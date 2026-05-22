@@ -1,5 +1,5 @@
 {
-  "name": "teams",
+  "name": "jongio-skills",
   "description": "Microsoft Teams chat skill - send, read, search, reply. Adaptive backend using Graph API with Power Automate flow fallback. Requires az CLI.",
   "version": "0.1.0",
   "author": {

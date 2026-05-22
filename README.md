@@ -6,6 +6,22 @@ Send messages, read chats, search conversations, reply to threads - all from you
 
 ## Install
 
+### One-liner (copies skill to ~/.copilot/skills/)
+
+```powershell
+# PowerShell
+gh repo clone jongio/skills $env:TEMP\jongio-skills 2>$null; Copy-Item -Recurse -Force "$env:TEMP\jongio-skills\skills\teams" "$env:USERPROFILE\.copilot\skills\teams"; Remove-Item -Recurse -Force "$env:TEMP\jongio-skills"
+```
+
+```sh
+# bash/zsh
+gh repo clone jongio/skills /tmp/jongio-skills 2>/dev/null && cp -r /tmp/jongio-skills/skills/teams ~/.copilot/skills/teams && rm -rf /tmp/jongio-skills
+```
+
+After install, restart Copilot CLI. The skill is available as `/teams`.
+
+### Plugin install (namespaced as /jongio-skills:teams)
+
 ```sh
 copilot plugin install jongio/skills
 ```
