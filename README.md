@@ -42,6 +42,7 @@ copilot plugin install jongio/skills
 | "search teams for {query}" | Search across chat messages |
 | "reply to {person}: {message}" | Reply in an existing chat |
 | "list teams chats" | List recent conversations |
+| "summarize {link\|phrase}" | Ramp-up brief for a chat or thread (read-only) |
 
 ## How it works
 
