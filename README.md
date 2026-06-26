@@ -36,10 +36,31 @@ npx skills add jongio/skills#main --skill create-canvas-kit
 After any install, reload skills with `/skills reload` or start a new session.
 Each skill is then available as `/<skill-name>` (e.g. `/create-canvas-kit`).
 
-### Install as a Copilot CLI plugin
+### Add as a marketplace, or install as a plugin
 
-The repo is also a [Copilot CLI plugin](https://docs.github.com/copilot/how-tos/copilot-cli),
-so every skill under `skills/` is available namespaced under `jongio-skills`:
+`jongio/skills` also plugs into the GitHub Copilot **plugin** system (works in both
+the Copilot app and the [Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli)).
+There are two ways to use it.
+
+**Add it as a marketplace** — browse and install individual skills. The repo ships a
+root [`marketplace.json`](marketplace.json) that indexes its skills:
+
+```sh
+# Register the marketplace:
+copilot plugin marketplace add jongio/skills
+
+# See what's available:
+copilot plugin marketplace browse jongio-skills
+
+# Install one skill from it (form: <plugin>@<marketplace>):
+copilot plugin install create-canvas-kit@jongio-skills
+```
+
+In the Copilot app, open **Plugins → Add marketplace**, enter `jongio/skills`, then
+browse and install skills from the panel.
+
+**Or install the whole repo as a single plugin** — gets every skill under `skills/`
+at once (uses the root [`plugin.json`](plugin.json)):
 
 ```sh
 copilot plugin install jongio/skills
@@ -48,7 +69,8 @@ copilot plugin install jongio/skills
 ## Layout
 
 ```
-plugin.json                   Copilot CLI plugin manifest (skills: "skills/")
+marketplace.json             Copilot marketplace manifest (indexes skills as plugins)
+plugin.json                   Copilot plugin manifest (skills: "skills/")
 skills/
   create-canvas-kit/          One self-contained skill
     SKILL.md                  Authoring contract the agent reads

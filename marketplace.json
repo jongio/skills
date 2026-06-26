@@ -1,0 +1,18 @@
+{
+  "name": "jongio-skills",
+  "owner": {
+    "name": "Jon Gallant",
+    "url": "https://github.com/jongio"
+  },
+  "metadata": {
+    "description": "Jon Gallant's collection of cross-agent skills for AI coding agents — GitHub Copilot, Claude, and Codex."
+  },
+  "plugins": [
+    {
+      "name": "create-canvas-kit",
+      "source": "./skills/create-canvas-kit",
+      "description": "Build GitHub Copilot canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable storage, Primer theming, official GitHub Lucide icons, a generator, and tests.",
+      "version": "1.0.0"
+    }
+  ]
+}
