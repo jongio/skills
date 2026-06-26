@@ -11,6 +11,11 @@ individually or all at once.
 |---|---|
 | [`create-canvas-kit`](skills/create-canvas-kit/) | Build GitHub Copilot App canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable storage, Primer theming, official GitHub Lucide icons, a generator, and an installable skill. |
 
+A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-kit`
+turns a one-line prompt into a working canvas:
+
+![Invoking create-canvas-kit from the Copilot composer: "/create-canvas-kit customized stock ticker"](skills/create-canvas-kit/docs/invoke.png)
+
 ## Install
 
 Uses the [`vercel-labs/skills`](https://github.com/vercel-labs/skills) CLI
