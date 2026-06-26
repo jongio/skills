@@ -85,6 +85,21 @@ Uses the [`vercel-labs/skills`](https://github.com/vercel-labs/skills) CLI
 `skills/create-canvas-kit/`; the bundled `kit/`, `reference/`, and `test/`
 directories are copied in with it.
 
+**Copilot plugin marketplace** &mdash; install through Copilot's native plugin
+system. Add the [`jongio/skills`](https://github.com/jongio/skills) repo as a
+marketplace once, then install this skill from it:
+
+```sh
+copilot plugin marketplace add jongio/skills
+copilot plugin install create-canvas-kit@jongio-skills
+```
+
+In the Copilot app: **Settings &rarr; Plugins &rarr; Install &#9662; &rarr; Add marketplace**,
+enter `jongio/skills`, then click **Install** on `create-canvas-kit`. The
+[root README](../../README.md#add-as-a-marketplace-or-install-as-a-plugin) has a
+screenshot walkthrough. Or install every skill at once with
+`copilot plugin install jongio/skills`.
+
 **Local install (no network)** — clone, then run the bundled installer:
 
 ```sh
