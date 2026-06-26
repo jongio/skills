@@ -56,8 +56,23 @@ copilot plugin marketplace browse jongio-skills
 copilot plugin install create-canvas-kit@jongio-skills
 ```
 
-In the Copilot app, open **Plugins → Add marketplace**, enter `jongio/skills`, then
-browse and install skills from the panel.
+**In the Copilot app** — no commands needed:
+
+1. Open **Settings** and select **Plugins**.
+
+   ![Plugins in the settings sidebar](docs/images/app-plugins-nav.png)
+
+2. Click **Install &#9662; &rarr; Add marketplace**, enter `jongio/skills`, and click **Add marketplace**.
+
+   ![Add marketplace dialog with jongio/skills entered](docs/images/app-add-marketplace.png)
+
+3. The marketplace's skills appear grouped under **jongio-skills** &mdash; click **Install** on the one you want.
+
+   ![Browse the jongio-skills marketplace and install create-canvas-kit](docs/images/app-browse-install.png)
+
+4. The skill installs and is enabled, ready to use right away.
+
+   ![create-canvas-kit installed and enabled](docs/images/app-installed.png)
 
 **Or install the whole repo as a single plugin** — gets every skill under `skills/`
 at once (uses the root [`plugin.json`](plugin.json)):
