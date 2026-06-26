@@ -125,10 +125,10 @@ for a complete worked example.
 ## Ship it
 
 Built a canvas you want to keep and reuse? Drop the folder into
-[`jongio/github-extensions`](https://github.com/jongio/github-extensions) — a
+[`jongio/copilot-extensions`](https://github.com/jongio/copilot-extensions) — a
 collection of finished, installable canvases. From there you (or anyone with
 access) install one in-app by asking the agent: *"install the stock-ticker canvas
-from jongio/github-extensions/extensions/stock-ticker."* No clone, no build.
+from jongio/copilot-extensions/extensions/stock-ticker."* No clone, no build.
 
 ## Layout
 
