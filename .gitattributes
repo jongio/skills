@@ -1,0 +1,15 @@
+# Normalize all text to LF in the repo and on checkout, so vendored bundles
+# (e.g. canvas-kit's kit/vendor/*.mjs) stay byte-identical across platforms and
+# byte-parity tests never see spurious line-ending diffs.
+* text=auto eol=lf
+
+# Binary assets — never apply line-ending normalization.
+*.png binary
+*.jpg binary
+*.gif binary
+
+# Vendored, generated bundles — keep diffs collapsed in review.
+skills/create-canvas-kit/kit/vendor/lucide.mjs linguist-vendored linguist-generated
+skills/create-canvas-kit/kit/vendor/preact-htm-standalone.mjs linguist-vendored linguist-generated
+skills/create-canvas-kit/reference/decision-log/canvas-kit/vendor/lucide.mjs linguist-vendored linguist-generated
+skills/create-canvas-kit/reference/decision-log/canvas-kit/vendor/preact-htm-standalone.mjs linguist-vendored linguist-generated

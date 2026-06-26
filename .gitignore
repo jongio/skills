@@ -1,0 +1,12 @@
+# Dependencies are vendored — there is no install step and no node_modules.
+node_modules/
+dist/
+build/
+
+# Local canvas state written by the reference extension / generated canvases.
+artifacts/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log

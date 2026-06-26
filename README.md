@@ -1,72 +1,64 @@
-# teams plugin
+# jongio/skills
 
-Microsoft Teams chat skill for [GitHub Copilot CLI](https://docs.github.com/copilot/how-tos/copilot-cli).
+Jon Gallant's collection of [GitHub Copilot](https://docs.github.com/copilot)
+skills — a general-purpose monorepo. Each skill lives in its own folder under
+[`skills/`](skills/) with a `SKILL.md` authoring contract, and can be installed
+individually or all at once.
 
-Send messages, read chats, search conversations, reply to threads - all from your terminal.
+## Skills
+
+| Skill | What it does |
+|---|---|
+| [`create-canvas-kit`](skills/create-canvas-kit/) | Build GitHub Copilot App canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable storage, Primer theming, official GitHub Lucide icons, a generator, and an installable skill. |
 
 ## Install
 
-### One-liner (copies skill to ~/.copilot/skills/)
-
-```powershell
-# PowerShell
-gh repo clone jongio/skills $env:TEMP\jongio-skills 2>$null; Copy-Item -Recurse -Force "$env:TEMP\jongio-skills\skills\teams" "$env:USERPROFILE\.copilot\skills\teams"; Remove-Item -Recurse -Force "$env:TEMP\jongio-skills"
-```
+Uses the [`vercel-labs/skills`](https://github.com/vercel-labs/skills) CLI
+(`skills.sh`) — note the binary is **`skills`** (plural).
 
 ```sh
-# bash/zsh
-gh repo clone jongio/skills /tmp/jongio-skills 2>/dev/null && cp -r /tmp/jongio-skills/skills/teams ~/.copilot/skills/teams && rm -rf /tmp/jongio-skills
+# List the skills available in this repo:
+npx skills add jongio/skills --list
+
+# Install one skill globally for GitHub Copilot:
+npx skills add jongio/skills --skill create-canvas-kit -g --agent github-copilot
+
+# Install into the current project instead of globally (drop -g):
+npx skills add jongio/skills --skill create-canvas-kit
+
+# Install every skill in the repo:
+npx skills add jongio/skills --all
+
+# Pin to a branch or tag:
+npx skills add jongio/skills#main --skill create-canvas-kit
 ```
 
-After install, restart Copilot CLI. The skill is available as `/teams`.
+After any install, reload skills with `/skills reload` or start a new session.
+Each skill is then available as `/<skill-name>` (e.g. `/create-canvas-kit`).
 
-### Plugin install (namespaced as /jongio-skills:teams)
+### Install as a Copilot CLI plugin
+
+The repo is also a [Copilot CLI plugin](https://docs.github.com/copilot/how-tos/copilot-cli),
+so every skill under `skills/` is available namespaced under `jongio-skills`:
 
 ```sh
 copilot plugin install jongio/skills
 ```
 
-## Prerequisites
+## Layout
 
-- [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) (`az`) - for authentication
-- `az login` completed with an account that has Microsoft Graph access
-- (Optional) `TEAMS_FLOW_URL` env var - Power Automate flow URL for send fallback if Graph Chat.ReadWrite isn't available
+```
+plugin.json                   Copilot CLI plugin manifest (skills: "skills/")
+skills/
+  create-canvas-kit/          One self-contained skill
+    SKILL.md                  Authoring contract the agent reads
+    README.md                 Human docs for the skill
+    kit/  reference/  scripts/  test/  docs/
+```
 
-## Operations
-
-| Command | What it does |
-|---|---|
-| "send {person}: {message}" | Send a 1:1 Teams message |
-| "read recent chats" | Show last 20 chats with previews |
-| "read unread" | Show chats with unread messages |
-| "search teams for {query}" | Search across chat messages |
-| "reply to {person}: {message}" | Reply in an existing chat |
-| "list teams chats" | List recent conversations |
-| "summarize {link\|phrase}" | Ramp-up brief for a chat or thread (read-only) |
-
-## How it works
-
-1. **Auth**: Uses `az account get-access-token` for Microsoft Graph API tokens
-2. **Backend detection**: Tests Graph `/me/chats` endpoint - if 200, uses Graph for everything. If 403, falls back to Power Automate flow for send operations
-3. **UPN resolution**: Resolves display names to UPNs via Graph with a persistent local cache at `~/.config/teams-skill/upn-cache.json`
-4. **Safety**: All write operations (send/reply) require explicit user approval before executing
-
-## Setting up Graph permissions
-
-If `az account get-access-token --resource https://graph.microsoft.com/` returns a token but Graph chat endpoints return 403, you need `Chat.ReadWrite` consent. See [docs/setup.md](docs/setup.md) for options.
-
-## Power Automate flow fallback (send-only)
-
-If Graph chat permissions aren't available, set `TEAMS_FLOW_URL` to a Power Automate HTTP trigger that creates a 1:1 chat and posts a message. See [docs/flow-setup.md](docs/flow-setup.md) for step-by-step instructions.
-
-## Configuration
-
-| Item | Location | Purpose |
-|---|---|---|
-| UPN cache | `~/.config/teams-skill/upn-cache.json` | Display name to UPN mappings |
-| Config | `~/.config/teams-skill/config.json` | Optional overrides |
-| Flow URL | `TEAMS_FLOW_URL` env var | Power Automate trigger (fallback) |
+Add a new skill by creating `skills/<name>/SKILL.md` (plus any bundled assets in
+the same folder); the `skills` CLI auto-discovers it.
 
 ## License
 
-MIT
+MIT — see [skills/create-canvas-kit/LICENSE](skills/create-canvas-kit/LICENSE).

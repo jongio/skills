@@ -1,0 +1,168 @@
+/* canvas-kit/theme.css
+ *
+ * Baseline canvas styling built on the Primer design tokens the runtime injects
+ * onto the canvas document (see github-app src/lib/extensionCanvasThemeContract.json).
+ * Every token has a hardcoded dark fallback so the canvas still looks right if a
+ * token is ever missing. Author canvas-specific styles on top of these.
+ */
+
+:root {
+  /* semantic aliases -> injected tokens (fallbacks = GitHub dark) */
+  --ck-bg: var(--background-color-default, #0d1117);
+  --ck-bg-muted: var(--background-color-muted, #161b22);
+  --ck-bg-inset: var(--background-color-emphasis, #010409);
+  --ck-fg: var(--text-color-default, #f0f6fc);
+  --ck-muted: var(--text-color-muted, #8b949e);
+  --ck-link: var(--text-color-link, #58a6ff);
+  --ck-accent: var(--text-color-accent, #58a6ff);
+  --ck-danger: var(--text-color-danger, #f85149);
+  --ck-success: var(--text-color-success, #3fb950);
+  --ck-attention: var(--text-color-attention, #d29922);
+  --ck-border: var(--border-color-default, #30363d);
+  --ck-border-muted: var(--border-color-muted, #21262d);
+  --ck-focus: var(--color-focus-outline, var(--outline-color-focus-default, #1f6feb));
+
+  --ck-font: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif);
+  --ck-mono: var(--font-mono, ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace);
+  --ck-fs: var(--text-body-medium, 14px);
+  --ck-lh: var(--leading-body-medium, 1.5);
+  --ck-fw-medium: var(--font-weight-medium, 500);
+  --ck-fw-semibold: var(--font-weight-semibold, 600);
+
+  --ck-radius: 6px;
+  --ck-gap: 12px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+  font-family: var(--ck-font);
+  font-size: var(--ck-fs);
+  line-height: var(--ck-lh);
+}
+
+body { padding: 16px; }
+
+a { color: var(--ck-link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1, h2, h3 { margin: 0 0 8px; line-height: var(--leading-title-medium, 1.25); }
+h1 { font-size: var(--text-title-large, 1.5rem); font-weight: var(--ck-fw-semibold); }
+h2 { font-size: var(--text-title-medium, 1.25rem); font-weight: var(--ck-fw-semibold); }
+h3 { font-size: var(--text-title-small, 1rem); font-weight: var(--ck-fw-semibold); }
+
+.ck-muted { color: var(--ck-muted); }
+.ck-mono { font-family: var(--ck-mono); }
+.ck-caption { font-size: var(--text-caption, 12px); color: var(--ck-muted); }
+.ck-row { display: flex; gap: var(--ck-gap); align-items: center; }
+.ck-col { display: flex; flex-direction: column; gap: var(--ck-gap); }
+.ck-spread { display: flex; justify-content: space-between; align-items: center; gap: var(--ck-gap); }
+.ck-wrap { flex-wrap: wrap; }
+.ck-grow { flex: 1 1 auto; }
+
+/* ---- card ---------------------------------------------------------------- */
+.ck-card {
+  background: var(--ck-bg-muted);
+  border: 1px solid var(--ck-border);
+  border-radius: var(--ck-radius);
+  padding: 12px 14px;
+}
+
+/* ---- buttons ------------------------------------------------------------- */
+.ck-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: inherit;
+  font-weight: var(--ck-fw-medium);
+  padding: 5px 12px;
+  border-radius: var(--ck-radius);
+  border: 1px solid var(--border-color-button-default-rest, var(--ck-border));
+  background: var(--background-color-button-default-rest, var(--ck-bg-inset));
+  color: var(--text-color-button-default-rest, var(--ck-fg));
+  cursor: pointer;
+}
+.ck-btn:hover { background: var(--background-color-button-default-hover, #30363d); }
+.ck-btn:active { background: var(--background-color-button-default-active, #282e33); }
+.ck-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ck-btn-primary {
+  border-color: var(--border-color-button-primary-rest, transparent);
+  background: var(--background-color-button-primary-rest, #238636);
+  color: var(--text-color-button-primary-rest, #ffffff);
+}
+.ck-btn-primary:hover { background: var(--background-color-button-primary-hover, #2ea043); }
+.ck-btn-primary:active { background: var(--background-color-button-primary-active, #238636); }
+
+.ck-btn-danger {
+  background: var(--background-color-button-invisible-rest, transparent);
+  color: var(--text-color-button-danger-rest, var(--ck-danger));
+  border-color: transparent;
+}
+.ck-btn-danger:hover { background: var(--background-color-button-danger-hover, #da3633); color: #fff; }
+
+.ck-btn-sm { padding: 2px 8px; font-size: var(--text-caption, 12px); }
+
+/* ---- inputs -------------------------------------------------------------- */
+.ck-input, .ck-textarea, .ck-select {
+  font: inherit;
+  width: 100%;
+  color: var(--ck-fg);
+  background: var(--background-color-default, var(--ck-bg-inset));
+  border: 1px solid var(--border-color-default, var(--ck-border));
+  border-radius: var(--ck-radius);
+  padding: 5px 10px;
+}
+.ck-textarea { resize: vertical; min-height: 38px; }
+.ck-input::placeholder, .ck-textarea::placeholder { color: var(--text-color-control-placeholder, var(--ck-muted)); }
+
+.ck-btn:focus-visible,
+.ck-input:focus-visible,
+.ck-textarea:focus-visible,
+.ck-select:focus-visible,
+.ck-tab:focus-visible {
+  outline: 2px solid var(--ck-focus);
+  outline-offset: -1px;
+}
+
+/* ---- badges / status ----------------------------------------------------- */
+.ck-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-badge, 12px);
+  font-weight: var(--ck-fw-medium);
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ck-border);
+  color: var(--ck-muted);
+}
+.ck-badge-open { color: var(--text-color-open, #3fb950); border-color: var(--border-color-success-emphasis, #238636); }
+.ck-badge-decided { color: var(--text-color-done, #a371f7); border-color: var(--border-color-accent-emphasis, #8957e5); }
+.ck-badge-parked { color: var(--text-color-muted, #8b949e); border-color: var(--ck-border); }
+
+/* ---- segmented tabs ------------------------------------------------------ */
+.ck-tabs { display: inline-flex; gap: 2px; background: var(--ck-bg-inset); padding: 2px; border-radius: var(--ck-radius); border: 1px solid var(--ck-border); }
+.ck-tab {
+  font: inherit; font-size: var(--text-caption, 12px);
+  border: 0; background: transparent; color: var(--ck-muted);
+  padding: 3px 10px; border-radius: 4px; cursor: pointer;
+}
+.ck-tab[aria-selected="true"] { background: var(--background-color-button-default-hover, #30363d); color: var(--ck-fg); }
+
+/* ---- connection pill ----------------------------------------------------- */
+.ck-status { font-size: var(--text-caption, 12px); color: var(--ck-muted); display: inline-flex; align-items: center; gap: 6px; }
+.ck-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ck-muted); }
+.ck-dot-live { background: var(--ck-success); }
+.ck-dot-off { background: var(--ck-attention); }
+
+.ck-empty { color: var(--ck-muted); text-align: center; padding: 28px 0; }
+
+/* ---- icons (Lucide) ------------------------------------------------------ */
+/* Inline SVGs inherit text color via stroke="currentColor". */
+.ck-icon { flex: none; vertical-align: text-bottom; }
+.ck-empty .ck-icon { display: block; margin: 0 auto 8px; color: var(--ck-muted); }

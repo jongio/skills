@@ -1,13 +1,13 @@
 {
   "name": "jongio-skills",
-  "description": "Microsoft Teams chat skill - send, read, search, reply. Adaptive backend using Graph API with Power Automate flow fallback. Requires az CLI.",
-  "version": "0.1.0",
+  "description": "Jon Gallant's collection of GitHub Copilot skills. Browse and install individual skills from the skills/ directory.",
+  "version": "1.0.0",
   "author": {
     "name": "Jon Gallant",
     "url": "https://github.com/jongio"
   },
   "license": "MIT",
-  "keywords": ["teams", "chat", "microsoft", "graph", "messaging"],
+  "keywords": ["copilot", "skills", "agent-skills", "canvas", "create-canvas-kit"],
   "repository": "https://github.com/jongio/skills",
   "skills": "skills/"
 }
