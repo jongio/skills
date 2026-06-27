@@ -131,6 +131,11 @@ the box: add, toggle, and remove items, live, shared between you and the agent.
 Each stamped canvas ships a `test/smoke.test.mjs` — run `node test/smoke.test.mjs`
 from the canvas folder to prove its actions over real HTTP.
 
+Target any extension scope with `--dir`: `.github/extensions/<name>` (in-repo,
+committed), `$COPILOT_HOME/extensions/<name>` (personal, local to you), or
+`$COPILOT_HOME/session-state/<sessionId>/extensions/<name>` (current session only —
+a throwaway canvas that disappears with the session).
+
 Then make it yours:
 
 1. **`canvas.mjs`** — edit `createInitialState`, the action handlers, and

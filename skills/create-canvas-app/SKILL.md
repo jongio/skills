@@ -282,10 +282,13 @@ who shares what.
    ```
    node scripts/new-canvas.mjs <name> --dir <target> --title "Display Name"
    ```
-   For an in-repo extension, target `.github/extensions/<name>`. For a personal
-   one, target `$COPILOT_HOME/extensions/<name>`. Add `--template data` for an
-   external-data canvas (fetch + `refresh` + visibility-gated polling) instead of
-   the default user-entered list.
+   Target `.github/extensions/<name>` for an in-repo extension (committed, shared
+   with the team), `$COPILOT_HOME/extensions/<name>` for a personal one (local to
+   you), or `$COPILOT_HOME/session-state/<sessionId>/extensions/<name>` for a
+   throwaway canvas scoped to just the current session — it's discovered like the
+   others (its `extensionId` is `session:<sessionId>:<name>`) and disappears when
+   the session does. Add `--template data` for an external-data canvas (fetch +
+   `refresh` + visibility-gated polling) instead of the default user-entered list.
 2. **Reload + open.** Run `extensions_reload`, then `open_canvas` with
    `canvasId: "<name>"`. The list canvas works immediately.
 3. **Shape your data.** In `canvas.mjs`, edit `createInitialState`, the action
