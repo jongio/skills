@@ -8,7 +8,7 @@
 //     innerHTML, a live state push does NOT clobber the text you're typing or
 //     move your caret — the core fix over the hand-rolled innerHTML canvases.
 
-import { html, mountCanvas, useState, Icon } from "/kit/client.mjs";
+import { html, mountCanvas, useState, Icon, relativeTime } from "/kit/client.mjs";
 
 const FILTERS = ["all", "open", "decided", "parked"];
 
@@ -81,6 +81,9 @@ function DecisionItem({ d, invoke }) {
       </div>
       ${d.note
         ? html`<div class="dl-item-note ck-muted">${d.note}</div>`
+        : null}
+      ${d.updatedAt
+        ? html`<div class="ck-caption" style="margin-top:6px">updated ${relativeTime(d.updatedAt)}</div>`
         : null}
       <div class="ck-row dl-actions" style="margin-top:10px">
         ${others.map(

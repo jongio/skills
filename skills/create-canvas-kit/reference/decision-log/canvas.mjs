@@ -68,12 +68,14 @@ export const canvasConfig = {
       handler: ({ state, set, input }) => {
         const title = String(input.title ?? "").trim();
         if (!title) throw new Error("title is required");
+        const now = new Date().toISOString();
         const d = {
           id: nid(),
           title,
           note: input.note ? String(input.note) : "",
           status: STATUSES.includes(input.status) ? input.status : "open",
-          createdAt: new Date().toISOString(),
+          createdAt: now,
+          updatedAt: now,
         };
         set({ ...state, decisions: [d, ...state.decisions] });
         return { id: d.id, status: `Added “${d.title}”` };
@@ -93,13 +95,15 @@ export const canvasConfig = {
       },
       handler: ({ state, set, input }) => {
         let found = false;
+        const now = new Date().toISOString();
         const decisions = state.decisions.map((d) => {
           if (d.id !== input.id) return d;
           found = true;
           return {
             ...d,
             status: input.status,
-            decidedAt: input.status === "decided" ? new Date().toISOString() : d.decidedAt,
+            decidedAt: input.status === "decided" ? now : d.decidedAt,
+            updatedAt: now,
           };
         });
         if (!found) throw new Error(`No decision with id ${input.id}`);
@@ -118,10 +122,11 @@ export const canvasConfig = {
       },
       handler: ({ state, set, input }) => {
         let found = false;
+        const now = new Date().toISOString();
         const decisions = state.decisions.map((d) => {
           if (d.id !== input.id) return d;
           found = true;
-          return { ...d, note: input.note ? String(input.note) : "" };
+          return { ...d, note: input.note ? String(input.note) : "", updatedAt: now };
         });
         if (!found) throw new Error(`No decision with id ${input.id}`);
         set({ ...state, decisions });
