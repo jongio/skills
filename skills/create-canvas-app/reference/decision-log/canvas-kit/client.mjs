@@ -114,12 +114,18 @@ export function mountCanvas({ view, mount, onState, poll } = {}) {
   function connect() {
     const es = new EventSource("./events");
     es.onmessage = (e) => {
+      let next;
       try {
-        state = JSON.parse(e.data);
-        connected = true;
-        onState?.(state);
-        rerender();
-      } catch { /* ignore malformed frame */ }
+        next = JSON.parse(e.data);
+      } catch {
+        return; // ignore a malformed SSE frame; the next push recovers
+      }
+      // Update + render OUTSIDE the try so a bug in onState/the view surfaces as
+      // a real error instead of being silently mislabeled a "malformed frame".
+      state = next;
+      connected = true;
+      onState?.(state);
+      rerender();
     };
     es.onopen = () => { connected = true; rerender(); };
     es.onerror = () => { connected = false; rerender(); /* EventSource auto-reconnects */ };

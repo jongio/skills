@@ -62,20 +62,33 @@ export function createCanvasRuntime(config) {
 
   const ASSETS_DIR = normalize(config.assetsDir);
   const domains = new Map(); // domainId -> { state }
+  const loading = new Map(); // domainId -> Promise<{ state }>  (in-flight cold loads)
   const instances = new Map(); // instanceId -> { server, url, domainId, clients:Set<res> }
 
   async function getDomain(domainId, ctx) {
-    let d = domains.get(domainId);
-    if (!d) {
-      let state;
-      if (config.loadState) state = await config.loadState(domainId);
-      if (state == null) {
-        state = config.createInitialState ? await config.createInitialState(ctx) : {};
-      }
-      d = { state };
-      domains.set(domainId, d);
+    const existing = domains.get(domainId);
+    if (existing) return existing;
+    // Memoize the in-flight cold load so concurrent first-touches of the same
+    // domain share ONE record. Without this, each caller would await loadState
+    // independently and publish its own { state } (last writer wins the map),
+    // letting an in-flight invoke() mutate+persist an orphaned copy while the
+    // map and SSE fan-out show a different winner — silent persisted-vs-shown
+    // divergence of the durable shared state this kit promises to keep in sync.
+    let pending = loading.get(domainId);
+    if (!pending) {
+      pending = (async () => {
+        let state;
+        if (config.loadState) state = await config.loadState(domainId);
+        if (state == null) {
+          state = config.createInitialState ? await config.createInitialState(ctx) : {};
+        }
+        const d = { state };
+        domains.set(domainId, d);
+        return d;
+      })().finally(() => loading.delete(domainId));
+      loading.set(domainId, pending);
     }
-    return d;
+    return pending;
   }
 
   function broadcast(domainId) {
@@ -147,12 +160,28 @@ export function createCanvasRuntime(config) {
     }
   }
 
+  // POST /action bodies are tiny JSON envelopes; cap buffering so a hostile
+  // local client can't force unbounded memory growth on the loopback runtime.
+  const MAX_BODY_BYTES = 1 << 20; // 1 MiB
+
   function readBody(req) {
     return new Promise((resolve, reject) => {
       const chunks = [];
-      req.on("data", (c) => chunks.push(c));
-      req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-      req.on("error", reject);
+      let size = 0;
+      let aborted = false;
+      req.on("data", (c) => {
+        if (aborted) return;
+        size += c.length;
+        if (size > MAX_BODY_BYTES) {
+          aborted = true;
+          reject(new CanvasKitError("payload_too_large", "Request body too large"));
+          req.destroy();
+          return;
+        }
+        chunks.push(c);
+      });
+      req.on("end", () => { if (!aborted) resolve(Buffer.concat(chunks).toString("utf8")); });
+      req.on("error", (e) => { if (!aborted) reject(e); });
     });
   }
 
@@ -195,8 +224,13 @@ export function createCanvasRuntime(config) {
           res.writeHead(200, { "Content-Type": MIME[".json"] });
           res.end(JSON.stringify({ ok: true, result }));
         } catch (e) {
-          res.writeHead(e instanceof CanvasKitError ? 400 : 500, { "Content-Type": MIME[".json"] });
-          res.end(JSON.stringify({ ok: false, code: e?.code ?? "error", message: String(e?.message ?? e) }));
+          // The body-too-large guard destroys the socket, so only respond when
+          // the connection is still writable (the unknown-action / handler-throw
+          // paths reach here with a live socket).
+          if (!res.headersSent && !res.destroyed) {
+            res.writeHead(e instanceof CanvasKitError ? 400 : 500, { "Content-Type": MIME[".json"] });
+            res.end(JSON.stringify({ ok: false, code: e?.code ?? "error", message: String(e?.message ?? e) }));
+          }
         }
         return;
       }

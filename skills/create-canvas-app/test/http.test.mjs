@@ -63,6 +63,17 @@ function openSSE(url) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Poll a predicate until it holds (or time out) — event-driven replacement for
+// fixed sleeps, which are the classic source of SSE/timing test flakiness.
+async function until(predicate, { timeout = 2000, step = 10 } = {}) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    if (predicate()) return;
+    if (Date.now() >= deadline) throw new Error("until: condition not met within timeout");
+    await wait(step);
+  }
+}
+
 async function main() {
   // Isolate durable storage to a temp COPILOT_HOME *before* importing canvas.mjs.
   const home = await mkdtemp(join(tmpdir(), "ck-test-"));
@@ -148,10 +159,10 @@ async function main() {
 
   await test("SSE pushes the latest state on action", async () => {
     const sse = await openSSE(open.url);
-    await wait(80); // initial snapshot frame
+    await until(() => sse.frames.length >= 1); // initial snapshot frame
     assert.ok(sse.frames.length >= 1, "expected initial snapshot frame");
     await action(open.url, "set_status", { id: newId, status: "decided" });
-    await wait(120);
+    await until(() => sse.frames.at(-1)?.decisions?.[0]?.status === "decided");
     const last = sse.frames.at(-1);
     assert.equal(last.decisions[0].status, "decided");
     sse.close();
@@ -175,10 +186,23 @@ async function main() {
     assert.equal(body.code, "unknown_action");
   });
 
-  await test("handler validation error surfaces as 500-ish failure", async () => {
-    const { body } = await action(open.url, "add_decision", { title: "   " });
+  await test("handler validation error surfaces as a 500 failure", async () => {
+    const { status, body } = await action(open.url, "add_decision", { title: "   " });
+    assert.equal(status, 500); // handler throw -> 500 (a kit error like unknown_action is 400)
     assert.equal(body.ok, false);
     assert.match(body.message, /title is required/);
+  });
+
+  await test("malformed JSON body returns a 500 error envelope", async () => {
+    const res = await fetch(new URL("/action", open.url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{ not json",
+    });
+    const body = await res.json();
+    assert.equal(res.status, 500);
+    assert.equal(body.ok, false);
+    assert.ok(body.code, "error envelope should carry a code");
   });
 
   await test("domains are isolated (domain=feature-x vs default)", async () => {

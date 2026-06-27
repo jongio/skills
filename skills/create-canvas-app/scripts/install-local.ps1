@@ -29,4 +29,4 @@ robocopy $repoRoot $dest /MIR /XD ".git" "artifacts" "node_modules" "vally-resul
 if ($LASTEXITCODE -ge 8) { throw "install failed (robocopy exit $LASTEXITCODE)" }
 
 Write-Host "Installed '$skillName' skill to: $dest"
-Write-Host "Reload skills (restart the CLI or run extensions_reload) to pick it up."
+Write-Host "Reload skills (restart the CLI or run '/skills reload') to pick it up."

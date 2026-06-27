@@ -382,6 +382,8 @@ const DATA_CANVAS_MJS = `// canvas.mjs — {{titleText}} canvas definition (data
 //   * the view polls a "refresh" action on a visibility-gated timer (app.mjs).
 
 import { fileURLToPath } from "node:url";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { userStore } from "./canvas-kit/storage.mjs";
 import { nid } from "./canvas-kit/format.mjs";
 
@@ -396,10 +398,49 @@ function fileFor(domainId) {
   return userStore(EXT_NAME, \`\${safe}.json\`);
 }
 
+// SSRF guard: true for loopback, link-local (incl. cloud metadata 169.254.169.254),
+// and private/CGNAT ranges — the targets a server-side fetch should never reach.
+function isBlockedAddress(ip) {
+  const addr = ip.startsWith("::ffff:") ? ip.slice(7) : ip; // unwrap IPv4-mapped IPv6
+  if (isIP(addr) === 4) {
+    const [a, b] = addr.split(".").map(Number);
+    if (a === 0 || a === 127 || a === 10) return true;     // this-host / loopback / private
+    if (a === 169 && b === 254) return true;               // link-local (incl. cloud IMDS)
+    if (a === 172 && b >= 16 && b <= 31) return true;      // private
+    if (a === 192 && b === 168) return true;               // private
+    if (a === 100 && b >= 64 && b <= 127) return true;     // CGNAT
+    return false;
+  }
+  const v6 = addr.toLowerCase();
+  return v6 === "::1" || v6 === "::" || v6.startsWith("fe80") || v6.startsWith("fc") || v6.startsWith("fd");
+}
+
+// Allow only http/https to a PUBLIC host. Rejects every address the hostname
+// resolves to, so a public name can't be pointed at an internal IP.
+async function assertPublicUrl(url) {
+  let u;
+  try { u = new URL(url); } catch { throw new Error("Invalid source URL"); }
+  if (u.protocol !== "http:" && u.protocol !== "https:") {
+    throw new Error("Blocked URL protocol: " + u.protocol);
+  }
+  let host = u.hostname;
+  if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1); // IPv6 brackets
+  if (host.toLowerCase() === "localhost") throw new Error("Blocked host: localhost");
+  const addrs = isIP(host) ? [host] : (await lookup(host, { all: true })).map((r) => r.address);
+  if (!addrs.length) throw new Error("Could not resolve host: " + host);
+  for (const ip of addrs) {
+    if (isBlockedAddress(ip)) throw new Error("Blocked private/loopback address: " + ip);
+  }
+}
+
 async function fetchItems(url) {
-  // NOTE: this runs server-side, so \`url\` is an unrestricted fetch (it can
-  // reach internal hosts) and the response flows back to the agent — keep the
-  // source one you trust, and render fetched fields as TEXT (never innerHTML).
+  // This runs server-side on the loopback runtime, so a caller-set \`url\` would
+  // otherwise be an unrestricted fetch. Block private/loopback/link-local
+  // targets BEFORE connecting (SSRF guard). A determined attacker could still
+  // DNS-rebind between this check and the fetch; for a local dev tool pointed at
+  // a source you trust this is adequate defense-in-depth. The response still
+  // flows back to the agent, so render fetched fields as TEXT, never innerHTML.
+  await assertPublicUrl(url);
   const res = await fetch(url, {
     headers: { Accept: "application/json", "User-Agent": "copilot-canvas" },
     signal: AbortSignal.timeout(12000),

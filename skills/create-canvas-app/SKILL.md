@@ -182,12 +182,13 @@ refresh. The shape:
    }
    ```
 
-   The fetch runs server-side on the loopback runtime, so a caller-set
-   `sourceUrl` is an **unrestricted server-side fetch** (it can reach internal
-   hosts), and anything you feed back to the agent (e.g. via `list_items`) is
-   attacker-influenced text. That's acceptable for a local dev tool you point at
-   a source *you* choose — but don't let an untrusted party set the URL, and
-   treat fetched content as untrusted (render it as text, never `innerHTML`).
+   The fetch runs server-side on the loopback runtime, so the generated `data`
+   template guards it with an **SSRF check**: it allows only `http`/`https` to a
+   **public** host and rejects loopback, link-local (incl. cloud metadata), and
+   private ranges — including every address the hostname resolves to. Anything
+   you feed back to the agent (e.g. via `list_items`) is still attacker-influenced
+   text, so keep the source one *you* choose and treat fetched content as
+   untrusted (render it as text, never `innerHTML`).
 
 2. **Expose a `refresh` action** that fetches and writes the result into shared
    state. Capture failures into `state.error` and *return* (don't throw) so a

@@ -171,6 +171,7 @@ test/
   http.test.mjs               Boots the runtime over real HTTP and checks the contract
   kit-parity.test.mjs         Asserts kit/ == reference canvas-kit/ (no drift)
   generator.test.mjs          Stamps both templates, runs their smoke tests, checks the kit API
+  tooling.test.mjs            Exercises the version stamp, sync-kit, and the freshness drift gate
 ```
 
 ## Run the tests
@@ -179,9 +180,11 @@ test/
 node test/http.test.mjs
 node test/kit-parity.test.mjs
 node test/generator.test.mjs
+node test/tooling.test.mjs
 ```
 
 No dependencies to install — everything is vendored. Node 18+ (developed on 24).
+`npm test` runs all four in sequence.
 
 ## License
 
