@@ -49,7 +49,7 @@ async function exists(p) {
 }
 
 async function main() {
-  console.log("create-canvas-kit kit tooling tests");
+  console.log("create-canvas-app kit tooling tests");
 
   const { KIT_VERSION } = await import("../kit/version.mjs");
   const { VERSION_MARKER, syncKit } = await import("../scripts/sync-kit.mjs");

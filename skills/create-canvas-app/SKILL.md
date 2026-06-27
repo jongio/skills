@@ -1,5 +1,5 @@
 ---
-name: create-canvas-kit
+name: create-canvas-app
 description: >-
   Build a GitHub Copilot App canvas extension the right way, fast. Use when the
   user wants to create, scaffold, or improve an interactive canvas (a side-panel
@@ -11,7 +11,7 @@ description: >-
   apps unrelated to Copilot canvases.
 ---
 
-# Create Canvas Kit
+# Create Canvas App
 
 A batteries-included way to build **Copilot App canvas extensions**. It exists
 because hand-rolled canvases keep hitting the same walls: an `innerHTML` repaint

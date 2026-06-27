@@ -14,7 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$skillName = "create-canvas-kit"
+$skillName = "create-canvas-app"
 
 if (-not $SkillsDir) {
     $copilotHome = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $env:USERPROFILE ".copilot" }

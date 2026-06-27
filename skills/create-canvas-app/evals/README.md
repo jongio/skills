@@ -1,6 +1,6 @@
-# create-canvas-kit eval
+# create-canvas-app eval
 
-A [Vally](https://aka.ms/vally) **capability** eval for the `create-canvas-kit`
+A [Vally](https://aka.ms/vally) **capability** eval for the `create-canvas-app`
 skill. It checks that, given a build request, the agent produces a canvas
 extension that honours the kit contract.
 
@@ -18,20 +18,20 @@ the backbone; the `prompt` rubric adds judgement.
 
 ## Run it
 
-From the skill root (`skills/create-canvas-kit`):
+From the skill root (`skills/create-canvas-app`):
 
 ```bash
 npm install                 # one-time: pulls @microsoft/vally + @microsoft/vally-cli (dev only)
 
 # Static validation — fast, no agent, no tokens. This is the gate that must pass.
-npm run eval:lint           # = vally lint --eval-spec evals/create-canvas-kit/eval.yaml
+npm run eval:lint           # = vally lint --eval-spec evals/create-canvas-app/eval.yaml
 
 # Full run — drives the agent and grades the result (LLM cost/time; needs Copilot auth).
 # --skill-dir . loads this skill (via paths.skills in .vally.yaml) into the executor.
-npm run eval                # = vally eval --eval-spec evals/create-canvas-kit/eval.yaml --skill-dir .
+npm run eval                # = vally eval --eval-spec evals/create-canvas-app/eval.yaml --skill-dir .
 
 # Just one stimulus (cheaper):
-npx vally eval --eval-spec evals/create-canvas-kit/eval.yaml --skill-dir . --tag canvas=kanban
+npx vally eval --eval-spec evals/create-canvas-app/eval.yaml --skill-dir . --tag canvas=kanban
 ```
 
 Results land in `vally-results/` (git-ignored). `npx vally serve vally-results`
