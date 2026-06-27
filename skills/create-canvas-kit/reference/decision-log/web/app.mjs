@@ -16,8 +16,13 @@ const FILTERS = ["all", "open", "decided", "parked"];
 // IssueOpenIcon=CircleDot, CheckCircleIcon=CircleCheck, BookmarkIcon=Bookmark).
 const STATUS_ICON = { open: "circle-dot", decided: "circle-check", parked: "bookmark" };
 
+// Map this canvas's statuses to the kit's generic badge variants. The kit theme
+// ships semantic classes (ck-badge-success/accent/muted/…), not app-specific
+// status names, so each canvas owns its own status -> variant mapping here.
+const STATUS_BADGE = { open: "success", decided: "accent", parked: "muted" };
+
 function Badge({ status }) {
-  return html`<span class=${`ck-badge ck-badge-${status}`}>
+  return html`<span class=${`ck-badge ck-badge-${STATUS_BADGE[status] ?? "muted"}`}>
     <${Icon} name=${STATUS_ICON[status]} size=${12} />${status}
   </span>`;
 }

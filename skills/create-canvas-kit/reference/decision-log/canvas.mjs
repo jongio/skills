@@ -6,12 +6,9 @@
 
 import { fileURLToPath } from "node:url";
 import { userStore } from "./canvas-kit/storage.mjs";
+import { nid } from "./canvas-kit/format.mjs";
 
 const EXT_NAME = "decision-log";
-
-function nid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-}
 
 function fileFor(domainId) {
   const safe = String(domainId).replace(/[^A-Za-z0-9._-]/g, "_") || "default";

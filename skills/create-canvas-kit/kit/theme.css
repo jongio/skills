@@ -141,9 +141,14 @@ h3 { font-size: var(--text-title-small, 1rem); font-weight: var(--ck-fw-semibold
   border: 1px solid var(--ck-border);
   color: var(--ck-muted);
 }
-.ck-badge-open { color: var(--text-color-open, #3fb950); border-color: var(--border-color-success-emphasis, #238636); }
-.ck-badge-decided { color: var(--text-color-done, #a371f7); border-color: var(--border-color-accent-emphasis, #8957e5); }
-.ck-badge-parked { color: var(--text-color-muted, #8b949e); border-color: var(--ck-border); }
+/* Generic semantic badge variants — map your own statuses to these in the view
+   (e.g. open -> ck-badge-success, decided -> ck-badge-accent). Do NOT add
+   app-specific status names here; this is the shared kit theme. */
+.ck-badge-success { color: var(--ck-success); border-color: var(--border-color-success-emphasis, #238636); }
+.ck-badge-accent { color: var(--text-color-accent, #a371f7); border-color: var(--border-color-accent-emphasis, #8957e5); }
+.ck-badge-danger { color: var(--ck-danger); border-color: var(--border-color-danger-emphasis, #da3633); }
+.ck-badge-attention { color: var(--ck-attention); border-color: var(--border-color-attention-emphasis, #9e6a03); }
+.ck-badge-muted { color: var(--ck-muted); border-color: var(--ck-border); }
 
 /* ---- segmented tabs ------------------------------------------------------ */
 .ck-tabs { display: inline-flex; gap: 2px; background: var(--ck-bg-inset); padding: 2px; border-radius: var(--ck-radius); border: 1px solid var(--ck-border); }
@@ -162,7 +167,61 @@ h3 { font-size: var(--text-title-small, 1rem); font-weight: var(--ck-fw-semibold
 
 .ck-empty { color: var(--ck-muted); text-align: center; padding: 28px 0; }
 
+/* ---- loading: spinner + skeleton ----------------------------------------- */
+/* Spinner: pair with a Lucide "loader-circle" icon —
+   html`<${Icon} name="loader-circle" class="ck-spinner" />`. */
+.ck-spinner { animation: ck-spin 0.9s linear infinite; transform-origin: center; }
+@keyframes ck-spin { to { transform: rotate(360deg); } }
+
+/* Skeleton: a shimmering placeholder block while data loads. */
+.ck-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--ck-bg-muted);
+  border-radius: var(--ck-radius);
+  min-height: 14px;
+}
+.ck-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  animation: ck-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes ck-shimmer { to { transform: translateX(100%); } }
+
+/* ---- callout / error surface --------------------------------------------- */
+.ck-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--ck-border);
+  border-left: 3px solid var(--ck-accent);
+  border-radius: var(--ck-radius);
+  background: var(--ck-bg-muted);
+  color: var(--ck-fg);
+}
+.ck-callout .ck-icon { margin-top: 2px; color: var(--ck-accent); }
+.ck-error { border-left-color: var(--ck-danger); }
+.ck-error .ck-icon { color: var(--ck-danger); }
+
 /* ---- icons (Lucide) ------------------------------------------------------ */
 /* Inline SVGs inherit text color via stroke="currentColor". */
 .ck-icon { flex: none; vertical-align: text-bottom; }
 .ck-empty .ck-icon { display: block; margin: 0 auto 8px; color: var(--ck-muted); }
+
+/* ---- motion safety ------------------------------------------------------- */
+/* Global guard: respect the OS "reduce motion" setting for every animation a
+   canvas adds (kit spinners/skeletons included). Author-added keyframes inherit
+   this automatically — you do not need to repeat it per canvas. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

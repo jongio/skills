@@ -19,6 +19,48 @@ export { html };
 // `lucideSVG` is the string helper for vanilla canvases.
 export { Icon, lucideSVG, hasIcon, iconNames } from "./icons.mjs";
 
+// Formatting + id helpers (also importable directly from /kit/format.mjs in
+// SDK-free canvas.mjs). Re-exported here so views have one import site.
+export { nid, relativeTime, compactNumber, percent } from "./format.mjs";
+
+/**
+ * Run `tick` on an interval, but only while the panel is visible — so a
+ * backgrounded canvas stops polling a (possibly rate-limited) upstream. Returns
+ * a cleanup function, which makes it a drop-in `useEffect` return value:
+ *
+ *   useEffect(
+ *     () => pollWhileVisible(() => invoke("refresh"), state.autoRefreshSec),
+ *     [state.autoRefreshSec]
+ *   );
+ *
+ * This is the single primitive behind every data canvas's auto-refresh; it
+ * replaces the hand-rolled `setInterval` + `document.visibilityState` checks.
+ * @param {()=>any} tick                 called each interval (promise rejections are swallowed)
+ * @param {number} seconds               interval in seconds; <=0 disables (returns a no-op cleanup)
+ * @param {object} [opts]
+ * @param {boolean} [opts.whenVisible=true]  skip ticks while the panel is hidden
+ * @param {boolean} [opts.immediate=false]   fire one tick immediately
+ * @returns {()=>void} cleanup
+ */
+export function pollWhileVisible(tick, seconds, { whenVisible = true, immediate = false } = {}) {
+  if (!seconds || seconds <= 0) return () => {};
+  let inFlight = false;
+  const run = async () => {
+    if (inFlight) return; // don't stack ticks if a slow one is still running
+    if (whenVisible && typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    inFlight = true;
+    try {
+      await tick();
+    } catch { /* keep the interval alive */ }
+    finally {
+      inFlight = false;
+    }
+  };
+  if (immediate) run();
+  const id = setInterval(run, seconds * 1000);
+  return () => clearInterval(id);
+}
+
 /**
  * Mount a canvas view and keep it live.
  * @param {object} opts
@@ -26,9 +68,11 @@ export { Icon, lucideSVG, hasIcon, iconNames } from "./icons.mjs";
  *        Returns an htm/Preact vnode. Re-invoked on every state push.
  * @param {HTMLElement} [opts.mount]   defaults to #app or <body>
  * @param {(state:any)=>void} [opts.onState]
- * @returns {{invoke:Function, refresh:Function, get state():any}}
+ * @param {PollOptions} [opts.poll]   built-in fixed-interval visibility-gated auto-refresh.
+ *        For an interval bound to live state, use `pollWhileVisible` in a useEffect instead.
+ * @returns {{invoke:Function, refresh:Function, stopPoll:Function, get state():any}}
  */
-export function mountCanvas({ view, mount, onState } = {}) {
+export function mountCanvas({ view, mount, onState, poll } = {}) {
   const root = mount || document.getElementById("app") || document.body;
   // Preact's render() diffs against — but does not clear — pre-existing DOM in
   // the container, so a static no-JS placeholder (e.g. <p>Loading…</p> in the
@@ -80,9 +124,30 @@ export function mountCanvas({ view, mount, onState } = {}) {
   refresh();
   connect();
 
+  // Built-in fixed-interval auto-refresh, delegating to the shared
+  // visibility-gated primitive. Pass `poll: { action, seconds, immediate }`.
+  //
+  // @typedef {object} PollOptions
+  // @property {string} [action]        action to invoke each tick; omit to call refresh()
+  // @property {number} seconds         interval in seconds; <=0 disables polling
+  // @property {object} [input]         input passed to the action
+  // @property {boolean} [whenVisible=true]  skip ticks while the panel is hidden
+  // @property {boolean} [immediate=false]   fire one tick right after mount
+  function startPoll({ action, seconds, input, whenVisible = true, immediate = false } = {}) {
+    return pollWhileVisible(
+      () => (action ? invoke(action, input) : refresh()),
+      seconds,
+      { whenVisible, immediate }
+    );
+  }
+
+  let stopPoll = () => {};
+  if (poll) stopPoll = startPoll(poll);
+
   return {
     invoke,
     refresh,
+    stopPoll: () => stopPoll(),
     get state() { return state; },
   };
 }
