@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GEN = join(ROOT, "scripts", "new-canvas.mjs");
+const FRESH = join(ROOT, "scripts", "check-kit-freshness.mjs");
 
 let passed = 0;
 async function test(name, fn) {
@@ -166,9 +167,23 @@ async function main() {
       });
 
       await test(`${c.template}: expected files exist (incl. stamped smoke test)`, async () => {
-        for (const f of ["canvas.mjs", "extension.mjs", "copilot-extension.json", "web/app.mjs", "web/index.html", "test/smoke.test.mjs"]) {
+        for (const f of ["canvas.mjs", "extension.mjs", "copilot-extension.json", "README.md", "web/app.mjs", "web/index.html", "test/smoke.test.mjs"]) {
           assert.ok(await exists(join(c.dir, f)), `missing ${f}`);
         }
+      });
+
+      await test(`${c.template}: stamped README documents the canvas`, async () => {
+        const readme = await read(join(c.dir, "README.md"));
+        assert.match(readme, /^# Gen Test/m);
+        assert.match(readme, /canvas-kit\//);
+        assert.match(readme, /node test\/smoke\.test\.mjs/);
+        // template-specific note is injected
+        assert.match(readme, c.template === "data" ? /external-data/i : /list\b/i);
+      });
+
+      await test(`${c.template}: generated canvas passes check-kit-freshness`, () => {
+        const out = run([FRESH, c.dir], work);
+        assert.equal(out.status, 0, out.stderr || out.stdout);
       });
 
       await test(`${c.template}: stamped canvas.mjs imports nid from the kit`, async () => {
@@ -203,6 +218,12 @@ async function main() {
       const app = await read(join(work, "gen-feed", "web", "app.mjs"));
       assert.match(app, /pollWhileVisible/);
       assert.match(app, /useEffect/);
+    });
+
+    await test("data smoke test exercises relativeTime against lastRefresh", async () => {
+      const smoke = await read(join(work, "gen-feed", "test", "smoke.test.mjs"));
+      assert.match(smoke, /relativeTime/);
+      assert.match(smoke, /canvas-kit\/format\.mjs/);
     });
 
     // Regression: a title with quotes / backtick / ${...} must still stamp a
