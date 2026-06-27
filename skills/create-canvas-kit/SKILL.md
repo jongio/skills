@@ -71,6 +71,23 @@ web/app.mjs     ── your Preact view
 - **Local UI state** (a draft input value, the active tab/filter) lives in
   `useState` and must never be pushed to the server until the user commits it.
 
+### Action results & errors — how failures surface
+
+Both callers (agent and UI) hit the same handler, and the runtime wraps every
+invocation in the same envelope, so model failures deliberately:
+
+- **Return** a small plain object for success (`{ id, status }`, `{ count }`).
+  `POST /action` answers `{ ok: true, result }`.
+- **Throw** for a hard failure (bad input, missing id). The runtime answers
+  `{ ok: false, code, message }` — HTTP **400** for a known kit error (e.g. an
+  unknown action) and **500** for a handler `throw` — and `mountCanvas`'s
+  `invoke` **rejects** with a `CanvasActionError` carrying that `code`/`message`,
+  so a button handler can `try/catch` it. On the agent side, `extension.mjs` maps
+  the same error to a `CanvasError`. A throw is *surfaced*, never a crash.
+- For an **expected, transient** failure (a flaky upstream fetch on a background
+  poll), don't throw — capture it into `state.error` and **return** so the error
+  card shows while the poll stays quiet (see the data template's `refresh`).
+
 ## Icons — official GitHub Lucide, always
 
 The kit vendors the **exact Lucide set github-app ships** (`lucide-react@1.14.0`,
@@ -135,6 +152,15 @@ percent(1.25);               // "+1.25%"
 
 `nid` is also importable server-side in `canvas.mjs` via
 `import { nid } from "./canvas-kit/format.mjs"` (the generator does this).
+
+**The formatters are locale-aware** — `relativeTime` ends in a
+`toLocaleDateString()`, and `compactNumber`/`percent` go through
+`Number.prototype.toLocaleString`, so their output depends on the host locale
+(`"1.5K"` vs `"1,5 K"`, `2025-01-31` vs `31/01/2025`). Keep the **raw** values in
+durable state (an ISO string, a `Number`) and format **in the view**. Never store
+a formatted string and never parse one back — formatting is a presentation
+concern, and a value formatted under one locale can't be reliably re-read under
+another.
 
 **`Fragment` is NOT exported.** To return sibling nodes without a wrapper, use
 htm's built-in empty-tag syntax — `` html`<><${A} /><${B} /></>` `` — or just
@@ -232,16 +258,22 @@ who shares what.
   count in `statusLine` goes stale. Show live counts **inside** the canvas body
   (which re-renders on every SSE push), and treat `statusLine` as an
   open-time-only summary.
-- **Rich-payload actions.** If the UI needs to hand the agent's handler a whole
-  object (e.g. the article being saved) rather than scalar fields, set
-  `additionalProperties: true` on that action's `inputSchema` (the generator
-  defaults to `false`). Denormalize what you need into durable state in the
-  handler.
+- **Rich-payload actions.** Action `inputSchema`s default to
+  `additionalProperties: false` on purpose: the schema is the contract the agent
+  fills, and a strict schema keeps the model from smuggling in unvalidated/typo'd
+  fields — only the properties you declare reach your handler. When the UI
+  genuinely needs to hand the handler a whole object (e.g. the article being
+  saved) rather than scalar fields, set `additionalProperties: true` on *that*
+  action's `inputSchema` and denormalize what you need into durable state in the
+  handler. Flip it deliberately, per-action — not as a blanket default.
 - **Install layout / SDK resolution.** A shipped extension folder contains only
   `copilot-extension.json` (`{ "name", "version": 1 }` — no `package.json`),
-  `extension.mjs`, `canvas.mjs`, `web/`, and the nested `canvas-kit/`. The host
-  resolves `@github/copilot-sdk/extension` for you; `extension.mjs` is the only
-  file that imports it. Don't add a `package.json` or a build step.
+  `extension.mjs`, `canvas.mjs`, `web/`, and the nested `canvas-kit/`. The kit is
+  plain ESM that Node runs directly — **no bundler, no transpile, no build step,
+  no `package.json`** in the extension (the stamped `test/smoke.test.mjs` runs
+  with bare `node`). The host resolves `@github/copilot-sdk/extension` for you;
+  `extension.mjs` is the only file that imports it. Don't add a `package.json` or
+  a build step to a shipped canvas.
 
 ## Build a canvas — fastest path
 
@@ -268,14 +300,45 @@ If you prefer to hand-assemble instead of using the generator: copy `kit/` into
 your extension as `canvas-kit/`, then copy `reference/decision-log/extension.mjs`
 verbatim and adapt `canvas.mjs` + `web/` from the reference.
 
+## Keeping your vendored kit in sync
+
+A shipped extension vendors the kit **verbatim** as `canvas-kit/` — there's no npm
+package or build step, so nothing tells you whether the copy you shipped matches
+the current `kit/`. The kit is version-stamped to close that gap: `kit/version.mjs`
+exports `KIT_VERSION` (re-exported from `/kit/client.mjs`), and two scripts keep
+vendored copies honest.
+
+- **Re-sync after a kit change.** Bump `KIT_VERSION` when you change any kit file,
+  then refresh each vendored copy:
+  ```
+  node scripts/sync-kit.mjs <extension-dir>
+  ```
+  This makes `<extension-dir>/canvas-kit/` an exact mirror of `kit/` —
+  overwriting changed files **and pruning stale ones** (a file removed upstream
+  won't linger) — and records the version into
+  `<extension-dir>/canvas-kit/.kit-version.json`.
+
+- **Gate drift in CI (offline).** Fail the build if any vendored kit has drifted
+  from `kit/` — by file set, by file contents, or by recorded version:
+  ```
+  node scripts/check-kit-freshness.mjs <extensions-dir>
+  ```
+  Point it at a folder of extensions (e.g. `.github/extensions`), a single
+  extension dir, or a `canvas-kit/` dir. Exit 0 = all fresh; exit 1 = drift, with
+  the offending files listed. It runs no network and needs no dependencies.
+
+The `.kit-version.json` marker is metadata, **not** a kit file — the byte-parity
+test (`test/kit-parity.test.mjs`) and the freshness check both treat it as
+out-of-band, so it never counts against `kit/` ↔ `canvas-kit/` parity.
+
 ## Validate visually — don't claim done without looking
 
 A canvas isn't done because the server boots. Verify the UI:
 
 1. Run the standalone HTTP test to prove the runtime contract:
    `node test/http.test.mjs` (and `node test/kit-parity.test.mjs`,
-   `node test/generator.test.mjs`). A stamped canvas ships its own
-   `test/smoke.test.mjs` — run it from the canvas folder
+   `node test/generator.test.mjs`, `node test/tooling.test.mjs`). A stamped canvas
+   ships its own `test/smoke.test.mjs` — run it from the canvas folder
    (`node test/smoke.test.mjs`) to prove its actions over real HTTP.
 2. Open the canvas and **look at it** (Playwright or the browser canvas):
    navigate to the panel, assert key text/controls render, take a screenshot.
@@ -294,6 +357,8 @@ A canvas isn't done because the server boots. Verify the UI:
   `canvas-kit/` stay byte-identical.
 - `test/generator.test.mjs` — stamps both templates, runs their smoke tests, and
   checks the kit API surface (format helpers, poll helper, theme primitives).
+- `test/tooling.test.mjs` — exercises the version stamp (`kit/version.mjs`),
+  `scripts/sync-kit.mjs`, and the offline `scripts/check-kit-freshness.mjs` drift gate.
 
 ## Footguns
 

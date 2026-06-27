@@ -3,6 +3,11 @@ node_modules/
 dist/
 build/
 
+# Optional dev tooling (the Vally eval) pulls dev deps + writes results.
+# Shipped canvases stay dependency-free; these are skill-repo dev artifacts only.
+package-lock.json
+vally-results/
+
 # Local canvas state written by the reference extension / generated canvases.
 artifacts/
 

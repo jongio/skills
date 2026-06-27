@@ -25,7 +25,7 @@ $dest = Join-Path $SkillsDir $skillName
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
 # Mirror the repo into the skill folder, excluding VCS + local state.
-robocopy $repoRoot $dest /MIR /XD ".git" "artifacts" /XF ".gitignore" /NFL /NDL /NJH /NJS /NP | Out-Null
+robocopy $repoRoot $dest /MIR /XD ".git" "artifacts" "node_modules" "vally-results" /XF ".gitignore" "package-lock.json" /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "install failed (robocopy exit $LASTEXITCODE)" }
 
 Write-Host "Installed '$skillName' skill to: $dest"

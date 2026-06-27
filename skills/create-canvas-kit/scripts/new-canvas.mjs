@@ -19,12 +19,9 @@
 //   node scripts/new-canvas.mjs market-feed --template data --title "Market Feed" \
 //        --dir .github/extensions/market-feed
 
-import { cp, mkdir, readdir, writeFile, stat } from "node:fs/promises";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { join, resolve, isAbsolute } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const KIT = join(ROOT, "kit");
+import { syncKit } from "./sync-kit.mjs";
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -122,6 +119,59 @@ const MANIFEST = `{
   "version": 1
 }
 `;
+
+// Per-canvas README — stamped for every generated canvas (both templates) so the
+// folder is self-documenting once copied into an extensions dir.
+const README_MD = `# {{titleText}}
+
+{{descriptionText}}
+
+A GitHub Copilot App **canvas extension** generated with the \`create-canvas-kit\`
+skill ({{templateLabel}} template). The agent and the user share the same live
+state through the same action handlers; the view renders with Preact + htm and a
+vendored kit — no build step, no \`package.json\`.
+
+## Layout
+
+\`\`\`
+extension.mjs   the ONLY file that imports the Copilot SDK (thin adapter)
+canvas.mjs      canvas config: state load/save + action handlers (SDK-free)
+canvas-kit/     vendored kit (copied verbatim; do not edit)
+web/index.html  shell that loads /kit/theme.css and ./app.mjs
+web/app.mjs     your Preact view
+test/smoke.test.mjs  boots the runtime over HTTP and exercises the actions
+\`\`\`
+
+{{templateNote}}
+
+## Validate
+
+\`\`\`
+node test/smoke.test.mjs
+\`\`\`
+
+## Install
+
+Copy this folder into \`.github/extensions/{{name}}\` (in-repo) or
+\`$COPILOT_HOME/extensions/{{name}}\` (personal), then run \`extensions_reload\` and
+open it with \`open_canvas\` (\`canvasId: "{{name}}"\`).
+
+## Keeping the kit current
+
+\`canvas-kit/\` is a vendored snapshot of the create-canvas-kit \`kit/\`. Re-sync it
+with the skill's \`scripts/sync-kit.mjs\`, and gate drift in CI with
+\`scripts/check-kit-freshness.mjs\`.
+`;
+
+// Template-specific note injected into the stamped README.
+const TEMPLATE_NOTES = {
+  list: "This is a user-entered **list** canvas: add / toggle / remove items, " +
+    "persisted per user and shared live across every open panel.",
+  data: "This is an **external-data** canvas: it fetches from a source URL inside " +
+    "an action handler (always with `AbortSignal.timeout`), captures failures into " +
+    "state, and auto-refreshes on a visibility-gated timer via the kit's " +
+    "`pollWhileVisible` helper.",
+};
 
 // ---- template: list (default) ----------------------------------------------
 
@@ -718,6 +768,14 @@ const DATA_SMOKE_BODY = `  await test("GET /state has the initial data shape", a
     assert.ok(s.error, "the failed fetch should be captured in state.error");
   });
 
+  await test("relativeTime formats the captured lastRefresh", async () => {
+    const { relativeTime } = await import("../canvas-kit/format.mjs");
+    const s = await getState(open.url);
+    const rel = relativeTime(s.lastRefresh);
+    assert.equal(typeof rel, "string");
+    assert.ok(rel.length > 0, "relativeTime should format the lastRefresh timestamp");
+  });
+
   await test("clear empties items and error", async () => {
     await post(open.url, "clear", {});
     const s = await getState(open.url);
@@ -772,16 +830,22 @@ async function main() {
     descriptionJs: JSON.stringify(description),
     titleHtml: htmlEscape(title),
     titleText: String(title).replace(/[`\r\n]/g, " "),
+    descriptionText: String(description).replace(/[`\r\n]/g, " "),
+    templateLabel: template,
+    templateNote: TEMPLATE_NOTES[template],
   };
   const t = TEMPLATES[template];
 
   await mkdir(join(target, "web"), { recursive: true });
   await mkdir(join(target, "test"), { recursive: true });
-  await cp(KIT, join(target, "canvas-kit"), { recursive: true });
+  // Vendor the kit AND stamp .kit-version.json, so the generated canvas passes
+  // scripts/check-kit-freshness.mjs out of the box.
+  await syncKit(target);
 
   await writeFile(join(target, "extension.mjs"), EXTENSION_MJS);
   await writeFile(join(target, "canvas.mjs"), tpl(t.canvas, vars));
   await writeFile(join(target, "copilot-extension.json"), tpl(MANIFEST, vars));
+  await writeFile(join(target, "README.md"), tpl(README_MD, vars));
   await writeFile(join(target, "web", "index.html"), tpl(INDEX_HTML, vars));
   await writeFile(join(target, "web", "app.mjs"), tpl(t.app, vars));
   await writeFile(join(target, "test", "smoke.test.mjs"), smokeFile(name, t.smokeBody));
@@ -792,6 +856,7 @@ async function main() {
     "extension.mjs",
     "canvas.mjs",
     "copilot-extension.json",
+    "README.md",
     "web/index.html",
     "web/app.mjs",
     "test/smoke.test.mjs",

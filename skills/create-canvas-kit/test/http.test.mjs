@@ -136,6 +136,7 @@ async function main() {
     assert.equal(after.body.decisions.length, 1);
     assert.equal(after.body.decisions[0].title, "Use Preact + htm");
     assert.equal(after.body.decisions[0].status, "open");
+    assert.ok(after.body.decisions[0].updatedAt, "add_decision should capture updatedAt");
   });
 
   await test("state persists durably to user artifacts", async () => {

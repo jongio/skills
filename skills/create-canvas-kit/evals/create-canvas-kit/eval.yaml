@@ -1,0 +1,229 @@
+name: create-canvas-kit
+description: >-
+  Capability eval for the create-canvas-kit skill. The agent must scaffold a
+  working Copilot App canvas extension that honours the kit contract: the SDK is
+  imported only in extension.mjs, the view renders through mountCanvas + Preact
+  (no innerHTML), icons are kebab-case Lucide names, and an external-data canvas
+  fetches inside a handler and auto-refreshes via the visibility-gated
+  pollWhileVisible helper. Deterministic graders inspect the produced files and
+  parse them; an LLM rubric judges contract adherence.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 12m
+  executor: copilot-sdk
+
+# Weights are keyed by grader TYPE (aggregated across a stimulus). run-command
+# (does it actually parse?) and the LLM rubric carry the most signal.
+scoring:
+  weights:
+    file-exists: 1
+    file-contains: 1
+    file-not-contains: 1
+    file-not-matches: 1
+    output-matches: 1
+    run-command: 2
+    prompt: 2
+  threshold: 0.8
+
+stimuli:
+  - name: kanban-board-canvas
+    prompt: >-
+      Build a kanban board canvas with the create-canvas-kit skill. Scaffold it
+      with the generator, keep the vendored canvas-kit folder, shape a small
+      board (columns / cards), and make sure it boots.
+    tags:
+      canvas: kanban
+      cost: high
+    graders:
+      - type: file-exists
+        name: canvas-scaffolded
+        config:
+          path: "**/canvas.mjs"
+      - type: file-exists
+        name: view-scaffolded
+        config:
+          path: "**/web/app.mjs"
+      - type: file-exists
+        name: kit-vendored
+        config:
+          path: "**/canvas-kit/server.mjs"
+      - type: file-contains
+        name: sdk-in-extension
+        config:
+          path: "**/extension.mjs"
+          value: "@github/copilot-sdk/extension"
+      - type: file-not-contains
+        name: no-sdk-in-canvas
+        config:
+          path: "**/canvas.mjs"
+          value: "@github/copilot-sdk"
+      - type: file-not-contains
+        name: no-sdk-in-view
+        config:
+          path: "**/web/app.mjs"
+          value: "@github/copilot-sdk"
+      - type: file-contains
+        name: uses-mountcanvas
+        config:
+          path: "**/web/app.mjs"
+          value: "mountCanvas"
+      - type: file-contains
+        name: uses-kit-nid
+        config:
+          path: "**/canvas.mjs"
+          value: "nid"
+      - type: file-not-matches
+        name: no-innerhtml-repaint
+        config:
+          # Flag the actual repaint anti-pattern (`el.innerHTML =` or `+=`), NOT the
+          # substring "innerHTML" — the kit legitimately uses Preact's
+          # `dangerouslySetInnerHTML` to render Lucide SVGs, and comments may
+          # mention innerHTML.
+          path: "**/web/app.mjs"
+          pattern: "\\.innerHTML\\s*\\+?="
+      - type: run-command
+        name: generated-sources-parse
+        config:
+          command: node
+          timeout: 120s
+          args:
+            - "-e"
+            - |
+              const { execFileSync } = require("node:child_process");
+              const { readdirSync } = require("node:fs");
+              const { join } = require("node:path");
+              const SKIP = new Set(["node_modules", ".git", "vendor"]);
+              const found = [];
+              (function walk(d) {
+                for (const e of readdirSync(d, { withFileTypes: true })) {
+                  if (SKIP.has(e.name)) continue;
+                  const p = join(d, e.name);
+                  if (e.isDirectory()) walk(p);
+                  else if (/(canvas|extension|app)\.mjs$/.test(e.name)) found.push(p);
+                }
+              })(process.cwd());
+              const norm = (f) => f.replace(/\\/g, "/");
+              const required = [
+                ["canvas.mjs", /canvas\.mjs$/],
+                ["extension.mjs", /extension\.mjs$/],
+                ["web/app.mjs", /web\/app\.mjs$/],
+              ];
+              for (const [label, re] of required) {
+                if (!found.some((f) => re.test(norm(f)))) {
+                  console.error("FAIL: no " + label + " was produced");
+                  process.exit(1);
+                }
+              }
+              for (const f of found) execFileSync(process.execPath, ["--check", f], { stdio: "inherit" });
+              console.log("node --check passed for " + found.length + " source file(s)");
+      - type: prompt
+        name: contract-rubric
+        config:
+          scoring: scale_1_5
+          threshold: 0.7
+          prompt: >-
+            Judge whether the agent built a canvas that follows the
+            create-canvas-kit contract in the rubric. Reward concrete evidence in
+            the produced files and the explanation; penalise hand-rolled SVGs,
+            CDN icons, innerHTML repaints, or SDK imports outside extension.mjs.
+    rubric:
+      - The agent used the create-canvas-kit skill / generator rather than hand-rolling a canvas from scratch.
+      - Icons use kebab-case Lucide names (e.g. "circle-check", "list-todo"), never hand-written SVG or a CDN.
+      - The theme builds on the kit's ck-* classes rather than restyling the primitives.
+      - State is shared and durable, keyed by domain, and the Copilot SDK import stays in extension.mjs only.
+      - The board renders through Preact (mountCanvas), not an innerHTML repaint loop.
+
+  - name: data-canvas-autorefresh
+    prompt: >-
+      Build a data canvas that fetches from an API and auto-refreshes, using the
+      create-canvas-kit skill's data template. Point it at a JSON API, fetch
+      inside an action handler with a timeout, and refresh on a visibility-gated
+      timer.
+    tags:
+      canvas: data
+      cost: high
+    graders:
+      - type: file-exists
+        name: canvas-scaffolded
+        config:
+          path: "**/canvas.mjs"
+      - type: file-exists
+        name: view-scaffolded
+        config:
+          path: "**/web/app.mjs"
+      - type: file-contains
+        name: uses-pollwhilevisible
+        config:
+          path: "**/web/app.mjs"
+          value: "pollWhileVisible"
+      - type: file-contains
+        name: fetch-timeout-in-handler
+        config:
+          path: "**/canvas.mjs"
+          value: "AbortSignal.timeout"
+      - type: file-not-contains
+        name: no-fetch-in-view
+        config:
+          path: "**/web/app.mjs"
+          value: "fetch("
+      - type: file-not-contains
+        name: no-sdk-in-view
+        config:
+          path: "**/web/app.mjs"
+          value: "@github/copilot-sdk"
+      - type: output-matches
+        name: mentions-refresh
+        config:
+          pattern: "[Rr]efresh|[Aa]uto-?[Rr]efresh|[Pp]oll"
+      - type: run-command
+        name: generated-sources-parse
+        config:
+          command: node
+          timeout: 120s
+          args:
+            - "-e"
+            - |
+              const { execFileSync } = require("node:child_process");
+              const { readdirSync } = require("node:fs");
+              const { join } = require("node:path");
+              const SKIP = new Set(["node_modules", ".git", "vendor"]);
+              const found = [];
+              (function walk(d) {
+                for (const e of readdirSync(d, { withFileTypes: true })) {
+                  if (SKIP.has(e.name)) continue;
+                  const p = join(d, e.name);
+                  if (e.isDirectory()) walk(p);
+                  else if (/(canvas|extension|app)\.mjs$/.test(e.name)) found.push(p);
+                }
+              })(process.cwd());
+              const norm = (f) => f.replace(/\\/g, "/");
+              const required = [
+                ["canvas.mjs", /canvas\.mjs$/],
+                ["extension.mjs", /extension\.mjs$/],
+                ["web/app.mjs", /web\/app\.mjs$/],
+              ];
+              for (const [label, re] of required) {
+                if (!found.some((f) => re.test(norm(f)))) {
+                  console.error("FAIL: no " + label + " was produced");
+                  process.exit(1);
+                }
+              }
+              for (const f of found) execFileSync(process.execPath, ["--check", f], { stdio: "inherit" });
+              console.log("node --check passed for " + found.length + " source file(s)");
+      - type: prompt
+        name: contract-rubric
+        config:
+          scoring: scale_1_5
+          threshold: 0.7
+          prompt: >-
+            Judge whether the data canvas follows the create-canvas-kit
+            external-data contract in the rubric. Reward fetch-in-handler with a
+            timeout, captured error state, and the visibility-gated poll helper.
+    rubric:
+      - The data canvas auto-refreshes with pollWhileVisible, not a raw setInterval.
+      - fetch() lives in an action handler (with AbortSignal.timeout), never in the view.
+      - A flaky fetch is captured into state.error and the refresh action returns instead of throwing.
+      - The view uses the kit's ck-* theme classes and kebab-case Lucide icon names.
+      - The agent followed the documented data-template contract end to end.
