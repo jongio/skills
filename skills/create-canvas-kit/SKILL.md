@@ -71,6 +71,23 @@ web/app.mjs     ── your Preact view
 - **Local UI state** (a draft input value, the active tab/filter) lives in
   `useState` and must never be pushed to the server until the user commits it.
 
+### Action results & errors — how failures surface
+
+Both callers (agent and UI) hit the same handler, and the runtime wraps every
+invocation in the same envelope, so model failures deliberately:
+
+- **Return** a small plain object for success (`{ id, status }`, `{ count }`).
+  `POST /action` answers `{ ok: true, result }`.
+- **Throw** for a hard failure (bad input, missing id). The runtime answers
+  `{ ok: false, code, message }` — HTTP **400** for a known kit error (e.g. an
+  unknown action) and **500** for a handler `throw` — and `mountCanvas`'s
+  `invoke` **rejects** with a `CanvasActionError` carrying that `code`/`message`,
+  so a button handler can `try/catch` it. On the agent side, `extension.mjs` maps
+  the same error to a `CanvasError`. A throw is *surfaced*, never a crash.
+- For an **expected, transient** failure (a flaky upstream fetch on a background
+  poll), don't throw — capture it into `state.error` and **return** so the error
+  card shows while the poll stays quiet (see the data template's `refresh`).
+
 ## Icons — official GitHub Lucide, always
 
 The kit vendors the **exact Lucide set github-app ships** (`lucide-react@1.14.0`,
@@ -135,6 +152,15 @@ percent(1.25);               // "+1.25%"
 
 `nid` is also importable server-side in `canvas.mjs` via
 `import { nid } from "./canvas-kit/format.mjs"` (the generator does this).
+
+**The formatters are locale-aware** — `relativeTime` ends in a
+`toLocaleDateString()`, and `compactNumber`/`percent` go through
+`Number.prototype.toLocaleString`, so their output depends on the host locale
+(`"1.5K"` vs `"1,5 K"`, `2025-01-31` vs `31/01/2025`). Keep the **raw** values in
+durable state (an ISO string, a `Number`) and format **in the view**. Never store
+a formatted string and never parse one back — formatting is a presentation
+concern, and a value formatted under one locale can't be reliably re-read under
+another.
 
 **`Fragment` is NOT exported.** To return sibling nodes without a wrapper, use
 htm's built-in empty-tag syntax — `` html`<><${A} /><${B} /></>` `` — or just
@@ -232,16 +258,22 @@ who shares what.
   count in `statusLine` goes stale. Show live counts **inside** the canvas body
   (which re-renders on every SSE push), and treat `statusLine` as an
   open-time-only summary.
-- **Rich-payload actions.** If the UI needs to hand the agent's handler a whole
-  object (e.g. the article being saved) rather than scalar fields, set
-  `additionalProperties: true` on that action's `inputSchema` (the generator
-  defaults to `false`). Denormalize what you need into durable state in the
-  handler.
+- **Rich-payload actions.** Action `inputSchema`s default to
+  `additionalProperties: false` on purpose: the schema is the contract the agent
+  fills, and a strict schema keeps the model from smuggling in unvalidated/typo'd
+  fields — only the properties you declare reach your handler. When the UI
+  genuinely needs to hand the handler a whole object (e.g. the article being
+  saved) rather than scalar fields, set `additionalProperties: true` on *that*
+  action's `inputSchema` and denormalize what you need into durable state in the
+  handler. Flip it deliberately, per-action — not as a blanket default.
 - **Install layout / SDK resolution.** A shipped extension folder contains only
   `copilot-extension.json` (`{ "name", "version": 1 }` — no `package.json`),
-  `extension.mjs`, `canvas.mjs`, `web/`, and the nested `canvas-kit/`. The host
-  resolves `@github/copilot-sdk/extension` for you; `extension.mjs` is the only
-  file that imports it. Don't add a `package.json` or a build step.
+  `extension.mjs`, `canvas.mjs`, `web/`, and the nested `canvas-kit/`. The kit is
+  plain ESM that Node runs directly — **no bundler, no transpile, no build step,
+  no `package.json`** in the extension (the stamped `test/smoke.test.mjs` runs
+  with bare `node`). The host resolves `@github/copilot-sdk/extension` for you;
+  `extension.mjs` is the only file that imports it. Don't add a `package.json` or
+  a build step to a shipped canvas.
 
 ## Build a canvas — fastest path
 
