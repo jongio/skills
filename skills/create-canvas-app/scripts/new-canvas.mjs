@@ -152,9 +152,11 @@ node test/smoke.test.mjs
 
 ## Install
 
-Copy this folder into \`.github/extensions/{{name}}\` (in-repo) or
-\`$COPILOT_HOME/extensions/{{name}}\` (personal), then run \`extensions_reload\` and
-open it with \`open_canvas\` (\`canvasId: "{{name}}"\`).
+Copy this folder into \`.github/extensions/{{name}}\` (in-repo),
+\`$COPILOT_HOME/extensions/{{name}}\` (personal), or
+\`$COPILOT_HOME/session-state/<sessionId>/extensions/{{name}}\` (current session
+only — disappears with the session), then run \`extensions_reload\` and open it
+with \`open_canvas\` (\`canvasId: "{{name}}"\`).
 
 ## Keeping the kit current
 
@@ -915,7 +917,7 @@ async function main() {
     console.log("  " + f);
   }
   console.log("\nValidate it:   node test/smoke.test.mjs   (run from the canvas folder)");
-  console.log("Then install:  copy the folder into .github/extensions/ or $COPILOT_HOME/extensions/, then extensions_reload.");
+  console.log("Then install:  copy the folder into .github/extensions/ (in-repo), $COPILOT_HOME/extensions/ (personal), or $COPILOT_HOME/session-state/<sessionId>/extensions/ (this session only), then extensions_reload.");
 }
 
 main().catch((e) => {
