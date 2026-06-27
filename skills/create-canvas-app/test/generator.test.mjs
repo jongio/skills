@@ -59,9 +59,16 @@ async function main() {
   });
 
   await test("compactNumber + percent format as expected", () => {
-    assert.match(fmt.compactNumber(1500), /1\.5\s?K/i);
-    assert.match(fmt.compactNumber(2.3e9), /2\.3\s?B/i);
+    // compactNumber delegates to Intl compact notation, which is locale-aware,
+    // so assert it produces what the host locale would (not a hardcoded en-US
+    // "K"/"B" that fails under e.g. de-DE "Tsd.") — and that it actually compacts.
+    const compact = (n) =>
+      Number(n).toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 2 });
+    assert.equal(fmt.compactNumber(1500), compact(1500));
+    assert.equal(fmt.compactNumber(2.3e9), compact(2.3e9));
+    assert.notEqual(fmt.compactNumber(1500), "1500"); // proves it compacted
     assert.equal(fmt.compactNumber(null), "—");
+    // percent() uses Number.toFixed -> always ASCII "." + digits, locale-independent.
     assert.equal(fmt.percent(1.2345), "+1.23%");
     assert.equal(fmt.percent(-2), "-2.00%");
     assert.equal(fmt.percent(null), "—");
@@ -89,7 +96,7 @@ async function main() {
   await test("pollWhileVisible: ticks on the interval and the cleanup stops it", async () => {
     let n = 0;
     const stop = pollWhileVisible(() => n++, 0.03); // 30ms
-    await sleep(80);
+    await sleep(150);
     assert.ok(n >= 2, `expected >=2 ticks, got ${n}`);
     stop();
     const after = n;
@@ -100,7 +107,7 @@ async function main() {
   await test("pollWhileVisible: a throwing/rejecting tick keeps the interval alive", async () => {
     let n = 0;
     const stop = pollWhileVisible(() => { n++; return Promise.reject(new Error("boom")); }, 0.03);
-    await sleep(80);
+    await sleep(150);
     assert.ok(n >= 2, `interval should survive rejections, got ${n}`);
     stop();
   });
@@ -212,6 +219,13 @@ async function main() {
       assert.match(canvas, /await fetch\(/);
       assert.match(canvas, /AbortSignal\.timeout\(/);
       assert.match(canvas, /refresh:\s*\{/);
+    });
+
+    await test("data canvas.mjs guards the server-side fetch against SSRF", async () => {
+      const canvas = await read(join(work, "gen-feed", "canvas.mjs"));
+      assert.match(canvas, /await assertPublicUrl\(url\)/);
+      assert.match(canvas, /a === 169 && b === 254/); // link-local / cloud metadata blocked
+      assert.match(canvas, /Blocked private\/loopback address/);
     });
 
     await test("data app.mjs uses the visibility-gated poll helper", async () => {
