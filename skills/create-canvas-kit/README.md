@@ -48,8 +48,9 @@ to your request, and validates it visually before handing it back.
   GitHub-dark fallbacks.
 - **Official GitHub icons** — the exact Lucide set github-app ships
   (`lucide-react@1.14.0`), vendored and byte-identical.
-- **A generator** — `node scripts/new-canvas.mjs <name>` stamps a working canvas.
-- **Tests** — a standalone HTTP harness and a kit byte-parity check.
+- **A generator** — `node scripts/new-canvas.mjs <name>` stamps a working canvas
+  (add `--template data` for a fetch + auto-refresh canvas) with its own smoke test.
+- **Tests** — a standalone HTTP harness, a kit byte-parity check, and a generator test.
 
 ## Use it
 
@@ -120,10 +121,15 @@ skill uses:
 ```sh
 # A working list canvas, kit copied in for you:
 node scripts/new-canvas.mjs my-board --title "My Board" --dir .github/extensions/my-board
+
+# An external-data canvas (fetch + refresh + visibility-gated auto-refresh):
+node scripts/new-canvas.mjs market-feed --template data --dir .github/extensions/market-feed
 ```
 
 Reload extensions, then open the canvas (`canvasId: "my-board"`). It works out of
 the box: add, toggle, and remove items, live, shared between you and the agent.
+Each stamped canvas ships a `test/smoke.test.mjs` — run `node test/smoke.test.mjs`
+from the canvas folder to prove its actions over real HTTP.
 
 Then make it yours:
 
@@ -150,19 +156,21 @@ from jongio/copilot-extensions/extensions/stock-ticker."* No clone, no build.
 ```
 SKILL.md                      The Copilot skill (authoring contract + workflow)
 kit/                          The canonical kit — copy into your extension as canvas-kit/
-  client.mjs                  Browser runtime: html, mountCanvas, useState, Icon
+  client.mjs                  Browser runtime: html, mountCanvas, pollWhileVisible, hooks, Icon, formatters
   server.mjs                  SDK-free runtime: /state, /events (SSE), /action, static
   storage.mjs                 Durable per-user JSON store
+  format.mjs                  nid + relativeTime / compactNumber / percent helpers
   theme.css                   Primer-token styling (ck-* classes)
   icons.mjs                   Lucide Icon component + helpers
   vendor/                     Vendored Preact+htm and the Lucide glyph data
 reference/decision-log/       Complete working canvas in the real installed shape
 scripts/
-  new-canvas.mjs              Generator — stamp a new canvas
+  new-canvas.mjs              Generator — stamp a new canvas (--template list|data)
   install-local.ps1           Install this skill into $COPILOT_HOME/skills
 test/
   http.test.mjs               Boots the runtime over real HTTP and checks the contract
   kit-parity.test.mjs         Asserts kit/ == reference canvas-kit/ (no drift)
+  generator.test.mjs          Stamps both templates, runs their smoke tests, checks the kit API
 ```
 
 ## Run the tests
@@ -170,6 +178,7 @@ test/
 ```sh
 node test/http.test.mjs
 node test/kit-parity.test.mjs
+node test/generator.test.mjs
 ```
 
 No dependencies to install — everything is vendored. Node 18+ (developed on 24).
