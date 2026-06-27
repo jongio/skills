@@ -35,7 +35,7 @@ async function exists(p) {
 const read = (p) => readFile(p, "utf8");
 
 async function main() {
-  console.log("create-canvas-kit generator + kit API tests");
+  console.log("create-canvas-app generator + kit API tests");
 
   // ---- format.mjs behavior (the reinvented utilities, now shared) ----------
   const fmt = await import("../kit/format.mjs");

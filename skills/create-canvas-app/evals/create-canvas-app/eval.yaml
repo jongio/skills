@@ -1,6 +1,6 @@
-name: create-canvas-kit
+name: create-canvas-app
 description: >-
-  Capability eval for the create-canvas-kit skill. The agent must scaffold a
+  Capability eval for the create-canvas-app skill. The agent must scaffold a
   working Copilot App canvas extension that honours the kit contract: the SDK is
   imported only in extension.mjs, the view renders through mountCanvas + Preact
   (no innerHTML), icons are kebab-case Lucide names, and an external-data canvas
@@ -30,7 +30,7 @@ scoring:
 stimuli:
   - name: kanban-board-canvas
     prompt: >-
-      Build a kanban board canvas with the create-canvas-kit skill. Scaffold it
+      Build a kanban board canvas with the create-canvas-app skill. Scaffold it
       with the generator, keep the vendored canvas-kit folder, shape a small
       board (columns / cards), and make sure it boots.
     tags:
@@ -125,11 +125,11 @@ stimuli:
           threshold: 0.7
           prompt: >-
             Judge whether the agent built a canvas that follows the
-            create-canvas-kit contract in the rubric. Reward concrete evidence in
+            create-canvas-app contract in the rubric. Reward concrete evidence in
             the produced files and the explanation; penalise hand-rolled SVGs,
             CDN icons, innerHTML repaints, or SDK imports outside extension.mjs.
     rubric:
-      - The agent used the create-canvas-kit skill / generator rather than hand-rolling a canvas from scratch.
+      - The agent used the create-canvas-app skill / generator rather than hand-rolling a canvas from scratch.
       - Icons use kebab-case Lucide names (e.g. "circle-check", "list-todo"), never hand-written SVG or a CDN.
       - The theme builds on the kit's ck-* classes rather than restyling the primitives.
       - State is shared and durable, keyed by domain, and the Copilot SDK import stays in extension.mjs only.
@@ -138,7 +138,7 @@ stimuli:
   - name: data-canvas-autorefresh
     prompt: >-
       Build a data canvas that fetches from an API and auto-refreshes, using the
-      create-canvas-kit skill's data template. Point it at a JSON API, fetch
+      create-canvas-app skill's data template. Point it at a JSON API, fetch
       inside an action handler with a timeout, and refresh on a visibility-gated
       timer.
     tags:
@@ -218,7 +218,7 @@ stimuli:
           scoring: scale_1_5
           threshold: 0.7
           prompt: >-
-            Judge whether the data canvas follows the create-canvas-kit
+            Judge whether the data canvas follows the create-canvas-app
             external-data contract in the rubric. Reward fetch-in-handler with a
             timeout, captured error state, and the visibility-gated poll helper.
     rubric:

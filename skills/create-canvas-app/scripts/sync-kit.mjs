@@ -89,7 +89,7 @@ export async function syncKit(dir) {
   const marker = {
     version: KIT_VERSION,
     syncedAt: new Date().toISOString(),
-    source: "create-canvas-kit/kit",
+    source: "create-canvas-app/kit",
   };
   await writeFile(join(dest, VERSION_MARKER), JSON.stringify(marker, null, 2) + "\n", "utf8");
   return { dest, version: KIT_VERSION };

@@ -9,8 +9,8 @@
   },
   "plugins": [
     {
-      "name": "create-canvas-kit",
-      "source": "./skills/create-canvas-kit",
+      "name": "create-canvas-app",
+      "source": "./skills/create-canvas-app",
       "description": "Build GitHub Copilot canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable storage, Primer theming, official GitHub Lucide icons, a generator, and tests.",
       "version": "1.0.0"
     }

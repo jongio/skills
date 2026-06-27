@@ -1,4 +1,4 @@
-# create-canvas-kit
+# create-canvas-app
 
 Build **GitHub Copilot App canvas extensions** the right way, fast — a no-build
 Preact + htm kit packaged as a Copilot skill.
@@ -16,7 +16,7 @@ drive: dashboards, editors, trackers, boards, document previews.
 **1. Install the skill** (global, for GitHub Copilot):
 
 ```sh
-npx skills add jongio/skills --skill create-canvas-kit -g --agent github-copilot
+npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot
 ```
 
 **2. Reload skills** — run `/skills reload`, or start a new session.
@@ -24,10 +24,10 @@ npx skills add jongio/skills --skill create-canvas-kit -g --agent github-copilot
 **3. Ask Copilot to build a canvas:**
 
 ```
-/create-canvas-kit build a kanban board canvas with todo / doing / done columns
+/create-canvas-app build a kanban board canvas with todo / doing / done columns
 ```
 
-![Invoking the skill from the Copilot composer: "/create-canvas-kit customized stock ticker".](docs/invoke.png)
+![Invoking the skill from the Copilot composer: "/create-canvas-app customized stock ticker".](docs/invoke.png)
 
 That's it. The agent loads the skill, stamps a working canvas with the kit (live
 shared state, durable storage, Primer theming, official GitHub icons), shapes it
@@ -57,15 +57,15 @@ to your request, and validates it visually before handing it back.
 Once installed, invoke the skill by name and describe the canvas you want:
 
 ```
-/create-canvas-kit make a canvas that tracks release readiness checklist items
+/create-canvas-app make a canvas that tracks release readiness checklist items
 ```
 
 ```
-/create-canvas-kit a canvas to review and triage incoming webhook events
+/create-canvas-app a canvas to review and triage incoming webhook events
 ```
 
 You don't have to name the skill explicitly — the agent routes to it whenever you
-ask to "create / scaffold / build a canvas." Invoking `/create-canvas-kit` just
+ask to "create / scaffold / build a canvas." Invoking `/create-canvas-app` just
 guarantees it.
 
 ## Install options
@@ -73,17 +73,17 @@ guarantees it.
 The Quickstart installs globally. Other ways:
 
 ```sh
-# Into the current project (.agents/skills/create-canvas-kit/):
-npx skills add jongio/skills --skill create-canvas-kit
+# Into the current project (.agents/skills/create-canvas-app/):
+npx skills add jongio/skills --skill create-canvas-app
 
 # Pin to a branch or tag:
-npx skills add jongio/skills#main --skill create-canvas-kit
+npx skills add jongio/skills#main --skill create-canvas-app
 ```
 
 Uses the [`vercel-labs/skills`](https://github.com/vercel-labs/skills) CLI
 (`skills.sh`) — note the binary is **`skills`** (plural). This skill lives in the
 [`jongio/skills`](https://github.com/jongio/skills) monorepo at
-`skills/create-canvas-kit/`; the bundled `kit/`, `reference/`, and `test/`
+`skills/create-canvas-app/`; the bundled `kit/`, `reference/`, and `test/`
 directories are copied in with it.
 
 **Copilot plugin marketplace** &mdash; install through Copilot's native plugin
@@ -92,11 +92,11 @@ marketplace once, then install this skill from it:
 
 ```sh
 copilot plugin marketplace add jongio/skills
-copilot plugin install create-canvas-kit@jongio-skills
+copilot plugin install create-canvas-app@jongio-skills
 ```
 
 In the Copilot app: **Settings &rarr; Plugins &rarr; Install &#9662; &rarr; Add marketplace**,
-enter `jongio/skills`, then click **Install** on `create-canvas-kit`. The
+enter `jongio/skills`, then click **Install** on `create-canvas-app`. The
 [root README](../../README.md#add-as-a-marketplace-or-install-as-a-plugin) has a
 screenshot walkthrough. Or install every skill at once with
 `copilot plugin install jongio/skills`.
@@ -108,7 +108,7 @@ pwsh -File scripts/install-local.ps1
 ```
 
 **Manual install** — copy this whole folder to
-`$COPILOT_HOME/skills/create-canvas-kit/` (`~/.copilot/skills/create-canvas-kit/`
+`$COPILOT_HOME/skills/create-canvas-app/` (`~/.copilot/skills/create-canvas-app/`
 by default).
 
 After any install, reload skills with `/skills reload` or a new session.

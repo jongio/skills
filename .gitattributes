@@ -9,7 +9,7 @@
 *.gif binary
 
 # Vendored, generated bundles — keep diffs collapsed in review.
-skills/create-canvas-kit/kit/vendor/lucide.mjs linguist-vendored linguist-generated
-skills/create-canvas-kit/kit/vendor/preact-htm-standalone.mjs linguist-vendored linguist-generated
-skills/create-canvas-kit/reference/decision-log/canvas-kit/vendor/lucide.mjs linguist-vendored linguist-generated
-skills/create-canvas-kit/reference/decision-log/canvas-kit/vendor/preact-htm-standalone.mjs linguist-vendored linguist-generated
+skills/create-canvas-app/kit/vendor/lucide.mjs linguist-vendored linguist-generated
+skills/create-canvas-app/kit/vendor/preact-htm-standalone.mjs linguist-vendored linguist-generated
+skills/create-canvas-app/reference/decision-log/canvas-kit/vendor/lucide.mjs linguist-vendored linguist-generated
+skills/create-canvas-app/reference/decision-log/canvas-kit/vendor/preact-htm-standalone.mjs linguist-vendored linguist-generated

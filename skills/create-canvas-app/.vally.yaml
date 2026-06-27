@@ -1,4 +1,4 @@
-# .vally.yaml — Vally project config for the create-canvas-kit skill eval.
+# .vally.yaml — Vally project config for the create-canvas-app skill eval.
 #
 # Wires the skill into the built-in copilot-sdk executor: `vally eval --skill-dir .`
 # reads paths.skills below to discover this skill (node_modules is ignored) and
@@ -6,13 +6,13 @@
 # so the file graders only ever see what the agent itself produced. Stimuli omit
 # `environment.skills` on purpose for exactly that reason.
 #
-# Run from this folder (skills/create-canvas-kit), after `npm install`:
-#   npx vally lint --eval-spec evals/create-canvas-kit/eval.yaml
-#   npx vally eval --eval-spec evals/create-canvas-kit/eval.yaml --skill-dir .
+# Run from this folder (skills/create-canvas-app), after `npm install`:
+#   npx vally lint --eval-spec evals/create-canvas-app/eval.yaml
+#   npx vally eval --eval-spec evals/create-canvas-app/eval.yaml --skill-dir .
 
 paths:
   # The skill lives at this folder's root (SKILL.md here). node_modules is
-  # ignored by discovery, so "." resolves to just the create-canvas-kit skill.
+  # ignored by discovery, so "." resolves to just the create-canvas-app skill.
   skills: "."
   evals: "evals"
   results: "vally-results"
