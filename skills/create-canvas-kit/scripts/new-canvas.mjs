@@ -537,7 +537,7 @@ const DATA_APP_MJS = `// web/app.mjs — Preact view for the {{titleText}} data 
 // only TRIGGERS refresh — on a button and on a visibility-gated timer via the
 // kit's pollWhileVisible helper, with the interval bound to durable state.
 
-import { html, mountCanvas, useState, useEffect, Icon, pollWhileVisible, relativeTime } from "/kit/client.mjs";
+import { html, mountCanvas, useState, useEffect, useRef, Icon, pollWhileVisible, relativeTime } from "/kit/client.mjs";
 
 const TITLE = {{titleJs}};
 
@@ -551,6 +551,14 @@ const INTERVALS = [
 function Toolbar({ state, invoke }) {
   const [url, setUrl] = useState(state.sourceUrl ?? "");
   const [busy, setBusy] = useState(false);
+  const inputRef = useRef(null);
+
+  // Reflect an agent-driven source change back into the field, but never clobber
+  // what the user is mid-edit — only resync the draft when the input isn't focused.
+  useEffect(() => {
+    if (inputRef.current && document.activeElement === inputRef.current) return;
+    setUrl(state.sourceUrl ?? "");
+  }, [state.sourceUrl]);
 
   async function refresh() {
     if (busy) return;
@@ -568,6 +576,7 @@ function Toolbar({ state, invoke }) {
     <div class="ck-card ck-col" style="margin:12px 0 16px">
       <div class="ck-row">
         <input
+          ref=\${inputRef}
           class="ck-input ck-grow"
           placeholder="Source URL…"
           value=\${url}
