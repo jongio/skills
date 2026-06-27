@@ -23,6 +23,10 @@ export { Icon, lucideSVG, hasIcon, iconNames } from "./icons.mjs";
 // SDK-free canvas.mjs). Re-exported here so views have one import site.
 export { nid, relativeTime, compactNumber, percent } from "./format.mjs";
 
+// Kit version stamp — lets a canvas (or the sync/freshness tooling) report which
+// kit snapshot it was built from.
+export { KIT_VERSION } from "./version.mjs";
+
 /**
  * Run `tick` on an interval, but only while the panel is visible — so a
  * backgrounded canvas stops polling a (possibly rate-limited) upstream. Returns

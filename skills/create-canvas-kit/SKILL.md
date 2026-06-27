@@ -268,14 +268,45 @@ If you prefer to hand-assemble instead of using the generator: copy `kit/` into
 your extension as `canvas-kit/`, then copy `reference/decision-log/extension.mjs`
 verbatim and adapt `canvas.mjs` + `web/` from the reference.
 
+## Keeping your vendored kit in sync
+
+A shipped extension vendors the kit **verbatim** as `canvas-kit/` — there's no npm
+package or build step, so nothing tells you whether the copy you shipped matches
+the current `kit/`. The kit is version-stamped to close that gap: `kit/version.mjs`
+exports `KIT_VERSION` (re-exported from `/kit/client.mjs`), and two scripts keep
+vendored copies honest.
+
+- **Re-sync after a kit change.** Bump `KIT_VERSION` when you change any kit file,
+  then refresh each vendored copy:
+  ```
+  node scripts/sync-kit.mjs <extension-dir>
+  ```
+  This makes `<extension-dir>/canvas-kit/` an exact mirror of `kit/` —
+  overwriting changed files **and pruning stale ones** (a file removed upstream
+  won't linger) — and records the version into
+  `<extension-dir>/canvas-kit/.kit-version.json`.
+
+- **Gate drift in CI (offline).** Fail the build if any vendored kit has drifted
+  from `kit/` — by file set, by file contents, or by recorded version:
+  ```
+  node scripts/check-kit-freshness.mjs <extensions-dir>
+  ```
+  Point it at a folder of extensions (e.g. `.github/extensions`), a single
+  extension dir, or a `canvas-kit/` dir. Exit 0 = all fresh; exit 1 = drift, with
+  the offending files listed. It runs no network and needs no dependencies.
+
+The `.kit-version.json` marker is metadata, **not** a kit file — the byte-parity
+test (`test/kit-parity.test.mjs`) and the freshness check both treat it as
+out-of-band, so it never counts against `kit/` ↔ `canvas-kit/` parity.
+
 ## Validate visually — don't claim done without looking
 
 A canvas isn't done because the server boots. Verify the UI:
 
 1. Run the standalone HTTP test to prove the runtime contract:
    `node test/http.test.mjs` (and `node test/kit-parity.test.mjs`,
-   `node test/generator.test.mjs`). A stamped canvas ships its own
-   `test/smoke.test.mjs` — run it from the canvas folder
+   `node test/generator.test.mjs`, `node test/tooling.test.mjs`). A stamped canvas
+   ships its own `test/smoke.test.mjs` — run it from the canvas folder
    (`node test/smoke.test.mjs`) to prove its actions over real HTTP.
 2. Open the canvas and **look at it** (Playwright or the browser canvas):
    navigate to the panel, assert key text/controls render, take a screenshot.
@@ -294,6 +325,8 @@ A canvas isn't done because the server boots. Verify the UI:
   `canvas-kit/` stay byte-identical.
 - `test/generator.test.mjs` — stamps both templates, runs their smoke tests, and
   checks the kit API surface (format helpers, poll helper, theme primitives).
+- `test/tooling.test.mjs` — exercises the version stamp (`kit/version.mjs`),
+  `scripts/sync-kit.mjs`, and the offline `scripts/check-kit-freshness.mjs` drift gate.
 
 ## Footguns
 
