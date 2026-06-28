@@ -42,6 +42,8 @@ html, body {
   font-family: var(--ck-font);
   font-size: var(--ck-fs);
   line-height: var(--ck-lh);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body { padding: 16px; }

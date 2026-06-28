@@ -175,6 +175,12 @@ async function main() {
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   });
 
+  await test("theme.css sets font-smoothing to match the host canvas defaults", async () => {
+    const css = await read(join(ROOT, "kit", "theme.css"));
+    assert.match(css, /-webkit-font-smoothing:\s*antialiased/);
+    assert.match(css, /-moz-osx-font-smoothing:\s*grayscale/);
+  });
+
   await test("theme.css badges are generic, not decision-log-specific", async () => {
     const css = await read(join(ROOT, "kit", "theme.css"));
     for (const cls of ["ck-badge-success", "ck-badge-accent", "ck-badge-muted", "ck-badge-danger", "ck-badge-attention"]) {

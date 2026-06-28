@@ -47,13 +47,14 @@ to your request, and validates it visually before handing it back.
 - **Primer theming** — `ck-*` classes mapped to the host theme tokens with
   GitHub-dark fallbacks.
 - **Official GitHub icons** — the exact Lucide set github-app ships
-  (`lucide-react@1.14.0`), vendored and byte-identical.
+  (`lucide-react@1.21.0`), vendored and byte-identical.
 - **Host AI in a handler** — call the Copilot app's own model from an action with
   `ctx.ai(question)` (silent, no keys, no history) or hand work to the main agent
   with `ctx.askAgent(prompt)`. No API keys, no model picker, no external `fetch`.
 - **A generator** — `node scripts/new-canvas.mjs <name>` stamps a working canvas
   (add `--template data` for a fetch + auto-refresh canvas) with its own smoke test.
-- **Tests** — a standalone HTTP harness, a kit byte-parity check, and a generator test.
+- **Tests** — a standalone HTTP harness, a kit byte-parity check, a generator test, a
+  kit-sync/freshness tooling check, and a Lucide re-vendor determinism test.
 
 ## Use it
 
@@ -175,12 +176,16 @@ kit/                          The canonical kit — copy into your extension as 
 reference/decision-log/       Complete working canvas in the real installed shape
 scripts/
   new-canvas.mjs              Generator — stamp a new canvas (--template list|data)
+  sync-kit.mjs                Copy kit/ into an extension as canvas-kit/ + stamp the version
+  check-kit-freshness.mjs     Offline drift gate — fail if a vendored kit copy is stale
+  vendor-lucide.mjs           Rebuild kit/vendor/lucide.mjs from a pinned lucide-react release
   install-local.ps1           Install this skill into $COPILOT_HOME/skills
 test/
   http.test.mjs               Boots the runtime over real HTTP and checks the contract
   kit-parity.test.mjs         Asserts kit/ == reference canvas-kit/ (no drift)
   generator.test.mjs          Stamps both templates, runs their smoke tests, checks the kit API
   tooling.test.mjs            Exercises the version stamp, sync-kit, and the freshness drift gate
+  vendor-lucide.test.mjs      Checks the Lucide vendoring generator (sorting, key-strip, determinism)
 ```
 
 ## Run the tests
@@ -190,10 +195,11 @@ node test/http.test.mjs
 node test/kit-parity.test.mjs
 node test/generator.test.mjs
 node test/tooling.test.mjs
+node test/vendor-lucide.test.mjs
 ```
 
 No dependencies to install — everything is vendored. Node 18+ (developed on 24).
-`npm test` runs all four in sequence.
+`npm test` runs all five in sequence.
 
 ## License
 

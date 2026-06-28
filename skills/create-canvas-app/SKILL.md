@@ -90,7 +90,7 @@ invocation in the same envelope, so model failures deliberately:
 
 ## Icons — official GitHub Lucide, always
 
-The kit vendors the **exact Lucide set github-app ships** (`lucide-react@1.14.0`,
+The kit vendors the **exact Lucide set github-app ships** (`lucide-react@1.21.0`,
 byte-identical). Use it for *every* icon; do not hand-write SVGs or pull a CDN.
 
 ```js
@@ -386,13 +386,24 @@ The `.kit-version.json` marker is metadata, **not** a kit file — the byte-pari
 test (`test/kit-parity.test.mjs`) and the freshness check both treat it as
 out-of-band, so it never counts against `kit/` ↔ `canvas-kit/` parity.
 
+- **Re-vendor the Lucide glyphs (rare).** `kit/vendor/lucide.mjs` is
+  AUTO-GENERATED to match the exact `lucide-react` release the Copilot host app
+  ships, so canvases render the same glyphs the host does. When the host bumps its
+  Lucide version, regenerate the file deterministically rather than hand-editing:
+  ```
+  node scripts/vendor-lucide.mjs <version>
+  ```
+  Then bump `KIT_VERSION` and re-sync vendored copies. Pass `--icons-dir <path>`
+  to vendor from an existing install instead of fetching one.
+
 ## Validate visually — don't claim done without looking
 
 A canvas isn't done because the server boots. Verify the UI:
 
 1. Run the standalone HTTP test to prove the runtime contract:
    `node test/http.test.mjs` (and `node test/kit-parity.test.mjs`,
-   `node test/generator.test.mjs`, `node test/tooling.test.mjs`). A stamped canvas
+   `node test/generator.test.mjs`, `node test/tooling.test.mjs`,
+   `node test/vendor-lucide.test.mjs`). A stamped canvas
    ships its own `test/smoke.test.mjs` — run it from the canvas folder
    (`node test/smoke.test.mjs`) to prove its actions over real HTTP.
 2. Open the canvas and **look at it** (Playwright or the browser canvas):
@@ -414,6 +425,8 @@ A canvas isn't done because the server boots. Verify the UI:
   checks the kit API surface (format helpers, poll helper, theme primitives).
 - `test/tooling.test.mjs` — exercises the version stamp (`kit/version.mjs`),
   `scripts/sync-kit.mjs`, and the offline `scripts/check-kit-freshness.mjs` drift gate.
+- `test/vendor-lucide.test.mjs` — checks the Lucide vendoring generator
+  (`scripts/vendor-lucide.mjs`): sorting, `key`-strip, alias mapping, determinism.
 
 ## Footguns
 
