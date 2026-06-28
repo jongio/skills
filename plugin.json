@@ -1,6 +1,6 @@
 {
   "name": "jongio-skills",
-  "description": "Jon Gallant's collection of GitHub Copilot skills. Browse and install individual skills from the skills/ directory.",
+  "description": "Jon Gallant's collection of cross-agent skills for AI coding agents — GitHub Copilot, Claude, and Codex. Browse and install individual skills from the skills/ directory.",
   "version": "1.0.0",
   "author": {
     "name": "Jon Gallant",

@@ -170,6 +170,7 @@ kit/                          The canonical kit — copy into your extension as 
   format.mjs                  nid + relativeTime / compactNumber / percent helpers
   theme.css                   Primer-token styling (ck-* classes)
   icons.mjs                   Lucide Icon component + helpers
+  version.mjs                 KIT_VERSION stamp — sync + freshness tooling
   vendor/                     Vendored Preact+htm and the Lucide glyph data
 reference/decision-log/       Complete working canvas in the real installed shape
 scripts/
