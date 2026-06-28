@@ -64,14 +64,25 @@ h1 { font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; margin: 0 0 0.75rem
 .meta dd { margin: 0; }
 .tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .tag { font-size: 0.72rem; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.1em 0.45em; }
-.cmd { display: block; margin-top: auto; white-space: pre-wrap; word-break: break-all; }
+.use { display: flex; flex-direction: column; gap: 0.25rem; margin-top: auto; }
+.use-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+.use-label:not(:first-child) { margin-top: 0.4rem; }
+.cmd { display: block; white-space: pre-wrap; word-break: break-all; font-size: 0.82rem; }
+.btn-sm { padding: 0.4rem 0.8rem; font-size: 0.85rem; border-radius: 8px; }
 
 .loading, .error { text-align: center; color: var(--muted); }
 .error { color: #f85149; }
 
-.how { margin: 3.5rem 0 0; }
-.how h2 { text-align: center; }
-.how ol { max-width: 60ch; margin: 1rem auto; }
-.how li { margin: 0.4rem 0; }
+.panel { margin: 3.5rem auto 0; max-width: 72ch; }
+.panel h2 { text-align: center; }
+.panel h3 { margin: 1.5rem 0 0.5rem; font-size: 1rem; }
+.panel ol, .panel ul { padding-left: 1.25rem; }
+.panel li { margin: 0.45rem 0; }
+.panel pre {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 0.9rem 1rem; overflow-x: auto; margin: 0.5rem 0;
+}
+.panel pre code { background: none; padding: 0; font-size: 0.85rem; line-height: 1.5; }
+.muted { color: var(--muted); font-size: 0.92rem; }
 
 .foot { text-align: center; color: var(--muted); border-top: 1px solid var(--border); padding-top: 1.5rem; margin-top: 3.5rem; }

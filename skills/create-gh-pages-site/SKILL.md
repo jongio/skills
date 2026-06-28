@@ -84,11 +84,38 @@ id-token: write }`, a single `concurrency: { group: pages }`, and the
 > Jan 2025). If a user reports a deploy failure mentioning a deprecated action,
 > check the latest majors and bump the `uses:` pins.
 
+## Interview first — never scaffold on a guess
+
+This skill produces a real repo with a live deploy pipeline, so getting the inputs
+right matters more than speed. **Do not stamp anything until you know (a) which
+template and (b) the target repo (or an explicit base path).** If the prompt is bare
+("make me a GitHub Pages site") or names no framework/repo, interview the user — ask
+only for what's missing, one focused question at a time, using the `ask_user` tool:
+
+1. **What kind of site?** Map the answer to a template:
+   - "a landing page / just some HTML / the simplest thing" → `static-html`
+   - "a blog / docs / content / marketing site, fast" → `astro` (or `eleventy` if
+     they say Markdown- or data-driven, or `jekyll` if they want the GitHub-native
+     path or are migrating an existing Jekyll site)
+   - "an app / dashboard / interactive / single-page app" → `react-vite`
+
+   If they're unsure, ask the single discriminating question — *content site or
+   interactive app?* — and default to `static-html` for the simplest ask.
+2. **Which repo?** The **current repo** or a **new** one, and the `owner/name`. This
+   drives the base path, so it's required. For a user site, confirm the repo is named
+   `<user>.github.io` (base `/`); otherwise it's a project site (base `/repo/`).
+3. **Title?** Optional — default to the repo name; never block on it.
+
+Skip any question the prompt already answered: *"an Astro blog for octocat/blog"*
+needs no interview (template `astro`, repo `octocat/blog`). Ask only for the gaps.
+When you **inferred** rather than were told, confirm in one line before scaffolding —
+e.g. *"Astro site → octocat/blog, base `/blog/` — go?"*
+
 ## The workflow you follow
 
-1. **Gather context.** What kind of site (content / app / docs / landing)? Target
-   repo: the **current repo** or a **new repo**? Repo name (drives the base path)?
-   A human title for the site?
+1. **Interview / gather context.** Resolve the questions above via `ask_user`. You
+   MUST end up with a chosen template and a target repo (or explicit `--base`) before
+   stamping. Don't guess a repo name — the base path depends on it.
 2. **Pick the template** from the table above.
 3. **Stamp it** with the generator (next section). This injects the base path,
    site URL, and title, and lays down the deploy workflow.
@@ -175,15 +202,24 @@ the domain and drop `base`. Don't automate DNS — explain the steps.
 ## Template registry & contributing
 
 Templates are bundled in `templates/<name>/`, each with a `template.json` manifest.
-The gallery (`gallery/`) renders the catalog from those manifests
+The bundled `gallery/` renders the catalog from those manifests
 (`scripts/build-catalog.mjs` regenerates `gallery/templates.json`; a test gates
 drift). New templates follow the contract in `CONTRIBUTING.md`: a folder with a
 `deploy.yml`, base-path handling via the sentinels, a `README.md`, and a manifest.
 
-The generator's `--registry <owner/repo>` flag fetches templates from a remote
-registry instead of the bundled copies — so these templates can graduate into a
-standalone, community-contributable `jongio/gh-pages-templates` repo (which can
-deploy its own gallery to Pages) with no change to the skill.
+A live, community-contributable registry of these templates is published at
+**[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)**, with
+a browsable gallery (live previews of every template) at
+**https://jongio.github.io/gh-pages-templates/**. The generator's
+`--registry <owner/repo>` flag fetches templates from there instead of the bundled
+copies:
+
+```
+node scripts/new-site.mjs astro --repo octocat/blog --registry jongio/gh-pages-templates
+```
+
+Point users at the gallery to browse + preview, and at the registry's `CONTRIBUTING.md`
+to submit their own template.
 
 ## Validate — don't claim done on a green check
 

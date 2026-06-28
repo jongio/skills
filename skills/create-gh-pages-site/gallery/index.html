@@ -22,7 +22,8 @@
         </p>
         <p class="cta">
           <a class="btn" href="#templates">Browse templates</a>
-          <a class="btn btn-ghost" href="https://github.com/jongio/skills/tree/main/skills/create-gh-pages-site">View the skill</a>
+          <a class="btn btn-ghost" href="#install">Install the skill</a>
+          <a class="btn btn-ghost" href="https://jongio.github.io/gh-pages-templates/">Live gallery + previews ↗</a>
         </p>
       </header>
 
@@ -30,25 +31,82 @@
         <p class="loading">Loading templates…</p>
       </section>
 
-      <section class="how">
-        <h2>How to use a template</h2>
+      <section id="install" class="panel">
+        <h2>Install the skill</h2>
+        <p>
+          These templates are scaffolded by the <code>create-gh-pages-site</code>
+          GitHub Copilot skill, part of the
+          <a href="https://github.com/jongio/skills">jongio/skills</a> collection.
+          Install it once, then ask Copilot for any template — each card shows the
+          exact prompt.
+        </p>
+
+        <h3>Option A — the skills CLI</h3>
+        <pre><code># Global, for GitHub Copilot:
+npx skills add jongio/skills --skill create-gh-pages-site -g --agent github-copilot
+
+# …or into the current project instead (drop -g):
+npx skills add jongio/skills --skill create-gh-pages-site</code></pre>
+
+        <h3>Option B — the Copilot plugin marketplace</h3>
+        <pre><code>copilot plugin marketplace add jongio/skills
+copilot plugin install create-gh-pages-site@jongio-skills</code></pre>
+
+        <p class="muted">
+          In the Copilot app: <strong>Settings → Plugins → Install ▾ → Add
+          marketplace</strong>, enter <code>jongio/skills</code>, then install
+          <code>create-gh-pages-site</code>. Reload skills with
+          <code>/skills reload</code> or start a new session.
+        </p>
+      </section>
+
+      <section id="use" class="panel">
+        <h2>Use a template</h2>
         <ol>
           <li>
-            With the Copilot skill: <code>/create-gh-pages-site</code> and describe
-            the site you want (e.g. <em>"an Astro blog"</em>).
+            <strong>With Copilot</strong> — invoke <code>/create-gh-pages-site</code>
+            with the prompt shown on each card, e.g.
+            <em>"an Astro site for octocat/blog"</em>. Leave out the framework or repo
+            and the skill will interview you before scaffolding.
           </li>
           <li>
-            Or run the generator yourself:
-            <code>node scripts/new-site.mjs &lt;template&gt; --repo &lt;owner/name&gt;</code>
+            <strong>With the generator</strong> —
+            <code>node scripts/new-site.mjs &lt;template&gt; --repo &lt;owner/name&gt;</code>,
+            or from anywhere with <code>--registry jongio/gh-pages-templates</code>.
           </li>
-          <li>Push to <code>main</code>, then set <strong>Settings → Pages → Source → GitHub Actions</strong>.</li>
+          <li>
+            Push to <code>main</code>, then set
+            <strong>Settings → Pages → Source → GitHub Actions</strong>.
+          </li>
         </ol>
+        <p class="muted">
+          Want to see each template running? Browse the live gallery with previews at
+          <a href="https://jongio.github.io/gh-pages-templates/">jongio.github.io/gh-pages-templates</a>.
+        </p>
+      </section>
+
+      <section id="contribute" class="panel">
+        <h2>Submit your own template</h2>
+        <p>
+          Anyone can add a template to the registry. A template is a folder under
+          <code>templates/&lt;name&gt;/</code> with a <code>template.json</code>
+          manifest, a <code>.github/workflows/deploy.yml</code> using the official
+          Pages actions, base-path handling via the generator's sentinels, and a
+          <code>README.md</code>. Fork
+          <a href="https://github.com/jongio/gh-pages-templates">jongio/gh-pages-templates</a>,
+          run <code>node scripts/validate.mjs</code>, and open a PR — once merged it
+          appears in the gallery with a live preview.
+        </p>
+        <p>
+          <a class="btn btn-sm" href="https://github.com/jongio/gh-pages-templates/blob/main/CONTRIBUTING.md">Read CONTRIBUTING.md →</a>
+        </p>
       </section>
 
       <footer class="foot">
         <p>
           Part of
           <a href="https://github.com/jongio/skills">jongio/skills</a>
+          · registry: <a href="https://github.com/jongio/gh-pages-templates">jongio/gh-pages-templates</a>
           · <span id="year"></span>
         </p>
       </footer>

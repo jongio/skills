@@ -9,6 +9,17 @@ const TIER_LABEL = {
   native: "Native",
 };
 
+// How to ask the Copilot skill for each template (shown per card).
+const SKILL_PROMPT = {
+  "static-html": "a static HTML site",
+  "astro": "an Astro site",
+  "react-vite": "a React (Vite) app",
+  "eleventy": "an Eleventy site",
+  "jekyll": "a Jekyll site",
+};
+const promptFor = (t) =>
+  `/create-gh-pages-site ${SKILL_PROMPT[t.name] || `a ${t.framework} site`} for owner/repo`;
+
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -45,7 +56,14 @@ function card(t) {
     el("dd", { text: t.deploy }),
   );
 
-  const cmd = el("code", { class: "cmd", text: `new-site.mjs ${t.name} --repo owner/name` });
+  const use = el(
+    "div",
+    { class: "use" },
+    el("span", { class: "use-label", text: "Ask Copilot" }),
+    el("code", { class: "cmd", text: promptFor(t) }),
+    el("span", { class: "use-label", text: "Or the CLI" }),
+    el("code", { class: "cmd", text: `new-site.mjs ${t.name} --repo owner/name` }),
+  );
 
   return el(
     "article",
@@ -55,7 +73,7 @@ function card(t) {
     el("p", { class: "desc", text: t.description }),
     meta,
     tags,
-    cmd,
+    use,
   );
 }
 
