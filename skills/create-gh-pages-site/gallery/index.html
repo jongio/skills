@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Pick a GitHub Pages starter template — static, Astro, React, Eleventy, or Jekyll — each with the deploy workflow and base path wired."
+    />
+    <title>GitHub Pages Templates</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="hero">
+        <p class="eyebrow">create-gh-pages-site</p>
+        <h1>GitHub Pages Templates</h1>
+        <p class="lede">
+          Pick a starter. Each one ships the current GitHub Actions Pages
+          workflow and the right base-path setup, so it deploys correctly to a
+          user or project site with no fiddling.
+        </p>
+        <p class="cta">
+          <a class="btn" href="#templates">Browse templates</a>
+          <a class="btn btn-ghost" href="https://github.com/jongio/skills/tree/main/skills/create-gh-pages-site">View the skill</a>
+        </p>
+      </header>
+
+      <section id="templates" class="catalog" aria-busy="true">
+        <p class="loading">Loading templates…</p>
+      </section>
+
+      <section class="how">
+        <h2>How to use a template</h2>
+        <ol>
+          <li>
+            With the Copilot skill: <code>/create-gh-pages-site</code> and describe
+            the site you want (e.g. <em>"an Astro blog"</em>).
+          </li>
+          <li>
+            Or run the generator yourself:
+            <code>node scripts/new-site.mjs &lt;template&gt; --repo &lt;owner/name&gt;</code>
+          </li>
+          <li>Push to <code>main</code>, then set <strong>Settings → Pages → Source → GitHub Actions</strong>.</li>
+        </ol>
+      </section>
+
+      <footer class="foot">
+        <p>
+          Part of
+          <a href="https://github.com/jongio/skills">jongio/skills</a>
+          · <span id="year"></span>
+        </p>
+      </footer>
+    </main>
+    <script src="./assets/app.js"></script>
+  </body>
+</html>

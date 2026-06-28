@@ -1,0 +1,24 @@
+---
+layout: default
+title: __SITE_NAME__
+---
+<header class="hero">
+  <p class="eyebrow">GitHub Pages · Jekyll</p>
+  <h1>__SITE_NAME__</h1>
+  <p class="lede">
+    GitHub's native static site generator. Write Markdown, get a site — built and
+    deployed by GitHub Actions with the base URL wired for project pages.
+  </p>
+</header>
+
+<section class="prose">
+  <h2>Recent posts</h2>
+  <ul class="posts">
+    {%- for post in site.posts %}
+    <li>
+      <a href="{{ post.url | relative_url }}">{{ post.title }}</a>
+      <time>{{ post.date | date: "%Y-%m-%d" }}</time>
+    </li>
+    {%- endfor %}
+  </ul>
+</section>

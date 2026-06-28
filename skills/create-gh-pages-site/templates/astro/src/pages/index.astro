@@ -1,0 +1,28 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Card from "../components/Card.astro";
+
+const features = [
+  { title: "Islands architecture", body: "Ship zero JS by default; hydrate only the interactive bits." },
+  { title: "Base path wired", body: "site + base are set for GitHub Pages, so assets and links resolve correctly." },
+  { title: "Official action", body: "Deploys with withastro/action + actions/deploy-pages." },
+];
+---
+
+<Layout title="__SITE_NAME__">
+  <header style="text-align: center;">
+    <p style="text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem; font-weight: 600; color: var(--muted); margin: 0 0 0.5rem;">
+      GitHub Pages · Astro
+    </p>
+    <h1 style="font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; margin: 0 0 0.75rem;">
+      __SITE_NAME__
+    </h1>
+    <p style="font-size: 1.15rem; color: var(--muted); max-width: 42ch; margin: 0 auto 2.5rem;">
+      A statically-rendered Astro site, ready to deploy to GitHub Pages.
+    </p>
+  </header>
+
+  <section style="display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+    {features.map((f) => <Card title={f.title}>{f.body}</Card>)}
+  </section>
+</Layout>

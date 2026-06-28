@@ -1,0 +1,5 @@
+{
+  "name": "__SITE_NAME__",
+  "description": "A data-driven Eleventy site on GitHub Pages.",
+  "url": "__SITE_URL__"
+}

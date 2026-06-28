@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="{{ site.description }}" />
+    <title>{{ title or site.name }}</title>
+    {# The `url` filter prepends pathPrefix, so this asset resolves at any base. #}
+    <link rel="stylesheet" href="{{ '/assets/styles.css' | url }}" />
+  </head>
+  <body>
+    <div class="wrap">
+      <nav>
+        <a href="{{ '/' | url }}">Home</a>
+        <a href="{{ '/about/' | url }}">About</a>
+        <a href="{{ '/posts/' | url }}">Posts</a>
+      </nav>
+      {{ content | safe }}
+      <footer class="foot">
+        <p>Built with Eleventy · {{ site.name }}</p>
+      </footer>
+    </div>
+  </body>
+</html>

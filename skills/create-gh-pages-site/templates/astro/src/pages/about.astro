@@ -1,0 +1,21 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="About · __SITE_NAME__" description="About this Astro template.">
+  <header style="text-align: center;">
+    <h1 style="font-size: clamp(1.75rem, 5vw, 2.5rem); margin: 0 0 0.75rem;">About</h1>
+  </header>
+  <div style="max-width: 60ch; margin: 0 auto; color: var(--fg);">
+    <p>
+      This page proves base-aware routing works. The nav links are built from
+      <code>import.meta.env.BASE_URL</code>, so they point at
+      <code>/REPO/about/</code> on a project site and <code>/about/</code> on a
+      user site — without you changing anything.
+    </p>
+    <p>
+      Edit <code>src/pages/</code> to add pages, <code>src/components/</code> for
+      reusable UI, and <code>src/layouts/Layout.astro</code> for the shell.
+    </p>
+  </div>
+</Layout>

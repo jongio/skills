@@ -1,0 +1,17 @@
+---
+layout: base.njk
+title: About · __SITE_NAME__
+---
+<section class="prose">
+  <h1>About</h1>
+  <p>
+    This page is rendered by Eleventy from <code>src/about.njk</code>. The nav
+    links use <code>{{ '{{' }} '/about/' | url {{ '}}' }}</code>, so they point at
+    <code>/REPO/about/</code> on a project site and <code>/about/</code> on a user
+    site — driven by the <code>PATH_PREFIX</code> the deploy workflow sets.
+  </p>
+  <p>
+    Add Markdown files under <code>src/posts/</code> and they appear in the
+    <a href="{{ '/posts/' | url }}">Posts</a> collection automatically.
+  </p>
+</section>

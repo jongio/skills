@@ -1,0 +1,12 @@
+{
+  "name": "create-gh-pages-site",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dev tooling for the create-gh-pages-site skill (generator + tests). Shipped sites carry their own package.json; this is for the skill repo only.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node test/generator.test.mjs && node test/workflow.test.mjs && node test/catalog.test.mjs",
+    "new": "node scripts/new-site.mjs"
+  }
+}

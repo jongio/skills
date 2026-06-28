@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="__SITE_NAME__ — a static site hosted on GitHub Pages." />
+    <title>__SITE_NAME__</title>
+    <!-- Relative URLs (./...) work at any base path, so this template needs no
+         base-path configuration whether it's a user site or a project site. -->
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="hero">
+        <p class="eyebrow">GitHub Pages · static</p>
+        <h1>__SITE_NAME__</h1>
+        <p class="lede">
+          A zero-build static site. Edit <code>index.html</code>, push to
+          <code>main</code>, and GitHub Actions publishes it.
+        </p>
+        <p class="cta">
+          <a class="btn" href="https://github.com/__REPO_SLUG__">View source</a>
+          <a class="btn btn-ghost" href="./about.html">About this template</a>
+        </p>
+      </header>
+
+      <section class="grid" id="features">
+        <article class="card">
+          <h2>No build step</h2>
+          <p>Plain HTML, CSS, and JS. Nothing to compile, nothing to break.</p>
+        </article>
+        <article class="card">
+          <h2>Base-path proof</h2>
+          <p>All links are relative, so it works at <code>/</code> or <code>/repo/</code> unchanged.</p>
+        </article>
+        <article class="card">
+          <h2>Official deploy</h2>
+          <p>Ships with the current GitHub Actions Pages workflow — no <code>gh-pages</code> branch.</p>
+        </article>
+      </section>
+
+      <footer class="foot">
+        <p>Built with the <code>static-html</code> template · <span id="year"></span></p>
+      </footer>
+    </main>
+    <script src="./assets/main.js"></script>
+  </body>
+</html>

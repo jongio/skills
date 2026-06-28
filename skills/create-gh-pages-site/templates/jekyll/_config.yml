@@ -1,0 +1,18 @@
+title: __SITE_NAME__
+description: A Jekyll site on GitHub Pages.
+
+# For a GitHub *project* site this is "/REPO" (no trailing slash). For a *user*
+# site (USER.github.io) it is "" (empty). The generator fills it in. Always build
+# links and assets with the `relative_url` filter so this prefix is applied.
+baseurl: "__BASE_URL__"
+url: "__SITE_ORIGIN__"
+
+# Build settings
+markdown: kramdown
+
+# Exclude repo/dev files from the build output
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - README.md
+  - vendor

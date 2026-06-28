@@ -1,0 +1,82 @@
+:root {
+  color-scheme: light dark;
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --fg: #e6edf3;
+  --muted: #9198a1;
+  --accent: #2f81f7;
+  --radius: 12px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --panel: #f6f8fa;
+    --border: #d0d7de;
+    --fg: #1f2328;
+    --muted: #59636e;
+    --accent: #0969da;
+  }
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+}
+code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  padding: 0.1em 0.4em;
+  border-radius: 6px;
+}
+a { color: var(--accent); }
+
+.wrap { max-width: 880px; margin: 0 auto; padding: clamp(2rem, 6vw, 5rem) 1.25rem; }
+.hero { text-align: center; }
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+h1 { font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; margin: 0 0 0.75rem; }
+.lede { font-size: 1.15rem; color: var(--muted); max-width: 38ch; margin: 0 auto 1.5rem; }
+.cta { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+.btn {
+  display: inline-block;
+  padding: 0.65rem 1.2rem;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.btn-ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+
+.grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin: 3rem 0;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+.card h2 { margin: 0 0 0.4rem; font-size: 1.1rem; }
+.card p { margin: 0; color: var(--muted); }
+
+.prose { max-width: 60ch; margin: 2.5rem auto; }
+.prose h2 { margin-top: 2rem; }
+
+.foot { text-align: center; color: var(--muted); border-top: 1px solid var(--border); padding-top: 1.5rem; margin-top: 3rem; }

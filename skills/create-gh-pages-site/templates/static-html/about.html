@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>About · __SITE_NAME__</title>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="hero">
+        <p class="eyebrow"><a href="./index.html">← __SITE_NAME__</a></p>
+        <h1>About this template</h1>
+        <p class="lede">
+          The <code>static-html</code> template is the simplest way to put a site
+          on GitHub Pages: hand-written HTML with relative links, deployed by the
+          official Pages workflow.
+        </p>
+      </header>
+      <section class="prose">
+        <h2>Why relative links</h2>
+        <p>
+          A project site lives at <code>https://USER.github.io/REPO/</code>. If you
+          link assets with absolute paths like <code>/styles.css</code>, the browser
+          asks for <code>https://USER.github.io/styles.css</code> and gets a 404.
+          Relative links (<code>./assets/styles.css</code>) resolve against the
+          current page, so they work at any base path with no configuration.
+        </p>
+        <h2>Add a page</h2>
+        <p>
+          Drop another <code>.html</code> file next to this one and link to it
+          relatively. That's the whole workflow.
+        </p>
+      </section>
+      <footer class="foot">
+        <p><a href="./index.html">Back home</a></p>
+      </footer>
+    </main>
+    <script src="./assets/main.js"></script>
+  </body>
+</html>

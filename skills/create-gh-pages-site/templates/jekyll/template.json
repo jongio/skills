@@ -1,0 +1,16 @@
+{
+  "name": "jekyll",
+  "title": "Jekyll",
+  "tagline": "GitHub's native static site generator.",
+  "description": "A Jekyll site built with the official actions/jekyll-build-pages action. Markdown posts, Liquid layouts, and a base-path-aware relative_url filter. The most GitHub-native option.",
+  "framework": "Jekyll",
+  "tier": "native",
+  "language": "Ruby",
+  "needsBuild": true,
+  "build": "jekyll build",
+  "output": "_site",
+  "basePathMechanism": "baseurl in _config.yml + relative_url filter",
+  "deploy": "jekyll-build-pages + deploy-pages",
+  "tags": ["jekyll", "ruby", "ssg", "markdown", "native"],
+  "order": 5
+}

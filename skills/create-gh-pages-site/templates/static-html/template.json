@@ -1,0 +1,16 @@
+{
+  "name": "static-html",
+  "title": "Static HTML",
+  "tagline": "Zero build. Plain HTML, CSS, and JS.",
+  "description": "Hand-written HTML with relative links, so it works at any base path with no configuration. The simplest way to get something on GitHub Pages.",
+  "framework": "None",
+  "tier": "static",
+  "language": "HTML",
+  "needsBuild": false,
+  "build": null,
+  "output": ".",
+  "basePathMechanism": "Relative URLs (immune to base path)",
+  "deploy": "configure-pages + upload-pages-artifact + deploy-pages",
+  "tags": ["static", "no-build", "html"],
+  "order": 1
+}

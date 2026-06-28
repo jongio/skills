@@ -1,0 +1,16 @@
+{
+  "name": "react-vite",
+  "title": "React + Vite",
+  "tagline": "A client-rendered React SPA.",
+  "description": "A React single-page app built with Vite, with React Router, a base-path-aware basename, and a 404.html fallback so deep links survive a refresh. Good for interactive apps and dashboards.",
+  "framework": "React",
+  "tier": "spa",
+  "language": "JavaScript",
+  "needsBuild": true,
+  "build": "vite build",
+  "output": "dist",
+  "basePathMechanism": "base in vite.config.js + 404.html SPA fallback",
+  "deploy": "configure-pages + upload-pages-artifact + deploy-pages",
+  "tags": ["react", "vite", "spa", "router"],
+  "order": 3
+}
