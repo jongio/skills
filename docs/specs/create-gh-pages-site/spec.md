@@ -1,7 +1,7 @@
 ---
-issue: pending
+issue: https://github.com/jongio/skills/pull/12
 author: @jongio
-status: approved
+status: shipped
 ---
 
 # create-gh-pages-site skill
@@ -150,7 +150,3 @@ bundled templates keep the skill fully offline and self-contained.
   assert it.
 - **Scope creep into theming.** Keep templates minimal and correct; resist turning
   this into a theme gallery. Point outward for themes.
-
-<!-- Pipeline tracking (auto-managed, not part of product spec) -->
-## Pipeline Status
-Phase: SHIPPING
