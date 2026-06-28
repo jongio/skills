@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildCatalog, serializeCatalog } from "../scripts/build-catalog.mjs";
-import { listTemplates } from "../scripts/new-site.mjs";
+import { listTemplates, readManifest } from "../scripts/new-site.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TEMPLATES_DIR = join(ROOT, "templates");
@@ -60,6 +60,18 @@ test("listTemplates() matches the manifest names", () => {
     [...listTemplates()].sort(),
     catalog.map((t) => t.name).sort(),
   );
+});
+
+test("readManifest reads a template manifest by directory", () => {
+  const m = readManifest(join(TEMPLATES_DIR, "static-html"));
+  assert.equal(m.name, "static-html");
+  assert.ok(Array.isArray(m.features) && m.features.length > 0);
+});
+
+test("every template documents its features", () => {
+  for (const t of catalog) {
+    assert.ok(Array.isArray(t.features) && t.features.length > 0, `${t.name} has no features[]`);
+  }
 });
 
 for (const t of catalog) {
