@@ -65,6 +65,15 @@ export function createCanvasRuntime(config) {
   const loading = new Map(); // domainId -> Promise<{ state }>  (in-flight cold loads)
   const instances = new Map(); // instanceId -> { server, url, domainId, clients:Set<res> }
 
+  // Host-model capabilities, injected by extension.mjs after it joins the
+  // session (see `setHost`). Kept here so server.mjs stays SDK-free: it never
+  // imports the Copilot SDK, it just forwards to whatever `host` provides.
+  // Null until wired (e.g. standalone HTTP tests), so the api guards below.
+  let host = null;
+  function setHost(h) {
+    host = h ?? null;
+  }
+
   async function getDomain(domainId, ctx) {
     const existing = domains.get(domainId);
     if (existing) return existing;
@@ -120,6 +129,35 @@ export function createCanvasRuntime(config) {
       },
       input: input ?? {},
       ctx: ctx ?? {},
+      // ---- host model access (wired by extension.mjs via setHost) ----------
+      // ai(question) -> Promise<string>: a silent, no-tools host-model query
+      // that is NOT added to the conversation history. It DOES run against the
+      // ambient conversation context, so frame prompts as self-contained
+      // functions ("You are X. Output ONLY ...") to avoid context bleed.
+      ai: (question) => {
+        if (typeof host?.ai !== "function") {
+          throw new CanvasKitError(
+            "ai_unavailable",
+            "ai() is unavailable: the canvas runtime has no host model wired " +
+              "(running standalone, or extension.mjs didn't call runtime.setHost). " +
+              "Host-model calls only work when the canvas runs under the Copilot app.",
+          );
+        }
+        return host.ai(question);
+      },
+      // askAgent(prompt) -> Promise<unknown>: hand a prompt to the MAIN agent in
+      // the user's conversation. Visible in chat and tool-capable — use for
+      // "do X in the repo" actions, NOT silent canvas text generation (use ai).
+      askAgent: (prompt) => {
+        if (typeof host?.askAgent !== "function") {
+          throw new CanvasKitError(
+            "agent_unavailable",
+            "askAgent() is unavailable: the canvas runtime has no host agent wired " +
+              "(running standalone, or extension.mjs didn't call runtime.setHost).",
+          );
+        }
+        return host.askAgent(prompt);
+      },
     };
     const result = await action.handler(api);
     if (mutated) {
@@ -312,6 +350,7 @@ export function createCanvasRuntime(config) {
 
   return {
     config,
+    setHost,
     openInstance,
     closeInstance,
     shutdown,

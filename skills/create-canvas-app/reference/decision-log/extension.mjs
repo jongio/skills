@@ -54,4 +54,20 @@ const canvas = createCanvas({
   },
 });
 
-await joinSession({ canvases: [canvas] });
+const session = await joinSession({ canvases: [canvas] });
+
+// Give canvas action handlers access to the host's AI model via ctx.ai /
+// ctx.askAgent. This is the ONLY place the SDK is touched; keep canvas.mjs
+// SDK-free and just call ctx.ai(...) / ctx.askAgent(...) from a handler.
+runtime.setHost({
+  // ctx.ai(question) -> Promise<string>: a silent, no-tools model query that is
+  // NOT added to the conversation. It runs against the ambient conversation
+  // context, so write self-contained prompts ("You are X. Output ONLY ...").
+  ai: async (question) => {
+    const { answer } = await session.rpc.ui.ephemeralQuery({ question: String(question) });
+    return answer ?? "";
+  },
+  // ctx.askAgent(prompt): hand a prompt to the MAIN agent (visible in chat,
+  // tool-capable). Use for "act in the repo" requests, not silent generation.
+  askAgent: async (prompt) => session.send({ prompt: String(prompt) }),
+});

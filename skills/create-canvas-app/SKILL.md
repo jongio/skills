@@ -44,7 +44,7 @@ use repaints the whole tree and loses keystrokes on every push. Don't do that.
 ## The model (read this before coding)
 
 ```
-extension.mjs   ── the ONLY file that imports the Copilot SDK (thin adapter)
+extension.mjs   ── the ONLY file that imports the Copilot SDK (thin adapter; also wires host AI)
 canvas.mjs      ── your canvas: id, schema, state load/save, action handlers (SDK-free)
 canvas-kit/     ── the kit (copied in verbatim; do not edit)
 web/index.html  ── shell: loads /kit/theme.css and ./app.mjs
@@ -232,6 +232,57 @@ refresh. The shape:
 
 Stamp this whole shape with `node scripts/new-canvas.mjs <name> --template data`.
 
+## Host AI — call the model from an action handler
+
+Canvases can use the **host's** AI model — the same model + auth the Copilot app is
+already running — with **no API keys, no model picker, no external `fetch`**. Action
+handlers get two capabilities on their context, wired once in `extension.mjs` (the
+only SDK file) and exposed by the kit:
+
+- **`ai(question) → Promise<string>`** — a **silent** model query. No tools, and it
+  is **not** added to the conversation history. This is the primitive for
+  canvas-internal AI: summarize, suggest, rewrite, classify, extract. It runs
+  against the **ambient conversation context**, so write self-contained,
+  function-style prompts and pin the output shape — otherwise the live chat can
+  bleed into the answer.
+
+  ```js
+  ai_suggest: {
+    inputSchema: { type: "object", properties: { topic: { type: "string" } }, required: ["topic"], additionalProperties: false },
+    handler: async ({ state, set, input, ai }) => {
+      const text = (await ai(
+        `You are an idea generator. Output ONLY one concise to-do (max 8 words) ` +
+        `about "${input.topic}". No quotes, no numbering, no extra text.`
+      )).trim().split("\n")[0];
+      set({ ...state, items: [{ id: nid(), text }, ...state.items] });
+      return { text };
+    },
+  },
+  ```
+
+- **`askAgent(prompt)`** — hand a prompt to the **main agent** in the user's
+  conversation. It is **visible in chat** and **tool-capable**. Use it for
+  "act in the repo / drive the agent" controls (e.g. an *Apply changes* button),
+  **not** for silent text generation — that's `ai`.
+
+Under the hood `ai` is the host's `ephemeralQuery` (a transient, no-tools,
+no-history model call, e2e-tested in the Copilot SDK) and `askAgent` is a normal
+session message. Both reach the host's selected model + auth.
+
+**Why not a sub-session?** Creating an isolated `client.createSession()` from inside
+an extension **hangs** — the host doesn't service a child-created session — so the
+kit does not offer it. `ai` (ephemeralQuery) is the supported silent path.
+
+**Footguns:**
+
+- `ai()` sees the live conversation. Treat it as ambient context; for a pure
+  transform, frame the prompt as a function and say "Output ONLY …".
+- `ai()` throws `ai_unavailable` when the canvas runs outside the Copilot host
+  (e.g. a standalone smoke test). Call it from an **action** (button- or
+  agent-invoked), never from `createInitialState`/`open`.
+- Don't block the panel on a slow `ai()` — `await` it in the handler, write the
+  result into state, and let SSE push the update, exactly like the data-fetch shape.
+
 ## Domain strategy — shared board vs personal profile
 
 State is keyed by the domain id `resolveDomainId` returns. Two intents, identical
@@ -377,3 +428,6 @@ A canvas isn't done because the server boots. Verify the UI:
 - **Never** hand-roll a polling `setInterval` — use `pollWhileVisible` so a
   hidden panel stops hammering the network.
 - **Never** `import { Fragment }` — it isn't exported; use htm's `<>…</>`.
+- **Never** reach for the model with `fetch`/API keys or a `client.createSession()`
+  sub-session (it hangs from an extension) — use `ctx.ai(...)` for silent
+  generation, `ctx.askAgent(...)` to drive the main agent.
