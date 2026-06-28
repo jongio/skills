@@ -1,9 +1,10 @@
 # jongio/skills
 
-Jon Gallant's collection of [GitHub Copilot](https://docs.github.com/copilot)
-skills — a general-purpose monorepo. Each skill lives in its own folder under
-[`skills/`](skills/) with a `SKILL.md` authoring contract, and can be installed
-individually or all at once.
+Jon Gallant's collection of skills for AI coding agents — works with
+[GitHub Copilot](https://docs.github.com/copilot), Claude, Codex, and any agent
+that supports the [`SKILL.md`](https://github.com/vercel-labs/skills) format. A
+general-purpose monorepo: each skill lives in its own folder under
+[`skills/`](skills/) and can be installed individually or all at once.
 
 ## Skills
 
