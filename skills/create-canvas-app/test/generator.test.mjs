@@ -130,6 +130,43 @@ async function main() {
     assert.match(src, /poll\b/); // mountCanvas accepts a poll option
   });
 
+  // ---- host-model capability (ai / askAgent) -------------------------------
+  await test("server.mjs stays SDK-free and exposes setHost", async () => {
+    const src = await read(join(ROOT, "kit", "server.mjs"));
+    assert.ok(!/@github\/copilot-sdk/.test(src), "server.mjs must not import the SDK");
+    assert.match(src, /function setHost/);
+  });
+
+  await test("runtime guards ai()/askAgent() until a host is wired, then forwards", async () => {
+    const { createCanvasRuntime } = await import("../kit/server.mjs");
+    const rt = createCanvasRuntime({
+      id: "t",
+      displayName: "T",
+      description: "t",
+      assetsDir: ROOT,
+      actions: {
+        sum: { handler: async ({ ai }) => ({ answer: await ai("q") }) },
+        act: { handler: async ({ askAgent }) => ({ r: await askAgent("p") }) },
+      },
+    });
+    assert.equal(typeof rt.setHost, "function");
+
+    // No host wired -> documented error codes (handlers reach the host model
+    // only when the canvas runs under the Copilot app, not in a plain test).
+    await assert.rejects(() => rt.invoke("sum", {}, {}), (e) => e.code === "ai_unavailable");
+    await assert.rejects(() => rt.invoke("act", {}, {}), (e) => e.code === "agent_unavailable");
+
+    // Wired -> the handler api forwards to the host stub.
+    const calls = [];
+    rt.setHost({
+      ai: async (qn) => { calls.push(["ai", qn]); return "ANSWER:" + qn; },
+      askAgent: async (pr) => { calls.push(["askAgent", pr]); return "SENT:" + pr; },
+    });
+    assert.equal((await rt.invoke("sum", {}, {})).answer, "ANSWER:q");
+    assert.equal((await rt.invoke("act", {}, {})).r, "SENT:p");
+    assert.deepEqual(calls, [["ai", "q"], ["askAgent", "p"]]);
+  });
+
   await test("theme.css ships loading/error primitives + reduced-motion guard", async () => {
     const css = await read(join(ROOT, "kit", "theme.css"));
     for (const cls of ["ck-spinner", "ck-skeleton", "ck-callout", "ck-error"]) {
@@ -232,6 +269,14 @@ async function main() {
       const app = await read(join(work, "gen-feed", "web", "app.mjs"));
       assert.match(app, /pollWhileVisible/);
       assert.match(app, /useEffect/);
+    });
+
+    await test("generated extension.mjs wires the host-model capabilities", async () => {
+      const ext = await read(join(work, "gen-list", "extension.mjs"));
+      assert.match(ext, /const session = await joinSession\(/);
+      assert.match(ext, /runtime\.setHost\(/);
+      assert.match(ext, /ephemeralQuery/);
+      assert.match(ext, /askAgent/);
     });
 
     await test("data smoke test exercises relativeTime against lastRefresh", async () => {

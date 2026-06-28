@@ -48,6 +48,9 @@ to your request, and validates it visually before handing it back.
   GitHub-dark fallbacks.
 - **Official GitHub icons** — the exact Lucide set github-app ships
   (`lucide-react@1.14.0`), vendored and byte-identical.
+- **Host AI in a handler** — call the Copilot app's own model from an action with
+  `ctx.ai(question)` (silent, no keys, no history) or hand work to the main agent
+  with `ctx.askAgent(prompt)`. No API keys, no model picker, no external `fetch`.
 - **A generator** — `node scripts/new-canvas.mjs <name>` stamps a working canvas
   (add `--template data` for a fetch + auto-refresh canvas) with its own smoke test.
 - **Tests** — a standalone HTTP harness, a kit byte-parity check, and a generator test.
