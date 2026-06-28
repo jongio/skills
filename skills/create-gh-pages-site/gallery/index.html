@@ -27,9 +27,19 @@
         </p>
       </header>
 
+      <section class="controls" aria-label="Find a template">
+        <input id="search" class="search" type="search" placeholder="Search templates, features, tags…" aria-label="Search templates" />
+        <div class="filters" id="tier-filters" role="group" aria-label="Filter by type"></div>
+        <button id="wizard-open" class="btn btn-sm" type="button">✨ Help me choose</button>
+      </section>
+
       <section id="templates" class="catalog" aria-busy="true">
         <p class="loading">Loading templates…</p>
       </section>
+
+      <dialog id="wizard" class="wizard" aria-label="Template chooser">
+        <div id="wizard-body"></div>
+      </dialog>
 
       <section id="install" class="panel">
         <h2>Install the skill</h2>

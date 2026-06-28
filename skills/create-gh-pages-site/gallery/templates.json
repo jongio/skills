@@ -17,6 +17,14 @@
       "no-build",
       "html"
     ],
+    "features": [
+      "Light/dark toggle",
+      "GitHub source link",
+      "Accessible tabs",
+      "Fetch loading/error states",
+      "Form validation",
+      "Native <dialog>"
+    ],
     "order": 1
   },
   {
@@ -38,6 +46,14 @@
       "islands",
       "content"
     ],
+    "features": [
+      "Light/dark toggle",
+      "GitHub source link",
+      "Preact islands (client:visible)",
+      "Content collections",
+      "View transitions",
+      "Scoped + global styles"
+    ],
     "order": 2
   },
   {
@@ -58,6 +74,14 @@
       "vite",
       "spa",
       "router"
+    ],
+    "features": [
+      "Light/dark toggle (Context)",
+      "GitHub source link",
+      "Lazy routes (code splitting)",
+      "useReducer data fetching",
+      "Controlled form validation",
+      "404.html deep-link fallback"
     ],
     "order": 3
   },
@@ -81,6 +105,14 @@
       "markdown",
       "data"
     ],
+    "features": [
+      "Light/dark toggle",
+      "GitHub source link",
+      "Data files (_data)",
+      "Filters & shortcodes",
+      "Pagination",
+      "Collections"
+    ],
     "order": 4
   },
   {
@@ -102,6 +134,14 @@
       "ssg",
       "markdown",
       "native"
+    ],
+    "features": [
+      "Light/dark toggle",
+      "GitHub source link",
+      "Includes (partials)",
+      "Data files (_data)",
+      "Custom collections",
+      "Front-matter defaults"
     ],
     "order": 5
   }

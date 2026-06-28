@@ -12,5 +12,13 @@
   "basePathMechanism": "Relative URLs (immune to base path)",
   "deploy": "configure-pages + upload-pages-artifact + deploy-pages",
   "tags": ["static", "no-build", "html"],
+  "features": [
+    "Light/dark toggle",
+    "GitHub source link",
+    "Accessible tabs",
+    "Fetch loading/error states",
+    "Form validation",
+    "Native <dialog>"
+  ],
   "order": 1
 }

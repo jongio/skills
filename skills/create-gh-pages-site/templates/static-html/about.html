@@ -4,37 +4,51 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>About · __SITE_NAME__</title>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("theme") ||
+            (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {}
+      })();
+    </script>
     <link rel="stylesheet" href="./assets/styles.css" />
   </head>
   <body>
+    <header class="topbar">
+      <a class="brand" href="./index.html">__SITE_NAME__</a>
+      <nav class="topnav">
+        <a href="./index.html">Home</a>
+        <a href="./about.html" aria-current="page">About</a>
+      </nav>
+      <div class="bar-actions">
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle color theme" title="Toggle theme"></button>
+        <a class="icon-btn" href="https://github.com/__REPO_SLUG__" target="_blank" rel="noopener" aria-label="View source on GitHub" title="View source on GitHub">
+          <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+      </div>
+    </header>
+
     <main class="wrap">
       <header class="hero">
-        <p class="eyebrow"><a href="./index.html">← __SITE_NAME__</a></p>
         <h1>About this template</h1>
         <p class="lede">
-          The <code>static-html</code> template is the simplest way to put a site
-          on GitHub Pages: hand-written HTML with relative links, deployed by the
-          official Pages workflow.
+          The <code>static-html</code> template — what the web platform gives you
+          with no framework and no build step.
         </p>
       </header>
-      <section class="prose">
-        <h2>Why relative links</h2>
-        <p>
-          A project site lives at <code>https://USER.github.io/REPO/</code>. If you
-          link assets with absolute paths like <code>/styles.css</code>, the browser
-          asks for <code>https://USER.github.io/styles.css</code> and gets a 404.
-          Relative links (<code>./assets/styles.css</code>) resolve against the
-          current page, so they work at any base path with no configuration.
-        </p>
-        <h2>Add a page</h2>
-        <p>
-          Drop another <code>.html</code> file next to this one and link to it
-          relatively. That's the whole workflow.
-        </p>
+      <section class="card">
+        <h2>What it demonstrates</h2>
+        <ul>
+          <li><strong>Theming</strong> — a light/dark toggle that respects your system default and persists your choice.</li>
+          <li><strong>Interactivity</strong> — accessible tabs, a fetch demo with loading/error states, and a native <code>&lt;dialog&gt;</code>.</li>
+          <li><strong>Forms</strong> — constraint validation with a custom inline message.</li>
+          <li><strong>Base-path proof</strong> — every link is relative, so it works at <code>/</code> or <code>/repo/</code> unchanged.</li>
+        </ul>
+        <p class="muted">Source: <a href="https://github.com/__REPO_SLUG__">github.com/__REPO_SLUG__</a></p>
       </section>
-      <footer class="foot">
-        <p><a href="./index.html">Back home</a></p>
-      </footer>
+      <footer class="foot"><p><a href="./index.html">Back home</a></p></footer>
     </main>
     <script src="./assets/main.js"></script>
   </body>

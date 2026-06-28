@@ -3,19 +3,35 @@ export default function (eleventyConfig) {
   // Copy static assets through verbatim (src/assets → _site/assets).
   eleventyConfig.addPassthroughCopy({ "src/assets": "assets" });
 
-  // Tiny date filter so templates can print a clean YYYY-MM-DD.
+  // --- Filters ---
   eleventyConfig.addFilter("date", (value) =>
     new Date(value).toISOString().slice(0, 10),
+  );
+  eleventyConfig.addFilter("readableDate", (value) =>
+    new Date(value).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    }),
+  );
+  eleventyConfig.addFilter("head", (array, n) =>
+    Array.isArray(array) ? array.slice(0, n) : array,
+  );
+
+  // --- Shortcodes ---
+  eleventyConfig.addShortcode("year", () => String(new Date().getFullYear()));
+  // Paired: {% note %}...{% endnote %}
+  eleventyConfig.addPairedShortcode(
+    "note",
+    (content) => `<div class="note">${content}</div>`,
   );
 
   return {
     dir: { input: "src", output: "_site", includes: "_includes", data: "_data" },
     markdownTemplateEngine: "njk",
     htmlTemplateEngine: "njk",
-    // For a GitHub *project* site this is "/REPO/"; the deploy workflow passes
-    // it via the PATH_PREFIX env var. Locally it defaults to "/". Always wrap
-    // internal links and asset URLs in the `url` filter so this prefix is
-    // applied automatically: href="{{ '/about/' | url }}".
+    // Project base path comes from PATH_PREFIX (set by the deploy workflow).
+    // Wrap internal links/assets in the `url` filter so it is applied.
     pathPrefix: process.env.PATH_PREFIX || "/",
   };
 }

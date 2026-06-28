@@ -1,15 +1,28 @@
 ---
 layout: base.njk
 title: Posts · __SITE_NAME__
+pagination:
+  data: collections.posts
+  size: 2
+  alias: posts
+  reverse: true
 ---
-<section class="prose">
+<header class="hero">
   <h1>Posts</h1>
-  <ul class="posts">
-    {%- for post in collections.posts | reverse %}
-    <li>
-      <a href="{{ post.url | url }}">{{ post.data.title }}</a>
-      <time>{{ post.date | date }}</time>
-    </li>
-    {%- endfor %}
-  </ul>
-</section>
+  <p class="lede">Paginated 2 per page from the <code>posts</code> collection.</p>
+</header>
+
+<ul class="posts">
+  {%- for post in posts %}
+  <li>
+    <a href="{{ post.url | url }}">{{ post.data.title }}</a>
+    <time>{{ post.date | readableDate }}</time>
+  </li>
+  {%- endfor %}
+</ul>
+
+<nav class="pager">
+  {% if pagination.href.previous %}<a href="{{ pagination.href.previous | url }}">← Newer</a>{% else %}<span class="muted">← Newer</span>{% endif %}
+  <span class="muted">Page {{ pagination.pageNumber + 1 }} of {{ pagination.pages | length }}</span>
+  {% if pagination.href.next %}<a href="{{ pagination.href.next | url }}">Older →</a>{% else %}<span class="muted">Older →</span>{% endif %}
+</nav>

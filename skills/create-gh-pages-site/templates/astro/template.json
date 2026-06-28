@@ -12,5 +12,13 @@
   "basePathMechanism": "site + base in astro.config.mjs (withastro/action)",
   "deploy": "withastro/action + deploy-pages",
   "tags": ["astro", "ssg", "islands", "content"],
+  "features": [
+    "Light/dark toggle",
+    "GitHub source link",
+    "Preact islands (client:visible)",
+    "Content collections",
+    "View transitions",
+    "Scoped + global styles"
+  ],
   "order": 2
 }

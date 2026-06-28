@@ -6,23 +6,40 @@ title: __SITE_NAME__
   <p class="eyebrow">GitHub Pages · Eleventy</p>
   <h1>__SITE_NAME__</h1>
   <p class="lede">
-    A data-driven static site. Content is Markdown and structured data; Eleventy
-    renders it to fast HTML. The <code>url</code> filter keeps every link correct
-    under the GitHub Pages base path.
+    A data-driven static site, and a reference for Eleventy's building blocks:
+    data files, filters, shortcodes, collections, and pagination.
   </p>
 </header>
 
+{% note %}
+  This callout is rendered by a <strong>paired shortcode</strong> defined in
+  <code>eleventy.config.js</code>. The nav above is built from a
+  <code>_data/nav.json</code> data file.
+{% endnote %}
+
 <section class="grid">
   <article class="card">
-    <h2>Markdown + data</h2>
-    <p>Author posts in <code>src/posts/</code>; list them from collections.</p>
+    <h2>Data files</h2>
+    <p class="muted"><code>_data/</code> JSON/JS drives content — like the nav above.</p>
   </article>
   <article class="card">
-    <h2>pathPrefix wired</h2>
-    <p>The deploy workflow passes <code>PATH_PREFIX</code>; <code>url</code> applies it.</p>
+    <h2>Filters &amp; shortcodes</h2>
+    <p class="muted"><code>readableDate</code>, <code>head</code>, <code>{% raw %}{% year %}{% endraw %}</code>, and <code>note</code>.</p>
   </article>
   <article class="card">
-    <h2>Official deploy</h2>
-    <p>Builds in CI and publishes <code>_site/</code> via the Pages Actions flow.</p>
+    <h2>Pagination</h2>
+    <p class="muted">The <a href="{{ '/posts/' | url }}">Posts</a> page paginates the collection.</p>
   </article>
+</section>
+
+<section class="card">
+  <h2>Latest posts</h2>
+  <ul class="posts">
+    {%- for post in collections.posts | reverse | head(2) %}
+    <li>
+      <a href="{{ post.url | url }}">{{ post.data.title }}</a>
+      <time>{{ post.date | readableDate }}</time>
+    </li>
+    {%- endfor %}
+  </ul>
 </section>

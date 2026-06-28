@@ -12,5 +12,13 @@
   "basePathMechanism": "baseurl in _config.yml + relative_url filter",
   "deploy": "jekyll-build-pages + deploy-pages",
   "tags": ["jekyll", "ruby", "ssg", "markdown", "native"],
+  "features": [
+    "Light/dark toggle",
+    "GitHub source link",
+    "Includes (partials)",
+    "Data files (_data)",
+    "Custom collections",
+    "Front-matter defaults"
+  ],
   "order": 5
 }

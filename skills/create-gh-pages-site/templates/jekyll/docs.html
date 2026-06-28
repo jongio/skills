@@ -1,0 +1,14 @@
+---
+layout: default
+title: Docs
+permalink: /docs/
+---
+<header class="hero">
+  <h1>Docs</h1>
+  <p class="lede">Pages from the <code>docs</code> collection.</p>
+</header>
+<ul class="posts">
+  {%- for doc in site.docs %}
+  <li><a href="{{ doc.url | relative_url }}">{{ doc.title }}</a></li>
+  {%- endfor %}
+</ul>

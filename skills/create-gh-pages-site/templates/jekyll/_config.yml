@@ -1,16 +1,26 @@
 title: __SITE_NAME__
 description: A Jekyll site on GitHub Pages.
 
-# For a GitHub *project* site this is "/REPO" (no trailing slash). For a *user*
-# site (USER.github.io) it is "" (empty). The generator fills it in. Always build
-# links and assets with the `relative_url` filter so this prefix is applied.
+# For a project site this is "/REPO" (no trailing slash); for a user site it is "".
 baseurl: "__BASE_URL__"
 url: "__SITE_ORIGIN__"
 
-# Build settings
 markdown: kramdown
 
-# Exclude repo/dev files from the build output
+# A custom collection (a core Jekyll feature) rendered at /docs/<name>/.
+collections:
+  docs:
+    output: true
+    permalink: /docs/:name/
+
+# Front-matter defaults: assign layouts without repeating them in every file.
+defaults:
+  - scope: { path: "", type: "posts" }
+    values: { layout: "default" }
+  - scope: { path: "", type: "docs" }
+    values: { layout: "default" }
+
+# Exclude repo/dev files from the build output.
 exclude:
   - Gemfile
   - Gemfile.lock

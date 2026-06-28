@@ -3,21 +3,27 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="{{ site.description }}" />
+    <meta name="description" content="{{ page.description | default: site.description }}" />
     <title>{{ page.title | default: site.title }}</title>
-    {%- comment -%} relative_url prepends site.baseurl, so this works at any base. {%- endcomment -%}
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("theme") ||
+            (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {}
+      })();
+    </script>
     <link rel="stylesheet" href="{{ '/assets/styles.css' | relative_url }}" />
   </head>
   <body>
-    <div class="wrap">
-      <nav>
-        <a href="{{ '/' | relative_url }}">Home</a>
-        <a href="{{ '/about/' | relative_url }}">About</a>
-      </nav>
+    {% include header.html %}
+    <main class="wrap">
       {{ content }}
-      <footer class="foot">
-        <p>Built with Jekyll · {{ site.title }}</p>
-      </footer>
-    </div>
+    </main>
+    <footer class="foot">
+      <p>Built with Jekyll · {{ site.title }} · {{ 'now' | date: '%Y' }}</p>
+    </footer>
+    <script src="{{ '/assets/theme.js' | relative_url }}"></script>
   </body>
 </html>

@@ -2,16 +2,18 @@
 layout: base.njk
 title: About · __SITE_NAME__
 ---
-<section class="prose">
+<header class="hero">
   <h1>About</h1>
-  <p>
-    This page is rendered by Eleventy from <code>src/about.njk</code>. The nav
-    links use <code>{{ '{{' }} '/about/' | url {{ '}}' }}</code>, so they point at
-    <code>/REPO/about/</code> on a project site and <code>/about/</code> on a user
-    site — driven by the <code>PATH_PREFIX</code> the deploy workflow sets.
-  </p>
-  <p>
-    Add Markdown files under <code>src/posts/</code> and they appear in the
-    <a href="{{ '/posts/' | url }}">Posts</a> collection automatically.
-  </p>
+  <p class="lede">What the <code>eleventy</code> template demonstrates.</p>
+</header>
+<section class="card">
+  <ul>
+    <li><strong>Data files</strong> — <code>_data/site.json</code> and <code>_data/nav.json</code> drive the shell.</li>
+    <li><strong>Collections</strong> — Markdown in <code>src/posts/</code> becomes the <code>posts</code> collection.</li>
+    <li><strong>Pagination</strong> — the Posts page splits the collection into pages.</li>
+    <li><strong>Filters</strong> — <code>readableDate</code>, <code>head</code>, and the universal <code>url</code> filter for base paths.</li>
+    <li><strong>Shortcodes</strong> — <code>{% raw %}{% year %}{% endraw %}</code> and the paired <code>note</code> callout.</li>
+    <li><strong>Theming</strong> — a persisted light/dark toggle and a GitHub source link in the top bar.</li>
+  </ul>
+  <p class="muted">Source: <a href="https://github.com/__REPO_SLUG__">github.com/__REPO_SLUG__</a></p>
 </section>

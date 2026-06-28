@@ -29,7 +29,7 @@ code {
   font-weight: 600; color: var(--muted); margin: 0 0 0.5rem;
 }
 h1 { font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; margin: 0 0 0.75rem; }
-.lede { font-size: 1.15rem; color: var(--muted); max-width: 52ch; margin: 0 auto 1.5rem; }
+.lede { font-size: 1.12rem; color: var(--muted); max-width: 58ch; margin: 0 auto 1.5rem; }
 .cta { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
 .btn {
   display: inline-block; padding: 0.65rem 1.2rem; border-radius: var(--radius);
@@ -37,14 +37,53 @@ h1 { font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; margin: 0 0 0.75rem
   border: 1px solid transparent;
 }
 .btn-ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+.btn-sm { padding: 0.4rem 0.8rem; font-size: 0.85rem; border-radius: 8px; }
+.btn-disabled { background: var(--panel); color: var(--muted); border: 1px solid var(--border); cursor: not-allowed; }
+
+/* Controls: search + tier filters + wizard launcher */
+.controls {
+  display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;
+  margin: 0 0 1.5rem;
+}
+.search {
+  flex: 1 1 240px; min-width: 0; padding: 0.6rem 0.85rem; font: inherit;
+  background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 10px;
+}
+.search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.filters { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.chip {
+  font: inherit; font-size: 0.85rem; padding: 0.4rem 0.75rem; border-radius: 999px;
+  border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer;
+}
+.chip:hover { border-color: var(--accent); }
+.chip-on { background: var(--accent); color: #fff; border-color: transparent; }
+
+/* Wizard dialog */
+.wizard {
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel);
+  color: var(--fg); max-width: 440px; width: calc(100% - 2rem); padding: 1.5rem;
+}
+.wizard::backdrop { background: rgba(0, 0, 0, 0.5); }
+.wizard-step { text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; color: var(--muted); margin: 0 0 0.25rem; }
+.wizard h3 { margin: 0 0 1rem; }
+.wizard-opts { display: grid; gap: 0.5rem; }
+.wizard-opt { text-align: left; }
+.wizard-cancel { margin-top: 1rem; background: none; border: none; color: var(--muted); cursor: pointer; font: inherit; }
 
 .grid {
   display: grid; gap: 1rem;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
 }
 .card {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius); padding: 1.25rem; display: flex; flex-direction: column; gap: 0.6rem;
+  scroll-margin-top: 5rem;
+}
+.card.recommended { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+.features { list-style: none; padding: 0; margin: 0.25rem 0 0; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.features li {
+  font-size: 0.74rem; color: var(--fg); background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 6px; padding: 0.12em 0.5em;
 }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 .card-head h3 { margin: 0; font-size: 1.15rem; }
@@ -64,11 +103,11 @@ h1 { font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; margin: 0 0 0.75rem
 .meta dd { margin: 0; }
 .tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .tag { font-size: 0.72rem; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.1em 0.45em; }
+.actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.25rem; }
 .use { display: flex; flex-direction: column; gap: 0.25rem; margin-top: auto; }
 .use-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
 .use-label:not(:first-child) { margin-top: 0.4rem; }
 .cmd { display: block; white-space: pre-wrap; word-break: break-all; font-size: 0.82rem; }
-.btn-sm { padding: 0.4rem 0.8rem; font-size: 0.85rem; border-radius: 8px; }
 
 .loading, .error { text-align: center; color: var(--muted); }
 .error { color: #f85149; }
@@ -77,7 +116,7 @@ h1 { font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.1; margin: 0 0 0.75rem
 .panel h2 { text-align: center; }
 .panel h3 { margin: 1.5rem 0 0.5rem; font-size: 1rem; }
 .panel ol, .panel ul { padding-left: 1.25rem; }
-.panel li { margin: 0.45rem 0; }
+.panel li { margin: 0.5rem 0; }
 .panel pre {
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
   padding: 0.9rem 1rem; overflow-x: auto; margin: 0.5rem 0;

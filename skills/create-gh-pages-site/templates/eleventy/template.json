@@ -12,5 +12,13 @@
   "basePathMechanism": "pathPrefix via PATH_PREFIX env + url filter",
   "deploy": "configure-pages + upload-pages-artifact + deploy-pages",
   "tags": ["eleventy", "11ty", "ssg", "markdown", "data"],
+  "features": [
+    "Light/dark toggle",
+    "GitHub source link",
+    "Data files (_data)",
+    "Filters & shortcodes",
+    "Pagination",
+    "Collections"
+  ],
   "order": 4
 }
