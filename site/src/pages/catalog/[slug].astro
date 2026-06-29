@@ -28,6 +28,8 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
 
   <section class="card">
     <h2>Install</h2>
+    <p class="muted" style="margin:0.8rem 0 0.3rem;">Ask your agent</p>
+    <pre><code>{`install ${skill.data.title} from jongio/skills`}</code></pre>
     {skill.data.install.map((step) => (
       <>
         <p class="muted" style="margin:0.8rem 0 0.3rem;">{step.label}</p>

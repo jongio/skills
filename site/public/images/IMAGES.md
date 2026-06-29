@@ -9,14 +9,14 @@ and aim for the listed size. Delete this file once every image is real.
 | `og.svg` | `<meta og:image>` | Social share card. Replace with a raster `og.png` (scrapers ignore SVG) and update the meta tag in `src/layouts/Layout.astro`. | 1200×630 |
 | `favicon.svg` | _(not referenced — the root `public/favicon.svg` is used)_ | Optional. | 64×64 |
 | `hero.svg` | _(spare)_ | Optional hero banner if you add one. | 1280×640 |
-| `thumb-create-gh-pages-site.svg` | `create-gh-pages-site` card/detail | Skill thumbnail. | 640×400 |
 | `item-thumb.svg` | _(spare)_ | Generic per-skill thumbnail to copy when you add a skill. | 640×400 |
 
 ## Already real (no action needed)
 
 | File | Used by | Notes |
 | --- | --- | --- |
-| `invoke-create-canvas-app.png` | `create-canvas-app` card/detail | Copied from `skills/create-canvas-app/docs/invoke.png`. |
+| `invoke-create-canvas-app.png` | `create-canvas-app` card/detail | Composer screenshot of invoking the skill. |
+| `invoke-create-gh-pages-site.png` | `create-gh-pages-site` card/detail | Composer screenshot of invoking the skill. |
 
 Tips:
 - Export at 2× for crisp display on high-DPI screens, then keep the file small.

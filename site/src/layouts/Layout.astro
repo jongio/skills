@@ -80,6 +80,16 @@ const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.gi
       .btn { display: inline-block; padding: 0.55rem 1.05rem; border-radius: 9px; background: var(--accent); color: #fff; border: 1px solid transparent; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
       ul.posts { list-style: none; padding: 0; }
       ul.posts li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
+      .codeblock { position: relative; }
+      .copy-btn {
+        position: absolute; top: 0.4rem; right: 0.4rem;
+        font: 600 0.72rem/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        padding: 0.3rem 0.55rem; border-radius: 6px;
+        border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+        cursor: pointer; transition: color 0.15s, border-color 0.15s, background 0.15s;
+      }
+      .copy-btn:hover { color: var(--fg); border-color: var(--accent); }
+      .copy-btn.copied { color: #fff; background: var(--accent); border-color: var(--accent); }
       @media (prefers-reduced-motion: reduce) { body { transition: none; } }
     </style>
   </head>
@@ -127,6 +137,53 @@ const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.gi
       document.addEventListener("astro:after-swap", applyStored);
       document.addEventListener("astro:page-load", renderIcon);
       renderIcon();
+    </script>
+
+    <script>
+      // Add a "Copy" button to every authored code block.
+      function enhanceCopy() {
+        const blocks = document.querySelectorAll(".card pre, .prose pre, .skill-install pre");
+        blocks.forEach((pre) => {
+          if (pre.dataset.copyReady) return;
+          const code = pre.querySelector("code");
+          if (!code) return;
+          pre.dataset.copyReady = "1";
+
+          const wrap = document.createElement("div");
+          wrap.className = "codeblock";
+          pre.parentNode.insertBefore(wrap, pre);
+          wrap.appendChild(pre);
+          // Wrap long lines and reserve room so the button never covers code.
+          pre.style.whiteSpace = "pre-wrap";
+          pre.style.overflowWrap = "anywhere";
+          pre.style.paddingRight = "3.6rem";
+
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "copy-btn";
+          btn.textContent = "Copy";
+          btn.setAttribute("aria-label", "Copy to clipboard");
+          btn.addEventListener("click", async () => {
+            const text = code.innerText.replace(/\n$/, "");
+            try {
+              await navigator.clipboard.writeText(text);
+            } catch (e) {
+              const r = document.createRange();
+              r.selectNodeContents(code);
+              const sel = window.getSelection();
+              sel.removeAllRanges();
+              sel.addRange(r);
+              try { document.execCommand("copy"); } catch (err) {}
+              sel.removeAllRanges();
+            }
+            btn.textContent = "Copied";
+            btn.classList.add("copied");
+            setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1600);
+          });
+          wrap.appendChild(btn);
+        });
+      }
+      document.addEventListener("astro:page-load", enhanceCopy);
     </script>
   </body>
 </html>

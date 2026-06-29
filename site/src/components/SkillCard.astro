@@ -7,16 +7,23 @@ interface Props {
 }
 const { href, title, tagline, thumb } = Astro.props;
 const base = import.meta.env.BASE_URL;
+const install = `install ${title} from jongio/skills`;
 ---
 
-<a class="skill-card" href={href}>
-  <img class="skill-thumb" src={`${base}${thumb}`} alt={`${title} preview`} loading="lazy" />
-  <div class="skill-body">
-    <h3>{title}</h3>
-    <p class="muted">{tagline}</p>
-    <span class="skill-more">View skill →</span>
+<article class="skill-card">
+  <a class="skill-card__link" href={href}>
+    <img class="skill-thumb" src={`${base}${thumb}`} alt={`${title} preview`} loading="lazy" />
+    <div class="skill-body">
+      <h3>{title}</h3>
+      <p class="muted">{tagline}</p>
+      <span class="skill-more">View skill →</span>
+    </div>
+  </a>
+  <div class="skill-install">
+    <p class="skill-install__label muted">Install in your agent</p>
+    <pre><code>{install}</code></pre>
   </div>
-</a>
+</article>
 
 <style>
   .skill-card {
@@ -26,13 +33,16 @@ const base = import.meta.env.BASE_URL;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
-    text-decoration: none;
-    color: inherit;
     transition: border-color 0.15s, transform 0.15s;
   }
   .skill-card:hover {
     border-color: var(--accent);
     transform: translateY(-2px);
+  }
+  .skill-card__link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
   }
   .skill-thumb {
     width: 100%;
@@ -59,5 +69,26 @@ const base = import.meta.env.BASE_URL;
     color: var(--accent);
     font-weight: 600;
     font-size: 0.92rem;
+  }
+  .skill-install {
+    margin-top: auto;
+    padding: 0.9rem 1.1rem 1.1rem;
+    border-top: 1px solid var(--border);
+  }
+  .skill-install__label {
+    margin: 0 0 0.4rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  .skill-install pre {
+    margin: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 0.6rem 0.8rem;
+    overflow-x: auto;
+    font-size: 0.88rem;
   }
 </style>
