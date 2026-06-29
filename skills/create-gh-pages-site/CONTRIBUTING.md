@@ -1,9 +1,9 @@
 # Contributing a template
 
 Templates are self-contained folders under `templates/<name>/`. Adding one is a
-folder plus a manifest — the generator and gallery pick it up automatically. This
-contract is identical whether the templates live here in `jongio/skills` or in a
-standalone `jongio/gh-pages-templates` registry repo.
+folder plus a manifest — the generator picks it up automatically. This contract is
+identical whether the templates live here in `jongio/skills` or in the standalone
+`jongio/gh-pages-templates` registry repo (which also renders the browsable gallery).
 
 ## Anatomy of a template
 
@@ -24,7 +24,7 @@ into a stamped site (the generator excludes them).
 ```json
 {
   "name": "my-template",              // must equal the folder name
-  "title": "My Template",             // shown in the gallery
+  "title": "My Template",             // shown in the registry gallery
   "tagline": "One-line pitch.",       // short
   "description": "A sentence or two on what it is and when to pick it.",
   "framework": "Svelte",              // human-readable
@@ -36,17 +36,9 @@ into a stamped site (the generator excludes them).
   "basePathMechanism": "base in svelte.config.js",
   "deploy": "configure-pages + upload-pages-artifact + deploy-pages",
   "tags": ["svelte", "ssg"],
-  "order": 6                          // sort order in the gallery
+  "order": 6                          // catalog sort order
 }
 ```
-
-After editing manifests, regenerate the gallery catalog:
-
-```sh
-node scripts/build-catalog.mjs
-```
-
-(`test/catalog.test.mjs` fails if the catalog is out of sync.)
 
 ## Base-path handling (the important part)
 
@@ -89,7 +81,7 @@ Every `deploy.yml` MUST declare:
 ## Validate
 
 ```sh
-npm test                                   # generator + workflow + catalog
+npm test                                   # generator + workflow
 node scripts/new-site.mjs my-template --repo octocat/demo --dir /tmp/x
 cd /tmp/x && npm install && npm run build  # if it builds
 ```

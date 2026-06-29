@@ -18,7 +18,6 @@ const TARGETS = {
   "templates/react-vite": ["actions/setup-node@", "actions/configure-pages@", "actions/upload-pages-artifact@"],
   "templates/eleventy": ["actions/setup-node@", "actions/configure-pages@", "actions/upload-pages-artifact@"],
   "templates/jekyll": ["actions/configure-pages@", "actions/jekyll-build-pages@", "actions/upload-pages-artifact@"],
-  "gallery": ["actions/configure-pages@", "actions/upload-pages-artifact@"],
 };
 
 const UNIVERSAL_REQUIRED = [
