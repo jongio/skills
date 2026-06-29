@@ -57,6 +57,11 @@ const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.gi
         background: color-mix(in srgb, var(--accent) 12%, transparent);
         padding: 0.1em 0.4em; border-radius: 6px;
       }
+      /* Inside a <pre>, <code> is a block of plain text — drop the inline
+         code chip styling so wrapped lines all align flush-left. */
+      pre code {
+        background: none; padding: 0; border-radius: 0; font-size: inherit;
+      }
       .topbar {
         display: flex; align-items: center; gap: 1rem;
         padding: 0.6rem clamp(1rem, 4vw, 2rem); border-bottom: 1px solid var(--border);
