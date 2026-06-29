@@ -6,8 +6,9 @@ description: >-
   site on GitHub Pages — a static page, an Astro or Eleventy site, a React (Vite)
   SPA, or a Jekyll site. Picks the right template for the use case, injects the
   correct base path for the target repo (the #1 thing people get wrong), adds the
-  current official GitHub Actions Pages deploy workflow, sets it up in the user's
-  current repo or a new one, and explains how to turn Pages on. Do NOT use for
+  current official GitHub Actions Pages deploy workflow, and sets it up in the
+  user's current repo by default (the repo in context) — or a new one if asked —
+  and explains how to turn Pages on. Do NOT use for
   non-Pages hosting (Vercel/Netlify/Azure), for deploying an existing app without
   a Pages target, or for plain web pages unrelated to GitHub Pages.
 ---
@@ -101,30 +102,45 @@ only for what's missing, one focused question at a time, using the `ask_user` to
 
    If they're unsure, ask the single discriminating question — *content site or
    interactive app?* — and default to `static-html` for the simplest ask.
-2. **Which repo?** The **current repo** or a **new** one, and the `owner/name`. This
-   drives the base path, so it's required. For a user site, confirm the repo is named
-   `<user>.github.io` (base `/`); otherwise it's a project site (base `/repo/`).
+2. **Which repo? Assume the current repo by default.** The site is for the repo in
+   context unless the user says otherwise — don't ask "current or new." Detect the
+   current repo from git (`git remote get-url origin`, parsed to `owner/name`); the
+   generator does the same automatically when you omit `--repo`. The repo drives the
+   base path, so you must resolve it before stamping:
+   - **Current repo detected** → use it. State the assumption in one line
+     (*"Scaffolding into this repo, octocat/blog → base `/blog/`"*) and proceed; no
+     question needed.
+   - **No git context, detached, or no `origin`** → then ask for the `owner/name`,
+     and whether it's an existing repo or a **new** one to create.
+   - Only treat it as a **new/different** repo when the user explicitly asks for one.
+     For a user site, confirm the repo is named `<user>.github.io` (base `/`);
+     otherwise it's a project site (base `/repo/`).
 3. **Title?** Optional — default to the repo name; never block on it.
 
 Skip any question the prompt already answered: *"an Astro blog for octocat/blog"*
-needs no interview (template `astro`, repo `octocat/blog`). Ask only for the gaps.
-When you **inferred** rather than were told, confirm in one line before scaffolding —
-e.g. *"Astro site → octocat/blog, base `/blog/` — go?"*
+needs no interview (template `astro`, repo `octocat/blog`). For a bare *"put this on
+Pages"* inside a repo, assume the current repo and ask only for the template. Ask
+only for the gaps. When you **inferred** rather than were told, confirm in one line
+before scaffolding — e.g. *"Astro site → octocat/blog (current repo), base `/blog/` —
+go?"*
 
 ## The workflow you follow
 
 1. **Interview / gather context.** Resolve the questions above via `ask_user`. You
    MUST end up with a chosen template and a target repo (or explicit `--base`) before
-   stamping. Don't guess a repo name — the base path depends on it.
+   stamping. **Default the target to the current repo** (detect it from
+   `git remote get-url origin`); only ask when there's no git context or the user
+   wants a different/new repo.
 2. **Pick the template** from the table above.
 3. **Stamp it** with the generator (next section). This injects the base path,
    site URL, and title, and lays down the deploy workflow.
 4. **Place it in the repo:**
-   - *Current repo*: stamp into the repo root (or a subfolder if it's a
-     subdirectory site, adjusting the workflow's upload path). If a `deploy.yml`
-     already exists, reconcile — don't blindly overwrite.
-   - *New repo*: create it (e.g. `gh repo create <name> --public`), stamp into it,
-     and push. Match the repo name you used for the base path.
+   - *Current repo (default)*: stamp into the repo root (or a subfolder if it's a
+     subdirectory site, adjusting the workflow's upload path). Pass `--dir .`
+     `--force` to write in place, and reconcile an existing `deploy.yml` rather than
+     blindly overwriting it.
+   - *New repo (only when asked)*: create it (e.g. `gh repo create <name> --public`),
+     stamp into it, and push. Match the repo name you used for the base path.
 5. **Enable Pages.** Tell the user (or do it with their approval):
    **Settings → Pages → Source → GitHub Actions**. By CLI:
    `gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow` (or PUT to
@@ -148,18 +164,27 @@ node scripts/new-site.mjs <template> --repo <owner/name> [options]
 
 | Option | Purpose |
 | --- | --- |
-| `--repo <owner/name>` | Target repo. Derives the base path + URLs (and detects user sites). |
+| `--repo <owner/name>` | Target repo. Derives the base path + URLs (and detects user sites). **Defaults to the current repo's `origin` remote when omitted.** |
 | `--base </path/>` | Override the base path (e.g. `/` for a user site or local preview). |
 | `--dir <path>` | Output directory (default: `./<repo-name>`). |
 | `--site-name "Title"` | Human title (default: derived from the repo name). |
-| `--registry <owner/repo>` | Fetch the template from a remote registry repo (needs git + network). |
+| `--registry <owner/repo>` | Template registry repo to fetch from (default: `jongio/gh-pages-templates`; needs git + network). |
+| `--templates-dir <path>` | Use a local `templates/` folder instead of fetching (offline). |
 | `--force` | Write into a non-empty directory. |
 | `--list` | List available templates. |
+
+Templates are **not bundled in the skill** — the generator fetches them from the
+`jongio/gh-pages-templates` registry (a shallow clone) on each run, so there's one
+source of truth. The clone is reused within a run, so `--list` + a stamp clone once.
+Pass `--templates-dir <path>` to scaffold from a local copy offline.
 
 Examples:
 
 ```sh
-# An Astro content site for a project repo:
+# Scaffold for the CURRENT repo (base path inferred from its origin remote):
+node scripts/new-site.mjs astro
+
+# An Astro content site for a specific project repo:
 node scripts/new-site.mjs astro --repo octocat/blog --site-name "Octocat's Blog"
 
 # A React SPA dashboard:
@@ -193,12 +218,14 @@ placeholders left. After stamping you may hand-edit content freely.
 
 ## Current repo vs. new repo
 
-- **Current repo**: simplest when the user already has the project. Confirm the
-  repo name matches the base path. Put the site at the root for a whole-repo site,
-  or in a subfolder and point the workflow's `upload-pages-artifact` `path:` at it.
-- **New repo**: create with `gh repo create`, stamp, push to `main`. For a **user
-  site**, the repo MUST be named `<user>.github.io` and the base is `/` — the
-  generator handles the base when you pass that repo name.
+- **Current repo (the default)**: assume the site is for the repo in context. The
+  generator infers the base path from its `origin` remote when you omit `--repo`.
+  Put the site at the root for a whole-repo site, or in a subfolder and point the
+  workflow's `upload-pages-artifact` `path:` at it. If a `deploy.yml` already exists,
+  reconcile — don't blindly overwrite.
+- **New repo (only when asked)**: create with `gh repo create`, stamp, push to
+  `main`. For a **user site**, the repo MUST be named `<user>.github.io` and the base
+  is `/` — the generator handles the base when you pass that repo name.
 
 ## Custom domains (documented, not automated)
 
@@ -208,25 +235,24 @@ the domain and drop `base`. Don't automate DNS — explain the steps.
 
 ## Template registry & contributing
 
-Templates are bundled in `templates/<name>/`, each with a `template.json` manifest.
-The generator reads these manifests to stamp a site. New templates follow the
-contract in `CONTRIBUTING.md`: a folder with a `deploy.yml`, base-path handling via
-the sentinels, a `README.md`, and a manifest.
-
-A live, community-contributable registry of these templates is published at
-**[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)**, with
-a browsable gallery (live previews of every template) at
-**https://jongio.github.io/gh-pages-templates/**. That gallery is the single home
-for browsing/previewing — this skill doesn't bundle its own copy. The generator's
-`--registry <owner/repo>` flag fetches templates from there instead of the bundled
-copies:
+Templates live in **one** place: the
+**[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)**
+registry. The skill does **not** bundle its own copy — the generator fetches
+templates from the registry at runtime (override with `--registry <owner/repo>`, or
+scaffold offline from a local checkout with `--templates-dir <path>`):
 
 ```
-node scripts/new-site.mjs astro --repo octocat/blog --registry jongio/gh-pages-templates
+node scripts/new-site.mjs astro --repo octocat/blog            # default registry
+node scripts/new-site.mjs astro --templates-dir ../gh-pages-templates/templates
 ```
 
-Point users at the gallery to browse + preview, and at the registry's `CONTRIBUTING.md`
-to submit their own template.
+Each template is a folder with a `template.json` manifest, a `deploy.yml`,
+base-path handling via the sentinels, and a `README.md`. The registry also renders
+the browsable gallery (live previews of every template) at
+**https://jongio.github.io/gh-pages-templates/** — the single home for browsing and
+previewing. Point users there to browse, and to the registry's `CONTRIBUTING.md` to
+submit a new template. Template changes (add/fix a template, bump an action version)
+land in the registry, not here.
 
 ## Validate — don't claim done on a green check
 
@@ -241,7 +267,8 @@ to submit their own template.
    fallback works.
 4. Only then report it as working.
 
-Run the skill's own tests with `npm test` (generator + workflow + catalog).
+Run the skill's own tests with `npm test` (the generator, offline via a fixture).
+Template/workflow validation lives in the `jongio/gh-pages-templates` registry.
 
 ## Footguns
 

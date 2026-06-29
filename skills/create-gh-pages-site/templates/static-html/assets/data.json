@@ -1,8 +1,0 @@
-{
-  "features": [
-    { "name": "Semantic HTML", "detail": "Landmarks, headings, and native elements first." },
-    { "name": "CSS custom properties", "detail": "Theme tokens that drive light and dark mode." },
-    { "name": "Vanilla JS", "detail": "Tabs, fetch, and form validation with zero dependencies." },
-    { "name": "Progressive enhancement", "detail": "Works without JS; enhances when it runs." }
-  ]
-}
