@@ -17,8 +17,8 @@
     {
       "name": "create-gh-pages-site",
       "source": "./skills/create-gh-pages-site",
-      "description": "Scaffold a working GitHub Pages site from a vetted template (static, Astro, React + Vite, Eleventy, or Jekyll), inject the correct base path for the target repo, wire the official GitHub Actions Pages deploy workflow, and explain how to enable Pages.",
-      "version": "1.0.0"
+      "description": "Scaffold a working GitHub Pages site from a vetted template (static, Astro, React + Vite, Eleventy, or Jekyll) into your current repo by default, inject the correct base path for the target repo, wire the official GitHub Actions Pages deploy workflow, set the repo's Website link, and explain how to enable Pages.",
+      "version": "1.1.0"
     }
   ]
 }

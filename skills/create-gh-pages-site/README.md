@@ -71,7 +71,9 @@ create or publish a GitHub Pages site.
 
 ## Build it yourself (no agent)
 
-The generator stamps the same site the skill uses:
+The generator stamps the same site the skill uses. Templates are fetched from the
+[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates) registry
+(a shallow clone), so it needs git + network unless you pass `--templates-dir`:
 
 ```sh
 # Scaffold for the CURRENT repo (base path read from its origin remote):
@@ -85,6 +87,9 @@ node scripts/new-site.mjs react-vite --repo octocat/dashboard
 
 # A user site (served from "/") or a quick local scaffold:
 node scripts/new-site.mjs static-html --base / --dir ./site
+
+# Offline, from a local registry checkout:
+node scripts/new-site.mjs astro --templates-dir ../gh-pages-templates/templates
 
 # List templates:
 node scripts/new-site.mjs --list
@@ -122,37 +127,36 @@ After any install, reload skills with `/skills reload` or a new session.
 
 ## A contributable registry
 
-Templates live in `templates/<name>/`, each with a `template.json` manifest the
-generator reads (and the [`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)
-registry gallery renders). Adding a template is a folder + a manifest — see
-[`CONTRIBUTING.md`](CONTRIBUTING.md). The generator's `--registry owner/repo` flag
-can fetch templates from that remote registry, so the browsable gallery + live
-previews live there, not in this skill.
+Templates live **only** in the
+[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates) registry
+— each a folder with a `template.json` manifest. The generator fetches them from
+there by default (override with `--registry owner/repo`, or scaffold offline with
+`--templates-dir <path>`). The browsable gallery + live previews are hosted from the
+registry too. Adding or fixing a template is a PR to that repo — see its
+`CONTRIBUTING.md`. This skill owns the generator + the agent workflow, not the
+templates.
 
 ## Run the tests
 
 ```sh
 npm test
-# node test/generator.test.mjs && node test/workflow.test.mjs
+# node test/generator.test.mjs
 ```
 
-No dependencies to install — the tests run on bare `node` (18+). They stamp every
-template, assert the base path is injected with no leftover placeholders, and
-validate each deploy workflow (permissions, concurrency, official actions, no
-deprecated ones).
+No dependencies to install — the tests run on bare `node` (18+), fully offline. They
+exercise the generator's base-path math, repo detection, and template stamping
+against a local fixture (sentinels fully replaced, `template.json`/`node_modules`
+skipped, user-site collapse to `/`). Template + deploy-workflow validation lives in
+the registry.
 
 ## Layout
 
 ```
 SKILL.md                     The skill (authoring contract + workflow)
-templates/                   The bundled, deployable templates
-  static-html/  astro/  react-vite/  eleventy/  jekyll/
-    template.json            Manifest (consumed by the generator)
-    .github/workflows/deploy.yml   Pages deploy workflow
 scripts/
-  new-site.mjs               Generator — stamp a site, inject the base path
+  new-site.mjs               Generator — fetch a template, inject the base path
   install-local.ps1          Install this skill into $COPILOT_HOME/skills
-test/                        Generator and workflow tests (bare node)
+test/                        Generator tests (bare node, offline fixture)
 ```
 
 ## License

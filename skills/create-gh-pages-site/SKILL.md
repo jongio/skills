@@ -168,9 +168,15 @@ node scripts/new-site.mjs <template> --repo <owner/name> [options]
 | `--base </path/>` | Override the base path (e.g. `/` for a user site or local preview). |
 | `--dir <path>` | Output directory (default: `./<repo-name>`). |
 | `--site-name "Title"` | Human title (default: derived from the repo name). |
-| `--registry <owner/repo>` | Fetch the template from a remote registry repo (needs git + network). |
+| `--registry <owner/repo>` | Template registry repo to fetch from (default: `jongio/gh-pages-templates`; needs git + network). |
+| `--templates-dir <path>` | Use a local `templates/` folder instead of fetching (offline). |
 | `--force` | Write into a non-empty directory. |
 | `--list` | List available templates. |
+
+Templates are **not bundled in the skill** — the generator fetches them from the
+`jongio/gh-pages-templates` registry (a shallow clone) on each run, so there's one
+source of truth. The clone is reused within a run, so `--list` + a stamp clone once.
+Pass `--templates-dir <path>` to scaffold from a local copy offline.
 
 Examples:
 
@@ -229,25 +235,24 @@ the domain and drop `base`. Don't automate DNS — explain the steps.
 
 ## Template registry & contributing
 
-Templates are bundled in `templates/<name>/`, each with a `template.json` manifest.
-The generator reads these manifests to stamp a site. New templates follow the
-contract in `CONTRIBUTING.md`: a folder with a `deploy.yml`, base-path handling via
-the sentinels, a `README.md`, and a manifest.
-
-A live, community-contributable registry of these templates is published at
-**[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)**, with
-a browsable gallery (live previews of every template) at
-**https://jongio.github.io/gh-pages-templates/**. That gallery is the single home
-for browsing/previewing — this skill doesn't bundle its own copy. The generator's
-`--registry <owner/repo>` flag fetches templates from there instead of the bundled
-copies:
+Templates live in **one** place: the
+**[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)**
+registry. The skill does **not** bundle its own copy — the generator fetches
+templates from the registry at runtime (override with `--registry <owner/repo>`, or
+scaffold offline from a local checkout with `--templates-dir <path>`):
 
 ```
-node scripts/new-site.mjs astro --repo octocat/blog --registry jongio/gh-pages-templates
+node scripts/new-site.mjs astro --repo octocat/blog            # default registry
+node scripts/new-site.mjs astro --templates-dir ../gh-pages-templates/templates
 ```
 
-Point users at the gallery to browse + preview, and at the registry's `CONTRIBUTING.md`
-to submit their own template.
+Each template is a folder with a `template.json` manifest, a `deploy.yml`,
+base-path handling via the sentinels, and a `README.md`. The registry also renders
+the browsable gallery (live previews of every template) at
+**https://jongio.github.io/gh-pages-templates/** — the single home for browsing and
+previewing. Point users there to browse, and to the registry's `CONTRIBUTING.md` to
+submit a new template. Template changes (add/fix a template, bump an action version)
+land in the registry, not here.
 
 ## Validate — don't claim done on a green check
 
@@ -262,7 +267,8 @@ to submit their own template.
    fallback works.
 4. Only then report it as working.
 
-Run the skill's own tests with `npm test` (generator + workflow + catalog).
+Run the skill's own tests with `npm test` (the generator, offline via a fixture).
+Template/workflow validation lives in the `jongio/gh-pages-templates` registry.
 
 ## Footguns
 

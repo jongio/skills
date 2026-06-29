@@ -6,6 +6,21 @@ status: shipped
 
 # create-gh-pages-site skill
 
+> **Update (post-v1).** Two architectural changes landed after this spec shipped:
+> 1. The bundled browse **gallery** moved out of the skill — the browsable gallery
+>    with live previews now lives only in the `jongio/gh-pages-templates` registry.
+> 2. **Templates are no longer bundled in the skill.** That registry is the single
+>    source of truth: the generator fetches templates from `jongio/gh-pages-templates`
+>    at runtime (a shallow clone), with `--templates-dir` for offline use. The skill
+>    also now defaults the target to the **current repo** (read from the `origin`
+>    remote) instead of asking "current or new," and offers to set the repo's
+>    `homepage`/Website link to the Pages URL.
+>
+> The "Goals", "Solution", and "Repo strategy" sections below describe the original
+> v1 design. Where they say templates/gallery are *bundled* and the skill is *offline
+> by default*, read "fetched from the registry" and "offline via `--templates-dir`."
+> Template + deploy-workflow validation now lives in the registry, not in the skill.
+
 ## Problem
 
 Standing up a GitHub Pages site is deceptively fiddly. The hard parts aren't the

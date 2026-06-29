@@ -7,14 +7,19 @@
 // the framework needs it (config, workflow env, links) so the site works at a
 // project URL (https://USER.github.io/REPO/) or a user URL (https://USER.github.io/).
 //
+// Templates are fetched from the jongio/gh-pages-templates registry (a shallow
+// git clone) — that registry is the single source of truth. Pass --templates-dir
+// to scaffold from a local copy offline.
+//
 // Options:
 //   --repo <owner/name>   Target GitHub repo. Drives the base path and URLs.
 //                         Defaults to the current repo's "origin" remote.
 //   --base </path/>       Override the base path (e.g. "/my-repo/" or "/").
 //   --dir <path>          Output directory (default: ./<repo-name or template>).
 //   --site-name <title>   Human title (default: derived from the repo name).
-//   --registry <owner/repo>  Fetch the template from a remote registry repo
-//                            instead of the bundled copies (needs git + network).
+//   --registry <owner/repo>  Use a different template registry repo
+//                            (default: jongio/gh-pages-templates; needs git + network).
+//   --templates-dir <path>   Use a local templates/ folder instead (offline; no fetch).
 //   --force               Write into a non-empty directory.
 //   --list                List available templates and exit.
 //   --help                Show this help.
@@ -30,6 +35,11 @@ import { tmpdir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = resolve(__dirname, "..", "templates");
+
+// The registry is the single source of truth for templates. The skill no longer
+// bundles its own copy; the generator fetches from here unless --templates-dir
+// (or a local templates/ next to the script) provides an offline source.
+const DEFAULT_REGISTRY = "jongio/gh-pages-templates";
 
 // Files/dirs never copied into a stamped site.
 const SKIP_ENTRIES = new Set(["node_modules", "dist", "_site", ".git", ".cache", ".jekyll-cache", "template.json"]);
@@ -169,7 +179,7 @@ export function applyReplacements(text, replacements) {
   return text.replace(SENTINEL_RE, (m) => (m in replacements ? replacements[m] : m));
 }
 
-/** List bundled template names (folders with a template.json). */
+/** List template names in a templates root (folders with a template.json). */
 export function listTemplates(dir = TEMPLATES_DIR) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
@@ -221,42 +231,62 @@ export function registryCloneUrl(registry) {
   return /^https?:\/\//.test(registry) ? registry : `https://github.com/${registry}.git`;
 }
 
-/** Fetch a template subdir from a remote registry into a temp dir; returns its path. */
-function fetchFromRegistry(registry, template) {
-  const tmp = join(tmpdir(), `ghp-registry-${Date.now()}`);
+// Cache one shallow clone per registry for the life of the process, so --list and
+// a stamp don't clone twice. Clones are removed on process exit.
+const _registryClones = new Map(); // registry -> { root, cleanup }
+let _exitHookInstalled = false;
+
+function cloneRegistry(registry) {
+  if (_registryClones.has(registry)) return _registryClones.get(registry);
+  const tmp = join(tmpdir(), `ghp-registry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const url = registryCloneUrl(registry);
   try {
     execFileSync("git", ["clone", "--depth", "1", url, tmp], { stdio: "pipe" });
   } catch (err) {
     rmSync(tmp, { recursive: true, force: true });
     const detail = err.stderr ? err.stderr.toString().trim() : err.message;
-    throw new Error(`Failed to clone registry ${registry}: ${detail}`);
+    throw new Error(`Failed to clone registry ${registry}: ${detail}\nPass --templates-dir <path> to scaffold from a local copy offline.`);
   }
-  const sub = join(tmp, "templates", template);
-  if (!existsSync(sub)) {
-    rmSync(tmp, { recursive: true, force: true });
-    throw new Error(`Template "${template}" not found in registry ${registry} (expected templates/${template}).`);
+  const entry = { root: tmp, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
+  _registryClones.set(registry, entry);
+  if (!_exitHookInstalled) {
+    _exitHookInstalled = true;
+    process.on("exit", () => {
+      for (const e of _registryClones.values()) e.cleanup();
+    });
   }
-  return { dir: sub, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
+  return entry;
+}
+
+/**
+ * Resolve the directory that holds template folders, honoring (in order):
+ *   1. an explicit local `templatesDir`,
+ *   2. an explicit `--registry` repo (cloned),
+ *   3. a local `templates/` next to the script (dev convenience), if present,
+ *   4. the default registry, jongio/gh-pages-templates (cloned).
+ * @returns {string} absolute path to the templates root
+ */
+export function resolveTemplatesSource({ registry, templatesDir } = {}) {
+  if (templatesDir) {
+    const d = resolve(templatesDir);
+    if (!existsSync(d)) throw new Error(`--templates-dir ${d} does not exist.`);
+    return d;
+  }
+  if (registry) return join(cloneRegistry(registry).root, "templates");
+  if (existsSync(TEMPLATES_DIR)) return TEMPLATES_DIR;
+  return join(cloneRegistry(DEFAULT_REGISTRY).root, "templates");
 }
 
 /**
  * Stamp a template into a target directory.
  * @returns {{ dir: string, replacements: object, manifest: object }}
  */
-export function stampTemplate({ template, dir, repo, base, siteName, registry, force = false } = {}) {
-  let srcDir = join(TEMPLATES_DIR, template);
-  let cleanup = null;
-
-  if (registry) {
-    const fetched = fetchFromRegistry(registry, template);
-    srcDir = fetched.dir;
-    cleanup = fetched.cleanup;
-  }
+export function stampTemplate({ template, dir, repo, base, siteName, registry, templatesDir, force = false } = {}) {
+  const templatesRoot = resolveTemplatesSource({ registry, templatesDir });
+  const srcDir = join(templatesRoot, template);
 
   if (!existsSync(join(srcDir, "template.json"))) {
-    if (cleanup) cleanup();
-    const avail = listTemplates().join(", ") || "(none)";
+    const avail = listTemplates(templatesRoot).join(", ") || "(none)";
     throw new Error(`Unknown template "${template}". Available: ${avail}`);
   }
 
@@ -265,17 +295,12 @@ export function stampTemplate({ template, dir, repo, base, siteName, registry, f
   const destDir = resolve(dir || replacements.__PKG_NAME__);
 
   if (existsSync(destDir) && readdirSync(destDir).length > 0 && !force) {
-    if (cleanup) cleanup();
     throw new Error(`Target ${destDir} is not empty. Use --force to write into it.`);
   }
   mkdirSync(destDir, { recursive: true });
 
-  try {
-    copyTemplate(srcDir, destDir);
-    rewriteTree(destDir, replacements);
-  } finally {
-    if (cleanup) cleanup();
-  }
+  copyTemplate(srcDir, destDir);
+  rewriteTree(destDir, replacements);
 
   return { dir: destDir, replacements, manifest };
 }
@@ -303,7 +328,8 @@ create-gh-pages-site — scaffold a GitHub Pages site from a template.
 Usage:
   node scripts/new-site.mjs <template> --repo <owner/name> [options]
 
-Templates: ${listTemplates().join(", ") || "(none found)"}
+Templates are fetched from the jongio/gh-pages-templates registry. Run --list to
+see them (or --templates-dir <path> to use a local copy offline).
 
 Options:
   --repo <owner/name>      Target GitHub repo (drives base path + URLs)
@@ -311,7 +337,8 @@ Options:
   --base </path/>          Override base path (e.g. "/my-repo/" or "/")
   --dir <path>             Output directory (default: ./<repo-name>)
   --site-name <title>      Human title (default: from repo name)
-  --registry <owner/repo>  Fetch template from a remote registry (git + network)
+  --registry <owner/repo>  Template registry repo (default: jongio/gh-pages-templates)
+  --templates-dir <path>   Local templates/ folder to use instead (offline; no fetch)
   --force                  Write into a non-empty directory
   --list                   List templates and exit
   --help                   Show this help
@@ -334,8 +361,15 @@ function main() {
     return;
   }
   if (args.list) {
-    for (const name of listTemplates()) {
-      const m = readManifest(join(TEMPLATES_DIR, name));
+    let root;
+    try {
+      root = resolveTemplatesSource({ registry: args.registry, templatesDir: args["templates-dir"] });
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+    for (const name of listTemplates(root)) {
+      const m = readManifest(join(root, name));
       console.log(`  ${name.padEnd(14)} ${m.tagline}`);
     }
     return;
@@ -366,6 +400,7 @@ function main() {
       base: args.base,
       siteName: args["site-name"],
       registry: args.registry,
+      templatesDir: args["templates-dir"],
       force: args.force,
     });
 

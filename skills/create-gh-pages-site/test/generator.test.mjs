@@ -1,6 +1,8 @@
-// test/generator.test.mjs — exercises scripts/new-site.mjs: base-path math and
-// stamping every template (sentinel replacement, structure, per-framework base
-// wiring). No deps; Node 18+.  Run:  node test/generator.test.mjs
+// test/generator.test.mjs — exercises scripts/new-site.mjs: base-path math, repo
+// detection, and stamping from a local fixture template source (sentinel
+// replacement, copy/skip logic, base-path injection). The real templates live in
+// the jongio/gh-pages-templates registry; these tests use --templates-dir so they
+// run offline with no network. No deps; Node 18+.  Run:  node test/generator.test.mjs
 
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, existsSync, readdirSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
@@ -17,6 +19,7 @@ import {
   applyReplacements,
   rewriteTree,
   registryCloneUrl,
+  resolveTemplatesSource,
   listTemplates,
   stampTemplate,
 } from "../scripts/new-site.mjs";
@@ -188,97 +191,113 @@ test("rewriteTree rewrites text, preserves binary, and never follows symlinks", 
   }
 });
 
-test("listTemplates returns the five bundled templates in order", () => {
-  const names = listTemplates();
-  assert.deepEqual(names, ["static-html", "astro", "react-vite", "eleventy", "jekyll"]);
+// ---- a local fixture template source (offline; no network) -----------------
+// The real templates live in the jongio/gh-pages-templates registry and are
+// fetched at runtime. We build a tiny fixture and stamp it via --templates-dir so
+// the generator's copy/skip/inject logic is covered without a clone.
+
+function mkTemplate(root, name, manifestExtra = {}) {
+  const d = join(root, name);
+  mkdirSync(join(d, ".github", "workflows"), { recursive: true });
+  mkdirSync(join(d, "node_modules"), { recursive: true });
+  writeFileSync(join(d, "template.json"), JSON.stringify({
+    name, title: titleize(name), tagline: "A fixture template", needsBuild: false, ...manifestExtra,
+  }));
+  writeFileSync(
+    join(d, "index.html"),
+    `<title>__SITE_NAME__</title><base href="__BASE_PATH__"><a href="https://github.com/__REPO_SLUG__">src</a> __SITE_URL__`,
+  );
+  writeFileSync(join(d, "_config.yml"), `baseurl: "__BASE_URL__"`);
+  writeFileSync(join(d, ".github", "workflows", "deploy.yml"), "name: github-pages\non: push\njobs: {}\n");
+  writeFileSync(join(d, "node_modules", "junk.js"), "__SITE_NAME__ should never be copied");
+  return d;
+}
+
+test("listTemplates lists template folders in manifest order", () => {
+  const fx = mkdtempSync(join(tmpdir(), "ghp-fx-"));
+  try {
+    mkTemplate(fx, "b-tmpl", { order: 2 });
+    mkTemplate(fx, "a-tmpl", { order: 1 });
+    assert.deepEqual(listTemplates(fx), ["a-tmpl", "b-tmpl"]);
+  } finally {
+    rmSync(fx, { recursive: true, force: true });
+  }
 });
 
-// ---- stamping every template ----------------------------------------------
-
+const fixtures = mkdtempSync(join(tmpdir(), "ghp-fixtures-"));
+mkTemplate(fixtures, "mini");
 const work = mkdtempSync(join(tmpdir(), "ghp-gen-"));
 try {
-  for (const template of listTemplates()) {
-    const dest = join(work, template);
-    const { dir, replacements, manifest } = stampTemplate({
-      template,
-      dir: dest,
-      repo: "octocat/demo-site",
-    });
-
-    test(`${template}: stamps without leaving any sentinel`, () => {
-      for (const file of walk(dir)) {
-        const buf = readFileSync(file);
-        // skip binaries (none expected, but be safe)
-        if (buf.includes(0)) continue;
-        const text = buf.toString("utf8");
-        for (const s of SENTINELS) {
-          assert.ok(!text.includes(s), `${relative(dir, file)} still contains ${s}`);
-        }
-      }
-    });
-
-    test(`${template}: does not copy template.json into the site`, () => {
-      assert.ok(!existsSync(join(dir, "template.json")));
-    });
-
-    test(`${template}: ships a Pages deploy workflow`, () => {
-      assert.ok(existsSync(join(dir, ".github", "workflows", "deploy.yml")));
-    });
-
-    test(`${template}: base path resolves to /demo-site/`, () => {
-      assert.equal(replacements.__BASE_PATH__, "/demo-site/");
-      assert.equal(manifest.name, template);
-    });
-  }
-
-  // per-framework base wiring
-  test("static-html: injects the repo slug into the source link", () => {
-    assert.match(read(join(work, "static-html"), "index.html"), /octocat\/demo-site/);
+  test("resolveTemplatesSource: explicit --templates-dir wins (no network)", () => {
+    assert.equal(resolveTemplatesSource({ templatesDir: fixtures }), fixtures);
   });
-  test("astro: astro.config has site origin + /demo-site/ base", () => {
-    const cfg = read(join(work, "astro"), "astro.config.mjs");
-    assert.match(cfg, /site:\s*"https:\/\/octocat\.github\.io"/);
-    assert.match(cfg, /base:\s*"\/demo-site\/"/);
-  });
-  test("react-vite: vite.config base + 404 fallback script present", () => {
-    assert.match(read(join(work, "react-vite"), "vite.config.js"), /base:\s*"\/demo-site\/"/);
-    assert.ok(existsSync(join(work, "react-vite", "copy-404.mjs")));
-  });
-  test("eleventy: workflow passes PATH_PREFIX=/demo-site/", () => {
-    assert.match(read(join(work, "eleventy"), ".github/workflows/deploy.yml"), /PATH_PREFIX:\s*\/demo-site\//);
-  });
-  test("jekyll: _config baseurl has no trailing slash", () => {
-    assert.match(read(join(work, "jekyll"), "_config.yml"), /baseurl:\s*"\/demo-site"/);
+  test("resolveTemplatesSource: a missing --templates-dir throws (no network)", () => {
+    assert.throws(() => resolveTemplatesSource({ templatesDir: join(work, "nope") }), /does not exist/);
   });
 
-  // user-site variant: base must collapse to "/" and jekyll baseurl to ""
-  test("user site: jekyll baseurl is empty, base path is /", () => {
-    const dest = join(work, "user-jekyll");
-    const { replacements } = stampTemplate({ template: "jekyll", dir: dest, repo: "octocat/octocat.github.io" });
-    assert.equal(replacements.__BASE_PATH__, "/");
-    assert.match(read(dest, "_config.yml"), /baseurl:\s*""/);
+  const dest = join(work, "mini-site");
+  const { dir, replacements, manifest } = stampTemplate({
+    template: "mini", dir: dest, repo: "octocat/demo-site", templatesDir: fixtures,
+  });
+
+  test("stamp: leaves no sentinel behind", () => {
+    for (const file of walk(dir)) {
+      const buf = readFileSync(file);
+      if (buf.includes(0)) continue;
+      const text = buf.toString("utf8");
+      for (const s of SENTINELS) assert.ok(!text.includes(s), `${relative(dir, file)} still contains ${s}`);
+    }
+  });
+
+  test("stamp: injects the project base path, repo slug, and URLs", () => {
+    assert.equal(replacements.__BASE_PATH__, "/demo-site/");
+    assert.equal(manifest.name, "mini");
+    const html = read(dir, "index.html");
+    assert.match(html, /href="\/demo-site\/"/);
+    assert.match(html, /github\.com\/octocat\/demo-site/);
+    assert.match(html, /https:\/\/octocat\.github\.io\/demo-site\//);
+  });
+
+  test("stamp: does not copy template.json or node_modules into the site", () => {
+    assert.ok(!existsSync(join(dir, "template.json")));
+    assert.ok(!existsSync(join(dir, "node_modules")));
+  });
+
+  test("stamp: ships the deploy workflow", () => {
+    assert.ok(existsSync(join(dir, ".github", "workflows", "deploy.yml")));
+  });
+
+  // user-site variant: base must collapse to "/" and __BASE_URL__ to ""
+  test("user site: base path is / and __BASE_URL__ collapses to empty", () => {
+    const ud = join(work, "user-site");
+    const { replacements: r } = stampTemplate({
+      template: "mini", dir: ud, repo: "octocat/octocat.github.io", templatesDir: fixtures,
+    });
+    assert.equal(r.__BASE_PATH__, "/");
+    assert.match(read(ud, "_config.yml"), /baseurl:\s*""/);
   });
 
   // safety: refuse to overwrite a non-empty dir unless --force
   test("stamp refuses a non-empty dir without force", () => {
-    const dest = join(work, "occupied");
-    mkdirSync(dest, { recursive: true });
-    writeFileSync(join(dest, "keep.txt"), "x");
-    assert.throws(() => stampTemplate({ template: "static-html", dir: dest, repo: "octocat/demo" }), /not empty/);
+    const d = join(work, "occupied");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "keep.txt"), "x");
+    assert.throws(() => stampTemplate({ template: "mini", dir: d, repo: "octocat/demo", templatesDir: fixtures }), /not empty/);
   });
   test("stamp into a non-empty dir succeeds with force", () => {
-    const dest = join(work, "occupied2");
-    mkdirSync(dest, { recursive: true });
-    writeFileSync(join(dest, "keep.txt"), "x");
-    stampTemplate({ template: "static-html", dir: dest, repo: "octocat/demo", force: true });
-    assert.ok(existsSync(join(dest, "index.html")));
+    const d = join(work, "occupied2");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "keep.txt"), "x");
+    stampTemplate({ template: "mini", dir: d, repo: "octocat/demo", templatesDir: fixtures, force: true });
+    assert.ok(existsSync(join(d, "index.html")));
   });
 
   test("unknown template throws with the list of valid names", () => {
-    assert.throws(() => stampTemplate({ template: "nope", dir: join(work, "x"), repo: "o/r" }), /Unknown template/);
+    assert.throws(() => stampTemplate({ template: "nope", dir: join(work, "x"), repo: "o/r", templatesDir: fixtures }), /Unknown template/);
   });
 } finally {
   rmSync(work, { recursive: true, force: true });
+  rmSync(fixtures, { recursive: true, force: true });
 }
 
 console.log(`\n${passed} checks passed`);

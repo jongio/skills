@@ -1,51 +1,27 @@
-# Contributing a template
+# Contributing
 
-Templates are self-contained folders under `templates/<name>/`. Adding one is a
-folder plus a manifest — the generator picks it up automatically. This contract is
-identical whether the templates live here in `jongio/skills` or in the standalone
-`jongio/gh-pages-templates` registry repo (which also renders the browsable gallery).
+This repo has two kinds of contribution, in two places.
 
-## Anatomy of a template
+## Templates → the registry
 
-```
-templates/<name>/
-  template.json                 Manifest (required — see below)
-  .github/workflows/deploy.yml  Pages deploy workflow (required)
-  README.md                     Human docs for the stamped site (required)
-  <site files…>                 index.html / src/ / _config.yml / etc.
-  .gitignore                    What the user's repo should ignore (recommended)
-```
+Templates are **not** in this skill. They live in the
+**[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)**
+registry, which also renders the browsable gallery + live previews. To add or fix a
+template (a new framework, a base-path fix, an action-version bump), open a PR there
+and follow that repo's `CONTRIBUTING.md`. The generator fetches templates from the
+registry at runtime, so a merged template is immediately available to the skill — no
+change here required.
 
-`template.json`, `node_modules`, `dist`, `_site`, and `.git` are **never** copied
-into a stamped site (the generator excludes them).
+## The skill (this repo)
 
-## The manifest (`template.json`)
+This skill owns the **generator** (`scripts/new-site.mjs`) and the **agent workflow**
+(`SKILL.md`). Work here when you're changing how sites are stamped, how the base path
+is computed, repo detection, or the interview/validation guidance.
 
-```json
-{
-  "name": "my-template",              // must equal the folder name
-  "title": "My Template",             // shown in the registry gallery
-  "tagline": "One-line pitch.",       // short
-  "description": "A sentence or two on what it is and when to pick it.",
-  "framework": "Svelte",              // human-readable
-  "tier": "ssg",                      // static | ssg | spa | data | native
-  "language": "JavaScript",
-  "needsBuild": true,                 // false for zero-build static
-  "build": "vite build",              // build command, or null
-  "output": "dist",                   // build output dir, or "." for static
-  "basePathMechanism": "base in svelte.config.js",
-  "deploy": "configure-pages + upload-pages-artifact + deploy-pages",
-  "tags": ["svelte", "ssg"],
-  "order": 6                          // catalog sort order
-}
-```
+### The generator's substitution contract
 
-## Base-path handling (the important part)
-
-A project site is served from `https://USER.github.io/REPO/`, so the template must
-make its base path configurable. Use these sentinels — the generator replaces them
-when stamping, deriving values from `--repo` (and detecting `USER.github.io` user
-sites, where the base collapses to `/`):
+The generator replaces these sentinels when stamping a template. Templates in the
+registry rely on them, so treat the set as a stable contract:
 
 | Sentinel | Replaced with | Use for |
 | --- | --- | --- |
@@ -57,34 +33,16 @@ sites, where the base collapses to `/`):
 | `__REPO_SLUG__` | `owner/repo` | links to the repo |
 | `__PKG_NAME__` | npm-safe name | `package.json` `name` |
 
-If the framework needs no base path (all relative links), you don't need
-`__BASE_PATH__` at all — see `static-html`.
+Values derive from `--repo` (the current repo's `origin` remote when omitted), and
+the generator detects `USER.github.io` user sites (base collapses to `/`).
 
-## The deploy workflow
-
-Use the official **GitHub Actions** Pages flow (Source = "GitHub Actions"):
-
-```
-actions/configure-pages@v5 → build → actions/upload-pages-artifact@v3 → actions/deploy-pages@v4
-```
-
-Every `deploy.yml` MUST declare:
-
-- `permissions: { contents: read, pages: write, id-token: write }`
-- `concurrency: { group: pages, cancel-in-progress: false }`
-- the `github-pages` environment on the deploy job
-- only first-party actions — no `peaceiris/actions-gh-pages`, no
-  `actions/upload-artifact`, no pre-cutover `deploy-pages` majors
-
-`test/workflow.test.mjs` enforces all of this.
-
-## Validate
+### Run the tests
 
 ```sh
-npm test                                   # generator + workflow
-node scripts/new-site.mjs my-template --repo octocat/demo --dir /tmp/x
-cd /tmp/x && npm install && npm run build  # if it builds
+npm test   # node test/generator.test.mjs — bare node, fully offline
 ```
 
-Confirm the built output's asset/link URLs carry the project prefix (`/repo/…`),
-not bare `/…`. Then open a PR.
+The tests cover base-path math, repo-slug parsing, and stamping a local fixture
+template (sentinels replaced, `template.json`/`node_modules` skipped, user-site
+collapse). They never hit the network — template/workflow validation lives in the
+registry. If you change the substitution contract or the resolver, update the tests.

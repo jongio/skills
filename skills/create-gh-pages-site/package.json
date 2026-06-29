@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "test": "node test/generator.test.mjs && node test/workflow.test.mjs",
+    "test": "node test/generator.test.mjs",
     "new": "node scripts/new-site.mjs"
   }
 }
