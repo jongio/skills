@@ -153,7 +153,6 @@ go?"*
 3. **Stamp it** with the generator (next section). This injects the base path,
    site URL, and title, and lays down the deploy workflow.
 4. **Place it in the repo:**
-4. **Place it in the repo:**
    - *Current repo (default)*: stamp into the repo root (or a subfolder if it's a
      subdirectory site, adjusting the workflow's upload path). Pass `--dir .`
      `--force` to write in place, and reconcile an existing `deploy.yml` rather than
