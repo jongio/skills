@@ -1,38 +1,87 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import Counter from "../components/Counter.jsx";
+import SkillCard from "../components/SkillCard.astro";
+import { getCollection } from "astro:content";
+
 const base = import.meta.env.BASE_URL;
+const skills = (await getCollection("skills")).sort(
+  (a, b) => a.data.order - b.data.order,
+);
 ---
 
-<Layout title="Skills">
-  <header style="text-align:center;margin-bottom:2rem;">
-    <p style="text-transform:uppercase;letter-spacing:.08em;font-size:.78rem;font-weight:600;color:var(--muted);margin:0 0 .5rem;">
-      GitHub Pages · Astro
+<Layout>
+  <header class="hero">
+    <img class="hero-logo" src={`${base}images/logo.svg`} alt="jongio/skills logo" width="84" height="84" />
+    <p class="eyebrow">Cross-agent skills · GitHub Copilot · Claude · Codex</p>
+    <h1>jongio/skills</h1>
+    <p class="lede">
+      Jon Gallant's collection of skills for AI coding agents. Each skill lives in
+      its own folder and installs individually or all at once — works with any agent
+      that supports the <a href="https://github.com/vercel-labs/skills">SKILL.md</a> format.
     </p>
-    <h1 style="font-size:clamp(2rem,6vw,3rem);line-height:1.1;margin:0 0 .75rem;">Skills</h1>
-    <p class="muted" style="font-size:1.12rem;max-width:46ch;margin:0 auto;">
-      A statically-rendered Astro site — and a reference for the framework's
-      signature features: islands, content collections, and view transitions.
-    </p>
+    <div class="cta">
+      <a class="btn" href={`${base}catalog/`}>Browse skills</a>
+      <a class="btn btn-ghost" href="https://github.com/jongio/skills">View on GitHub</a>
+    </div>
+    <pre class="hero-cmd"><code>npx skills add jongio/skills --all</code></pre>
   </header>
 
-  <section class="card">
-    <h2>Islands</h2>
-    <p class="muted">
-      This counter is a Preact component hydrated with <code>client:visible</code>.
-      Its JavaScript loads only when it scrolls into view; the rest of the page is
-      static HTML.
-    </p>
-    <Counter client:visible start={3} />
+  <section>
+    <h2 class="section-title">Skills</h2>
+    <div class="grid">
+      {skills.map((s) => (
+        <SkillCard
+          href={`${base}catalog/${s.id}/`}
+          title={s.data.title}
+          tagline={s.data.tagline}
+          thumb={s.data.thumb}
+        />
+      ))}
+    </div>
   </section>
 
   <section class="card">
-    <h2>What else this template shows</h2>
-    <ul>
-      <li><strong>Content collections</strong> — typed Markdown in the <a href={`${base}blog/`}>Blog</a>.</li>
-      <li><strong>View transitions</strong> — animated navigation (click around the nav).</li>
-      <li><strong>Light/dark theme</strong> + a <strong>GitHub source link</strong> in the top bar.</li>
-      <li><strong>Scoped + global styles</strong> and a base-path-aware layout.</li>
-    </ul>
+    <h2>Install</h2>
+    <p class="muted">Three ways in, depending on your setup.</p>
+    <h3>1 · Skills CLI</h3>
+    <pre><code>npx skills add jongio/skills --list
+npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot</code></pre>
+    <h3>2 · Copilot plugin marketplace</h3>
+    <pre><code>copilot plugin marketplace add jongio/skills
+copilot plugin install create-canvas-app@jongio-skills</code></pre>
+    <h3>3 · Whole repo as one plugin</h3>
+    <pre><code>copilot plugin install jongio/skills</code></pre>
+    <p class="muted">After any install, reload with <code>/skills reload</code> or start a new session.</p>
   </section>
 </Layout>
+
+<style>
+  .hero { text-align: center; margin: 1rem 0 2.5rem; }
+  .hero-logo { margin: 0 auto 1rem; display: block; }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.74rem;
+    font-weight: 600; color: var(--muted); margin: 0 0 0.5rem;
+  }
+  .hero h1 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; margin: 0 0 0.75rem;
+  }
+  .lede { color: var(--muted); font-size: 1.12rem; max-width: 54ch; margin: 0 auto 1.4rem; }
+  .cta { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.4rem; }
+  .btn-ghost { background: var(--panel); color: var(--fg); border-color: var(--border); }
+  .hero-cmd {
+    display: inline-block; text-align: left; margin: 0 auto; max-width: 100%;
+    overflow-x: auto; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 9px; padding: 0.7rem 1rem;
+  }
+  .section-title { font-size: 1.4rem; margin: 0 0 1rem; }
+  .grid {
+    display: grid; gap: 1rem; margin-bottom: 2rem;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+  .card pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+    padding: 0.7rem 0.9rem; overflow-x: auto;
+  }
+  .card h3 { font-size: 1rem; margin: 1.1rem 0 0.4rem; }
+</style>

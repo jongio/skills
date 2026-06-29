@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400" role="img" aria-label="create-gh-pages-site placeholder 640×400">
+  <rect x="1" y="1" width="638" height="398" rx="24" fill="#0d1117" stroke="#30363d" stroke-width="2" stroke-dasharray="10 8"/>
+  <g fill="#9198a1" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" text-anchor="middle">
+    <text x="50%" y="50%" dy="-0.2em" font-size="33" font-weight="700" fill="#e6edf3">create-gh-pages-site</text>
+    <text x="50%" y="50%" dy="1.4em" font-size="23">placeholder · 640×400 · replace me</text>
+  </g>
+</svg>

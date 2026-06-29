@@ -5,9 +5,10 @@ interface Props {
   title?: string;
   description?: string;
 }
-const { title = "Skills", description = "An Astro site on GitHub Pages." } = Astro.props;
+const { title = "jongio/skills", description = "Jon Gallant's collection of cross-agent skills for AI coding agents — GitHub Copilot, Claude, and Codex." } = Astro.props;
 const base = import.meta.env.BASE_URL;
 const repo = "jongio/skills";
+const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.github.io");
 ---
 
 <!doctype html>
@@ -16,6 +17,11 @@ const repo = "jongio/skills";
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content={ogImage} />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" type="image/svg+xml" href={`${base}favicon.svg`} />
     <title>{title}</title>
     <!-- No-flash theme, before first paint. -->
@@ -79,10 +85,10 @@ const repo = "jongio/skills";
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href={base}>Skills</a>
+      <a class="brand" href={base}>jongio/skills</a>
       <nav class="topnav">
         <a href={base}>Home</a>
-        <a href={`${base}blog/`}>Blog</a>
+        <a href={`${base}catalog/`}>Skills</a>
         <a href={`${base}about/`}>About</a>
       </nav>
       <div class="bar-actions">
