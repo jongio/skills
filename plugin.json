@@ -7,7 +7,7 @@
     "url": "https://github.com/jongio"
   },
   "license": "MIT",
-  "keywords": ["copilot", "skills", "agent-skills", "canvas", "create-canvas-app"],
+  "keywords": ["copilot", "skills", "agent-skills", "canvas", "create-canvas-app", "github-pages", "create-gh-pages-site"],
   "repository": "https://github.com/jongio/skills",
   "skills": "skills/"
 }

@@ -1,0 +1,80 @@
+:root {
+  --bg: #0d1117; --panel: #161b22; --border: #30363d;
+  --fg: #e6edf3; --muted: #9198a1; --accent: #2f81f7;
+  --ok: #3fb950; --err: #f85149;
+  --radius: 12px;
+}
+:root[data-theme="light"] {
+  --bg: #fff; --panel: #f6f8fa; --border: #d0d7de;
+  --fg: #1f2328; --muted: #59636e; --accent: #0969da;
+  --ok: #1a7f37; --err: #cf222e;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  transition: background 0.2s, color 0.2s;
+}
+a { color: var(--accent); }
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  padding: 0.1em 0.4em; border-radius: 6px;
+}
+
+.topbar {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.6rem clamp(1rem, 4vw, 2rem); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10;
+  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px);
+}
+.brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+.topnav { display: flex; gap: 1rem; margin-left: 0.5rem; }
+.topnav a { color: var(--muted); text-decoration: none; font-weight: 500; }
+.topnav a.active { color: var(--fg); }
+.bar-actions { margin-left: auto; display: flex; gap: 0.4rem; align-items: center; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--fg); cursor: pointer; text-decoration: none;
+}
+.icon-btn:hover { border-color: var(--accent); }
+
+.wrap { max-width: 760px; margin: 0 auto; padding: clamp(1.5rem, 5vw, 3.5rem) 1.25rem; }
+.hero { text-align: center; margin-bottom: 1.5rem; }
+.eyebrow {
+  text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem;
+  font-weight: 600; color: var(--muted); margin: 0 0 0.5rem;
+}
+h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; margin: 0 0 0.75rem; }
+.lede { font-size: 1.1rem; color: var(--muted); max-width: 46ch; margin: 0 auto 1.25rem; }
+.muted { color: var(--muted); }
+
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem 1.4rem; margin: 1rem 0; }
+.card h2 { margin: 0 0 0.5rem; font-size: 1.2rem; }
+.row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+.btn { display: inline-block; padding: 0.55rem 1.05rem; border-radius: 9px; background: var(--accent); color: #fff; border: 1px solid transparent; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+.btn-ghost { background: transparent; color: var(--fg); border-color: var(--border); }
+
+.list { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: 0.5rem; }
+.list li { border: 1px solid var(--border); border-radius: 9px; padding: 0.6rem 0.8rem; }
+.list li b { display: block; }
+.states { margin-top: 1rem; display: grid; gap: 0.5rem; }
+.skeleton {
+  height: 2.6rem; border-radius: 9px; border: 1px solid var(--border);
+  background: linear-gradient(90deg, var(--panel), var(--border), var(--panel));
+  background-size: 200% 100%; animation: shimmer 1.2s infinite;
+}
+.callout-err { color: var(--err); border: 1px solid var(--err); border-radius: 9px; padding: 0.6rem 0.8rem; margin-top: 1rem; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } body { transition: none; } }
+
+label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
+input {
+  width: 100%; max-width: 360px; padding: 0.55rem 0.7rem; border-radius: 9px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--fg); font: inherit;
+}
+input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input[aria-invalid="true"] { border-color: var(--err); }
+.field-error { color: var(--err); min-height: 1.2rem; margin: 0.3rem 0 0.6rem; font-size: 0.9rem; }
+.field-ok { color: var(--ok); margin: 0.6rem 0 0; }

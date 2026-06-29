@@ -1,0 +1,24 @@
+{
+  "name": "astro",
+  "title": "Astro",
+  "tagline": "Fast content sites with islands.",
+  "description": "A statically-rendered Astro site that ships zero JS by default and hydrates only interactive components. Great for content, blogs, docs, and marketing pages.",
+  "framework": "Astro",
+  "tier": "ssg",
+  "language": "JavaScript",
+  "needsBuild": true,
+  "build": "astro build",
+  "output": "dist",
+  "basePathMechanism": "site + base in astro.config.mjs (withastro/action)",
+  "deploy": "withastro/action + deploy-pages",
+  "tags": ["astro", "ssg", "islands", "content"],
+  "features": [
+    "Light/dark toggle",
+    "GitHub source link",
+    "Preact islands (client:visible)",
+    "Content collections",
+    "View transitions",
+    "Scoped + global styles"
+  ],
+  "order": 2
+}

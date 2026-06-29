@@ -1,0 +1,24 @@
+{
+  "name": "eleventy",
+  "title": "Eleventy (11ty)",
+  "tagline": "Data-driven static site generator.",
+  "description": "Markdown content and structured data rendered to fast HTML by Eleventy. Collections, layouts, and a base-path-aware url filter. Good for blogs, docs, and data-backed pages.",
+  "framework": "Eleventy",
+  "tier": "data",
+  "language": "JavaScript",
+  "needsBuild": true,
+  "build": "eleventy",
+  "output": "_site",
+  "basePathMechanism": "pathPrefix via PATH_PREFIX env + url filter",
+  "deploy": "configure-pages + upload-pages-artifact + deploy-pages",
+  "tags": ["eleventy", "11ty", "ssg", "markdown", "data"],
+  "features": [
+    "Light/dark toggle",
+    "GitHub source link",
+    "Data files (_data)",
+    "Filters & shortcodes",
+    "Pagination",
+    "Collections"
+  ],
+  "order": 4
+}

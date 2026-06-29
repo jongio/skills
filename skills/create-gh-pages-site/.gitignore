@@ -1,0 +1,22 @@
+# Dependencies are not committed; templates install their own at build time.
+node_modules/
+dist/
+build/
+_site/
+
+# Eleventy / SSG output
+.cache/
+.eleventy.cache/
+
+# Skill dev tooling (optional Vally eval) writes results + a lockfile.
+package-lock.json
+vally-results/
+
+# Scratch output from the generator / tests
+.tmp/
+*.tmp
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log

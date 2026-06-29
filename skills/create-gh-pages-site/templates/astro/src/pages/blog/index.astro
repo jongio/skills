@@ -1,0 +1,25 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { getCollection } from "astro:content";
+
+const base = import.meta.env.BASE_URL;
+const posts = (await getCollection("blog")).sort(
+  (a, b) => b.data.date.valueOf() - a.data.date.valueOf(),
+);
+const fmt = (d) => d.toISOString().slice(0, 10);
+---
+
+<Layout title="Blog · __SITE_NAME__" description="Posts from a content collection.">
+  <header style="text-align:center;">
+    <h1 style="font-size:clamp(1.75rem,5vw,2.5rem);margin:0 0 .75rem;">Blog</h1>
+    <p class="muted">Loaded from a typed content collection.</p>
+  </header>
+  <ul class="posts">
+    {posts.map((post) => (
+      <li>
+        <a href={`${base}blog/${post.id}/`}>{post.data.title}</a>
+        <time class="muted">{fmt(post.data.date)}</time>
+      </li>
+    ))}
+  </ul>
+</Layout>

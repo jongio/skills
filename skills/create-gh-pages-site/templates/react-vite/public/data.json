@@ -1,0 +1,8 @@
+{
+  "features": [
+    { "name": "Hooks", "detail": "useState, useEffect, useReducer, useContext." },
+    { "name": "Context", "detail": "A persisted light/dark theme provider." },
+    { "name": "Routing", "detail": "React Router with a base-path-aware basename." },
+    { "name": "Code splitting", "detail": "Lazy routes loaded on demand." }
+  ]
+}

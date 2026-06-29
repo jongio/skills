@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="__SITE_NAME__ — a static site on GitHub Pages." />
+    <title>__SITE_NAME__</title>
+    <!-- No-flash theme: set data-theme before first paint. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("theme") ||
+            (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./index.html">__SITE_NAME__</a>
+      <nav class="topnav">
+        <a href="./index.html" aria-current="page">Home</a>
+        <a href="./about.html">About</a>
+      </nav>
+      <div class="bar-actions">
+        <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle color theme" title="Toggle theme"></button>
+        <a class="icon-btn" href="https://github.com/__REPO_SLUG__" target="_blank" rel="noopener" aria-label="View source on GitHub" title="View source on GitHub">
+          <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <header class="hero">
+        <p class="eyebrow">GitHub Pages · static</p>
+        <h1>__SITE_NAME__</h1>
+        <p class="lede">
+          A zero-build static site — and a working reference for what the web
+          platform gives you with no framework: theming, interactivity, data, and
+          forms in plain HTML, CSS, and JS.
+        </p>
+      </header>
+
+      <section class="card" aria-labelledby="tabs-h">
+        <h2 id="tabs-h">Tabs</h2>
+        <p class="muted">An accessible tab set wired with a few lines of JS.</p>
+        <div class="tabs" role="tablist" aria-label="Demo tabs">
+          <button class="tab" role="tab" aria-selected="true" id="tab-html" aria-controls="panel-html">HTML</button>
+          <button class="tab" role="tab" aria-selected="false" id="tab-css" aria-controls="panel-css">CSS</button>
+          <button class="tab" role="tab" aria-selected="false" id="tab-js" aria-controls="panel-js">JS</button>
+        </div>
+        <div class="tabpanel" role="tabpanel" id="panel-html" aria-labelledby="tab-html">Semantic markup with landmarks and native controls.</div>
+        <div class="tabpanel" role="tabpanel" id="panel-css" aria-labelledby="tab-css" hidden>Custom properties power the light/dark theme up top.</div>
+        <div class="tabpanel" role="tabpanel" id="panel-js" aria-labelledby="tab-js" hidden>No build step — this script is served exactly as written.</div>
+      </section>
+
+      <section class="card" aria-labelledby="fetch-h">
+        <h2 id="fetch-h">Fetch &amp; states</h2>
+        <p class="muted">Loads <code>./assets/data.json</code> with loading, error, and data states.</p>
+        <div class="row">
+          <button id="load-btn" class="btn" type="button">Load features</button>
+          <button id="fail-btn" class="btn btn-ghost" type="button">Simulate error</button>
+        </div>
+        <div id="fetch-out" class="fetch-out" aria-live="polite"></div>
+      </section>
+
+      <section class="card" aria-labelledby="form-h">
+        <h2 id="form-h">Form validation</h2>
+        <p class="muted">Native constraints plus a custom inline message — no library.</p>
+        <form id="demo-form" novalidate>
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required placeholder="you@example.com" />
+          <p class="field-error" id="email-error" role="alert"></p>
+          <button class="btn" type="submit">Subscribe</button>
+          <p class="field-ok" id="form-ok" hidden>Thanks — that's a valid email.</p>
+        </form>
+      </section>
+
+      <section class="card" aria-labelledby="native-h">
+        <h2 id="native-h">Native UI elements</h2>
+        <details>
+          <summary>What ships in this template?</summary>
+          <p>Theming, tabs, a fetch demo, a validated form, and this <code>&lt;details&gt;</code> — all dependency-free.</p>
+        </details>
+        <p class="row"><button id="open-dialog" class="btn btn-ghost" type="button">Open a &lt;dialog&gt;</button></p>
+        <dialog id="demo-dialog">
+          <form method="dialog">
+            <h3>Native modal</h3>
+            <p>The <code>&lt;dialog&gt;</code> element gives you a real modal with focus trapping for free.</p>
+            <button class="btn" value="ok">Close</button>
+          </form>
+        </dialog>
+      </section>
+
+      <footer class="foot">
+        <p>Built with the <code>static-html</code> template · <span id="year"></span></p>
+      </footer>
+    </main>
+    <script src="./assets/main.js"></script>
+  </body>
+</html>
