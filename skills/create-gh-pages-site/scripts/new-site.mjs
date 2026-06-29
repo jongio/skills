@@ -320,7 +320,12 @@ function main() {
     }
     console.log(`  ${step++}. Commit and push to the repo's main branch.`);
     console.log(`  ${step++}. Settings → Pages → Source → "GitHub Actions".`);
-    console.log(`  ${step++}. The deploy workflow publishes on push; the URL appears in the Actions run.\n`);
+    console.log(`  ${step++}. The deploy workflow publishes on push; the URL appears in the Actions run.`);
+    if (args.repo) {
+      console.log(`  ${step++}. Set the repo "Website" link to the Pages URL:`);
+      console.log(`       gh repo edit ${replacements.__REPO_SLUG__} --homepage ${replacements.__SITE_URL__}`);
+    }
+    console.log();
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);

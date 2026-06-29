@@ -130,7 +130,14 @@ e.g. *"Astro site → octocat/blog, base `/blog/` — go?"*
    `gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow` (or PUT to
    update). After the first push to `main`, the workflow runs and the live URL
    appears in the Actions run summary and under Settings → Pages.
-6. **Verify it actually works** (see "Validate" below) — don't claim success on a
+6. **Set the repo website link** to the Pages URL (the "Website" field in the repo
+   header — same as ticking *Settings → "Use your GitHub Pages website"*). This is
+   just the repo's `homepage`; point it at the site URL the generator prints:
+   `gh repo edit <owner>/<repo> --homepage <site-url>` (or
+   `gh api -X PATCH repos/<owner>/<repo> -f homepage=<site-url>`). Offer to set the
+   exact URL, or let the user supply a custom domain instead. There's no separate
+   "use Pages" boolean — setting `homepage` to the Pages URL *is* the checkbox.
+7. **Verify it actually works** (see "Validate" below) — don't claim success on a
    green workflow alone.
 
 ## Stamp a site — the generator
@@ -202,15 +209,15 @@ the domain and drop `base`. Don't automate DNS — explain the steps.
 ## Template registry & contributing
 
 Templates are bundled in `templates/<name>/`, each with a `template.json` manifest.
-The bundled `gallery/` renders the catalog from those manifests
-(`scripts/build-catalog.mjs` regenerates `gallery/templates.json`; a test gates
-drift). New templates follow the contract in `CONTRIBUTING.md`: a folder with a
-`deploy.yml`, base-path handling via the sentinels, a `README.md`, and a manifest.
+The generator reads these manifests to stamp a site. New templates follow the
+contract in `CONTRIBUTING.md`: a folder with a `deploy.yml`, base-path handling via
+the sentinels, a `README.md`, and a manifest.
 
 A live, community-contributable registry of these templates is published at
 **[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)**, with
 a browsable gallery (live previews of every template) at
-**https://jongio.github.io/gh-pages-templates/**. The generator's
+**https://jongio.github.io/gh-pages-templates/**. That gallery is the single home
+for browsing/previewing — this skill doesn't bundle its own copy. The generator's
 `--registry <owner/repo>` flag fetches templates from there instead of the bundled
 copies:
 
@@ -247,6 +254,9 @@ Run the skill's own tests with `npm test` (generator + workflow + catalog).
   first-party Actions flow these templates ship.
 - **Never** forget to set **Source → GitHub Actions** in Settings → Pages; the
   workflow can't publish until Pages is enabled for Actions.
+- **Don't** leave the repo "Website" link blank — set `homepage` to the Pages URL
+  (`gh repo edit --homepage`) so visitors find the site; it's the same as the
+  "Use your GitHub Pages website" checkbox.
 - **Never** claim success because the workflow is green — load the URL and check an
   asset and an internal link actually resolve.
 - **Don't** hand-roll a base-path setup when the generator + sentinels already do

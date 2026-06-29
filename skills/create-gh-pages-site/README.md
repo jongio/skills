@@ -49,7 +49,8 @@ All five deploy via the **GitHub Actions** Pages source using the current
 first-party actions (`configure-pages@v5` → `upload-pages-artifact@v3` →
 `deploy-pages@v4`; Astro/Jekyll use their official actions). No `gh-pages` branch.
 
-Browse them in the [gallery](gallery/) (a static site that itself deploys to Pages).
+Browse them in the live [gallery with previews](https://jongio.github.io/gh-pages-templates/),
+hosted from the [`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates) registry.
 
 ## Use it
 
@@ -85,7 +86,9 @@ node scripts/new-site.mjs --list
 ```
 
 Then push to `main` and set **Settings → Pages → Source → GitHub Actions**. The
-workflow publishes on every push; the live URL appears in the Actions run.
+workflow publishes on every push; the live URL appears in the Actions run. Point
+the repo's "Website" link at it with `gh repo edit OWNER/REPO --homepage <site-url>`
+(the same as checking *"Use your GitHub Pages website"*).
 
 ## Install options
 
@@ -115,22 +118,23 @@ After any install, reload skills with `/skills reload` or a new session.
 ## A contributable registry
 
 Templates live in `templates/<name>/`, each with a `template.json` manifest the
-gallery and generator read. Adding a template is a folder + a manifest — see
+generator reads (and the [`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)
+registry gallery renders). Adding a template is a folder + a manifest — see
 [`CONTRIBUTING.md`](CONTRIBUTING.md). The generator's `--registry owner/repo` flag
-can fetch templates from a remote registry, so these can graduate into a standalone
-`jongio/gh-pages-templates` repo without changing the skill.
+can fetch templates from that remote registry, so the browsable gallery + live
+previews live there, not in this skill.
 
 ## Run the tests
 
 ```sh
 npm test
-# node test/generator.test.mjs && node test/workflow.test.mjs && node test/catalog.test.mjs
+# node test/generator.test.mjs && node test/workflow.test.mjs
 ```
 
 No dependencies to install — the tests run on bare `node` (18+). They stamp every
-template, assert the base path is injected with no leftover placeholders, validate
-each deploy workflow (permissions, concurrency, official actions, no deprecated
-ones), and gate the gallery catalog against the manifests.
+template, assert the base path is injected with no leftover placeholders, and
+validate each deploy workflow (permissions, concurrency, official actions, no
+deprecated ones).
 
 ## Layout
 
@@ -138,15 +142,12 @@ ones), and gate the gallery catalog against the manifests.
 SKILL.md                     The skill (authoring contract + workflow)
 templates/                   The bundled, deployable templates
   static-html/  astro/  react-vite/  eleventy/  jekyll/
-    template.json            Manifest (consumed by the gallery + generator)
+    template.json            Manifest (consumed by the generator)
     .github/workflows/deploy.yml   Pages deploy workflow
-gallery/                     Static "pick a template" site (deploys to Pages)
-  templates.json             Generated catalog (build-catalog.mjs)
 scripts/
   new-site.mjs               Generator — stamp a site, inject the base path
-  build-catalog.mjs          Regenerate the gallery catalog from manifests
   install-local.ps1          Install this skill into $COPILOT_HOME/skills
-test/                        Generator, workflow, and catalog tests (bare node)
+test/                        Generator and workflow tests (bare node)
 ```
 
 ## License
