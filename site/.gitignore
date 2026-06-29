@@ -1,0 +1,15 @@
+# build output
+dist/
+# generated types
+.astro/
+# dependencies
+node_modules/
+# keep the lockfile tracked for reproducible CI builds (repo root ignores it globally)
+!package-lock.json
+# logs
+*.log*
+# environment
+.env
+.env.production
+# macOS
+.DS_Store
