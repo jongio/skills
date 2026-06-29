@@ -1,0 +1,71 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { getCollection, render } from "astro:content";
+
+export async function getStaticPaths() {
+  const skills = await getCollection("skills");
+  return skills.map((skill) => ({ params: { slug: skill.id }, props: { skill } }));
+}
+
+const { skill } = Astro.props;
+const { Content } = await render(skill);
+const base = import.meta.env.BASE_URL;
+const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPath}`;
+---
+
+<Layout title={`${skill.data.title} · jongio/skills`} description={skill.data.tagline}>
+  <p style="margin:0 0 1rem;"><a href={`${base}catalog/`}>← All skills</a></p>
+
+  <header class="skill-head">
+    <img class="skill-hero" src={`${base}${skill.data.thumb}`} alt={`${skill.data.title} preview`} />
+    <h1>{skill.data.title}</h1>
+    <p class="muted lede">{skill.data.tagline}</p>
+    <p class="usewhen"><strong>Use when:</strong> {skill.data.useWhen}</p>
+    <p>
+      <a class="btn" href={repoUrl}>Source &amp; README</a>
+    </p>
+  </header>
+
+  <section class="card">
+    <h2>Install</h2>
+    <p class="muted" style="margin:0.8rem 0 0.3rem;">Ask your agent</p>
+    <pre><code>{`install ${skill.data.title} from jongio/skills`}</code></pre>
+    {skill.data.install.map((step) => (
+      <>
+        <p class="muted" style="margin:0.8rem 0 0.3rem;">{step.label}</p>
+        <pre><code>{step.cmd}</code></pre>
+      </>
+    ))}
+    <p class="muted">Then reload with <code>/skills reload</code> or start a new session.</p>
+  </section>
+
+  <article class="prose">
+    <Content />
+  </article>
+</Layout>
+
+<style>
+  .skill-head { margin-bottom: 1.5rem; }
+  .skill-hero {
+    width: 100%; aspect-ratio: 16 / 9; object-fit: contain;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--panel); margin-bottom: 1.1rem; display: block;
+    padding: 1rem;
+  }
+  .skill-head h1 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: clamp(1.6rem, 5vw, 2.3rem); margin: 0 0 0.5rem;
+  }
+  .lede { font-size: 1.05rem; }
+  .usewhen {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 9px; padding: 0.7rem 0.9rem; font-size: 0.95rem;
+  }
+  .card pre, .prose pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+    padding: 0.7rem 0.9rem; overflow-x: auto;
+  }
+  .prose :global(h2) { font-size: 1.25rem; margin: 1.8rem 0 0.6rem; }
+  .prose :global(h3) { font-size: 1.05rem; margin: 1.3rem 0 0.5rem; }
+  .prose :global(li) { margin: 0.25rem 0; }
+</style>

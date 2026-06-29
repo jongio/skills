@@ -1,0 +1,63 @@
+---
+import Layout from "../layouts/Layout.astro";
+---
+
+<Layout title="About · jongio/skills" description="About jongio/skills — a cross-agent collection of skills for AI coding agents.">
+  <header style="text-align:center;">
+    <h1 style="font-size:clamp(1.75rem,5vw,2.5rem);margin:0 0 .75rem;">About</h1>
+  </header>
+
+  <section class="card">
+    <h2>What this is</h2>
+    <p>
+      <a href="https://github.com/jongio/skills">jongio/skills</a> is Jon Gallant's
+      collection of skills for AI coding agents. It's a general-purpose monorepo:
+      each skill lives in its own folder under <code>skills/</code> and can be
+      installed individually or all at once.
+    </p>
+    <p class="muted">
+      A skill is a packaged capability the agent loads on demand. Once installed it's
+      available straight from the composer as <code>/&lt;skill-name&gt;</code>.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Works across agents</h2>
+    <p>
+      The skills use the <a href="https://github.com/vercel-labs/skills">SKILL.md</a>
+      format, so they work with <strong>GitHub Copilot</strong>, <strong>Claude</strong>,
+      <strong>Codex</strong>, and any agent that supports it. The repo also plugs into
+      the GitHub Copilot <strong>plugin</strong> system — add it as a marketplace, or
+      install the whole repo as a single plugin.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Install</h2>
+    <p>Ask your agent — in Copilot (or any agent that supports plugins), just say:</p>
+    <pre><code>install jongio/skills</code></pre>
+    <p class="muted">Or use the Skills CLI for the whole repo:</p>
+    <pre><code>npx skills add jongio/skills --all</code></pre>
+    <p class="muted">
+      Or grab one skill at a time — see <a href="/skills/catalog/">the catalog</a>.
+      After any install, reload with <code>/skills reload</code>.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Details</h2>
+    <ul>
+      <li><strong>Author</strong> — <a href="https://github.com/jongio">Jon Gallant</a></li>
+      <li><strong>Source</strong> — <a href="https://github.com/jongio/skills">github.com/jongio/skills</a></li>
+      <li><strong>License</strong> — MIT</li>
+    </ul>
+    <p class="muted">This site itself was scaffolded by the <code>create-gh-pages-site</code> skill.</p>
+  </section>
+</Layout>
+
+<style>
+  .card pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+    padding: 0.7rem 0.9rem; overflow-x: auto;
+  }
+</style>

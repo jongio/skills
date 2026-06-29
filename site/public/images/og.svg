@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Social card placeholder 1200×630">
+  <rect x="1" y="1" width="1198" height="628" rx="24" fill="#0d1117" stroke="#30363d" stroke-width="2" stroke-dasharray="10 8"/>
+  <g fill="#9198a1" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" text-anchor="middle">
+    <text x="50%" y="50%" dy="-0.2em" font-size="53" font-weight="700" fill="#e6edf3">Social card</text>
+    <text x="50%" y="50%" dy="1.4em" font-size="37">placeholder · 1200×630 · replace me</text>
+  </g>
+</svg>

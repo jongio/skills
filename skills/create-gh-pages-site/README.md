@@ -8,6 +8,11 @@ injects the correct **base path** for your repo, adds the current official GitHu
 Actions Pages workflow, drops it into your repo (the **current repo by default**, or
 a new one), and tells you how to turn Pages on.
 
+It doesn't stop at the template's demo content, either: it **digests your repo**
+(README, manifests, entry points, docs) and authors a site that's actually about
+your project — a CLI reference, an API/usage page, a feature tour, or a catalog of
+parts — and drops in labeled image placeholders you swap for real art.
+
 ## Quickstart
 
 **1. Install the skill** (global, for GitHub Copilot):
@@ -53,6 +58,27 @@ first-party actions (`configure-pages@v5` → `upload-pages-artifact@v3` →
 
 Browse them in the live [gallery with previews](https://jongio.github.io/gh-pages-templates/),
 hosted from the [`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates) registry.
+
+## Tailored to your repo, not a demo
+
+A stamped template is a skeleton, not the deliverable. After stamping, the skill
+reads your repo and rewrites the content to match it:
+
+- **`scripts/digest-repo.mjs`** analyzes the repo and classifies it — `cli`,
+  `library`, `app`, `action`, `collection`, `docs`, or `site` — and pulls out the
+  name, pitch, install commands, README usage examples, badges, docs, existing
+  images, and sub-projects. That drives *which* kind of site gets built: a command
+  reference for a CLI, an API/usage page for a library, a feature tour for an app, a
+  catalog for a monorepo.
+- **`scripts/make-placeholder.mjs`** drops labeled placeholder images (logo, social
+  card, hero, screenshots) into the site plus an `IMAGES.md` checklist telling you
+  what to supply and at what size. Real images the repo already has are reused
+  instead.
+
+```sh
+node scripts/digest-repo.mjs --dir . --json          # see what the author sees
+node scripts/make-placeholder.mjs --out site/public/images --preset cli --repo octocat/mytool
+```
 
 ## Use it
 
@@ -140,23 +166,26 @@ templates.
 
 ```sh
 npm test
-# node test/generator.test.mjs
+# node test/generator.test.mjs && node test/digest.test.mjs
 ```
 
 No dependencies to install — the tests run on bare `node` (18+), fully offline. They
 exercise the generator's base-path math, repo detection, and template stamping
 against a local fixture (sentinels fully replaced, `template.json`/`node_modules`
-skipped, user-site collapse to `/`). Template + deploy-workflow validation lives in
-the registry.
+skipped, user-site collapse to `/`), plus the repo-digest classifier and the
+placeholder generator. Template + deploy-workflow validation lives in the registry.
 
 ## Layout
 
 ```
 SKILL.md                     The skill (authoring contract + workflow)
 scripts/
+scripts/
   new-site.mjs               Generator — fetch a template, inject the base path
+  digest-repo.mjs            Analyze a repo → JSON signals + type classification
+  make-placeholder.mjs       Generate placeholder images + an IMAGES.md checklist
   install-local.ps1          Install this skill into $COPILOT_HOME/skills
-test/                        Generator tests (bare node, offline fixture)
+test/                        Generator and digest tests (bare node, offline fixture)
 ```
 
 ## License

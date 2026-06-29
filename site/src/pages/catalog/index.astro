@@ -1,0 +1,34 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import SkillCard from "../../components/SkillCard.astro";
+import { getCollection } from "astro:content";
+
+const base = import.meta.env.BASE_URL;
+const skills = (await getCollection("skills")).sort(
+  (a, b) => a.data.order - b.data.order,
+);
+---
+
+<Layout title="Skills · jongio/skills" description="The skills in jongio/skills — install any one, or the whole repo.">
+  <header style="text-align:center;margin-bottom:1.75rem;">
+    <h1 style="font-size:clamp(1.75rem,5vw,2.5rem);margin:0 0 .5rem;">Skills</h1>
+    <p class="muted">{skills.length} skills · install one, or the whole repo.</p>
+  </header>
+  <div class="grid">
+    {skills.map((s) => (
+      <SkillCard
+        href={`${base}catalog/${s.id}/`}
+        title={s.data.title}
+        tagline={s.data.tagline}
+        thumb={s.data.thumb}
+      />
+    ))}
+  </div>
+</Layout>
+
+<style>
+  .grid {
+    display: grid; gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+</style>

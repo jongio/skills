@@ -8,7 +8,11 @@ description: >-
   correct base path for the target repo (the #1 thing people get wrong), adds the
   current official GitHub Actions Pages deploy workflow, and sets it up in the
   user's current repo by default (the repo in context) — or a new one if asked —
-  and explains how to turn Pages on. Do NOT use for
+  and explains how to turn Pages on. Crucially, it does not stop at the template's
+  demo content: it digests the target repo (README, manifests, entry points, docs)
+  and authors a site that is actually about that repo — a CLI reference, an
+  API/usage page, a feature tour, or a catalog of parts as appropriate — with
+  labeled image placeholders the user swaps in. Do NOT use for
   non-Pages hosting (Vercel/Netlify/Azure), for deploying an existing app without
   a Pages target, or for plain web pages unrelated to GitHub Pages.
 ---
@@ -20,6 +24,13 @@ hard part of GitHub Pages isn't the HTML — it's the deploy plumbing and the
 **base-path trap**. This skill owns both: it stamps a vetted template, sets the
 base path for the exact repo, ships the current official Pages workflow, and walks
 the user through enabling Pages.
+
+It also never stops at the template's demo content. A stamped template is a
+**skeleton, not the deliverable** — the skill reads the target repo and authors a
+site about *that* project: real name and pitch, the right kind of reference (CLI,
+library, app, or catalog), real install/usage pulled from the repo, and labeled
+image placeholders the user can drop real art into. Shipping a site that still says
+"Hello, Astro" for someone's CLI is a failure, even if it deploys.
 
 ## When to use which template
 
@@ -117,6 +128,13 @@ only for what's missing, one focused question at a time, using the `ask_user` to
      otherwise it's a project site (base `/repo/`).
 3. **Title?** Optional — default to the repo name; never block on it.
 
+You usually don't need to ask "what should the site say?" — the **content comes from
+the repo** (you digest it after stamping; see "Digest the repo, then author it").
+When the target repo is the current/an existing one, run `digest-repo.mjs` early to
+confirm the type and let it inform the template choice (e.g. a `cli` repo is a great
+fit for `astro` or `static-html` with a command reference). If the repo is empty or
+brand-new, fall back to asking what the site should cover.
+
 Skip any question the prompt already answered: *"an Astro blog for octocat/blog"*
 needs no interview (template `astro`, repo `octocat/blog`). For a bare *"put this on
 Pages"* inside a repo, assume the current repo and ask only for the template. Ask
@@ -141,20 +159,27 @@ go?"*
      blindly overwriting it.
    - *New repo (only when asked)*: create it (e.g. `gh repo create <name> --public`),
      stamp into it, and push. Match the repo name you used for the base path.
-5. **Enable Pages.** Tell the user (or do it with their approval):
+5. **Digest the repo and author the site** (see "Digest the repo, then author it"
+   below). This is the step that makes the site *real*: run the digest, replace
+   every default page/section with repo-derived content of the right kind, add
+   image placeholders + an `IMAGES.md`, and **prompt the user for the real images**
+   (they can paste screenshots straight into the chat). Never skip to enabling Pages
+   on the demo content.
+6. **Enable Pages.** Tell the user (or do it with their approval):
    **Settings → Pages → Source → GitHub Actions**. By CLI:
    `gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow` (or PUT to
    update). After the first push to `main`, the workflow runs and the live URL
    appears in the Actions run summary and under Settings → Pages.
-6. **Set the repo website link** to the Pages URL (the "Website" field in the repo
+7. **Set the repo website link** to the Pages URL (the "Website" field in the repo
    header — same as ticking *Settings → "Use your GitHub Pages website"*). This is
    just the repo's `homepage`; point it at the site URL the generator prints:
    `gh repo edit <owner>/<repo> --homepage <site-url>` (or
    `gh api -X PATCH repos/<owner>/<repo> -f homepage=<site-url>`). Offer to set the
    exact URL, or let the user supply a custom domain instead. There's no separate
    "use Pages" boolean — setting `homepage` to the Pages URL *is* the checkbox.
-7. **Verify it actually works** (see "Validate" below) — don't claim success on a
-   green workflow alone.
+8. **Verify it actually works** (see "Validate" below) — don't claim success on a
+   green workflow alone, and don't claim success while template default copy or
+   "Hello, world" demo content is still on the page.
 
 ## Stamp a site — the generator
 
@@ -198,6 +223,113 @@ The generator replaces a small set of sentinels (`__BASE_PATH__`, `__BASE_URL__`
 `__SITE_NAME__`, `__SITE_URL__`, `__SITE_ORIGIN__`, `__REPO_SLUG__`, `__PKG_NAME__`)
 across the template — so injection is deterministic and the result has no
 placeholders left. After stamping you may hand-edit content freely.
+
+## Digest the repo, then author it (never ship the template defaults)
+
+Stamping gives you a working skeleton with **demo content**. The job is only half
+done. Now make the site about the actual repo. This is not optional polish — it's
+the deliverable.
+
+### 1. Run the digest
+
+```sh
+node scripts/digest-repo.mjs --dir <path-to-repo> --json
+```
+
+It returns deterministic signals you build from: `name`, `description` (the pitch),
+`repoSlug`, `license`, a `type` classification (`cli` | `library` | `app` |
+`action` | `collection` | `docs` | `site`) with the reasons behind it, suggested
+`install` commands, README `usageExamples` (code fences), `badges`, `docFiles`,
+existing `images` (with role hints like `logo`/`hero`/`screenshot`), `languages`,
+and `subProjects` (for monorepos/collections). Read the repo's README and key docs
+yourself too — the digest points you at them; it doesn't replace judgment.
+
+### 2. Build the right *kind* of site for the type
+
+| Type | Tell-tale signals | Author the site around… |
+| --- | --- | --- |
+| `cli` | `bin`, console_scripts, `[[bin]]`, `--help` in README | Install + Quickstart, then a **command/flag reference** (a section or page per command), copy-paste examples, config/exit codes. Hero = terminal demo. |
+| `library` | `main`/`exports`, `[lib]`, import examples | Install, an **import + usage** snippet, an **API reference** (exported functions/types from the README/docs), examples, badges. Hero = a concept diagram. |
+| `app` | web-framework dep, `index.html`, `src/` | A **feature tour** with screenshots, a "Get started"/live-demo CTA. Hero = an app screenshot. |
+| `action` | `action.yml` | A `uses:` snippet, an **inputs/outputs table**, an example workflow. |
+| `collection` | `plugin.json`/`marketplace.json` + `skills/`, workspaces, `packages/` | A **catalog**: one card/detail per `subProject` (its pitch + install), plus a top-level install for the whole thing. Hero = a banner; per-item thumbnails. |
+| `docs` | many Markdown docs, little code | A **docs nav + content**, pulling the existing Markdown in. |
+| `site` / unknown | none of the above | A clean landing built from the repo's pitch and links. If the shape is unclear, ask the user what sections they want. |
+
+### 3. Authoring rules
+
+- **Replace every default.** No template demo copy survives — not the sample hero,
+  not "Hello, Astro/world", not the example blog posts, not lorem. After building,
+  grep the output for the template's stock phrases; none should remain.
+- **Use real values from the digest:** the repo's name and `description` as the
+  title/tagline, the `install` commands verbatim, the README `usageExamples` as
+  real code blocks, `badges`, `license`, and links to the repo and each
+  `subProject`. **Don't invent** features, commands, or APIs you can't see in the
+  repo — if something's unclear, leave a visible `TODO` for the user rather than
+  fabricate.
+- **Fit the template's content model.** Use content collections (Astro/Eleventy:
+  one entry per command/skill/post), pages (React/static), etc. Add or rename
+  routes to match the content (e.g. a `commands/` or `catalog/` section) instead of
+  forcing everything into the demo "blog". Keep the GitHub source link and the
+  base-path-aware internal links the template already wires — never hand-write
+  absolute `/...` links (use the template's base helper, or it breaks on a project
+  site).
+
+### 4. Add image placeholders the user can supply
+
+Real sites need art the agent can't produce. Drop in **obvious placeholders** plus
+a checklist so the user knows exactly what to provide:
+
+```sh
+node scripts/make-placeholder.mjs --out <site>/<images-dir> --preset <type> --repo owner/name
+```
+
+`--preset` is the repo type (`cli`/`library`/`app`/`collection`/`site`). It writes
+labeled SVG placeholders (logo, social card, favicon, hero, and type-specific
+shots) and an `IMAGES.md` manifest listing each file's purpose and recommended
+dimensions. Then:
+
+- **Reference them** from the pages you author — hero, top-bar logo, the OG/social
+  meta tag, and per-item thumbnails for a catalog.
+- **Reuse real images first.** If the digest found an existing logo or screenshot
+  (e.g. a `docs/*.png`), use it instead of a placeholder.
+- **Put images where the template serves static files:**
+  - `astro`, `react-vite` → `public/images/` (served at `${BASE_URL}images/…`)
+  - `static-html` → `assets/images/` (relative `./assets/images/…`)
+  - `eleventy` → `src/assets/images/` (through the `url` filter)
+  - `jekyll` → `assets/images/` (via `relative_url`)
+- **Leave `IMAGES.md` in the images dir** as the hand-off, and tell the user it's
+  there. A placeholder still deploys fine; it just visibly says "replace me".
+
+### Ask the user for the real images
+
+Placeholders unblock the deploy, but a finished site needs real art. After you've
+authored the pages and know exactly which images the site references, **prompt the
+user for them** with a short, specific checklist — don't make them guess. For each
+image give the role, the filename it should land at, and the recommended size, e.g.:
+
+> This site needs a few images. You can **paste a screenshot straight into the chat**
+> and I'll drop it in, or point me at a file/URL:
+> 1. **Social card** → `og.png`, 1200×630 (used for link previews)
+> 2. **Hero** → `hero.png`, 1280×640
+> 3. **Skill thumbnail** → `thumb-create-gh-pages-site.png`, 640×400
+>
+> Send any you have; I'll keep placeholders for the rest.
+
+Then, as the user supplies them:
+
+- **Accept pasted screenshots.** Images pasted into the conversation are available
+  to you directly — save each to the right path (matching the reference or
+  `IMAGES.md`), no upload step needed. A local file path or URL works too.
+- **Don't block on it.** Anything the user doesn't provide keeps its placeholder;
+  the site still builds and deploys. Update `IMAGES.md` to tick off what's now real.
+- **Only ask for what the site actually uses.** Don't request a logo or a hero the
+  page never references (drop unused placeholders instead of asking for art for them).
+
+### Helper scripts (alongside `new-site.mjs`)
+
+- `scripts/digest-repo.mjs` — analyze a repo → JSON signals + a type classification.
+- `scripts/make-placeholder.mjs` — generate placeholder images + an `IMAGES.md`.
 
 ## Per-template notes
 
@@ -256,19 +388,26 @@ land in the registry, not here.
 
 ## Validate — don't claim done on a green check
 
-1. **Build it.** For `astro`/`react-vite`/`eleventy`, run `npm install` then
+1. **Content check first.** Confirm the site is about the repo, not the template:
+   the title/tagline, install commands, and examples are the repo's real values, and
+   **no template demo copy survives** (grep the built output for the template's stock
+   phrases — "Hello", "islands", "lorem", the sample post titles — and for leftover
+   `__…__` sentinels). The page kind matches the repo type (CLI ref / API ref /
+   feature tour / catalog). Image placeholders exist and `IMAGES.md` is present.
+2. **Build it.** For `astro`/`react-vite`/`eleventy`, run `npm install` then
    `npm run build` and confirm it exits 0 and emits the output dir
    (`dist` / `_site`). For `jekyll`, `bundle exec jekyll build` if Ruby is present.
-2. **Check the base path.** Open the built output and confirm asset/link URLs carry
+3. **Check the base path.** Open the built output and confirm asset/link URLs carry
    the project prefix (`/repo/...`) — not bare `/...`. This is the failure mode that
    "looks deployed but renders blank."
-3. **After deploy**, load the live `page_url` from the Actions run; click an
+4. **After deploy**, load the live `page_url` from the Actions run; click an
    internal link and (for the SPA) refresh a sub-route to confirm the `404.html`
    fallback works.
-4. Only then report it as working.
+5. Only then report it as working.
 
-Run the skill's own tests with `npm test` (the generator, offline via a fixture).
-Template/workflow validation lives in the `jongio/gh-pages-templates` registry.
+Run the skill's own tests with `npm test` (the generator + the repo-digest and
+placeholder checks, offline via a fixture). Template/workflow validation lives in
+the `jongio/gh-pages-templates` registry.
 
 ## Footguns
 
@@ -286,5 +425,14 @@ Template/workflow validation lives in the `jongio/gh-pages-templates` registry.
   "Use your GitHub Pages website" checkbox.
 - **Never** claim success because the workflow is green — load the URL and check an
   asset and an internal link actually resolve.
+- **Never** ship the template's demo content. A stamped template that still says
+  "Hello, Astro" (or lists the sample blog posts) for someone's CLI or library is a
+  failure — digest the repo and author real content of the right kind.
+- **Never** fabricate features, commands, or APIs to fill the page. Author only what
+  the repo actually shows; leave a visible `TODO` when unsure.
+- **Don't** leave bare image references with nothing behind them — add the
+  placeholders + `IMAGES.md`, or reuse the repo's existing images.
+- **Don't** ship placeholders silently — tell the user which real images the site
+  needs and that they can paste a screenshot into the chat to fill each one.
 - **Don't** hand-roll a base-path setup when the generator + sentinels already do
   it correctly per framework.

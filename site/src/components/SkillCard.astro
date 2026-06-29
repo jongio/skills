@@ -1,0 +1,94 @@
+---
+interface Props {
+  href: string;
+  title: string;
+  tagline: string;
+  thumb: string;
+}
+const { href, title, tagline, thumb } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const install = `install ${title} from jongio/skills`;
+---
+
+<article class="skill-card">
+  <a class="skill-card__link" href={href}>
+    <img class="skill-thumb" src={`${base}${thumb}`} alt={`${title} preview`} loading="lazy" />
+    <div class="skill-body">
+      <h3>{title}</h3>
+      <p class="muted">{tagline}</p>
+      <span class="skill-more">View skill →</span>
+    </div>
+  </a>
+  <div class="skill-install">
+    <p class="skill-install__label muted">Install in your agent</p>
+    <pre><code>{install}</code></pre>
+  </div>
+</article>
+
+<style>
+  .skill-card {
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .skill-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .skill-card__link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+  }
+  .skill-thumb {
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    object-fit: contain;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    display: block;
+    padding: 0.75rem;
+  }
+  .skill-body {
+    padding: 1rem 1.1rem 1.2rem;
+  }
+  .skill-body h3 {
+    margin: 0 0 0.4rem;
+    font-size: 1.1rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .skill-body p {
+    margin: 0 0 0.8rem;
+    font-size: 0.95rem;
+  }
+  .skill-more {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.92rem;
+  }
+  .skill-install {
+    margin-top: auto;
+    padding: 0.9rem 1.1rem 1.1rem;
+    border-top: 1px solid var(--border);
+  }
+  .skill-install__label {
+    margin: 0 0 0.4rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  .skill-install pre {
+    margin: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 0.6rem 0.8rem;
+    overflow-x: auto;
+    font-size: 0.88rem;
+  }
+</style>

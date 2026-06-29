@@ -1,0 +1,88 @@
+---
+import Layout from "../layouts/Layout.astro";
+import SkillCard from "../components/SkillCard.astro";
+import { getCollection } from "astro:content";
+
+const base = import.meta.env.BASE_URL;
+const skills = (await getCollection("skills")).sort(
+  (a, b) => a.data.order - b.data.order,
+);
+---
+
+<Layout>
+  <header class="hero">
+    <p class="eyebrow">Cross-agent skills · GitHub Copilot · Claude · Codex</p>
+    <h1>jongio/skills</h1>
+    <p class="lede">
+      Jon Gallant's collection of skills for AI coding agents. Each skill lives in
+      its own folder and installs individually or all at once — works with any agent
+      that supports the <a href="https://github.com/vercel-labs/skills">SKILL.md</a> format.
+    </p>
+    <div class="cta">
+      <a class="btn" href={`${base}catalog/`}>Browse skills</a>
+      <a class="btn btn-ghost" href="https://github.com/jongio/skills">View on GitHub</a>
+    </div>
+    <pre class="hero-cmd"><code>npx skills add jongio/skills --all</code></pre>
+  </header>
+
+  <section>
+    <h2 class="section-title">Skills</h2>
+    <div class="grid">
+      {skills.map((s) => (
+        <SkillCard
+          href={`${base}catalog/${s.id}/`}
+          title={s.data.title}
+          tagline={s.data.tagline}
+          thumb={s.data.thumb}
+        />
+      ))}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Install</h2>
+    <p class="muted">Pick whichever fits your setup.</p>
+    <h3>1 · Ask your agent</h3>
+    <p class="muted">In Copilot (or any agent that supports plugins), just say:</p>
+    <pre><code>install jongio/skills</code></pre>
+    <h3>2 · Skills CLI</h3>
+    <pre><code>npx skills add jongio/skills --list
+npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot</code></pre>
+    <h3>3 · Copilot plugin marketplace</h3>
+    <pre><code>copilot plugin marketplace add jongio/skills
+copilot plugin install create-canvas-app@jongio-skills</code></pre>
+    <h3>4 · Whole repo as one plugin</h3>
+    <pre><code>copilot plugin install jongio/skills</code></pre>
+    <p class="muted">After any install, reload with <code>/skills reload</code> or start a new session.</p>
+  </section>
+</Layout>
+
+<style>
+  .hero { text-align: center; margin: 1rem 0 2.5rem; }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.74rem;
+    font-weight: 600; color: var(--muted); margin: 0 0 0.5rem;
+  }
+  .hero h1 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; margin: 0 0 0.75rem;
+  }
+  .lede { color: var(--muted); font-size: 1.12rem; max-width: 54ch; margin: 0 auto 1.4rem; }
+  .cta { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.4rem; }
+  .btn-ghost { background: var(--panel); color: var(--fg); border-color: var(--border); }
+  .hero-cmd {
+    display: inline-block; text-align: left; margin: 0 auto; max-width: 100%;
+    overflow-x: auto; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 9px; padding: 0.7rem 1rem;
+  }
+  .section-title { font-size: 1.4rem; margin: 0 0 1rem; }
+  .grid {
+    display: grid; gap: 1rem; margin-bottom: 2rem;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+  .card pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
+    padding: 0.7rem 0.9rem; overflow-x: auto;
+  }
+  .card h3 { font-size: 1rem; margin: 1.1rem 0 0.4rem; }
+</style>
