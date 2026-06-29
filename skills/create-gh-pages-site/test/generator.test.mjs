@@ -12,6 +12,7 @@ import {
   normalizeBase,
   titleize,
   pkgNameOf,
+  parseRepoSlug,
   computeReplacements,
   applyReplacements,
   rewriteTree,
@@ -73,6 +74,25 @@ test("pkgNameOf produces a valid npm name", () => {
   assert.equal(pkgNameOf("My Cool Site"), "my-cool-site");
   assert.equal(pkgNameOf("Octocat.GitHub.io"), "octocat.github.io");
   assert.equal(pkgNameOf("___weird@@@"), "weird");
+});
+
+test("parseRepoSlug extracts owner/name from common remote URL forms", () => {
+  assert.equal(parseRepoSlug("https://github.com/octocat/blog.git"), "octocat/blog");
+  assert.equal(parseRepoSlug("https://github.com/octocat/blog"), "octocat/blog");
+  assert.equal(parseRepoSlug("git@github.com:octocat/blog.git"), "octocat/blog");
+  assert.equal(parseRepoSlug("ssh://git@github.com/octocat/blog.git"), "octocat/blog");
+  assert.equal(parseRepoSlug("octocat/blog"), "octocat/blog");
+  // GitHub Enterprise / self-hosted host: keep the trailing owner/name.
+  assert.equal(parseRepoSlug("https://github.example.com/octocat/blog.git"), "octocat/blog");
+  // user-site repo name survives intact (the dotted name is the repo).
+  assert.equal(parseRepoSlug("git@github.com:octocat/octocat.github.io.git"), "octocat/octocat.github.io");
+});
+
+test("parseRepoSlug returns null for unusable input", () => {
+  assert.equal(parseRepoSlug(""), null);
+  assert.equal(parseRepoSlug(undefined), null);
+  assert.equal(parseRepoSlug("just-a-name"), null);
+  assert.equal(parseRepoSlug("git@github.com:"), null);
 });
 
 test("computeReplacements: project site derives /repo/ base + URLs", () => {

@@ -5,8 +5,8 @@ deploy automatically — packaged as a GitHub Copilot skill.
 
 Pick a template (static, Astro, React + Vite, Eleventy, or Jekyll); the skill
 injects the correct **base path** for your repo, adds the current official GitHub
-Actions Pages workflow, drops it into your repo (current or new), and tells you how
-to turn Pages on.
+Actions Pages workflow, drops it into your repo (the **current repo by default**, or
+a new one), and tells you how to turn Pages on.
 
 ## Quickstart
 
@@ -21,11 +21,13 @@ npx skills add jongio/skills --skill create-gh-pages-site -g --agent github-copi
 **3. Ask Copilot to build a site:**
 
 ```
-/create-gh-pages-site an Astro blog for my repo octocat/blog
+/create-gh-pages-site put this repo on GitHub Pages as an Astro blog
 ```
 
-The agent picks the `astro` template, sets `site`/`base` for `octocat/blog`, lays
-down the deploy workflow, and shows you how to enable Pages.
+By default the agent scaffolds for the **repo you're in** — it reads the current
+repo from git, picks the `astro` template, sets `site`/`base` for it, lays down the
+deploy workflow, and shows you how to enable Pages. Name a different repo
+(`octocat/blog`) only when you want one.
 
 ## Why this exists
 
@@ -72,7 +74,10 @@ create or publish a GitHub Pages site.
 The generator stamps the same site the skill uses:
 
 ```sh
-# An Astro site for a project repo (base = /blog/):
+# Scaffold for the CURRENT repo (base path read from its origin remote):
+node scripts/new-site.mjs astro
+
+# An Astro site for a specific project repo (base = /blog/):
 node scripts/new-site.mjs astro --repo octocat/blog --site-name "Octocat's Blog"
 
 # A React SPA:

@@ -9,6 +9,7 @@
 //
 // Options:
 //   --repo <owner/name>   Target GitHub repo. Drives the base path and URLs.
+//                         Defaults to the current repo's "origin" remote.
 //   --base </path/>       Override the base path (e.g. "/my-repo/" or "/").
 //   --dir <path>          Output directory (default: ./<repo-name or template>).
 //   --site-name <title>   Human title (default: derived from the repo name).
@@ -18,7 +19,8 @@
 //   --list                List available templates and exit.
 //   --help                Show this help.
 //
-// Either --repo or --base is required (base path correctness is the point).
+// If neither --repo nor --base is given, the generator assumes the current repo
+// (read from the "origin" remote) so a site is scaffolded for the repo you're in.
 
 import { existsSync, readdirSync, readFileSync, writeFileSync, lstatSync, cpSync, mkdirSync, rmSync } from "node:fs";
 import { join, resolve, dirname, basename } from "node:path";
@@ -73,6 +75,51 @@ export function pkgNameOf(slug) {
 }
 
 /**
+ * Parse an "owner/name" slug from a git remote URL. Handles the common GitHub
+ * forms (https, ssh scp-like, ssh:// and a bare owner/name), returns null if it
+ * can't find a clean owner/name pair.
+ */
+export function parseRepoSlug(remoteUrl) {
+  if (!remoteUrl) return null;
+  let s = String(remoteUrl).trim();
+  if (!s) return null;
+  s = s
+    .replace(/^git\+/i, "")
+    .replace(/^https?:\/\//i, "")
+    .replace(/^ssh:\/\//i, "")
+    .replace(/^git:\/\//i, "")
+    .replace(/^[^@/]+@/, "") // strip "git@" style userinfo
+    .replace(/^github\.com[:/]/i, "")
+    .replace(/[:/]+$/, "")
+    .replace(/\.git$/i, "");
+  const parts = s.split(/[/:]/).filter(Boolean);
+  if (parts.length < 2) return null;
+  const [owner, name] = parts.slice(-2);
+  if (!owner || !name) return null;
+  return `${owner}/${name}`;
+}
+
+/**
+ * Detect the current repo's "owner/name" from its "origin" remote (falling back
+ * to any remote). Returns null when not in a git repo or no usable remote.
+ */
+export function detectCurrentRepo(cwd = process.cwd()) {
+  const tryGit = (args) => {
+    try {
+      return execFileSync("git", args, { cwd, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    } catch {
+      return "";
+    }
+  };
+  let url = tryGit(["remote", "get-url", "origin"]);
+  if (!url) {
+    const remotes = tryGit(["remote"]).split(/\r?\n/).filter(Boolean);
+    if (remotes.length) url = tryGit(["remote", "get-url", remotes[0]]);
+  }
+  return parseRepoSlug(url);
+}
+
+/**
  * Compute every sentinel replacement from the user's inputs.
  * @param {{repo?: string, base?: string, siteName?: string, dir?: string}} opts
  */
@@ -92,7 +139,7 @@ export function computeReplacements({ repo, base, siteName, dir } = {}) {
   let basePath;
   if (base != null && base !== "") basePath = normalizeBase(base);
   else if (repo) basePath = isUserSite ? "/" : `/${repoName}/`;
-  else throw new Error("Provide --repo <owner/name> or --base </path/> so the base path can be set.");
+  else throw new Error("No target repo found. Run inside a git repo with an 'origin' remote, or pass --repo <owner/name> or --base </path/>.");
 
   const baseUrl = basePath === "/" ? "" : basePath.replace(/\/$/, ""); // "/repo" or ""
   const siteOrigin = `https://${owner.toLowerCase()}.github.io`;
@@ -260,6 +307,7 @@ Templates: ${listTemplates().join(", ") || "(none found)"}
 
 Options:
   --repo <owner/name>      Target GitHub repo (drives base path + URLs)
+                           Defaults to the current repo's "origin" remote
   --base </path/>          Override base path (e.g. "/my-repo/" or "/")
   --dir <path>             Output directory (default: ./<repo-name>)
   --site-name <title>      Human title (default: from repo name)
@@ -268,7 +316,11 @@ Options:
   --list                   List templates and exit
   --help                   Show this help
 
+If neither --repo nor --base is given, the current repo is assumed (read from
+the "origin" remote), so a site is scaffolded for the repo you're in.
+
 Examples:
+  node scripts/new-site.mjs astro                               # current repo
   node scripts/new-site.mjs astro --repo octocat/my-astro-site
   node scripts/new-site.mjs react-vite --repo octocat/dashboard --site-name "Dashboard"
   node scripts/new-site.mjs static-html --base / --dir ./site   # user site / local
@@ -295,11 +347,22 @@ function main() {
     process.exit(1);
   }
 
+  // Assume the current repo when neither --repo nor --base is provided, so a
+  // site is scaffolded for the repo you're in.
+  let repo = args.repo;
+  if (!repo && !args.base) {
+    const detected = detectCurrentRepo();
+    if (detected) {
+      repo = detected;
+      console.log(`Using current repo from origin remote: ${repo}`);
+    }
+  }
+
   try {
     const { dir, replacements, manifest } = stampTemplate({
       template,
       dir: args.dir,
-      repo: args.repo,
+      repo,
       base: args.base,
       siteName: args["site-name"],
       registry: args.registry,
@@ -321,7 +384,7 @@ function main() {
     console.log(`  ${step++}. Commit and push to the repo's main branch.`);
     console.log(`  ${step++}. Settings → Pages → Source → "GitHub Actions".`);
     console.log(`  ${step++}. The deploy workflow publishes on push; the URL appears in the Actions run.`);
-    if (args.repo) {
+    if (repo) {
       console.log(`  ${step++}. Set the repo "Website" link to the Pages URL:`);
       console.log(`       gh repo edit ${replacements.__REPO_SLUG__} --homepage ${replacements.__SITE_URL__}`);
     }
