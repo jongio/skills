@@ -36,13 +36,30 @@ registry rely on them, so treat the set as a stable contract:
 Values derive from `--repo` (the current repo's `origin` remote when omitted), and
 the generator detects `USER.github.io` user sites (base collapses to `/`).
 
+## Images & content authoring
+
+After stamping, the skill **digests the target repo and rewrites the demo content**
+to match it (`scripts/digest-repo.mjs`), and drops placeholder images plus an
+`IMAGES.md` via `scripts/make-placeholder.mjs`. When authoring a generated site:
+
+- Write placeholders into the folder the template serves static files from —
+  `public/images/` for build tools (Astro/Vite), `assets/images/` for static/Jekyll,
+  `src/assets/images/` for Eleventy.
+- Reference images through the same base-path mechanism as other assets (so they
+  don't 404 on a project site).
+- Reuse real images the digest already found before generating a placeholder.
+
+Template requirements (how a framework should expose those static folders and the
+base path) live in the registry's `CONTRIBUTING.md`, not here.
+
 ### Run the tests
 
 ```sh
-npm test   # node test/generator.test.mjs — bare node, fully offline
+npm test   # node test/generator.test.mjs && node test/digest.test.mjs — bare node, fully offline
 ```
 
 The tests cover base-path math, repo-slug parsing, and stamping a local fixture
 template (sentinels replaced, `template.json`/`node_modules` skipped, user-site
-collapse). They never hit the network — template/workflow validation lives in the
-registry. If you change the substitution contract or the resolver, update the tests.
+collapse), plus the repo-digest classifier and the placeholder generator. They never
+hit the network — template/workflow validation lives in the registry. If you change
+the substitution contract or the resolver, update the tests.
