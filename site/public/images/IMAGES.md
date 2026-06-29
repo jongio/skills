@@ -6,7 +6,6 @@ and aim for the listed size. Delete this file once every image is real.
 
 | File | Used by | Purpose | Recommended size |
 | --- | --- | --- | --- |
-| `logo.svg` | Home hero | Site logo / wordmark. | 512×512 (or square) |
 | `og.svg` | `<meta og:image>` | Social share card. Replace with a raster `og.png` (scrapers ignore SVG) and update the meta tag in `src/layouts/Layout.astro`. | 1200×630 |
 | `favicon.svg` | _(not referenced — the root `public/favicon.svg` is used)_ | Optional. | 64×64 |
 | `hero.svg` | _(spare)_ | Optional hero banner if you add one. | 1280×640 |

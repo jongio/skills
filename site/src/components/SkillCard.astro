@@ -37,10 +37,11 @@ const base = import.meta.env.BASE_URL;
   .skill-thumb {
     width: 100%;
     aspect-ratio: 16 / 10;
-    object-fit: cover;
+    object-fit: contain;
     background: var(--bg);
     border-bottom: 1px solid var(--border);
     display: block;
+    padding: 0.75rem;
   }
   .skill-body {
     padding: 1rem 1.1rem 1.2rem;

@@ -162,9 +162,10 @@ go?"*
      stamp into it, and push. Match the repo name you used for the base path.
 5. **Digest the repo and author the site** (see "Digest the repo, then author it"
    below). This is the step that makes the site *real*: run the digest, replace
-   every default page/section with repo-derived content of the right kind, and add
-   image placeholders + an `IMAGES.md`. Never skip to enabling Pages on the demo
-   content.
+   every default page/section with repo-derived content of the right kind, add
+   image placeholders + an `IMAGES.md`, and **prompt the user for the real images**
+   (they can paste screenshots straight into the chat). Never skip to enabling Pages
+   on the demo content.
 6. **Enable Pages.** Tell the user (or do it with their approval):
    **Settings → Pages → Source → GitHub Actions**. By CLI:
    `gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow` (or PUT to
@@ -301,6 +302,31 @@ dimensions. Then:
 - **Leave `IMAGES.md` in the images dir** as the hand-off, and tell the user it's
   there. A placeholder still deploys fine; it just visibly says "replace me".
 
+### Ask the user for the real images
+
+Placeholders unblock the deploy, but a finished site needs real art. After you've
+authored the pages and know exactly which images the site references, **prompt the
+user for them** with a short, specific checklist — don't make them guess. For each
+image give the role, the filename it should land at, and the recommended size, e.g.:
+
+> This site needs a few images. You can **paste a screenshot straight into the chat**
+> and I'll drop it in, or point me at a file/URL:
+> 1. **Social card** → `og.png`, 1200×630 (used for link previews)
+> 2. **Hero** → `hero.png`, 1280×640
+> 3. **Skill thumbnail** → `thumb-create-gh-pages-site.png`, 640×400
+>
+> Send any you have; I'll keep placeholders for the rest.
+
+Then, as the user supplies them:
+
+- **Accept pasted screenshots.** Images pasted into the conversation are available
+  to you directly — save each to the right path (matching the reference or
+  `IMAGES.md`), no upload step needed. A local file path or URL works too.
+- **Don't block on it.** Anything the user doesn't provide keeps its placeholder;
+  the site still builds and deploys. Update `IMAGES.md` to tick off what's now real.
+- **Only ask for what the site actually uses.** Don't request a logo or a hero the
+  page never references (drop unused placeholders instead of asking for art for them).
+
 ### Helper scripts (alongside `new-site.mjs`)
 
 - `scripts/digest-repo.mjs` — analyze a repo → JSON signals + a type classification.
@@ -407,5 +433,7 @@ the `jongio/gh-pages-templates` registry.
   the repo actually shows; leave a visible `TODO` when unsure.
 - **Don't** leave bare image references with nothing behind them — add the
   placeholders + `IMAGES.md`, or reuse the repo's existing images.
+- **Don't** ship placeholders silently — tell the user which real images the site
+  needs and that they can paste a screenshot into the chat to fill each one.
 - **Don't** hand-roll a base-path setup when the generator + sentinels already do
   it correctly per framework.
