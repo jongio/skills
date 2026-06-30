@@ -1,17 +1,21 @@
 // scripts/new-canvas.mjs — stamp a new, working canvas extension from the kit.
 //
 // Copies the canonical kit/ into <target>/canvas-kit/ and writes a minimal but
-// fully working canvas plus a per-canvas smoke test. Two templates:
+// fully working canvas plus a per-canvas smoke test. Three templates:
 //
 //   list (default)  one shared list (add/toggle/remove), Preact + htm, SSE live
 //                   state, durable per-user storage. Edit from there.
 //   data            an EXTERNAL-DATA canvas: fetch-in-handler (with a timeout),
 //                   a `refresh` action, captured error state, and visibility-
 //                   gated auto-refresh via the kit's pollWhileVisible helper.
+//   ai              a HOST-AI canvas: calls the Copilot app's own model from an
+//                   action with `ctx.ai(...)` (silent, no keys, no history) and
+//                   hands prompts to the main agent with `ctx.askAgent(...)`.
+//                   Model errors are captured into state and surfaced in the panel.
 //
 // Usage:
 //   node scripts/new-canvas.mjs <name> [--dir <path>] [--title "Display Name"]
-//                                       [--description "..."] [--template list|data]
+//                                       [--description "..."] [--template list|data|ai]
 //                                       [--force]
 //
 // Examples:
@@ -136,7 +140,7 @@ const MANIFEST = `{
 }
 `;
 
-// Per-canvas README — stamped for every generated canvas (both templates) so the
+// Per-canvas README — stamped for every generated canvas (all templates) so the
 // folder is self-documenting once copied into an extensions dir.
 const README_MD = `# {{titleText}}
 
@@ -189,6 +193,11 @@ const TEMPLATE_NOTES = {
     "an action handler (always with `AbortSignal.timeout`), captures failures into " +
     "state, and auto-refreshes on a visibility-gated timer via the kit's " +
     "`pollWhileVisible` helper.",
+  ai: "This is a **host-AI** canvas: it calls the Copilot app's own model from an " +
+    "action handler with `ctx.ai(...)` (silent, no API keys, not added to chat " +
+    "history) and can hand a prompt to the main agent with `ctx.askAgent(...)`. " +
+    "Model errors (e.g. running outside the Copilot host) are captured into state " +
+    "and surfaced in the panel.",
 };
 
 // ---- template: list (default) ----------------------------------------------
@@ -721,6 +730,285 @@ function App({ state, invoke, connected }) {
 mountCanvas({ view: (model) => html\`<\${App} ...\${model} />\` });
 `;
 
+// ---- template: ai (host model / agent handoff) -----------------------------
+
+const AI_CANVAS_MJS = `// canvas.mjs — {{titleText}} canvas definition (ai template; kit config; SDK-free).
+//
+// A HOST-AI canvas: action handlers call the COPILOT APP'S OWN model — the same
+// model + auth the app is already running — with no API keys, no model picker,
+// and no external fetch. Two capabilities arrive on the handler context,
+// wired once in extension.mjs (the only SDK file) and exposed by the kit:
+//
+//   * ctx.ai(question) -> Promise<string>  a SILENT, no-tools model query that is
+//       NOT added to the conversation. Use it for canvas-internal generation
+//       (summarize / suggest / rewrite / classify). It runs against the ambient
+//       conversation context, so frame prompts as self-contained functions and
+//       pin the output shape ("Output ONLY ...").
+//   * ctx.askAgent(prompt) -> Promise<unknown>  hand a prompt to the MAIN agent
+//       in the user's chat. It is VISIBLE in chat and TOOL-CAPABLE — use it for
+//       "act in the repo / drive the agent" controls, not silent text.
+//
+// ctx.ai() / ctx.askAgent() throw when the canvas runs OUTSIDE the Copilot host
+// (e.g. a standalone smoke test); this canvas captures that into state.error so
+// the panel degrades gracefully instead of dead-ending on a thrown action.
+
+import { fileURLToPath } from "node:url";
+import { userStore } from "./canvas-kit/storage.mjs";
+import { nid } from "./canvas-kit/format.mjs";
+
+const EXT_NAME = "{{name}}";
+
+function fileFor(domainId) {
+  const safe = String(domainId).replace(/[^A-Za-z0-9._-]/g, "_") || "default";
+  return userStore(EXT_NAME, \`\${safe}.json\`);
+}
+
+export const canvasConfig = {
+  id: "{{name}}",
+  displayName: {{titleJs}},
+  description: {{descriptionJs}},
+  assetsDir: fileURLToPath(new URL("./web/", import.meta.url)),
+
+  inputSchema: {
+    type: "object",
+    properties: {
+      domain: { type: "string", description: "Logical board to open. Omit for the default." },
+    },
+    additionalProperties: false,
+  },
+
+  resolveDomainId: (input) => (input?.domain ? String(input.domain) : "default"),
+  createInitialState: () => ({ entries: [], error: null }),
+  loadState: async (domainId) => fileFor(domainId).load(null),
+  saveState: async (domainId, state) => fileFor(domainId).save(state),
+  statusLine: (_ctx, state) => \`\${state.entries.length} entries\`,
+
+  actions: {
+    ask_ai: {
+      description: "Ask the host AI model a question silently (no tools, not added to chat history) and record the answer.",
+      inputSchema: {
+        type: "object",
+        properties: { prompt: { type: "string", description: "What to ask the model." } },
+        required: ["prompt"],
+        additionalProperties: false,
+      },
+      // The "ai" capability destructured off the handler context is the silent
+      // host-model call. Frame the prompt as a self-contained function so the live
+      // chat can't bleed into the answer, and pin the output shape.
+      handler: async ({ set, input, ai }) => {
+        const prompt = String(input.prompt ?? "").trim();
+        if (!prompt) throw new Error("prompt is required");
+        try {
+          const answer = (await ai(
+            \`You are a concise assistant embedded in a side-panel canvas. \` +
+            \`Answer the request directly in plain text. Output ONLY the answer — \` +
+            \`no preamble, no markdown headings, no surrounding quotes. Request: \${prompt}\`
+          )).trim();
+          const entry = { id: nid(), kind: "ai", prompt, answer, createdAt: new Date().toISOString() };
+          // Functional set() merges into the LATEST state — a concurrent action
+          // may have run while the model call was in flight.
+          set((current) => ({ ...current, error: null, entries: [entry, ...current.entries] }));
+          return { id: entry.id, answer };
+        } catch (err) {
+          // ai() throws "ai_unavailable" outside the Copilot host. Capture it into
+          // shared state so the panel shows a friendly message, and return (don't
+          // throw) so an agent-side call still gets a clean result.
+          const error = String(err?.message ?? err);
+          set((current) => ({ ...current, error }));
+          return { ok: false, error };
+        }
+      },
+    },
+
+    hand_to_agent: {
+      description: "Hand a prompt to the MAIN agent (visible in chat, tool-capable). Use for 'act in the repo' requests, not silent generation.",
+      inputSchema: {
+        type: "object",
+        properties: { prompt: { type: "string", description: "Instruction for the main agent." } },
+        required: ["prompt"],
+        additionalProperties: false,
+      },
+      handler: async ({ set, input, askAgent }) => {
+        const prompt = String(input.prompt ?? "").trim();
+        if (!prompt) throw new Error("prompt is required");
+        try {
+          await askAgent(prompt);
+          const entry = {
+            id: nid(),
+            kind: "agent",
+            prompt,
+            answer: "Handed to the agent — watch the conversation.",
+            createdAt: new Date().toISOString(),
+          };
+          set((current) => ({ ...current, error: null, entries: [entry, ...current.entries] }));
+          return { id: entry.id, ok: true };
+        } catch (err) {
+          const error = String(err?.message ?? err);
+          set((current) => ({ ...current, error }));
+          return { ok: false, error };
+        }
+      },
+    },
+
+    remove_entry: {
+      description: "Delete an entry from the log.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+      handler: ({ state, set, input }) => {
+        const entries = state.entries.filter((e) => e.id !== input.id);
+        set({ ...state, entries });
+        return { removed: state.entries.length - entries.length };
+      },
+    },
+
+    clear: {
+      description: "Clear the whole log.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      handler: ({ state, set }) => {
+        set({ ...state, entries: [], error: null });
+        return { ok: true };
+      },
+    },
+
+    list_entries: {
+      description: "Return a text summary of the log (for the agent).",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      handler: ({ state }) => {
+        if (!state.entries.length) return { summary: "No entries yet.", count: 0 };
+        const summary = state.entries
+          .map((e) => \`- (\${e.kind}) \${e.prompt} -> \${e.answer}\`)
+          .join("\\n");
+        return { count: state.entries.length, summary };
+      },
+    },
+  },
+};
+`;
+
+const AI_APP_MJS = `// web/app.mjs — Preact view for the {{titleText}} ai canvas.
+//
+// The MODEL call never happens here — it lives in the "ask_ai" / "hand_to_agent"
+// action handlers (canvas.mjs), which reach the host model. The view only
+// TRIGGERS those actions and renders the shared log that arrives over /events.
+// LOCAL UI state (the draft prompt, the busy flag) lives in useState.
+
+import { html, mountCanvas, useState, Icon } from "/kit/client.mjs";
+
+const TITLE = {{titleJs}};
+
+function Composer({ invoke }) {
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(null); // "ai" | "agent" | null
+
+  async function run(action) {
+    const p = prompt.trim();
+    if (!p || busy) return;
+    setBusy(action === "ask_ai" ? "ai" : "agent");
+    try {
+      await invoke(action, { prompt: p });
+      setPrompt("");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return html\`
+    <div class="ck-card ck-col" style="margin:12px 0 16px">
+      <textarea
+        class="ck-textarea"
+        placeholder="Ask the model anything…"
+        value=\${prompt}
+        onInput=\${(e) => setPrompt(e.target.value)}
+        onKeyDown=\${(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run("ask_ai"); }}
+      ></textarea>
+      <div class="ck-row">
+        <button
+          class="ck-btn ck-btn-primary"
+          disabled=\${!prompt.trim() || !!busy}
+          onClick=\${() => run("ask_ai")}
+        >
+          <\${Icon} name=\${busy === "ai" ? "loader-circle" : "sparkles"} size=\${16} class=\${busy === "ai" ? "ck-spinner" : ""} />
+          \${busy === "ai" ? "Asking…" : "Ask AI"}
+        </button>
+        <button
+          class="ck-btn"
+          disabled=\${!prompt.trim() || !!busy}
+          onClick=\${() => run("hand_to_agent")}
+        >
+          <\${Icon} name=\${busy === "agent" ? "loader-circle" : "send"} size=\${16} class=\${busy === "agent" ? "ck-spinner" : ""} />
+          \${busy === "agent" ? "Sending…" : "Hand to agent"}
+        </button>
+      </div>
+      <span class="ck-caption">Cmd/Ctrl + Enter asks the AI silently. "Hand to agent" drives the main chat.</span>
+    </div>
+  \`;
+}
+
+function Entry({ entry, invoke }) {
+  const isAgent = entry.kind === "agent";
+  return html\`
+    <div class="ck-card ck-col" style="gap:8px">
+      <div class="ck-spread">
+        <span class=\${\`ck-badge \${isAgent ? "ck-badge-accent" : "ck-badge-success"}\`}>
+          <\${Icon} name=\${isAgent ? "send" : "sparkles"} size=\${12} />
+          \${isAgent ? "agent" : "ai"}
+        </span>
+        <button class="ck-btn ck-btn-sm ck-btn-danger" onClick=\${() => invoke("remove_entry", { id: entry.id })}>
+          <\${Icon} name="trash-2" size=\${14} />
+        </button>
+      </div>
+      <div style="font-weight:var(--ck-fw-semibold)">\${entry.prompt}</div>
+      <div class="ck-muted" style="white-space:pre-wrap">\${entry.answer}</div>
+    </div>
+  \`;
+}
+
+function App({ state, invoke, connected }) {
+  if (!state) return html\`<p class="ck-muted">Loading…</p>\`;
+  const entries = state.entries ?? [];
+
+  return html\`
+    <div>
+      <div class="ck-spread" style="margin-bottom:14px">
+        <div class="ck-row" style="gap:8px">
+          <\${Icon} name="wand-sparkles" size=\${20} />
+          <h1 style="margin:0">\${TITLE}</h1>
+        </div>
+        <span class="ck-status">
+          <span class=\${\`ck-dot \${connected ? "ck-dot-live" : "ck-dot-off"}\`}></span>
+          \${connected ? "live" : "reconnecting…"}
+        </span>
+      </div>
+
+      <\${Composer} invoke=\${invoke} />
+
+      \${state.error
+        ? html\`<div class="ck-callout ck-error" style="margin-bottom:12px">
+            <\${Icon} name="circle-x" size=\${16} /><span>\${state.error}</span>
+          </div>\`
+        : null}
+
+      <div class="ck-spread ck-caption" style="margin-bottom:8px">
+        <span>\${entries.length} entr\${entries.length === 1 ? "y" : "ies"}</span>
+        \${entries.length ? html\`<button class="ck-btn ck-btn-sm" onClick=\${() => invoke("clear")}>Clear</button>\` : null}
+      </div>
+
+      <div class="ck-col" style="gap:10px">
+        \${entries.length
+          ? entries.map((e) => html\`<\${Entry} key=\${e.id} entry=\${e} invoke=\${invoke} />\`)
+          : html\`<div class="ck-empty"><\${Icon} name="messages-square" size=\${20} />Ask the model to get started.</div>\`}
+      </div>
+    </div>
+  \`;
+}
+
+mountCanvas({ view: (model) => html\`<\${App} ...\${model} />\` });
+`;
+
 // ---- per-canvas smoke test -------------------------------------------------
 
 // Wrap template-specific test calls in a shared harness that boots the runtime
@@ -851,9 +1139,73 @@ const DATA_SMOKE_BODY = `  await test("GET /state has the initial data shape", a
     assert.equal(s.error, null);
   });`;
 
+const AI_SMOKE_BODY = `  await test("GET /state starts empty", async () => {
+    const s = await getState(open.url);
+    assert.deepEqual(s.entries, []);
+    assert.equal(s.error, null);
+  });
+
+  await test("ask_ai with no host wired captures a friendly error (offline)", async () => {
+    // No host is wired yet (a standalone smoke test never runs under the Copilot
+    // app), so ai() throws "ai_unavailable" and the handler captures it to state.
+    const { body } = await post(open.url, "ask_ai", { prompt: "hello" });
+    assert.equal(body.ok, true); // POST envelope ok; the result carries the error
+    assert.equal(body.result.ok, false);
+    assert.match(body.result.error, /unavailable/i);
+    const s = await getState(open.url);
+    assert.ok(s.error, "ai_unavailable should be captured into state.error");
+    assert.deepEqual(s.entries, [], "no entry is recorded when the model is unavailable");
+  });
+
+  // Wire a STUB host so the rest runs offline + deterministic. This mirrors what
+  // extension.mjs does with the real Copilot model: ai -> ephemeralQuery (silent),
+  // askAgent -> a main-conversation message.
+  const sentToAgent = [];
+  runtime.setHost({
+    ai: async (q) => "ECHO:" + q,
+    askAgent: async (p) => { sentToAgent.push(p); return "queued"; },
+  });
+
+  let aiId;
+  await test("ask_ai records the model's answer once a host is wired", async () => {
+    const { body } = await post(open.url, "ask_ai", { prompt: "ping" });
+    aiId = body.result.id;
+    assert.ok(aiId);
+    assert.match(body.result.answer, /ECHO:/);
+    const s = await getState(open.url);
+    assert.equal(s.entries.length, 1);
+    assert.equal(s.entries[0].kind, "ai");
+    assert.equal(s.error, null, "a successful call clears the prior error");
+  });
+
+  await test("hand_to_agent forwards the prompt to the main agent", async () => {
+    const { body } = await post(open.url, "hand_to_agent", { prompt: "do the thing" });
+    assert.equal(body.result.ok, true);
+    assert.deepEqual(sentToAgent, ["do the thing"]);
+    const s = await getState(open.url);
+    assert.equal(s.entries.length, 2);
+    assert.equal(s.entries[0].kind, "agent");
+  });
+
+  await test("list_entries summarizes for the agent", async () => {
+    const { body } = await post(open.url, "list_entries", {});
+    assert.equal(body.result.count, 2);
+  });
+
+  await test("remove_entry + clear empty the log", async () => {
+    await post(open.url, "remove_entry", { id: aiId });
+    let s = await getState(open.url);
+    assert.equal(s.entries.length, 1);
+    await post(open.url, "clear", {});
+    s = await getState(open.url);
+    assert.deepEqual(s.entries, []);
+    assert.equal(s.error, null);
+  });`;
+
 const TEMPLATES = {
   list: { canvas: LIST_CANVAS_MJS, app: LIST_APP_MJS, smokeBody: LIST_SMOKE_BODY },
   data: { canvas: DATA_CANVAS_MJS, app: DATA_APP_MJS, smokeBody: DATA_SMOKE_BODY },
+  ai: { canvas: AI_CANVAS_MJS, app: AI_APP_MJS, smokeBody: AI_SMOKE_BODY },
 };
 
 async function isNonEmptyDir(dir) {
@@ -871,7 +1223,7 @@ async function main() {
 
   if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
     console.error(
-      "Usage: node scripts/new-canvas.mjs <name> [--dir <path>] [--title \"...\"] [--description \"...\"] [--template list|data] [--force]\n" +
+      "Usage: node scripts/new-canvas.mjs <name> [--dir <path>] [--title \"...\"] [--description \"...\"] [--template list|data|ai] [--force]\n" +
         "  <name> must be kebab-case: start with a letter, then lowercase letters, digits, or hyphens."
     );
     process.exit(1);
@@ -879,7 +1231,7 @@ async function main() {
 
   const template = args.template || "list";
   if (!TEMPLATES[template]) {
-    console.error(`Unknown --template "${template}". Use "list" (default) or "data".`);
+    console.error(`Unknown --template "${template}". Use "list" (default), "data", or "ai".`);
     process.exit(1);
   }
 

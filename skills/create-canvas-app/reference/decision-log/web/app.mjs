@@ -73,6 +73,14 @@ function NewDecision({ invoke }) {
 
 function DecisionItem({ d, invoke }) {
   const others = ["open", "decided", "parked"].filter((s) => s !== d.status);
+  const [handing, setHanding] = useState(false);
+
+  async function handToAgent() {
+    if (handing) return;
+    setHanding(true);
+    try { await invoke("hand_to_agent", { id: d.id }); } finally { setHanding(false); }
+  }
+
   return html`
     <div class="ck-card">
       <div class="ck-spread">
@@ -83,7 +91,9 @@ function DecisionItem({ d, invoke }) {
         ? html`<div class="dl-item-note ck-muted">${d.note}</div>`
         : null}
       ${d.updatedAt
-        ? html`<div class="ck-caption" style="margin-top:6px">updated ${relativeTime(d.updatedAt)}</div>`
+        ? html`<div class="ck-caption" style="margin-top:6px">
+            updated ${relativeTime(d.updatedAt)}${d.handedToAgentAt ? " · handed to agent" : ""}
+          </div>`
         : null}
       <div class="ck-row dl-actions" style="margin-top:10px">
         ${others.map(
@@ -96,6 +106,9 @@ function DecisionItem({ d, invoke }) {
             </button>
           `
         )}
+        <button class="ck-btn ck-btn-sm" disabled=${handing} onClick=${handToAgent} title="Hand this decision to the main agent">
+          <${Icon} name=${handing ? "loader-circle" : "send"} size=${14} class=${handing ? "ck-spinner" : ""} />Hand to agent
+        </button>
         <span class="ck-grow"></span>
         <button
           class="ck-btn ck-btn-sm ck-btn-danger"
@@ -104,6 +117,54 @@ function DecisionItem({ d, invoke }) {
           <${Icon} name="trash-2" size=${14} />Delete
         </button>
       </div>
+    </div>
+  `;
+}
+
+// Host-AI summary panel. The model call lives in the "summarize" handler
+// (canvas.mjs) — this only TRIGGERS it and renders the derived state it writes
+// back (state.summary / state.summaryError), exactly like any shared field.
+function Summary({ state, invoke }) {
+  const [busy, setBusy] = useState(false);
+  const hasDecisions = (state.decisions ?? []).length > 0;
+
+  async function run() {
+    if (busy) return;
+    setBusy(true);
+    try { await invoke("summarize"); } finally { setBusy(false); }
+  }
+
+  return html`
+    <div class="ck-card dl-summary ck-col">
+      <div class="ck-spread">
+        <div class="ck-row" style="gap:6px">
+          <${Icon} name="sparkles" size=${16} />
+          <span class="dl-item-title">AI summary</span>
+        </div>
+        <button
+          class="ck-btn ck-btn-sm"
+          disabled=${busy || !hasDecisions}
+          onClick=${run}
+          title=${hasDecisions ? "Summarize with the host model" : "Add a decision first"}
+        >
+          <${Icon} name=${busy ? "loader-circle" : "sparkles"} size=${14} class=${busy ? "ck-spinner" : ""} />
+          ${busy ? "Summarizing…" : "Summarize"}
+        </button>
+      </div>
+      ${state.summaryError
+        ? html`<div class="ck-callout ck-error" style="margin-top:10px">
+            <${Icon} name="circle-x" size=${16} /><span>${state.summaryError}</span>
+          </div>`
+        : state.summary
+          ? html`<div style="margin-top:8px">
+              <div style="white-space:pre-wrap">${state.summary}</div>
+              ${state.summaryAt
+                ? html`<div class="ck-caption" style="margin-top:6px">summarized ${relativeTime(state.summaryAt)}</div>`
+                : null}
+            </div>`
+          : html`<div class="ck-muted" style="margin-top:8px">
+              ${hasDecisions ? "Summarize the log into a one-line recommendation." : "No decisions to summarize yet."}
+            </div>`}
     </div>
   `;
 }
@@ -130,6 +191,14 @@ function App({ state, invoke, connected }) {
       </div>
 
       <${NewDecision} invoke=${invoke} />
+
+      <${Summary} state=${state} invoke=${invoke} />
+
+      ${state.agentError
+        ? html`<div class="ck-callout ck-error" style="margin-bottom:10px">
+            <${Icon} name="circle-x" size=${16} /><span>${state.agentError}</span>
+          </div>`
+        : null}
 
       <div class="ck-spread" style="margin-bottom:10px">
         <div class="ck-tabs" role="tablist">

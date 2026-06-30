@@ -42,6 +42,10 @@ export const canvasConfig = {
   createInitialState: (ctx) => ({
     domain: ctx?.input?.domain ?? "default",
     decisions: [],
+    summary: "",
+    summaryAt: null,
+    summaryError: null,
+    agentError: null,
   }),
 
   loadState: async (domainId) => fileFor(domainId).load(null),
@@ -165,6 +169,97 @@ export const canvasConfig = {
           .map((d) => `- [${d.status}] ${d.title}${d.note ? ` — ${d.note}` : ""}`)
           .join("\n");
         return { count: items.length, summary };
+      },
+    },
+
+    // ---- host-model actions --------------------------------------------------
+    // The two capabilities below reach the COPILOT APP'S OWN model — the same
+    // model + auth the app is already running — with no API keys and no external
+    // fetch. They arrive on the handler context (`ai` / `askAgent`), wired once in
+    // extension.mjs (the only SDK file). Both are guarded: outside the Copilot
+    // host they throw, so each handler CAPTURES the failure into shared state and
+    // returns a result instead of throwing, letting the panel degrade gracefully.
+
+    summarize: {
+      description:
+        "Summarize the log with the host AI model (silent — not added to chat history) and store the result on the canvas.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      // `ai(question) -> Promise<string>` is the SILENT host-model call: no tools,
+      // not added to the conversation. It runs against the ambient conversation
+      // context, so the prompt is framed as a self-contained function with a
+      // pinned output shape to keep the live chat from bleeding into the answer.
+      handler: async ({ state, set, ai }) => {
+        if (!state.decisions.length) {
+          set({ ...state, summary: "", summaryAt: new Date().toISOString(), summaryError: null });
+          return { summary: "", count: 0 };
+        }
+        const log = state.decisions
+          .map((d) => `- [${d.status}] ${d.title}${d.note ? ` — ${d.note}` : ""}`)
+          .join("\n");
+        try {
+          const summary = (await ai(
+            `You are summarizing a shared decision log for a software team. From the ` +
+            `entries below, write a 1–2 sentence plain-text summary that highlights what ` +
+            `is still open and the recommended next step. Output ONLY the summary — no ` +
+            `preamble, no markdown, no surrounding quotes.\n\nDecisions:\n${log}`
+          )).trim();
+          // Functional set() merges into the LATEST state — a concurrent action
+          // (add/remove) may have run while the model call was in flight.
+          set((current) => ({
+            ...current,
+            summary,
+            summaryAt: new Date().toISOString(),
+            summaryError: null,
+          }));
+          return { summary, count: state.decisions.length };
+        } catch (err) {
+          // ai() throws (e.g. "ai_unavailable") when the canvas runs outside the
+          // Copilot host. Capture it so the panel shows a friendly message, and
+          // return (don't throw) so an agent-side call still gets a clean result.
+          const summaryError = String(err?.message ?? err);
+          set((current) => ({ ...current, summaryError }));
+          return { ok: false, error: summaryError };
+        }
+      },
+    },
+
+    hand_to_agent: {
+      description:
+        "Hand a decision to the MAIN agent (visible in chat, tool-capable) to act on or research it. Use for follow-up work, not silent text.",
+      inputSchema: {
+        type: "object",
+        properties: { id: { type: "string", description: "The decision to hand off." } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+      // `askAgent(prompt)` hands a prompt to the MAIN agent in the user's chat —
+      // VISIBLE and TOOL-CAPABLE. Use it for "act in the repo / drive the agent"
+      // controls; use `ai` (above) for silent canvas-internal generation.
+      handler: async ({ state, set, input, askAgent }) => {
+        const decision = state.decisions.find((d) => d.id === input.id);
+        if (!decision) throw new Error(`No decision with id ${input.id}`);
+        const prompt =
+          `From a decision log, please act on this decision (research it, draft an ` +
+          `approach, or implement it as appropriate):\n\n` +
+          `Title: ${decision.title}\nStatus: ${decision.status}` +
+          (decision.note ? `\nNote: ${decision.note}` : "");
+        try {
+          await askAgent(prompt);
+          const now = new Date().toISOString();
+          // Write-back into the item so the UI can reflect that it was handed off.
+          set((current) => ({
+            ...current,
+            agentError: null,
+            decisions: current.decisions.map((d) =>
+              d.id === input.id ? { ...d, handedToAgentAt: now, updatedAt: now } : d
+            ),
+          }));
+          return { ok: true, status: `Handed “${decision.title}” to the agent` };
+        } catch (err) {
+          const agentError = String(err?.message ?? err);
+          set((current) => ({ ...current, agentError }));
+          return { ok: false, error: agentError };
+        }
       },
     },
   },

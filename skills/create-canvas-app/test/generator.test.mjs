@@ -199,12 +199,13 @@ async function main() {
     assert.ok(a.equals(b), "kit/format.mjs and reference copy differ");
   });
 
-  // ---- generator: both templates -------------------------------------------
+  // ---- generator: all templates --------------------------------------------
   const work = await mkdtemp(join(tmpdir(), "ck-gen-test-"));
   try {
     const cases = [
       { name: "gen-list", template: "list", dir: join(work, "gen-list") },
       { name: "gen-feed", template: "data", dir: join(work, "gen-feed") },
+      { name: "gen-ai", template: "ai", dir: join(work, "gen-ai") },
     ];
 
     for (const c of cases) {
@@ -228,7 +229,8 @@ async function main() {
         assert.match(readme, /canvas-kit\//);
         assert.match(readme, /node test\/smoke\.test\.mjs/);
         // template-specific note is injected
-        assert.match(readme, c.template === "data" ? /external-data/i : /list\b/i);
+        const noteRe = { list: /list\b/i, data: /external-data/i, ai: /host-AI/i }[c.template];
+        assert.match(readme, noteRe);
       });
 
       await test(`${c.template}: generated canvas passes check-kit-freshness`, () => {
@@ -275,6 +277,25 @@ async function main() {
       const app = await read(join(work, "gen-feed", "web", "app.mjs"));
       assert.match(app, /pollWhileVisible/);
       assert.match(app, /useEffect/);
+    });
+
+    // ai-template-specific contract: calls the host model from a handler, hands
+    // off to the main agent, and captures model errors into shared state.
+    await test("ai canvas.mjs calls ctx.ai and ctx.askAgent from handlers", async () => {
+      const canvas = await read(join(work, "gen-ai", "canvas.mjs"));
+      assert.match(canvas, /handler: async \(\{ set, input, ai \}\)/);
+      assert.match(canvas, /await ai\(/);
+      assert.match(canvas, /handler: async \(\{ set, input, askAgent \}\)/);
+      assert.match(canvas, /await askAgent\(/);
+      // model errors are captured into state, not thrown past the action
+      assert.match(canvas, /set\(\(current\) => \(\{ \.\.\.current, error \}\)\)/);
+    });
+
+    await test("ai smoke test exercises both the offline path and a wired host", async () => {
+      const smoke = await read(join(work, "gen-ai", "test", "smoke.test.mjs"));
+      assert.match(smoke, /no host wired captures a friendly error/);
+      assert.match(smoke, /runtime\.setHost\(/);
+      assert.match(smoke, /hand_to_agent forwards the prompt to the main agent/);
     });
 
     await test("generated extension.mjs wires the host-model capabilities", async () => {

@@ -224,6 +224,64 @@ async function main() {
     assert.ok(res.status === 403 || res.status === 404, `expected 403/404, got ${res.status}`);
   });
 
+  // ---- host-model actions (ctx.ai / ctx.askAgent) --------------------------
+  // These reach the host's model in production (wired in extension.mjs). Here we
+  // first prove the OFFLINE path — no host wired, so the handlers capture the
+  // failure into shared state instead of throwing — then wire a STUB host and
+  // prove the success path, mirroring what extension.mjs does with the real model.
+  await test("summarize with no host wired captures summaryError (offline)", async () => {
+    await action(open.url, "add_decision", { title: "Adopt SSE for live state" });
+    const { status, body } = await action(open.url, "summarize", {});
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);          // POST envelope ok; the result carries the error
+    assert.equal(body.result.ok, false);
+    assert.match(body.result.error, /unavailable/i);
+    const after = await get(open.url, "/state");
+    assert.ok(after.body.summaryError, "ai_unavailable should land in state.summaryError");
+    assert.equal(after.body.summary, "", "no summary text is written when the model is unavailable");
+  });
+
+  await test("hand_to_agent with no host wired captures agentError (offline)", async () => {
+    const { body: list } = (await get(open.url, "/state"));
+    const id = list.decisions[0].id;
+    const { body } = await action(open.url, "hand_to_agent", { id });
+    assert.equal(body.result.ok, false);
+    assert.match(body.result.error, /unavailable/i);
+    const after = await get(open.url, "/state");
+    assert.ok(after.body.agentError, "askAgent unavailable should land in state.agentError");
+    assert.ok(!after.body.decisions[0].handedToAgentAt, "no write-back when the agent is unavailable");
+  });
+
+  await test("summarize records state.summary once a host is wired", async () => {
+    // Wire a STUB host (extension.mjs does this with the real Copilot model:
+    // ai -> ephemeralQuery, askAgent -> a main-conversation message).
+    const sentToAgent = [];
+    runtime.setHost({
+      ai: async (q) => "SUMMARY of: " + q.split("Decisions:\n")[1],
+      askAgent: async (p) => { sentToAgent.push(p); return "queued"; },
+    });
+    runtime._sentToAgent = sentToAgent; // expose for the next test
+
+    const { body } = await action(open.url, "summarize", {});
+    assert.match(body.result.summary, /SUMMARY of:/);
+    const after = await get(open.url, "/state");
+    assert.match(after.body.summary, /Adopt SSE for live state/);
+    assert.ok(after.body.summaryAt, "a successful summary stamps summaryAt");
+    assert.equal(after.body.summaryError, null, "a successful summary clears the prior error");
+  });
+
+  await test("hand_to_agent forwards a decision prompt to the main agent", async () => {
+    const before = await get(open.url, "/state");
+    const id = before.body.decisions[0].id;
+    const { body } = await action(open.url, "hand_to_agent", { id });
+    assert.equal(body.result.ok, true);
+    assert.equal(runtime._sentToAgent.length, 1);
+    assert.match(runtime._sentToAgent[0], /Adopt SSE for live state/);
+    const after = await get(open.url, "/state");
+    assert.ok(after.body.decisions[0].handedToAgentAt, "a successful handoff is written back onto the item");
+    assert.equal(after.body.agentError, null, "a successful handoff clears the prior error");
+  });
+
   await runtime.shutdown();
   await rm(home, { recursive: true, force: true });
   console.log(`\n${passed} checks passed`);

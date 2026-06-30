@@ -52,7 +52,8 @@ to your request, and validates it visually before handing it back.
   `ctx.ai(question)` (silent, no keys, no history) or hand work to the main agent
   with `ctx.askAgent(prompt)`. No API keys, no model picker, no external `fetch`.
 - **A generator** — `node scripts/new-canvas.mjs <name>` stamps a working canvas
-  (add `--template data` for a fetch + auto-refresh canvas) with its own smoke test.
+  (`--template data` for a fetch + auto-refresh canvas, `--template ai` for a
+  host-AI canvas) with its own smoke test.
 - **Tests** — a standalone HTTP harness, a kit byte-parity check, a generator test, a
   kit-sync/freshness tooling check, and a Lucide re-vendor determinism test.
 
@@ -128,6 +129,9 @@ node scripts/new-canvas.mjs my-board --title "My Board" --dir .github/extensions
 
 # An external-data canvas (fetch + refresh + visibility-gated auto-refresh):
 node scripts/new-canvas.mjs market-feed --template data --dir .github/extensions/market-feed
+
+# A host-AI canvas (silent ctx.ai generation + ctx.askAgent handoff):
+node scripts/new-canvas.mjs ai-helper --template ai --dir .github/extensions/ai-helper
 ```
 
 Reload extensions, then open the canvas (`canvasId: "my-board"`). It works out of
@@ -174,8 +178,9 @@ kit/                          The canonical kit — copy into your extension as 
   version.mjs                 KIT_VERSION stamp — sync + freshness tooling
   vendor/                     Vendored Preact+htm and the Lucide glyph data
 reference/decision-log/       Complete working canvas in the real installed shape
+                              (CRUD + host AI: summarize via ctx.ai, hand-off via ctx.askAgent)
 scripts/
-  new-canvas.mjs              Generator — stamp a new canvas (--template list|data)
+  new-canvas.mjs              Generator — stamp a new canvas (--template list|data|ai)
   sync-kit.mjs                Copy kit/ into an extension as canvas-kit/ + stamp the version
   check-kit-freshness.mjs     Offline drift gate — fail if a vendored kit copy is stale
   vendor-lucide.mjs           Rebuild kit/vendor/lucide.mjs from a pinned lucide-react release
@@ -183,7 +188,7 @@ scripts/
 test/
   http.test.mjs               Boots the runtime over real HTTP and checks the contract
   kit-parity.test.mjs         Asserts kit/ == reference canvas-kit/ (no drift)
-  generator.test.mjs          Stamps both templates, runs their smoke tests, checks the kit API
+  generator.test.mjs          Stamps the list/data/ai templates, runs their smoke tests, checks the kit API
   tooling.test.mjs            Exercises the version stamp, sync-kit, and the freshness drift gate
   vendor-lucide.test.mjs      Checks the Lucide vendoring generator (sorting, key-strip, determinism)
 ```
