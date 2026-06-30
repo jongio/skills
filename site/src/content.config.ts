@@ -11,6 +11,7 @@ const skills = defineCollection({
     tagline: z.string(),
     useWhen: z.string(),
     repoPath: z.string(), // path within the repo, e.g. skills/create-canvas-app
+    gallery: z.string().url().optional(), // optional external gallery/demo link
     thumb: z.string(), // image under public/, base-relative (e.g. images/...)
     install: z.array(z.object({ label: z.string(), cmd: z.string() })),
     order: z.number().default(99),

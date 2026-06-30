@@ -3,6 +3,7 @@ title: create-gh-pages-site
 tagline: "Scaffold a working GitHub Pages site from a vetted template (static, Astro, React + Vite, Eleventy, or Jekyll) — the correct base path, the official GitHub Actions deploy, and content authored from your repo."
 useWhen: "When you want to publish a static page, an Astro/Eleventy site, a React (Vite) SPA, or a Jekyll site to GitHub Pages — with the base path and deploy pipeline wired correctly."
 repoPath: skills/create-gh-pages-site
+gallery: https://jongio.github.io/gh-pages-templates/
 thumb: images/invoke-create-gh-pages-site.png
 order: 2
 install:

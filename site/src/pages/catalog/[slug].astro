@@ -21,8 +21,11 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
     <h1>{skill.data.title}</h1>
     <p class="muted lede">{skill.data.tagline}</p>
     <p class="usewhen"><strong>Use when:</strong> {skill.data.useWhen}</p>
-    <p>
+    <p class="actions">
       <a class="btn" href={repoUrl}>Source &amp; README</a>
+      {skill.data.gallery && (
+        <a class="btn" href={skill.data.gallery}>Template gallery</a>
+      )}
     </p>
   </header>
 
@@ -46,6 +49,7 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
 
 <style>
   .skill-head { margin-bottom: 1.5rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
   .skill-hero {
     width: 100%; aspect-ratio: 16 / 9; object-fit: contain;
     border: 1px solid var(--border); border-radius: var(--radius);
