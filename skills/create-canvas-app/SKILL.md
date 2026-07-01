@@ -283,6 +283,10 @@ kit does not offer it. `ai` (ephemeralQuery) is the supported silent path.
 - Don't block the panel on a slow `ai()` — `await` it in the handler, write the
   result into state, and let SSE push the update, exactly like the data-fetch shape.
 
+Stamp this whole shape — an `ask_ai` handler (silent `ctx.ai`), a `hand_to_agent`
+handler (`ctx.askAgent`), model errors captured into state, and an offline smoke
+test that wires a stub host — with `node scripts/new-canvas.mjs <name> --template ai`.
+
 ## Domain strategy — shared board vs personal profile
 
 State is keyed by the domain id `resolveDomainId` returns. Two intents, identical
@@ -339,7 +343,9 @@ who shares what.
    throwaway canvas scoped to just the current session — it's discovered like the
    others (its `extensionId` is `session:<sessionId>:<name>`) and disappears when
    the session does. Add `--template data` for an external-data canvas (fetch +
-   `refresh` + visibility-gated polling) instead of the default user-entered list.
+   `refresh` + visibility-gated polling), or `--template ai` for a host-AI canvas
+   (`ctx.ai` silent generation + `ctx.askAgent` handoff), instead of the default
+   user-entered list.
 2. **Reload + open.** Run `extensions_reload`, then `open_canvas` with
    `canvasId: "<name>"`. The list canvas works immediately.
 3. **Shape your data.** In `canvas.mjs`, edit `createInitialState`, the action
@@ -415,14 +421,18 @@ A canvas isn't done because the server boots. Verify the UI:
 ## Reference + tests (study these)
 
 - `reference/decision-log/` — a complete, working canvas in the exact installed
-  shape (kit nested as `canvas-kit/`). Best example of every contract above.
+  shape (kit nested as `canvas-kit/`). Best example of every contract above —
+  including the host model: a `summarize` action (silent `ctx.ai`) and a
+  `hand_to_agent` action (`ctx.askAgent`), each capturing model errors into state.
 - `kit/` — the canonical kit you copy in. Source of truth.
 - `test/http.test.mjs` — boots the SDK-free runtime over real HTTP and checks
-  `/state`, `/events`, `/action`, static serving, and path-traversal safety.
+  `/state`, `/events`, `/action`, static serving, path-traversal safety, and the
+  host-model actions (offline-error capture + a wired-host stub).
 - `test/kit-parity.test.mjs` — guarantees `kit/` and the reference's bundled
   `canvas-kit/` stay byte-identical.
-- `test/generator.test.mjs` — stamps both templates, runs their smoke tests, and
-  checks the kit API surface (format helpers, poll helper, theme primitives).
+- `test/generator.test.mjs` — stamps the list, data, and ai templates, runs their
+  smoke tests, and checks the kit API surface (format helpers, poll helper, theme
+  primitives, host-model wiring).
 - `test/tooling.test.mjs` — exercises the version stamp (`kit/version.mjs`),
   `scripts/sync-kit.mjs`, and the offline `scripts/check-kit-freshness.mjs` drift gate.
 - `test/vendor-lucide.test.mjs` — checks the Lucide vendoring generator

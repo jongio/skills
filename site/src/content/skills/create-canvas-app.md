@@ -23,6 +23,8 @@ canvas needs already wired:
 - **Durable per-user storage** — state survives reloads and sessions.
 - **Primer theming** — matches GitHub light/dark out of the box.
 - **Official GitHub Lucide icons** — the same icon set the product uses.
+- **Host AI, no API keys** — call the Copilot app's own model from an action with
+  `ctx.ai(…)` (silent generation) or hand work to the main agent with `ctx.askAgent(…)`.
 - **A generator** that stamps a working canvas in one command, plus tests.
 
 ## When to reach for it
