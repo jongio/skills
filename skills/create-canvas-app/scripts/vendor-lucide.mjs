@@ -11,15 +11,15 @@
 // Usage:
 //   node scripts/vendor-lucide.mjs <version> [--icons-dir <path>] [--out <path>]
 //
-//   <version>        lucide-react version to stamp + install (e.g. 1.21.0).
+//   <version>        lucide-react version to stamp + install (e.g. 1.22.0).
 //   --icons-dir <p>  read icons from an existing install's dist/esm/icons dir
 //                    instead of installing. The <version> is still used for the
 //                    stamped header, so pass the version that <p> was built from.
 //   --out <p>        output file (default: kit/vendor/lucide.mjs).
 //
 // Examples:
-//   node scripts/vendor-lucide.mjs 1.21.0
-//   node scripts/vendor-lucide.mjs 1.21.0 --icons-dir /tmp/lr/node_modules/lucide-react/dist/esm/icons
+//   node scripts/vendor-lucide.mjs 1.22.0
+//   node scripts/vendor-lucide.mjs 1.22.0 --icons-dir /tmp/lr/node_modules/lucide-react/dist/esm/icons
 
 import { readdir, readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { join, resolve, isAbsolute } from "node:path";
