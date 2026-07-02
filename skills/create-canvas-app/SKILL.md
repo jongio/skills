@@ -90,7 +90,7 @@ invocation in the same envelope, so model failures deliberately:
 
 ## Icons — official GitHub Lucide, always
 
-The kit vendors the **exact Lucide set github-app ships** (`lucide-react@1.21.0`,
+The kit vendors the **exact Lucide set github-app ships** (`lucide-react@1.22.0`,
 byte-identical). Use it for *every* icon; do not hand-write SVGs or pull a CDN.
 
 ```js
