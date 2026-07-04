@@ -51,6 +51,10 @@ to your request, and validates it visually before handing it back.
 - **Host AI in a handler** — call the Copilot app's own model from an action with
   `ctx.ai(question)` (silent, no keys, no history) or hand work to the main agent
   with `ctx.askAgent(prompt)`. No API keys, no model picker, no external `fetch`.
+- **Deep links into github-app** — build a validated `ghapp://` URL (open a
+  session, jump to a surface) with the kit's deep-link builders and render it as a
+  `target="_blank"` link; the canvas webview routes it into the app's
+  confirmation-gated deeplink pipeline. No OS launcher, no IPC, no SDK.
 - **A generator** — `node scripts/new-canvas.mjs <name>` stamps a working canvas
   (`--template data` for a fetch + auto-refresh canvas, `--template ai` for a
   host-AI canvas) with its own smoke test.
@@ -169,16 +173,19 @@ from jongio/copilot-extensions/extensions/stock-ticker."* No clone, no build.
 ```
 SKILL.md                      The Copilot skill (authoring contract + workflow)
 kit/                          The canonical kit — copy into your extension as canvas-kit/
-  client.mjs                  Browser runtime: html, mountCanvas, pollWhileVisible, hooks, Icon, formatters
+  client.mjs                  Browser runtime: html, mountCanvas, pollWhileVisible, hooks, Icon, formatters, deep-link builders
   server.mjs                  SDK-free runtime: /state, /events (SSE), /action, static
   storage.mjs                 Durable per-user JSON store
   format.mjs                  nid + relativeTime / compactNumber / percent helpers
+  deeplinks.mjs               github-app deep-link builders (ghapp://) + safe URL / prompt helpers
   theme.css                   Primer-token styling (ck-* classes)
   icons.mjs                   Lucide Icon component + helpers
   version.mjs                 KIT_VERSION stamp — sync + freshness tooling
   vendor/                     Vendored Preact+htm and the Lucide glyph data
 reference/decision-log/       Complete working canvas in the real installed shape
-                              (CRUD + host AI: summarize via ctx.ai, hand-off via ctx.askAgent)
+                              (CRUD + host AI + an "Open in github-app" card that
+                              demonstrates every ghapp:// deep-link builder)
+reference/deeplinks.md        Deep-link schema reference (routes, params, validation)
 scripts/
   new-canvas.mjs              Generator — stamp a new canvas (--template list|data|ai)
   sync-kit.mjs                Copy kit/ into an extension as canvas-kit/ + stamp the version
@@ -188,6 +195,7 @@ scripts/
 test/
   http.test.mjs               Boots the runtime over real HTTP and checks the contract
   kit-parity.test.mjs         Asserts kit/ == reference canvas-kit/ (no drift)
+  deeplinks.test.mjs          Checks the ghapp:// builders: validation, encoding, injection resistance
   generator.test.mjs          Stamps the list/data/ai templates, runs their smoke tests, checks the kit API
   tooling.test.mjs            Exercises the version stamp, sync-kit, and the freshness drift gate
   vendor-lucide.test.mjs      Checks the Lucide vendoring generator (sorting, key-strip, determinism)
@@ -198,13 +206,14 @@ test/
 ```sh
 node test/http.test.mjs
 node test/kit-parity.test.mjs
+node test/deeplinks.test.mjs
 node test/generator.test.mjs
 node test/tooling.test.mjs
 node test/vendor-lucide.test.mjs
 ```
 
 No dependencies to install — everything is vendored. Node 18+ (developed on 24).
-`npm test` runs all five in sequence.
+`npm test` runs all six in sequence.
 
 ## License
 

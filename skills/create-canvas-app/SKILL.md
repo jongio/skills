@@ -287,6 +287,86 @@ Stamp this whole shape — an `ask_ai` handler (silent `ctx.ai`), a `hand_to_age
 handler (`ctx.askAgent`), model errors captured into state, and an offline smoke
 test that wires a stub host — with `node scripts/new-canvas.mjs <name> --template ai`.
 
+## Deep links: open a session in github-app
+
+A canvas often needs to push work OUT to the app it runs in: open a new session on
+a repo, jump to Chats, pre-fill an automation. Do it with a **deep link**. The kit
+builds a validated `ghapp://` URL and you render it as an ordinary anchor.
+
+**How it reaches the app.** The canvas webview intercepts a trusted click on an
+`<a target="_blank" href="ghapp://…">` and routes it into the app's deeplink
+pipeline, which shows a confirmation before it clones a repo or creates a session.
+A canvas only has to BUILD the URL (no OS launcher, no IPC, no SDK). The
+`target="_blank"` is required: without it the webview will not route the click.
+
+**Build links with the kit, never by hand.** The builders (re-exported from
+`/kit/client.mjs` for the view, and importable from `./canvas-kit/deeplinks.mjs` in
+SDK-free `canvas.mjs`) validate inputs the same way github-app does and encode every
+param with `URLSearchParams`, so attacker-influenced text (a title, a fetched value)
+can neither inject an extra query key nor change the target route:
+
+```js
+import { buildSessionDeepLink, quoteUntrusted } from "/kit/client.mjs";
+
+// Open a NEW session on a repo, seeded with a prompt. Returns null when the repo
+// is invalid, so you can withhold the control instead of rendering a dead link.
+const href = buildSessionDeepLink({
+  repo: "owner/repo",                              // required, validated owner/repo
+  prompt: `Work on ${quoteUntrusted(item.title)}`, // wrap untrusted text
+  mode: "interactive",                             // plan | interactive | autopilot
+  // pr: 42          -> a PR number (cannot be combined with branch)
+  // branch: "main"  -> a base branch (cannot be combined with pr)
+});
+
+href && html`<a class="ck-btn ck-btn-sm" href=${href} target="_blank" rel="noopener noreferrer">
+  <${Icon} name="rocket" size=${14} />Open in session
+</a>`;
+```
+
+**The full builder set** (each validates its input and returns a normalized
+`ghapp://` URL, or null on bad input):
+
+- `buildSessionDeepLink({ repo, prompt, pr, branch, mode })`: `session/new`, the primary one.
+- `buildSessionDetailDeepLink(sessionId)`: open an existing session.
+- `buildChatsDeepLink()`: the Chats surface.
+- `buildNewAutomationDeepLink({ name, prompt, trigger, time, day })`: pre-fill the new-automation dialog.
+- `buildIssueDeepLink({ owner, repo, number })` and `buildPullRequestDeepLink({ owner, repo, number })`.
+
+Plus the primitives: `isRepoFullName(s)` (validate a repo before offering a link;
+the reference's `set_repo` action uses it), `safeDeepLinkUrl(raw)` (validate and
+normalize any app-scheme URL), `quoteUntrusted(text)` (wrap untrusted prompt text so
+it reads as data), and `APP_DEEP_LINK_SCHEME` (`"ghapp"`).
+
+**From a web surface, wrap it in the hosted launcher.** A canvas inside the app can
+link `ghapp://` directly. If a link might instead be opened in a browser, wrap it so
+dotcom handles retry, fallback, and an app-missing install prompt:
+
+```js
+import { hostedLauncherUrl } from "/kit/client.mjs";
+const url = hostedLauncherUrl(href, { entryPoint: "my_canvas" });
+// -> https://github.com/copilot/app/launch?entry_point=my_canvas&open=<encoded ghapp://…>
+```
+
+**Rules:**
+
+- **Never put secrets or sensitive content in a deep-link `prompt`.** The URL is
+  handed to the OS.
+- **Always wrap untrusted free text with `quoteUntrusted`** before putting it in a
+  prompt, and let the builders encode the rest.
+- **A builder returns null on invalid input.** Guard on it and hide the control
+  instead of rendering a broken link.
+- **The anchor must be `target="_blank"`,** or the canvas webview will not route it
+  into the app.
+
+**Full schema.** `reference/deeplinks.md` documents every route, its parameters, and
+the validation the builders apply (and how to add a route if the app grows one).
+
+The reference canvas (`reference/decision-log/`) demonstrates every builder: a
+`set_repo` action, a per-decision "Open in session" link (`session/new`), and an
+"Open in github-app" card with Chats, a pre-filled new automation, issue/PR links,
+open-by-session-id, and a "web links" toggle that wraps each link with
+`hostedLauncherUrl`.
+
 ## Domain strategy — shared board vs personal profile
 
 State is keyed by the domain id `resolveDomainId` returns. Two intents, identical
@@ -424,12 +504,19 @@ A canvas isn't done because the server boots. Verify the UI:
   shape (kit nested as `canvas-kit/`). Best example of every contract above —
   including the host model: a `summarize` action (silent `ctx.ai`) and a
   `hand_to_agent` action (`ctx.askAgent`), each capturing model errors into state.
+  It also demonstrates every deep-link builder: a `set_repo` action, a per-decision
+  "Open in session" link, and an "Open in github-app" card (Chats, new automation,
+  issue/PR, open-by-session-id, and a hosted-launcher web-links toggle).
+- `reference/deeplinks.md` — the deep-link schema reference: routes, parameters, the
+  validation the builders apply, the webview mechanism, and how to add a route.
 - `kit/` — the canonical kit you copy in. Source of truth.
 - `test/http.test.mjs` — boots the SDK-free runtime over real HTTP and checks
   `/state`, `/events`, `/action`, static serving, path-traversal safety, and the
   host-model actions (offline-error capture + a wired-host stub).
 - `test/kit-parity.test.mjs` — guarantees `kit/` and the reference's bundled
   `canvas-kit/` stay byte-identical.
+- `test/deeplinks.test.mjs` — checks the `ghapp://` builders: input validation
+  (matching github-app), param encoding, injection resistance, and the launcher wrapper.
 - `test/generator.test.mjs` — stamps the list, data, and ai templates, runs their
   smoke tests, and checks the kit API surface (format helpers, poll helper, theme
   primitives, host-model wiring).
@@ -454,3 +541,6 @@ A canvas isn't done because the server boots. Verify the UI:
 - **Never** reach for the model with `fetch`/API keys or a `client.createSession()`
   sub-session (it hangs from an extension) — use `ctx.ai(...)` for silent
   generation, `ctx.askAgent(...)` to drive the main agent.
+- **Never** hand-build a `ghapp://` URL, and never omit `target="_blank"` on a
+  deep-link anchor. Use the kit builders (`buildSessionDeepLink`, …) and render a
+  `target="_blank"` link so the canvas webview routes it into the app.

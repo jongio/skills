@@ -7,6 +7,7 @@
 import { fileURLToPath } from "node:url";
 import { userStore } from "./canvas-kit/storage.mjs";
 import { nid } from "./canvas-kit/format.mjs";
+import { isRepoFullName } from "./canvas-kit/deeplinks.mjs";
 
 const EXT_NAME = "decision-log";
 
@@ -42,6 +43,7 @@ export const canvasConfig = {
   createInitialState: (ctx) => ({
     domain: ctx?.input?.domain ?? "default",
     decisions: [],
+    repo: null,
     summary: "",
     summaryAt: null,
     summaryError: null,
@@ -169,6 +171,39 @@ export const canvasConfig = {
           .map((d) => `- [${d.status}] ${d.title}${d.note ? ` — ${d.note}` : ""}`)
           .join("\n");
         return { count: items.length, summary };
+      },
+    },
+
+    // ---- github-app integration (deep links) ---------------------------------
+    // Set the project repo this log opens sessions in. The view builds a
+    // `ghapp://session/new` deep link per decision (kit/deeplinks.mjs) and renders
+    // it as a target="_blank" anchor; the canvas webview routes the click into the
+    // app's confirmation-gated deeplink pipeline. Repo is validated the SAME way
+    // github-app validates it (isRepoFullName), so a stored value always yields a
+    // link the app will accept. Both the agent and the user set it through here.
+    set_repo: {
+      description:
+        "Set (or clear) the project repo (owner/repo) that this decision log opens " +
+        "github-app sessions in. Pass an empty string to clear it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          repo: { type: "string", description: "GitHub repo as owner/repo, or empty to clear." },
+        },
+        required: ["repo"],
+        additionalProperties: false,
+      },
+      handler: ({ state, set, input }) => {
+        const raw = String(input.repo ?? "").trim();
+        if (raw === "") {
+          set({ ...state, repo: null });
+          return { repo: null, status: "Cleared project repo" };
+        }
+        if (!isRepoFullName(raw)) {
+          throw new Error(`Invalid repo "${raw}". Expected owner/repo.`);
+        }
+        set({ ...state, repo: raw });
+        return { repo: raw, status: `Project repo set to ${raw}` };
       },
     },
 

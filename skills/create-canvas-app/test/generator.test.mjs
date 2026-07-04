@@ -130,6 +130,28 @@ async function main() {
     assert.match(src, /poll\b/); // mountCanvas accepts a poll option
   });
 
+  await test("client.mjs re-exports the deep-link builders (one import site for views)", async () => {
+    const client = await import("../kit/client.mjs");
+    for (const name of [
+      "APP_DEEP_LINK_SCHEME",
+      "isRepoFullName",
+      "safeDeepLinkUrl",
+      "quoteUntrusted",
+      "hostedLauncherUrl",
+      "buildSessionDeepLink",
+      "buildSessionDetailDeepLink",
+      "buildChatsDeepLink",
+      "buildNewAutomationDeepLink",
+      "buildIssueDeepLink",
+      "buildPullRequestDeepLink",
+    ]) {
+      assert.equal(typeof client[name], name === "APP_DEEP_LINK_SCHEME" ? "string" : "function", `client.mjs must re-export ${name}`);
+    }
+    // A built link is validated + encoded (untrusted "/" in repo is escaped).
+    assert.equal(client.buildSessionDeepLink({ repo: "a/b" }), "ghapp://session/new?repo=a%2Fb");
+    assert.equal(client.buildSessionDeepLink({ repo: "bad" }), null);
+  });
+
   // ---- host-model capability (ai / askAgent) -------------------------------
   await test("server.mjs stays SDK-free and exposes setHost", async () => {
     const src = await read(join(ROOT, "kit", "server.mjs"));
@@ -197,6 +219,14 @@ async function main() {
       readFile(join(ROOT, "reference", "decision-log", "canvas-kit", "format.mjs")),
     ]);
     assert.ok(a.equals(b), "kit/format.mjs and reference copy differ");
+  });
+
+  await test("deeplinks.mjs is byte-mirrored into the reference canvas-kit", async () => {
+    const [a, b] = await Promise.all([
+      readFile(join(ROOT, "kit", "deeplinks.mjs")),
+      readFile(join(ROOT, "reference", "decision-log", "canvas-kit", "deeplinks.mjs")),
+    ]);
+    assert.ok(a.equals(b), "kit/deeplinks.mjs and reference copy differ (run scripts/sync-kit.mjs)");
   });
 
   // ---- generator: all templates --------------------------------------------
