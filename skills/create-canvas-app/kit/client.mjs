@@ -23,6 +23,25 @@ export { Icon, lucideSVG, hasIcon, iconNames } from "./icons.mjs";
 // SDK-free canvas.mjs). Re-exported here so views have one import site.
 export { nid, relativeTime, compactNumber, percent } from "./format.mjs";
 
+// Deep links INTO github-app — build a validated `ghapp://` URL (open a session,
+// jump to a surface) and render it as a `target="_blank"` anchor; the canvas
+// webview routes it into the app's deeplink pipeline. Also importable directly
+// from /kit/deeplinks.mjs in SDK-free canvas.mjs. See deeplinks.mjs for the
+// contract and the SKILL "Deep links" section for usage.
+export {
+  APP_DEEP_LINK_SCHEME,
+  isRepoFullName,
+  safeDeepLinkUrl,
+  quoteUntrusted,
+  hostedLauncherUrl,
+  buildSessionDeepLink,
+  buildSessionDetailDeepLink,
+  buildChatsDeepLink,
+  buildNewAutomationDeepLink,
+  buildIssueDeepLink,
+  buildPullRequestDeepLink,
+} from "./deeplinks.mjs";
+
 // Kit version stamp — lets a canvas (or the sync/freshness tooling) report which
 // kit snapshot it was built from.
 export { KIT_VERSION } from "./version.mjs";
