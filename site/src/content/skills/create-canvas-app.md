@@ -1,6 +1,6 @@
 ---
 title: create-canvas-app
-tagline: "Build GitHub Copilot canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable per-user storage, Primer theming, the official Lucide icon set, and a one-command generator."
+tagline: "Build GitHub Copilot canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable per-user storage, Primer theming, the official Lucide icon set, a one-command generator, and deep links into the app."
 useWhen: "When you want to create, scaffold, or improve an interactive canvas — a side-panel UI the agent can open and drive: dashboards, editors, trackers, boards, or document/preview surfaces."
 repoPath: skills/create-canvas-app
 thumb: images/invoke-create-canvas-app.png
@@ -25,6 +25,8 @@ canvas needs already wired:
 - **Official GitHub Lucide icons** — the same icon set the product uses.
 - **Host AI, no API keys** — call the Copilot app's own model from an action with
   `ctx.ai(…)` (silent generation) or hand work to the main agent with `ctx.askAgent(…)`.
+- **Deep links into github-app:** open a session (or any documented app surface) from a
+  canvas with a validated `ghapp://` link that the app routes into its confirmation-gated pipeline.
 - **A generator** that stamps a working canvas in one command, plus tests.
 
 ## When to reach for it
