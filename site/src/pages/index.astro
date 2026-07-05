@@ -49,8 +49,28 @@ const skills = (await getCollection("skills")).sort(
     <pre><code>npx skills add jongio/skills --list
 npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot</code></pre>
     <h3>3 · Copilot plugin marketplace</h3>
+    <p class="muted">From the CLI:</p>
     <pre><code>copilot plugin marketplace add jongio/skills
 copilot plugin install create-canvas-app@jongio-skills</code></pre>
+    <p class="muted">Or in the Copilot app, no commands needed:</p>
+    <ol class="steps">
+      <li>
+        <span>Open <strong>Settings</strong> and select <strong>Plugins</strong>.</span>
+        <img class="shot" src={`${base}images/app-plugins-nav.png`} alt="Plugins in the settings sidebar" loading="lazy" />
+      </li>
+      <li>
+        <span>Click <strong>Install ▾ → Add marketplace</strong>, enter <code>jongio/skills</code>, and click <strong>Add marketplace</strong>.</span>
+        <img class="shot" src={`${base}images/app-add-marketplace.png`} alt="Add marketplace dialog with jongio/skills entered" loading="lazy" />
+      </li>
+      <li>
+        <span>The marketplace's skills appear grouped under <strong>jongio-skills</strong>. Click <strong>Install</strong> on the one you want.</span>
+        <img class="shot" src={`${base}images/app-browse-install.png`} alt="Browse the jongio-skills marketplace and install create-canvas-app" loading="lazy" />
+      </li>
+      <li>
+        <span>The skill installs and is enabled, ready to use right away.</span>
+        <img class="shot" src={`${base}images/app-installed.png`} alt="create-canvas-app installed and enabled" loading="lazy" />
+      </li>
+    </ol>
     <h3>4 · Whole repo as one plugin</h3>
     <pre><code>copilot plugin install jongio/skills</code></pre>
     <p class="muted">After any install, reload with <code>/skills reload</code> or start a new session.</p>
@@ -85,4 +105,11 @@ copilot plugin install create-canvas-app@jongio-skills</code></pre>
     padding: 0.7rem 0.9rem; overflow-x: auto;
   }
   .card h3 { font-size: 1rem; margin: 1.1rem 0 0.4rem; }
+  .steps { margin: 0.5rem 0 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 1.1rem; }
+  .steps li { color: var(--fg); }
+  .steps li > span { display: block; }
+  .shot {
+    display: block; margin: 0.55rem 0 0; max-width: 100%; height: auto;
+    border: 1px solid var(--border); border-radius: 9px; background: var(--bg);
+  }
 </style>
