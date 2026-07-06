@@ -2,15 +2,31 @@
  *
  * Baseline canvas styling built on the Primer design tokens the runtime injects
  * onto the canvas document (see github-app src/lib/extensionCanvasThemeContract.json).
- * Every token has a hardcoded dark fallback so the canvas still looks right if a
- * token is ever missing. Author canvas-specific styles on top of these.
+ *
+ * Theme awareness. The tokens the host injects are computed from the *current*
+ * user theme, so a light-theme user gets light values and a dark-theme user gets
+ * dark ones. Author against the --ck-* aliases below and your canvas follows the
+ * user's theme for free. Two rules keep that honest:
+ *   1. Never hardcode a dark-only color. Use a --ck-* alias, an injected token, or
+ *      color-mix() of one so the value tracks the theme. (--ck-bg-inset derives
+ *      itself from --ck-bg-muted + --ck-fg for exactly this reason.)
+ *   2. The dark fallbacks below only apply when a token is missing. Because the
+ *      host injects its theme *after* first paint, a light user would otherwise
+ *      see a dark flash, so the block after :root follows the OS color scheme
+ *      until the host takes over (it sets data-color-mode when it does).
  */
 
 :root {
   /* semantic aliases -> injected tokens (fallbacks = GitHub dark) */
   --ck-bg: var(--background-color-default, #0d1117);
   --ck-bg-muted: var(--background-color-muted, #161b22);
-  --ck-bg-inset: var(--background-color-emphasis, #010409);
+  /* Recessed control surface (tabs track, wells, chips). Derived from the two
+     theme-aware tokens above rather than --background-color-emphasis, which is a
+     high-contrast chip color that is *dark* in light mode (#25292e) and would
+     paint every inset surface as a dark box on a light canvas. This mix stays a
+     touch more prominent than a card in either theme (dark ~#363c43, light
+     ~#d6d8db). */
+  --ck-bg-inset: color-mix(in srgb, var(--ck-bg-muted) 85%, var(--ck-fg) 15%);
   --ck-fg: var(--text-color-default, #f0f6fc);
   --ck-muted: var(--text-color-muted, #8b949e);
   --ck-link: var(--text-color-link, #58a6ff);
@@ -31,6 +47,33 @@
 
   --ck-radius: 6px;
   --ck-gap: 12px;
+}
+
+/* Theme-aware fallback (see header note 2). The host injects its Primer tokens
+   only after first paint. Until then (and in any non-app context that never
+   injects) follow the webview's OS color scheme instead of forcing dark. Both
+   rules are gated on :not([data-color-mode]): the host sets that attribute
+   alongside its tokens and explicit color-scheme, so the instant it themes the
+   canvas these back off and the host is fully in control. --ck-bg-inset is
+   omitted on purpose; it derives from --ck-bg-muted + --ck-fg, which are
+   redefined here, so it tracks the light values automatically. */
+:root:not([data-color-mode]) { color-scheme: light dark; }
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-color-mode]) {
+    --ck-bg: var(--background-color-default, #ffffff);
+    --ck-bg-muted: var(--background-color-muted, #f6f8fa);
+    --ck-fg: var(--text-color-default, #1f2328);
+    --ck-muted: var(--text-color-muted, #59636e);
+    --ck-link: var(--text-color-link, #0969da);
+    --ck-accent: var(--text-color-accent, #0969da);
+    --ck-danger: var(--text-color-danger, #d1242f);
+    --ck-success: var(--text-color-success, #1a7f37);
+    --ck-attention: var(--text-color-attention, #9a6700);
+    --ck-border: var(--border-color-default, #d1d9e0);
+    --ck-border-muted: var(--border-color-muted, #d1d9e0);
+    --ck-focus: var(--color-focus-outline, var(--outline-color-focus-default, #0969da));
+  }
 }
 
 * { box-sizing: border-box; }
@@ -143,8 +186,8 @@ h3 { font-size: var(--text-title-small, 1rem); font-weight: var(--ck-fw-semibold
   border: 1px solid var(--ck-border);
   color: var(--ck-muted);
 }
-/* Generic semantic badge variants — map your own statuses to these in the view
-   (e.g. open -> ck-badge-success, decided -> ck-badge-accent). Do NOT add
+/* Generic semantic badge variants (map your own statuses to these in the view;
+   e.g. open -> ck-badge-success, decided -> ck-badge-accent). Do NOT add
    app-specific status names here; this is the shared kit theme. */
 .ck-badge-success { color: var(--ck-success); border-color: var(--border-color-success-emphasis, #238636); }
 .ck-badge-accent { color: var(--text-color-accent, #a371f7); border-color: var(--border-color-accent-emphasis, #8957e5); }
@@ -170,7 +213,7 @@ h3 { font-size: var(--text-title-small, 1rem); font-weight: var(--ck-fw-semibold
 .ck-empty { color: var(--ck-muted); text-align: center; padding: 28px 0; }
 
 /* ---- loading: spinner + skeleton ----------------------------------------- */
-/* Spinner: pair with a Lucide "loader-circle" icon —
+/* Spinner: pair with a Lucide "loader-circle" icon:
    html`<${Icon} name="loader-circle" class="ck-spinner" />`. */
 .ck-spinner { animation: ck-spin 0.9s linear infinite; transform-origin: center; }
 @keyframes ck-spin { to { transform: rotate(360deg); } }
@@ -188,7 +231,7 @@ h3 { font-size: var(--text-title-small, 1rem); font-weight: var(--ck-fw-semibold
   position: absolute;
   inset: 0;
   transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.06), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ck-fg) 8%, transparent), transparent);
   animation: ck-shimmer 1.2s ease-in-out infinite;
 }
 @keyframes ck-shimmer { to { transform: translateX(100%); } }
@@ -217,7 +260,7 @@ h3 { font-size: var(--text-title-small, 1rem); font-weight: var(--ck-fw-semibold
 /* ---- motion safety ------------------------------------------------------- */
 /* Global guard: respect the OS "reduce motion" setting for every animation a
    canvas adds (kit spinners/skeletons included). Author-added keyframes inherit
-   this automatically — you do not need to repeat it per canvas. */
+   this automatically, so you do not need to repeat it per canvas. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
