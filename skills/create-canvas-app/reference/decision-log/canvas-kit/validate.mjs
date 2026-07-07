@@ -19,10 +19,13 @@
 //   minItems/maxItems      array length bounds
 //
 // It is intentionally forgiving: an absent/empty schema validates anything, and
-// unknown keywords are ignored (so a richer schema never hard-fails here). The
-// goal is to catch the shape mistakes that actually break canvases — wrong type,
-// missing required field, unknown/typo'd property, out-of-enum value — not to be
-// a complete JSON Schema implementation.
+// unknown keywords are ignored (so a richer schema never hard-fails here). A
+// property whose value is `undefined` is treated as ABSENT — `undefined` is not a
+// JSON value, so `{ x: undefined }` is equivalent to `{}` once it crosses the
+// agent↔extension / iframe↔extension boundary, and `{ optional }` shorthand with
+// an unset variable must not be rejected. The goal is to catch the shape mistakes
+// that actually break canvases — wrong type, missing required field, unknown/typo'd
+// property, out-of-enum value — not to be a complete JSON Schema implementation.
 
 function typeOf(value) {
   if (value === null) return "null";
@@ -121,24 +124,33 @@ function walk(schema, value, path, errors) {
       for (const key of schema.required) {
         // Object.hasOwn (not `value[key] === undefined`): a required property
         // named after a prototype member (e.g. "toString", "constructor") would
-        // otherwise read the inherited value and wrongly pass the check.
-        if (!Object.hasOwn(value, key)) errors.push(`${path}.${key}: required`);
+        // otherwise read the inherited value and wrongly pass the check. An
+        // explicit `undefined` counts as ABSENT (undefined is not a JSON value, so
+        // { x: undefined } is equivalent to {} once it crosses the wire).
+        if (!Object.hasOwn(value, key) || value[key] === undefined) errors.push(`${path}.${key}: required`);
       }
     }
     for (const [key, sub] of Object.entries(props)) {
-      if (Object.hasOwn(value, key)) walk(sub, value[key], `${path}.${key}`, errors);
+      // Skip absent OR explicitly-undefined optional properties: a caller passing
+      // { article } where `article` is an unset variable is idiomatic JS and, over
+      // a JSON boundary, indistinguishable from omitting the key. Only validate a
+      // property that is actually present with a defined value.
+      if (Object.hasOwn(value, key) && value[key] !== undefined) walk(sub, value[key], `${path}.${key}`, errors);
     }
     // Membership is tested with Object.hasOwn, NOT `key in props`: `in` walks the
     // prototype chain, so an extra key named "toString"/"constructor"/"__proto__"
     // etc. would satisfy `key in props` and escape additionalProperties. This
     // validator is the enforcement boundary (input → 400, state → 500), so that
-    // would be a real contract hole.
+    // would be a real contract hole. An explicit `undefined` value is treated as
+    // absent (see above), so it is never counted as an extra/unexpected property.
     if (schema.additionalProperties === false) {
       for (const key of Object.keys(value)) {
+        if (value[key] === undefined) continue;
         if (!Object.hasOwn(props, key)) errors.push(`${path}.${key}: unexpected property`);
       }
     } else if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
       for (const key of Object.keys(value)) {
+        if (value[key] === undefined) continue;
         if (!Object.hasOwn(props, key)) walk(schema.additionalProperties, value[key], `${path}.${key}`, errors);
       }
     }

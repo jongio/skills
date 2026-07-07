@@ -68,6 +68,22 @@ async function main() {
     assert.deepEqual(validate(undefined, { anything: true }), []); // no schema = anything
   });
 
+  await test("validate: an optional property explicitly set to undefined is treated as absent", () => {
+    // { value, article } where `article` is an unset variable is idiomatic JS; over
+    // a JSON boundary `undefined` is dropped, so the validator must NOT type-check it.
+    const schema = {
+      type: "object",
+      properties: { value: { type: "string" }, article: { type: "object" } },
+      required: ["value"],
+      additionalProperties: false,
+    };
+    assert.deepEqual(validate(schema, { value: "up", article: undefined }), [], "undefined optional prop must pass");
+    // A REQUIRED property explicitly set to undefined is still missing.
+    assert.ok(validate(schema, { value: undefined }).some((e) => /value: required/.test(e)));
+    // An UNKNOWN key set to undefined is not an unexpected property (it's absent).
+    assert.deepEqual(validate(schema, { value: "up", bogus: undefined }), [], "undefined unknown key = absent");
+  });
+
   await test("validate: prototype-named keys can't escape additionalProperties (in-operator hole)", () => {
     const schema = { type: "object", properties: { title: { type: "string" } }, additionalProperties: false };
     // These keys all exist on Object.prototype; `key in props` would treat them as
