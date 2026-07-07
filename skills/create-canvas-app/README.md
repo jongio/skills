@@ -206,7 +206,7 @@ test/
   generator.test.mjs          Stamps the list/data/ai templates, runs their smoke tests, checks the kit API
   tooling.test.mjs            Exercises the version stamp, sync-kit, and the freshness drift gate
   vendor-lucide.test.mjs      Checks the Lucide vendoring generator (sorting, key-strip, determinism)
-  kit-runtime.test.mjs        Checks input/state schema validation, the net.mjs SSRF guard, and concurrency-safe storage
+  kit-runtime.test.mjs        Checks input/state schema validation, the net.mjs SSRF guard, concurrency-safe storage, the githubStore shared store, and the server sync loop
 ```
 
 ## Run the tests
