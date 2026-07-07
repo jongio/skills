@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import { mkdtemp, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -96,6 +96,12 @@ async function main() {
           inputSchema: { type: "object", properties: { count: { type: "integer" } }, required: ["count"], additionalProperties: false },
           handler: ({ set, input }) => { set((s) => ({ ...s, count: input.count })); return { count: input.count }; },
         },
+        // Same effect as set_count but MUTATES state in place (returns the same
+        // object) — exercises the stateSchema rollback deep-snapshot path.
+        set_count_inplace: {
+          inputSchema: { type: "object", properties: { count: { type: "integer" } }, required: ["count"], additionalProperties: false },
+          handler: ({ set, input }) => { set((s) => { s.count = input.count; return s; }); return { count: input.count }; },
+        },
       },
     });
   }
@@ -137,6 +143,16 @@ async function main() {
     assert.equal((await rt.getState("d")).count, 3, "state must roll back to the last valid value");
   });
 
+  await test("runtime: an IN-PLACE mutation that produces invalid state is rolled back (deep snapshot)", async () => {
+    const rt = makeRuntime();
+    await rt.invoke("set_count_inplace", { count: 3 }, { domainId: "d" }); // valid baseline
+    // The handler mutates the SAME state object and returns it; a reference-copy
+    // snapshot would roll back to the corrupted object. structuredClone must give
+    // a real pre-mutation value to restore.
+    await throwsAsync(() => rt.invoke("set_count_inplace", { count: -1 }, { domainId: "d" }), /invalid state/);
+    assert.equal((await rt.getState("d")).count, 3, "in-place mutation must roll back to the last valid value");
+  });
+
   // ---- net.mjs: SSRF / egress guard (offline; IP literals, no DNS) ---------
   const { isBlockedAddress, assertPublicUrl, safeFetch } = await imp("net.mjs");
 
@@ -170,6 +186,45 @@ async function main() {
     await throwsAsync(() => safeFetch("http://127.0.0.1:1/"), /Blocked/);
   });
 
+  await test("net: safeFetch re-checks the guard on every redirect hop (no SSRF via 30x)", async () => {
+    // A public host that 302-redirects to the metadata endpoint must NOT be chased.
+    // Stub fetch to (a) assert we asked for manual redirects and (b) hand back a
+    // 302 -> Location: link-local. safeFetch must re-run assertPublicUrl on the hop
+    // and throw, and must have called fetch exactly once (never reached the target).
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    let sawManual = false;
+    globalThis.fetch = async (_url, opts) => {
+      calls++;
+      if (opts && opts.redirect === "manual") sawManual = true;
+      return new Response(null, { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data/" } });
+    };
+    try {
+      await throwsAsync(() => safeFetch("http://8.8.8.8/"), /Blocked/);
+      assert.equal(sawManual, true, "safeFetch must request redirect:'manual'");
+      assert.equal(calls, 1, "must not follow the redirect into blocked space");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  await test("net: safeFetch follows a redirect to another PUBLIC host and returns its response", async () => {
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = async (url) => {
+      calls++;
+      if (calls === 1) return new Response(null, { status: 302, headers: { location: "http://9.9.9.9/final" } });
+      return new Response("ok", { status: 200 });
+    };
+    try {
+      const res = await safeFetch("http://8.8.8.8/");
+      assert.equal(res.status, 200);
+      assert.equal(calls, 2, "should have followed exactly one hop");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   // ---- storage.mjs: concurrency-safe save + tiers --------------------------
   const home = await mkdtemp(join(tmpdir(), "ck-storage-"));
   process.env.COPILOT_HOME = home;
@@ -190,6 +245,17 @@ async function main() {
   await test("storage: sessionStore is rooted under session-state/<id>/extensions/<name>", () => {
     const store = sessionStore("sess-123", "my-ext", "d.json");
     assert.match(store.file.replace(/\\/g, "/"), /session-state\/sess-123\/extensions\/my-ext\/d\.json$/);
+  });
+
+  await test("storage: sessionStore('..') can't escape the session-state root", () => {
+    // ".." would otherwise join one level above session-state. The sanitizer must
+    // collapse the dot-run so the resolved path stays inside session-state/.
+    const store = sessionStore("..", "my-ext", "d.json");
+    const root = resolve(join(home, "session-state"));
+    assert.ok(
+      resolve(store.file).startsWith(root + sep),
+      `resolved path must stay under session-state (got ${store.file})`,
+    );
   });
 
   // ---- icons.mjs: prototype-safe name resolution ---------------------------

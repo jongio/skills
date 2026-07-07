@@ -82,22 +82,45 @@ export async function assertPublicUrl(url) {
 }
 
 /**
- * SSRF-guarded fetch with a mandatory timeout. Runs assertPublicUrl(url) first,
- * then fetch() with an AbortSignal.timeout so a slow upstream can't hang the
- * panel. Returns the Response as-is (does NOT throw on a non-2xx status — the
- * caller checks res.ok), so it is a drop-in for a guarded fetch().
+ * SSRF-guarded fetch with a mandatory timeout. Runs assertPublicUrl on the URL
+ * and on EVERY redirect hop, so a chosen public host can't 30x-redirect the
+ * request into loopback/metadata/private space. Returns the final Response as-is
+ * (does NOT throw on a non-2xx status — the caller checks res.ok), so it is a
+ * drop-in for a guarded fetch().
+ *
+ * Redirects are followed MANUALLY (redirect:"manual") rather than by fetch's
+ * default redirect:"follow": the default would chase a 3xx Location without
+ * re-running the guard, which silently undoes every check in this module. Here
+ * each hop's target is re-validated before we connect to it.
  * @param {string} url
  * @param {object} [opts]
- * @param {number} [opts.timeoutMs=12000]  abort the request after this many ms
- * @param {object} [opts.headers]          request headers (merged as-is)
- * @param {RequestInit} [opts.rest]        any other fetch init (method, body, …)
+ * @param {number} [opts.timeoutMs=12000]     abort the WHOLE operation (all hops) after this many ms
+ * @param {number} [opts.maxRedirects=5]      how many 3xx hops to follow before giving up
+ * @param {object} [opts.headers]             request headers (merged as-is)
+ * @param {RequestInit} [opts.rest]           any other fetch init (method, body, …)
  * @returns {Promise<Response>}
  */
-export async function safeFetch(url, { timeoutMs = 12000, headers, ...rest } = {}) {
-  await assertPublicUrl(url);
-  return fetch(url, {
-    ...rest,
-    headers: headers ?? {},
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+export async function safeFetch(url, { timeoutMs = 12000, maxRedirects = 5, headers, ...rest } = {}) {
+  // One timeout signal bounds the entire operation, redirects included, so a
+  // chain of slow hops can't multiply the deadline.
+  const signal = AbortSignal.timeout(timeoutMs);
+  let current = url;
+  for (let hop = 0; ; hop++) {
+    await assertPublicUrl(current);
+    const res = await fetch(current, {
+      ...rest,
+      headers: headers ?? {},
+      redirect: "manual",
+      signal,
+    });
+    if (res.status >= 300 && res.status < 400 && res.headers.has("location")) {
+      if (hop >= maxRedirects) throw new Error("Too many redirects");
+      const next = new URL(res.headers.get("location"), current).href;
+      // Discard the redirect body so the connection can be freed before the next hop.
+      try { await res.body?.cancel(); } catch { /* no body / already consumed */ }
+      current = next;
+      continue;
+    }
+    return res;
+  }
 }
