@@ -20,6 +20,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { join, normalize, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { validate } from "./validate.mjs";
 
 const KIT_DIR = fileURLToPath(new URL(".", import.meta.url));
 
@@ -53,6 +54,7 @@ export class CanvasKitError extends Error {
  * @param {(domainId:string)=>any|Promise<any>} [config.loadState]
  * @param {(domainId:string, state:any)=>void|Promise<void>} [config.saveState]
  * @param {Record<string,{description?:string,inputSchema?:object,handler:Function}>} config.actions
+ * @param {object} [config.stateSchema]  optional JSON-Schema-subset for the durable state; when set, a mutation that violates it is rolled back and fails (500)
  * @param {string} config.assetsDir  absolute path to the canvas web/ folder
  * @param {(ctx:object,state:any)=>string} [config.statusLine]
  */
@@ -118,8 +120,26 @@ export function createCanvasRuntime(config) {
     if (!action || typeof action.handler !== "function") {
       throw new CanvasKitError("unknown_action", `Unknown action: ${actionName}`);
     }
+    // Enforce the declared inputSchema at the boundary (agent OR ui). The schema
+    // is a contract authors already write; validating it here turns "declared but
+    // unchecked" into a typed boundary and stops a malformed/typo'd payload from
+    // reaching the handler. A shape violation is the CALLER's fault → invalid_input
+    // (HTTP 400). Business rules ("title can't be blank") still live in the handler
+    // and surface as a 500, so a schema-valid-but-empty string reaches the handler.
+    if (action.inputSchema) {
+      const errs = validate(action.inputSchema, input ?? {}, "input");
+      if (errs.length) {
+        throw new CanvasKitError("invalid_input", `Invalid input for '${actionName}': ${errs.join("; ")}`);
+      }
+    }
     const domainId = ctx?.domainId ?? "default";
     const d = await getDomain(domainId, ctx);
+    // Deep snapshot for stateSchema rollback: a handler may mutate state IN PLACE
+    // and return the same object, so a reference copy (prevState = d.state) would
+    // point at the same (now-corrupt) object and restore nothing. structuredClone
+    // gives a real pre-mutation copy. Durable state is JSON-shaped, so it clones
+    // cleanly. Only pay the clone when a stateSchema is actually configured.
+    const prevState = config.stateSchema ? structuredClone(d.state) : undefined;
     let mutated = false;
     const api = {
       get state() { return d.state; },
@@ -161,6 +181,17 @@ export function createCanvasRuntime(config) {
     };
     const result = await action.handler(api);
     if (mutated) {
+      // Optional stateSchema guards the durable shape: if a handler produced an
+      // invalid state, roll back the in-memory mutation and fail LOUD (a 500 —
+      // this is a handler bug, not caller input) instead of persisting/broadcasting
+      // corrupt state. Absent stateSchema, anything goes (opt-in).
+      if (config.stateSchema) {
+        const errs = validate(config.stateSchema, d.state, "state");
+        if (errs.length) {
+          d.state = prevState; // roll back so in-memory stays consistent
+          throw new Error(`Action '${actionName}' produced invalid state: ${errs.join("; ")}`);
+        }
+      }
       if (config.saveState) await config.saveState(domainId, d.state);
       broadcast(domainId);
     }
@@ -307,6 +338,15 @@ export function createCanvasRuntime(config) {
    * @returns {Promise<{url:string,title:string,status?:string}>}
    */
   async function openInstance({ instanceId, input, ctx }) {
+    // Validate the open input against the declared inputSchema (same contract the
+    // actions get). A bad open payload fails fast with invalid_input rather than
+    // silently resolving the wrong domain.
+    if (config.inputSchema) {
+      const errs = validate(config.inputSchema, input ?? {}, "open input");
+      if (errs.length) {
+        throw new CanvasKitError("invalid_input", `Invalid open input: ${errs.join("; ")}`);
+      }
+    }
     const domainId = config.resolveDomainId
       ? config.resolveDomainId(input ?? {}, ctx ?? {}) || "default"
       : "default";

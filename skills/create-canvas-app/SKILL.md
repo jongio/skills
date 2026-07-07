@@ -55,6 +55,12 @@ web/app.mjs     ── your Preact view
   open input (`resolveDomainId`), **not** by `instanceId` — open the same domain
   in two panels and they show the same data. Persistence goes through
   `userStore(extName, file)` → `$COPILOT_HOME/extensions/<name>/artifacts/<domain>.json`.
+  Two more tiers exist in `kit/storage.mjs` for non-durable/scoped state:
+  `sessionStore(sessionId, extName, file)` (per-session scratch, discarded with
+  the session) and `workspaceStore(workspacePath, file)` (rooted at the session
+  workspace). All three write atomically (temp + rename) and **serialize
+  concurrent saves to the same file**, so a racing agent + UI save can't corrupt
+  or `EPERM` the durable file.
 - **Agent and UI share handlers.** An action invoked by the agent and the same
   action invoked from a button run the identical handler and produce the identical
   state mutation. Write the logic once, in `canvas.mjs`.
@@ -87,6 +93,22 @@ invocation in the same envelope, so model failures deliberately:
 - For an **expected, transient** failure (a flaky upstream fetch on a background
   poll), don't throw — capture it into `state.error` and **return** so the error
   card shows while the poll stays quiet (see the data template's `refresh`).
+
+### Input & state are schema-validated at the boundary
+
+An action's `inputSchema` is **enforced by the runtime**, not just declared: a
+payload that violates it (wrong type, missing required field, out-of-enum value,
+or an unexpected property under `additionalProperties: false`) is rejected with
+an `invalid_input` error (**HTTP 400**) *before* your handler runs — from the
+agent side too. So `inputSchema` is your typed contract; write it precisely and
+your handler only sees well-shaped input. **Business rules still live in the
+handler** (a schema-valid but empty `"   "` title reaches the handler, which
+throws → 500). Open input is validated against `config.inputSchema` the same way.
+
+Optionally set `config.stateSchema` (same JSON-Schema subset, `kit/validate.mjs`)
+to guard the **durable shape**: if a handler produces state that violates it, the
+mutation is rolled back and the action fails loud (500) instead of persisting
+corrupt state. It's opt-in — omit it and any state shape is allowed.
 
 ## Icons — official GitHub Lucide, always
 
@@ -172,23 +194,29 @@ Most real canvases aren't user-entered CRUD lists; they pull from the network an
 refresh. The shape:
 
 1. **`fetch()` lives in the action handler (or a helper it calls), never in the
-   view.** Always bound it with a timeout so a slow upstream can't hang the panel:
+   view.** Use the kit's **`safeFetch`** — it SSRF-guards the URL and applies a
+   hard timeout, so a caller-influenced source can't reach the internal network
+   and a slow upstream can't hang the panel:
 
    ```js
+   import { safeFetch } from "./canvas-kit/net.mjs";
+
    async function fetchItems(url) {
-     const res = await fetch(url, { signal: AbortSignal.timeout(12000) });
+     const res = await safeFetch(url, { headers: { Accept: "application/json" } });
      if (!res.ok) throw new Error(`HTTP ${res.status}`);
      return mapItems(await res.json());
    }
    ```
 
-   The fetch runs server-side on the loopback runtime, so the generated `data`
-   template guards it with an **SSRF check**: it allows only `http`/`https` to a
-   **public** host and rejects loopback, link-local (incl. cloud metadata), and
-   private ranges — including every address the hostname resolves to. Anything
-   you feed back to the agent (e.g. via `list_items`) is still attacker-influenced
-   text, so keep the source one *you* choose and treat fetched content as
-   untrusted (render it as text, never `innerHTML`).
+   `safeFetch` runs server-side on the loopback runtime, so it enforces an **SSRF
+   guard** (`kit/net.mjs`): it allows only `http`/`https` to a **public** host and
+   rejects loopback, link-local (incl. cloud metadata), and private ranges —
+   including every address the hostname resolves to — then fetches with an
+   `AbortSignal.timeout`. `assertPublicUrl(url)` / `isBlockedAddress(ip)` are also
+   exported if you need the check without the fetch. Anything you feed back to the
+   agent (e.g. via `list_items`) is still attacker-influenced text, so keep the
+   source one *you* choose and treat fetched content as untrusted (render it as
+   text, never `innerHTML`).
 
 2. **Expose a `refresh` action** that fetches and writes the result into shared
    state. Capture failures into `state.error` and *return* (don't throw) so a
