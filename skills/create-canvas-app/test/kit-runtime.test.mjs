@@ -258,6 +258,111 @@ async function main() {
     );
   });
 
+  // ---- github-store.mjs: shared repo-backed store (mocked fetch) -----------
+  const { githubStore } = await imp("github-store.mjs");
+  const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
+  const ghJson = (obj, { status = 200, etag } = {}) =>
+    new Response(JSON.stringify(obj), { status, headers: etag ? { "Content-Type": "application/json", etag } : { "Content-Type": "application/json" } });
+  // Run fn with a stubbed global fetch + a fake token (so no `gh` spawn).
+  async function withFetch(stub, fn) {
+    const realFetch = globalThis.fetch;
+    const prevTok = process.env.GH_TOKEN;
+    process.env.GH_TOKEN = "test-token";
+    globalThis.fetch = stub;
+    try { return await fn(); }
+    finally {
+      globalThis.fetch = realFetch;
+      if (prevTok === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = prevTok;
+    }
+  }
+
+  await test("github-store: load decodes content + authorizes; poll with a matching ETag is a 304 (unchanged)", async () => {
+    const calls = [];
+    await withFetch(async (url, init = {}) => {
+      calls.push({ url: String(url), method: init.method ?? "GET", headers: init.headers ?? {} });
+      if ((init.headers ?? {})["If-None-Match"] === '"e1"') return new Response(null, { status: 304 });
+      return ghJson({ content: b64(JSON.stringify({ n: 1 })), sha: "sha1" }, { etag: '"e1"' });
+    }, async () => {
+      const store = githubStore({ owner: "o", repo: "r", path: "state/b.json" });
+      assert.deepEqual(await store.load(null), { n: 1 });
+      assert.ok(String(calls[0].headers.Authorization).includes("test-token"), "token sent as Bearer");
+      assert.match(calls[0].url, /\/repos\/o\/r\/contents\/state\/b\.json\?ref=main$/);
+      const p = await store.poll();
+      assert.equal(p.changed, false, "matching ETag → 304 → unchanged");
+      assert.equal(calls[1].headers["If-None-Match"], '"e1"', "poll sent If-None-Match");
+    });
+  });
+
+  await test("github-store: poll detects a remote change and returns the new state", async () => {
+    let loaded = false;
+    await withFetch(async () => {
+      if (!loaded) { loaded = true; return ghJson({ content: b64(JSON.stringify({ n: 1 })), sha: "sha1" }, { etag: '"e1"' }); }
+      return ghJson({ content: b64(JSON.stringify({ n: 2 })), sha: "sha2" }, { etag: '"e2"' });
+    }, async () => {
+      const store = githubStore({ owner: "o", repo: "r", path: "b.json" });
+      await store.load(null);
+      const p = await store.poll();
+      assert.equal(p.changed, true);
+      assert.deepEqual(p.state, { n: 2 });
+    });
+  });
+
+  await test("github-store: save sends the sha and retries once on a 409 (last-writer-wins)", async () => {
+    const puts = [];
+    let gets = 0;
+    await withFetch(async (url, init = {}) => {
+      const method = init.method ?? "GET";
+      if (method === "GET") { gets++; return ghJson({ content: b64(JSON.stringify({ n: gets })), sha: "sha" + gets }, { etag: '"e' + gets + '"' }); }
+      const body = JSON.parse(init.body);
+      puts.push(body);
+      if (puts.length === 1) return ghJson({ message: "conflict" }, { status: 409 }); // stale sha
+      return ghJson({ content: { sha: "newsha" } });
+    }, async () => {
+      const store = githubStore({ owner: "o", repo: "r", path: "b.json" });
+      await store.load(null);                 // sha1
+      await store.save({ hello: "world" });   // PUT#1 sha1 → 409 → reload sha2 → PUT#2 sha2 → ok
+      assert.equal(puts.length, 2, "retried after the 409");
+      assert.equal(puts[0].sha, "sha1", "first PUT used the loaded sha (optimistic lock)");
+      assert.equal(puts[1].sha, "sha2", "retry used the refreshed sha");
+      assert.equal(Buffer.from(puts[1].content, "base64").toString("utf8"), JSON.stringify({ hello: "world" }, null, 2));
+    });
+  });
+
+  await test("github-store: a 404 load returns the fallback (fresh file, no sha)", async () => {
+    await withFetch(async () => new Response("Not Found", { status: 404 }), async () => {
+      const store = githubStore({ owner: "o", repo: "r", path: "b.json" });
+      assert.equal(await store.load(null), null);
+    });
+  });
+
+  await test("github-store: owner/repo/path are URL-encoded in the request (no path injection)", async () => {
+    let seen = "";
+    await withFetch(async (url) => { seen = String(url); return ghJson({ content: b64("{}"), sha: "s" }); }, async () => {
+      // An owner with URL-significant chars must not shift the path/query boundaries.
+      const store = githubStore({ owner: "o/../x", repo: "r?a=1", path: "state/b.json" });
+      await store.load(null);
+      assert.ok(seen.includes("/repos/o%2F..%2Fx/r%3Fa%3D1/contents/state/b.json"), `owner/repo encoded (got ${seen})`);
+    });
+  });
+
+  await test("github-store: a non-https apiBase is rejected at construction", () => {
+    // apiBase is trusted/fixed by design; still, reject an obviously unsafe override.
+    assert.throws(() => githubStore({ owner: "o", repo: "r", path: "b.json", apiBase: "http://169.254.169.254" }), /https/);
+    assert.throws(() => githubStore({ owner: "o", repo: "r", path: "b.json", apiBase: "not a url" }), /valid URL|https/);
+    // The default (GitHub public API) and a valid https enterprise host are fine.
+    assert.doesNotThrow(() => githubStore({ owner: "o", repo: "r", path: "b.json" }));
+    assert.doesNotThrow(() => githubStore({ owner: "o", repo: "r", path: "b.json", apiBase: "https://ghe.example.com/api/v3" }));
+  });
+
+  await test("github-store: an oversized response is refused before it's read into memory", async () => {
+    // A collaborator pushing a huge file must not force the runtime to allocate it on
+    // every poll — the Content-Length guard rejects it first.
+    await withFetch(async () => new Response(b64("{}"), { status: 200, headers: { "Content-Type": "application/json", "Content-Length": String(64 * 1024 * 1024) } }), async () => {
+      const store = githubStore({ owner: "o", repo: "r", path: "b.json" });
+      await throwsAsync(() => store.load(null), /too large/);
+    });
+  });
+
   // ---- icons.mjs: prototype-safe name resolution ---------------------------
   const { hasIcon, lucideSVG, Icon } = await imp("icons.mjs");
 
@@ -301,6 +406,74 @@ async function main() {
       assert.equal(over.status, 503, "the 65th subscriber is refused");
     } finally {
       for (const c of conns) { try { c.req.destroy(); } catch {} }
+      await rt.shutdown();
+    }
+  });
+
+  await test("server: syncState adopts a remote change and broadcasts to viewers", async () => {
+    // Simulate a shared store whose remote content changes out-of-band. The
+    // runtime's sync loop should pull it via syncState and replace in-memory state.
+    let remote = { v: 1 };
+    let polls = 0;
+    const rt = createCanvasRuntime({
+      id: "sync", displayName: "Sync", description: "", assetsDir: KIT,
+      createInitialState: () => ({ v: 0 }),
+      loadState: async () => ({ v: 0 }),
+      syncState: async () => { polls++; return { changed: true, state: remote }; },
+      syncIntervalMs: 50,
+      actions: {},
+    });
+    try {
+      await rt.getState("d");                 // warm the domain so it exists in the map
+      remote = { v: 2 };
+      await rt._syncDomain("d");              // one manual tick (no timer/viewer needed)
+      assert.deepEqual(await rt.getState("d"), { v: 2 }, "remote change adopted into in-memory state");
+      assert.ok(polls >= 1, "syncState was polled");
+    } finally {
+      await rt.shutdown();
+    }
+  });
+
+  await test("server: syncState never blanks state on a null/deleted remote", async () => {
+    const rt = createCanvasRuntime({
+      id: "sync2", displayName: "Sync2", description: "", assetsDir: KIT,
+      createInitialState: () => ({ v: 5 }),
+      syncState: async () => ({ changed: true, state: null }), // remote file gone
+      syncIntervalMs: 50,
+      actions: {},
+    });
+    try {
+      await rt.getState("d");
+      await rt._syncDomain("d");
+      assert.deepEqual(await rt.getState("d"), { v: 5 }, "a null remote is ignored, live state preserved");
+    } finally {
+      await rt.shutdown();
+    }
+  });
+
+  await test("server: syncState rejects a remote that violates stateSchema (no adopt, no broadcast)", async () => {
+    // A collaborator (or a hand-edit on github.com) can push a shape that violates
+    // the declared stateSchema. Adopting it unvalidated would broadcast corrupt state
+    // to every viewer and poison the next invoke()'s rollback baseline — so the sync
+    // path must clear the SAME schema gate the invoke() path enforces.
+    let remote = { count: 1 };
+    const rt = createCanvasRuntime({
+      id: "sync3", displayName: "Sync3", description: "", assetsDir: KIT,
+      createInitialState: () => ({ count: 0 }),
+      stateSchema: { type: "object", properties: { count: { type: "integer", minimum: 0 } }, required: ["count"], additionalProperties: false },
+      syncState: async () => ({ changed: true, state: remote }),
+      syncIntervalMs: 50,
+      actions: {},
+    });
+    try {
+      await rt.getState("d");
+      remote = { count: 3 };                    // valid remote is adopted
+      await rt._syncDomain("d");
+      assert.deepEqual(await rt.getState("d"), { count: 3 }, "a schema-valid remote is adopted");
+      remote = { count: -1, bogus: true };      // violates minimum + additionalProperties
+      await rt._syncDomain("d");
+      assert.deepEqual(await rt.getState("d"), { count: 3 }, "a schema-invalid remote is rejected, last valid state preserved");
+    } finally {
       await rt.shutdown();
     }
   });
