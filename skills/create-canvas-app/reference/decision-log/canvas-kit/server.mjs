@@ -142,7 +142,19 @@ export function createCanvasRuntime(config) {
       // is ignored so a transient upstream gap can't blank a live board.
       if (out?.changed && out.state != null) {
         const d = domains.get(domainId);
-        if (d) { d.state = out.state; broadcast(domainId); }
+        if (d) {
+          // Adopted remote state must clear the SAME stateSchema gate the invoke()
+          // path enforces. A collaborator (or a hand-edit on github.com) can push a
+          // shape that violates the schema; adopting it unvalidated would broadcast a
+          // corrupt shape to every viewer AND poison the next invoke()'s rollback
+          // baseline (structuredClone would snapshot the already-invalid state).
+          // Reject (skip) an invalid remote instead — the next valid write reconciles.
+          if (config.stateSchema && validate(config.stateSchema, out.state, "sync-remote").length) {
+            return;
+          }
+          d.state = out.state;
+          broadcast(domainId);
+        }
       }
     } catch {
       // A transient network/API error must not kill the timer; retry next tick.
@@ -157,10 +169,16 @@ export function createCanvasRuntime(config) {
     }
   }
 
+  // Floor the poll cadence: a mistakenly tiny interval (e.g. 1ms) would hammer the
+  // durable source — for githubStore that means burning the GitHub API rate limit in
+  // seconds. 2s is well below any real collaboration-latency need.
+  const MIN_SYNC_INTERVAL_MS = 2000;
+
   function startSync() {
     if (syncTimer || typeof config.syncState !== "function") return;
-    const ms = Number(config.syncIntervalMs) || 0;
-    if (ms <= 0) return;
+    const requested = Number(config.syncIntervalMs) || 0;
+    if (requested <= 0) return;
+    const ms = Math.max(requested, MIN_SYNC_INTERVAL_MS);
     syncTimer = setInterval(syncTick, ms);
     syncTimer.unref?.(); // never keep the process alive just to poll
   }

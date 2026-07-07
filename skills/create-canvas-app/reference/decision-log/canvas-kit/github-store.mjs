@@ -24,20 +24,33 @@
 // logged, never written to the repo.
 
 import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const API = "https://api.github.com";
 const UA = "canvas-kit-github-store";
+// Hard deadline for every GitHub API call so a hung request (stalled TLS, dropped
+// connection) can't freeze a user action or dead-lock the sync loop (mirrors the
+// AbortSignal.timeout pattern in net.mjs safeFetch).
+const DEFAULT_TIMEOUT_MS = 15000;
+// Refuse an implausibly large state file rather than allocate it on every poll. A
+// board's JSON is tens of KB; this is a safety ceiling, not a real size limit.
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+// Bounded save retries on an optimistic-lock conflict (409) before failing loud.
+const MAX_SAVE_RETRIES = 3;
 
 // Resolve a GitHub token lazily and memoize it. A 401 (expired/rotated) clears the
 // cache via invalidate() so the next call re-resolves.
 function makeTokenResolver(tokenOpt) {
   let cached = null;
   async function fromGhCli() {
-    return new Promise((resolve) => {
-      execFile("gh", ["auth", "token"], { windowsHide: true }, (err, stdout) => {
-        resolve(err ? null : String(stdout).trim() || null);
-      });
-    });
+    try {
+      const { stdout } = await execFileAsync("gh", ["auth", "token"], { windowsHide: true });
+      return String(stdout).trim() || null;
+    } catch {
+      return null; // gh missing or not logged in → fall through to the no-token error
+    }
   }
   return {
     async get() {
@@ -77,9 +90,19 @@ function encodePath(path) {
 export function githubStore(opts) {
   const { owner, repo, path, branch = "main", token, merge, message, apiBase = API } = opts ?? {};
   if (!owner || !repo || !path) throw new Error("githubStore: owner, repo and path are required");
+  // apiBase is a trusted, fixed host by design — GitHub's public API by default, or a
+  // GitHub Enterprise host the canvas author sets at construction (never runtime
+  // input). That's why we call fetch() directly rather than the kit's safeFetch SSRF
+  // guard, which would add a DNS-resolution check on every call for a host that can't
+  // vary per request. Still, require https for any custom apiBase as defense-in-depth.
+  if (apiBase !== API) {
+    let base;
+    try { base = new URL(apiBase); } catch { throw new Error("githubStore: apiBase must be a valid URL"); }
+    if (base.protocol !== "https:") throw new Error("githubStore: apiBase must be https");
+  }
 
   const tok = makeTokenResolver(token);
-  const contentsUrl = `${apiBase}/repos/${owner}/${repo}/contents/${encodePath(path)}`;
+  const contentsUrl = `${apiBase}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodePath(path)}`;
   const label = `${owner}/${repo}:${path}`;
 
   let sha = null;      // last-seen blob sha — sent on write as the optimistic lock
@@ -90,6 +113,7 @@ export function githubStore(opts) {
     const t = await tok.get();
     const res = await fetch(url, {
       ...init,
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${t}`,
         Accept: "application/vnd.github+json",
@@ -113,10 +137,20 @@ export function githubStore(opts) {
     return Buffer.from(json.content ?? "", "base64").toString("utf8");
   }
 
+  async function readJson(res) {
+    // Bound the allocation: refuse an oversized response before reading it, so a
+    // huge state file can't be pulled into memory on every poll tick.
+    const len = Number(res.headers.get("content-length") || 0);
+    if (len > MAX_RESPONSE_BYTES) {
+      throw new Error(`githubStore ${label}: response too large (${len} bytes)`);
+    }
+    return res.json();
+  }
+
   async function load(fallback = null) {
     const res = await api(`${contentsUrl}?ref=${encodeURIComponent(branch)}`, {}, [404]);
     if (res.status === 404) { sha = null; etag = null; lastText = null; return fallback; }
-    const json = await res.json();
+    const json = await readJson(res);
     sha = json.sha ?? null;
     etag = res.headers.get("etag");
     const text = decode(json);
@@ -133,7 +167,7 @@ export function githubStore(opts) {
       sha = null; etag = null; lastText = null;
       return { changed: true, state: null };
     }
-    const json = await res.json();
+    const json = await readJson(res);
     const text = decode(json);
     sha = json.sha ?? null;
     etag = res.headers.get("etag");
@@ -167,7 +201,7 @@ export function githubStore(opts) {
       // 409 (or a 404 if the file/branch vanished): the sha we held is stale.
       // Re-read to refresh sha, optionally merge the remote with our intended
       // write, and retry. Bounded so a persistent conflict fails loudly.
-      if ((res.status === 409 || res.status === 404) && attempt < 3) {
+      if ((res.status === 409 || res.status === 404) && attempt < MAX_SAVE_RETRIES) {
         const remote = await load(null);
         toWrite = merge ? merge(remote, state) : state; // default: last-writer-wins
         continue;
