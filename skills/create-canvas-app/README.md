@@ -174,8 +174,10 @@ from jongio/copilot-extensions/extensions/stock-ticker."* No clone, no build.
 SKILL.md                      The Copilot skill (authoring contract + workflow)
 kit/                          The canonical kit — copy into your extension as canvas-kit/
   client.mjs                  Browser runtime: html, mountCanvas, pollWhileVisible, hooks, Icon, formatters, deep-link builders
-  server.mjs                  SDK-free runtime: /state, /events (SSE), /action, static
-  storage.mjs                 Durable per-user JSON store
+  server.mjs                  SDK-free runtime: /state, /events (SSE), /action, static, inputSchema/stateSchema validation
+  storage.mjs                 Durable JSON store — userStore / sessionStore / workspaceStore (atomic, concurrency-safe writes)
+  validate.mjs                Dependency-free JSON-Schema-subset validator (enforces action inputSchema + stateSchema)
+  net.mjs                     Server-side egress guard: assertPublicUrl / isBlockedAddress / safeFetch (SSRF-safe fetch + timeout)
   format.mjs                  nid + relativeTime / compactNumber / percent helpers
   deeplinks.mjs               github-app deep-link builders (ghapp://) + safe URL / prompt helpers
   theme.css                   Primer-token styling (ck-* classes)
@@ -194,26 +196,30 @@ scripts/
   install-local.ps1           Install this skill into $COPILOT_HOME/skills
 test/
   http.test.mjs               Boots the runtime over real HTTP and checks the contract
+  client.test.mjs             Unit-tests the DOM-free client transport (connectCanvas): /state, SSE, invoke
   kit-parity.test.mjs         Asserts kit/ == reference canvas-kit/ (no drift)
   deeplinks.test.mjs          Checks the ghapp:// builders: validation, encoding, injection resistance
   generator.test.mjs          Stamps the list/data/ai templates, runs their smoke tests, checks the kit API
   tooling.test.mjs            Exercises the version stamp, sync-kit, and the freshness drift gate
   vendor-lucide.test.mjs      Checks the Lucide vendoring generator (sorting, key-strip, determinism)
+  kit-runtime.test.mjs        Checks input/state schema validation, the net.mjs SSRF guard, and concurrency-safe storage
 ```
 
 ## Run the tests
 
 ```sh
 node test/http.test.mjs
+node test/client.test.mjs
 node test/kit-parity.test.mjs
 node test/deeplinks.test.mjs
 node test/generator.test.mjs
 node test/tooling.test.mjs
 node test/vendor-lucide.test.mjs
+node test/kit-runtime.test.mjs
 ```
 
 No dependencies to install — everything is vendored. Node 18+ (developed on 24).
-`npm test` runs all six in sequence.
+`npm test` runs all eight in sequence.
 
 ## License
 
