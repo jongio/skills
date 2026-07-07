@@ -53,6 +53,8 @@ export class CanvasKitError extends Error {
  * @param {(ctx:object)=>any|Promise<any>} [config.createInitialState]
  * @param {(domainId:string)=>any|Promise<any>} [config.loadState]
  * @param {(domainId:string, state:any)=>void|Promise<void>} [config.saveState]
+ * @param {(domainId:string)=>{changed:boolean,state?:any}|Promise<{changed:boolean,state?:any}>} [config.syncState]  optional delta-poll of a SHARED durable source (e.g. githubStore.poll); when set with syncIntervalMs, remote changes are adopted + broadcast to viewers live
+ * @param {number} [config.syncIntervalMs]  poll cadence for syncState; only polled while a domain has >=1 connected viewer
  * @param {Record<string,{description?:string,inputSchema?:object,handler:Function}>} config.actions
  * @param {object} [config.stateSchema]  optional JSON-Schema-subset for the durable state; when set, a mutation that violates it is rolled back and fails (500)
  * @param {string} config.assetsDir  absolute path to the canvas web/ folder
@@ -112,6 +114,59 @@ export function createCanvasRuntime(config) {
         try { res.write(payload); } catch { /* dropped client */ }
       }
     }
+  }
+
+  // ---- optional shared-state sync (repo-backed multiplayer) ----------------
+  // When config.syncState + config.syncIntervalMs are set, poll the durable
+  // source on an interval and adopt+broadcast remote changes, so collaborators
+  // editing a SHARED store (e.g. githubStore) see each other's edits live. We
+  // only poll a domain while at least one SSE client is watching it — no viewers,
+  // no network — so API usage stays proportional to real use. syncState returns
+  // { changed:boolean, state? }; a cheap unchanged poll (ETag 304) is changed:false.
+  const syncing = new Set(); // domainIds with an in-flight poll (prevents overlap)
+  let syncTimer = null;
+
+  function domainHasViewers(domainId) {
+    for (const inst of instances.values()) {
+      if (inst.domainId === domainId && inst.clients.size > 0) return true;
+    }
+    return false;
+  }
+
+  async function syncDomain(domainId) {
+    if (syncing.has(domainId)) return; // last tick still in flight — skip
+    syncing.add(domainId);
+    try {
+      const out = await config.syncState(domainId);
+      // Adopt only a real, non-null remote state. A null (file deleted upstream)
+      // is ignored so a transient upstream gap can't blank a live board.
+      if (out?.changed && out.state != null) {
+        const d = domains.get(domainId);
+        if (d) { d.state = out.state; broadcast(domainId); }
+      }
+    } catch {
+      // A transient network/API error must not kill the timer; retry next tick.
+    } finally {
+      syncing.delete(domainId);
+    }
+  }
+
+  function syncTick() {
+    for (const domainId of domains.keys()) {
+      if (domainHasViewers(domainId)) syncDomain(domainId);
+    }
+  }
+
+  function startSync() {
+    if (syncTimer || typeof config.syncState !== "function") return;
+    const ms = Number(config.syncIntervalMs) || 0;
+    if (ms <= 0) return;
+    syncTimer = setInterval(syncTick, ms);
+    syncTimer.unref?.(); // never keep the process alive just to poll
+  }
+
+  function stopSync() {
+    if (syncTimer) { clearInterval(syncTimer); syncTimer = null; }
   }
 
   // Core action invoker — the single code path behind both agent and UI actions.
@@ -401,12 +456,15 @@ export function createCanvasRuntime(config) {
   }
 
   async function shutdown() {
+    stopSync();
     await Promise.all([...instances.keys()].map(closeInstance));
   }
 
   async function getState(domainId = "default") {
     return (await getDomain(domainId)).state;
   }
+
+  startSync(); // no-op unless config.syncState + syncIntervalMs are set
 
   return {
     config,
@@ -418,5 +476,6 @@ export function createCanvasRuntime(config) {
     invokeFromAgent, // agent-side, resolves domain from ctx
     getState,
     _instances: instances,
+    _syncDomain: syncDomain, // manual one-shot sync (tests)
   };
 }
