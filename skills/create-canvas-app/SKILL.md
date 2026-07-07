@@ -483,6 +483,10 @@ Key facts to tell the user and honor in code:
   pass `merge(remoteState, myState)` to `githubStore` to resolve field-by-field
   (e.g. union a board's items by id) so two people editing different items never
   clobber each other.
+- **Untrusted remote:** if you set `config.stateSchema`, it guards **sync-adopted**
+  state too — a collaborator's malformed edit (or a hand-edit on github.com) that
+  violates the schema is rejected instead of being broadcast to viewers. Define a
+  `stateSchema` for any shared board so a bad remote can't corrupt everyone's panel.
 - **Distribution:** put the extension folder in that same repo (`extension/`) so a
   collaborator installs the canvas AND gets the live data from one place.
 
