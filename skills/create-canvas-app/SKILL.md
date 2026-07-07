@@ -61,6 +61,18 @@ web/app.mjs     ── your Preact view
   workspace). All three write atomically (temp + rename) and **serialize
   concurrent saves to the same file**, so a racing agent + UI save can't corrupt
   or `EPERM` the durable file.
+- **Shared, multiplayer state (optional).** For a board multiple *people* edit,
+  swap the local tier for `githubStore({ owner, repo, path })` from
+  `kit/github-store.mjs`: it persists the same JSON to a file in a (private) repo
+  via the GitHub Contents API, so every collaborator with push access edits ONE
+  document — GitHub is both the store and the access control. Wire it as
+  `loadState`/`saveState`, and add `syncState: () => store.poll()` +
+  `syncIntervalMs` so the runtime polls for other people's edits (cheap ETag `304`
+  when unchanged) and adopts them live — but only while a panel is being viewed.
+  Writes are optimistic-locked by blob SHA (a conflicting commit re-reads +
+  retries; last-writer-wins by default, or pass a `merge(remote, mine)`). Token
+  comes from `GH_TOKEN`/`GITHUB_TOKEN` or `gh auth token` and is only ever sent as
+  an `Authorization` header.
 - **Agent and UI share handlers.** An action invoked by the agent and the same
   action invoked from a button run the identical handler and produce the identical
   state mutation. Write the logic once, in `canvas.mjs`.
@@ -411,6 +423,69 @@ machinery (`fileFor` sanitizes the id to a filename — copy it verbatim):
 Pick the noun (`domain` vs `profile`) deliberately — it's the whole contract for
 who shares what.
 
+## Sharing canvas state across users (GitHub-backed)
+
+When the user says **"share this canvas state with other users on GitHub"** (or
+wants several people to edit the same board), don't invent a sync mechanism and
+don't round-trip a gist by hand — gists are single-writer. Back the canvas with a
+file in a **private GitHub repo** using the kit's `githubStore`
+(`kit/github-store.mjs`): GitHub is both the shared store and the access control
+(only repo collaborators can read/write), and there's no server to run.
+
+**Ask the user which repo** to store the data in — it can be different from wherever
+they installed the canvas. (For the Canvas SDK meeting board, default to
+`jongio/canvas-sdk-planning`.) Then wire the runtime to it:
+
+```js
+import { githubStore } from "./canvas-kit/github-store.mjs";
+import { userStore } from "./canvas-kit/storage.mjs";
+
+// Let the user override the target without editing code.
+const OWNER  = process.env.CANVAS_STATE_OWNER  || "jongio";
+const REPO   = process.env.CANVAS_STATE_REPO   || "canvas-sdk-planning";
+const BRANCH = process.env.CANVAS_STATE_BRANCH || "main";
+
+const local  = (d) => userStore(EXT_NAME, `${safe(d)}.json`);      // offline mirror/fallback
+const remote = (d) => githubStore({ owner: OWNER, repo: REPO, path: `state/${safe(d)}.json`, branch: BRANCH });
+
+createCanvasRuntime({
+  // …
+  // Read the shared repo; mirror locally and fall back to it if the repo is
+  // unreachable or the caller lacks access, so the panel never hard-fails.
+  loadState: async (d) => {
+    try { const r = await remote(d).load(null); if (r != null) { await local(d).save(r).catch(()=>{}); return r; } }
+    catch (e) { console.error("remote load failed, using local:", e.message); }
+    return local(d).load(null);
+  },
+  // Write the shared repo AND keep a local mirror; a transient repo error is
+  // logged, not thrown, so an edit still lands locally and reconciles next poll.
+  saveState: async (d, state) => {
+    await local(d).save(state).catch(()=>{});
+    try { await remote(d).save(state); } catch (e) { console.error("remote save failed (kept local):", e.message); }
+  },
+  // Live pull: poll the repo (cheap ETag 304 when unchanged) so a collaborator's
+  // commit shows up here within a few seconds. Only polled while a panel is open.
+  syncState: async (d) => { try { return await remote(d).poll(); } catch { return { changed: false }; } },
+  syncIntervalMs: 5000,
+});
+```
+
+Key facts to tell the user and honor in code:
+
+- **Access = repo collaborators.** They add each teammate with **push** access
+  (`gh api -X PUT repos/<o>/<r>/collaborators/<user> -f permission=push`); private
+  invites must be accepted before they can write.
+- **Token** comes from `GH_TOKEN` / `GITHUB_TOKEN`, else `gh auth token` (needs the
+  `repo` scope), and is only ever sent as an `Authorization` header — never logged
+  or written to the repo. Pass `token` explicitly to override.
+- **Conflicts:** every write is optimistic-locked by the blob SHA; a colliding
+  commit re-reads + retries. Default is last-writer-wins for the whole document —
+  pass `merge(remoteState, myState)` to `githubStore` to resolve field-by-field
+  (e.g. union a board's items by id) so two people editing different items never
+  clobber each other.
+- **Distribution:** put the extension folder in that same repo (`extension/`) so a
+  collaborator installs the canvas AND gets the live data from one place.
+
 ## Patterns & limitations (know these)
 
 - **Bundled catalog.** For curated seed data (courses, presets), ship a separate
@@ -560,8 +635,10 @@ A canvas isn't done because the server boots. Verify the UI:
 - `test/kit-runtime.test.mjs` — exercises the runtime hardening: `kit/validate.mjs`
   input/`stateSchema` validation (incl. prototype-key safety), the `kit/net.mjs`
   SSRF guard (`assertPublicUrl`/`safeFetch`, IPv4-mapped-IPv6 forms), concurrency-safe
-  `kit/storage.mjs` saves + `sessionStore`, prototype-safe `kit/icons.mjs` name
-  resolution, and the server's bounded SSE subscriber cap.
+  `kit/storage.mjs` saves + `sessionStore`, the `kit/github-store.mjs` shared store
+  (mocked fetch: load/decode, ETag `304` poll, `409` re-read+retry, `404` fallback)
+  and the server's `syncState` adopt-and-broadcast loop, prototype-safe
+  `kit/icons.mjs` name resolution, and the server's bounded SSE subscriber cap.
 
 ## Footguns
 

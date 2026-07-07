@@ -44,6 +44,9 @@ to your request, and validates it visually before handing it back.
   focus or half-typed input (the #1 bug in hand-rolled `innerHTML` canvases).
 - **Durable per-user storage** — state persists under
   `$COPILOT_HOME/extensions/<name>/artifacts/<domain>.json`.
+- **Shared multiplayer storage (optional)** — `githubStore` backs the board with a
+  file in a private repo, so collaborators edit one live document and see each
+  other's changes within seconds (poll + adopt); GitHub handles access control.
 - **Primer theming** — `ck-*` classes mapped to the host theme tokens with
   GitHub-dark fallbacks.
 - **Official GitHub icons** — the exact Lucide set github-app ships
@@ -174,8 +177,9 @@ from jongio/copilot-extensions/extensions/stock-ticker."* No clone, no build.
 SKILL.md                      The Copilot skill (authoring contract + workflow)
 kit/                          The canonical kit — copy into your extension as canvas-kit/
   client.mjs                  Browser runtime: html, mountCanvas, pollWhileVisible, hooks, Icon, formatters, deep-link builders
-  server.mjs                  SDK-free runtime: /state, /events (SSE), /action, static, inputSchema/stateSchema validation
+  server.mjs                  SDK-free runtime: /state, /events (SSE), /action, static, inputSchema/stateSchema validation, optional shared-state sync
   storage.mjs                 Durable JSON store — userStore / sessionStore / workspaceStore (atomic, concurrency-safe writes)
+  github-store.mjs            Shared repo-backed store — githubStore (multi-writer via the GitHub Contents API; poll + optimistic-lock)
   validate.mjs                Dependency-free JSON-Schema-subset validator (enforces action inputSchema + stateSchema)
   net.mjs                     Server-side egress guard: assertPublicUrl / isBlockedAddress / safeFetch (SSRF-safe fetch + timeout)
   format.mjs                  nid + relativeTime / compactNumber / percent helpers
