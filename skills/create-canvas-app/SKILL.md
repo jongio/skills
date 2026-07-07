@@ -432,17 +432,17 @@ file in a **private GitHub repo** using the kit's `githubStore`
 (`kit/github-store.mjs`): GitHub is both the shared store and the access control
 (only repo collaborators can read/write), and there's no server to run.
 
-**Ask the user which repo** to store the data in — it can be different from wherever
-they installed the canvas. (For the Canvas SDK meeting board, default to
-`jongio/canvas-sdk-planning`.) Then wire the runtime to it:
+**Ask the user which repo** to store the data in — a private repo whose
+collaborators are the people who should edit the board. It can be different from
+wherever they installed the canvas. Then wire the runtime to it:
 
 ```js
 import { githubStore } from "./canvas-kit/github-store.mjs";
 import { userStore } from "./canvas-kit/storage.mjs";
 
-// Let the user override the target without editing code.
-const OWNER  = process.env.CANVAS_STATE_OWNER  || "jongio";
-const REPO   = process.env.CANVAS_STATE_REPO   || "canvas-sdk-planning";
+// The user picks the target repo; read it from env so it isn't hardcoded.
+const OWNER  = process.env.CANVAS_STATE_OWNER  || "your-org";
+const REPO   = process.env.CANVAS_STATE_REPO   || "your-canvas-state-repo";
 const BRANCH = process.env.CANVAS_STATE_BRANCH || "main";
 
 const local  = (d) => userStore(EXT_NAME, `${safe(d)}.json`);      // offline mirror/fallback
