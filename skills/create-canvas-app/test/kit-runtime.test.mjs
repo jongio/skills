@@ -335,6 +335,34 @@ async function main() {
     });
   });
 
+  await test("github-store: owner/repo/path are URL-encoded in the request (no path injection)", async () => {
+    let seen = "";
+    await withFetch(async (url) => { seen = String(url); return ghJson({ content: b64("{}"), sha: "s" }); }, async () => {
+      // An owner with URL-significant chars must not shift the path/query boundaries.
+      const store = githubStore({ owner: "o/../x", repo: "r?a=1", path: "state/b.json" });
+      await store.load(null);
+      assert.ok(seen.includes("/repos/o%2F..%2Fx/r%3Fa%3D1/contents/state/b.json"), `owner/repo encoded (got ${seen})`);
+    });
+  });
+
+  await test("github-store: a non-https apiBase is rejected at construction", () => {
+    // apiBase is trusted/fixed by design; still, reject an obviously unsafe override.
+    assert.throws(() => githubStore({ owner: "o", repo: "r", path: "b.json", apiBase: "http://169.254.169.254" }), /https/);
+    assert.throws(() => githubStore({ owner: "o", repo: "r", path: "b.json", apiBase: "not a url" }), /valid URL|https/);
+    // The default (GitHub public API) and a valid https enterprise host are fine.
+    assert.doesNotThrow(() => githubStore({ owner: "o", repo: "r", path: "b.json" }));
+    assert.doesNotThrow(() => githubStore({ owner: "o", repo: "r", path: "b.json", apiBase: "https://ghe.example.com/api/v3" }));
+  });
+
+  await test("github-store: an oversized response is refused before it's read into memory", async () => {
+    // A collaborator pushing a huge file must not force the runtime to allocate it on
+    // every poll — the Content-Length guard rejects it first.
+    await withFetch(async () => new Response(b64("{}"), { status: 200, headers: { "Content-Type": "application/json", "Content-Length": String(64 * 1024 * 1024) } }), async () => {
+      const store = githubStore({ owner: "o", repo: "r", path: "b.json" });
+      await throwsAsync(() => store.load(null), /too large/);
+    });
+  });
+
   // ---- icons.mjs: prototype-safe name resolution ---------------------------
   const { hasIcon, lucideSVG, Icon } = await imp("icons.mjs");
 
@@ -418,6 +446,33 @@ async function main() {
       await rt.getState("d");
       await rt._syncDomain("d");
       assert.deepEqual(await rt.getState("d"), { v: 5 }, "a null remote is ignored, live state preserved");
+    } finally {
+      await rt.shutdown();
+    }
+  });
+
+  await test("server: syncState rejects a remote that violates stateSchema (no adopt, no broadcast)", async () => {
+    // A collaborator (or a hand-edit on github.com) can push a shape that violates
+    // the declared stateSchema. Adopting it unvalidated would broadcast corrupt state
+    // to every viewer and poison the next invoke()'s rollback baseline — so the sync
+    // path must clear the SAME schema gate the invoke() path enforces.
+    let remote = { count: 1 };
+    const rt = createCanvasRuntime({
+      id: "sync3", displayName: "Sync3", description: "", assetsDir: KIT,
+      createInitialState: () => ({ count: 0 }),
+      stateSchema: { type: "object", properties: { count: { type: "integer", minimum: 0 } }, required: ["count"], additionalProperties: false },
+      syncState: async () => ({ changed: true, state: remote }),
+      syncIntervalMs: 50,
+      actions: {},
+    });
+    try {
+      await rt.getState("d");
+      remote = { count: 3 };                    // valid remote is adopted
+      await rt._syncDomain("d");
+      assert.deepEqual(await rt.getState("d"), { count: 3 }, "a schema-valid remote is adopted");
+      remote = { count: -1, bogus: true };      // violates minimum + additionalProperties
+      await rt._syncDomain("d");
+      assert.deepEqual(await rt.getState("d"), { count: 3 }, "a schema-invalid remote is rejected, last valid state preserved");
     } finally {
       await rt.shutdown();
     }
