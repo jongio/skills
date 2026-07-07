@@ -99,7 +99,15 @@ export function userStore(extensionName, fileName) {
  * one-off working data). Pass the session id (e.g. from the SDK ctx).
  */
 export function sessionStore(sessionId, extensionName, fileName) {
-  const safeSession = String(sessionId).replace(/[^A-Za-z0-9._-]/g, "_") || "default";
+  // Reduce the session id to a single safe path segment. The charset filter keeps
+  // "." (so dotted ids survive), so we must ALSO collapse any ".." run — otherwise
+  // a session id of ".." would join to one level ABOVE session-state and escape the
+  // per-session root. (sessionId is normally a trusted SDK value; this keeps the
+  // sanitizer honest regardless.)
+  const safeSession =
+    String(sessionId)
+      .replace(/[^A-Za-z0-9._-]/g, "_")
+      .replace(/\.\.+/g, "_") || "default";
   return makeStore(join(copilotHome(), "session-state", safeSession, "extensions", extensionName, fileName));
 }
 

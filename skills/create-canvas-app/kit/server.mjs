@@ -141,7 +141,12 @@ export function createCanvasRuntime(config) {
     }
     const domainId = ctx?.domainId ?? "default";
     const d = await getDomain(domainId, ctx);
-    const prevState = d.state; // snapshot for stateSchema rollback (below)
+    // Deep snapshot for stateSchema rollback: a handler may mutate state IN PLACE
+    // and return the same object, so a reference copy (prevState = d.state) would
+    // point at the same (now-corrupt) object and restore nothing. structuredClone
+    // gives a real pre-mutation copy. Durable state is JSON-shaped, so it clones
+    // cleanly. Only pay the clone when a stateSchema is actually configured.
+    const prevState = config.stateSchema ? structuredClone(d.state) : undefined;
     let mutated = false;
     const api = {
       get state() { return d.state; },
