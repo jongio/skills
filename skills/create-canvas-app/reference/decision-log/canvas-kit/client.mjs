@@ -85,6 +85,74 @@ export function pollWhileVisible(tick, seconds, { whenVisible = true, immediate 
 }
 
 /**
+ * DOM-FREE transport for a canvas: owns the loopback wiring (GET /state, GET
+ * /events SSE, POST /action) and the derived `state`/`connected`, with no Preact
+ * and no DOM. `mountCanvas` composes this with a render loop; keeping it separate
+ * makes the reconnect/invoke glue unit-testable without a browser (see
+ * test/client.test.mjs). Both callbacks receive the latest `(state, connected)`.
+ * @param {object} [opts]
+ * @param {(state:any, connected:boolean)=>void} [opts.onState]      fired on the initial /state and every SSE push
+ * @param {(connected:boolean)=>void} [opts.onConnected]             fired when the SSE stream opens/errors
+ * @param {typeof EventSource} [opts.EventSourceImpl]                override the SSE impl (tests); defaults to the global
+ * @returns {{invoke:Function, refresh:Function, get state():any, get connected():boolean}}
+ */
+export function connectCanvas({ onState, onConnected, EventSourceImpl } = {}) {
+  let state = null;
+  let connected = false;
+  const ES = EventSourceImpl || (typeof EventSource !== "undefined" ? EventSource : null);
+
+  async function invoke(actionName, input) {
+    const res = await fetch("./action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ actionName, input: input ?? {} }),
+    });
+    const data = await res.json().catch(() => ({ ok: false }));
+    if (!data.ok) {
+      throw new CanvasActionError(data.code || "error", data.message || "action failed");
+    }
+    return data.result;
+  }
+
+  async function refresh() {
+    try {
+      state = await (await fetch("./state")).json();
+      onState?.(state, connected);
+    } catch { /* offline; SSE will recover */ }
+  }
+
+  function connect() {
+    if (!ES) return; // no EventSource (e.g. a non-browser host); refresh() still works
+    const es = new ES("./events");
+    es.onmessage = (e) => {
+      let next;
+      try {
+        next = JSON.parse(e.data);
+      } catch {
+        return; // ignore a malformed SSE frame; the next push recovers
+      }
+      // Update OUTSIDE the try so a bug in onState surfaces as a real error
+      // instead of being silently mislabeled a "malformed frame".
+      state = next;
+      connected = true;
+      onState?.(state, connected);
+    };
+    es.onopen = () => { connected = true; onConnected?.(connected); };
+    es.onerror = () => { connected = false; onConnected?.(connected); /* EventSource auto-reconnects */ };
+  }
+
+  refresh();
+  connect();
+
+  return {
+    invoke,
+    refresh,
+    get state() { return state; },
+    get connected() { return connected; },
+  };
+}
+
+/**
  * Mount a canvas view and keep it live.
  * @param {object} opts
  * @param {(model:{state:any, invoke:Function, connected:boolean})=>any} opts.view
@@ -102,56 +170,29 @@ export function mountCanvas({ view, mount, onState, poll } = {}) {
   // HTML shell) would linger as a sibling. Clear it once so Preact owns an empty
   // root; the view's own loading branch covers the gap until first state.
   root.replaceChildren();
-  let state = null;
-  let connected = false;
 
-  async function invoke(actionName, input) {
-    const res = await fetch("./action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ actionName, input: input ?? {} }),
-    });
-    const data = await res.json().catch(() => ({ ok: false }));
-    if (!data.ok) {
-      throw new CanvasActionError(data.code || "error", data.message || "action failed");
-    }
-    return data.result;
-  }
+  let latestState = null;
+  let latestConnected = false;
+  let client;
 
   function rerender() {
-    render(view({ state, invoke, connected }), root);
+    render(view({ state: latestState, invoke: client.invoke, connected: latestConnected }), root);
   }
 
-  async function refresh() {
-    try {
-      state = await (await fetch("./state")).json();
+  // The transport is DOM-free (connectCanvas); this wrapper only adds the Preact
+  // render on each state/connection change.
+  client = connectCanvas({
+    onState: (state, connected) => {
+      latestState = state;
+      latestConnected = connected;
       onState?.(state);
       rerender();
-    } catch { /* offline; SSE will recover */ }
-  }
-
-  function connect() {
-    const es = new EventSource("./events");
-    es.onmessage = (e) => {
-      let next;
-      try {
-        next = JSON.parse(e.data);
-      } catch {
-        return; // ignore a malformed SSE frame; the next push recovers
-      }
-      // Update + render OUTSIDE the try so a bug in onState/the view surfaces as
-      // a real error instead of being silently mislabeled a "malformed frame".
-      state = next;
-      connected = true;
-      onState?.(state);
+    },
+    onConnected: (connected) => {
+      latestConnected = connected;
       rerender();
-    };
-    es.onopen = () => { connected = true; rerender(); };
-    es.onerror = () => { connected = false; rerender(); /* EventSource auto-reconnects */ };
-  }
-
-  refresh();
-  connect();
+    },
+  });
 
   // Built-in fixed-interval auto-refresh, delegating to the shared
   // visibility-gated primitive. Pass `poll: { action, seconds, immediate }`.
@@ -164,7 +205,7 @@ export function mountCanvas({ view, mount, onState, poll } = {}) {
   // @property {boolean} [immediate=false]   fire one tick right after mount
   function startPoll({ action, seconds, input, whenVisible = true, immediate = false } = {}) {
     return pollWhileVisible(
-      () => (action ? invoke(action, input) : refresh()),
+      () => (action ? client.invoke(action, input) : client.refresh()),
       seconds,
       { whenVisible, immediate }
     );
@@ -174,10 +215,10 @@ export function mountCanvas({ view, mount, onState, poll } = {}) {
   if (poll) stopPoll = startPoll(poll);
 
   return {
-    invoke,
-    refresh,
+    invoke: client.invoke,
+    refresh: client.refresh,
     stopPoll: () => stopPoll(),
-    get state() { return state; },
+    get state() { return latestState; },
   };
 }
 

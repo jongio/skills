@@ -122,7 +122,11 @@ async function main() {
   });
 
   // ---- kit API surface -----------------------------------------------------
-  await test("client.mjs exports pollWhileVisible + re-exports format helpers", async () => {
+  await test("client.mjs exports pollWhileVisible + connectCanvas + re-exports format helpers", async () => {
+    const client = await import("../kit/client.mjs");
+    assert.equal(typeof client.pollWhileVisible, "function");
+    assert.equal(typeof client.mountCanvas, "function");
+    assert.equal(typeof client.connectCanvas, "function", "the DOM-free transport is exported");
     const src = await read(join(ROOT, "kit", "client.mjs"));
     assert.match(src, /export function pollWhileVisible/);
     assert.match(src, /document\.visibilityState/);
@@ -288,19 +292,20 @@ async function main() {
       });
     }
 
-    // data-template-specific contract: fetch-in-handler + refresh + poll helper
-    await test("data canvas.mjs fetches in a handler with a timeout + refresh action", async () => {
+    // data-template-specific contract: fetch-in-handler via the kit's guarded
+    // safeFetch + refresh + poll helper
+    await test("data canvas.mjs fetches via the kit's safeFetch (guarded + timeout) + refresh action", async () => {
       const canvas = await read(join(work, "gen-feed", "canvas.mjs"));
-      assert.match(canvas, /await fetch\(/);
-      assert.match(canvas, /AbortSignal\.timeout\(/);
+      assert.match(canvas, /from "\.\/canvas-kit\/net\.mjs"/);
+      assert.match(canvas, /await safeFetch\(/);
       assert.match(canvas, /refresh:\s*\{/);
     });
 
-    await test("data canvas.mjs guards the server-side fetch against SSRF", async () => {
-      const canvas = await read(join(work, "gen-feed", "canvas.mjs"));
-      assert.match(canvas, /await assertPublicUrl\(url\)/);
-      assert.match(canvas, /a === 169 && b === 254/); // link-local / cloud metadata blocked
-      assert.match(canvas, /Blocked private\/loopback address/);
+    await test("kit net.mjs guards the server-side fetch against SSRF (vendored into the canvas)", async () => {
+      const net = await read(join(work, "gen-feed", "canvas-kit", "net.mjs"));
+      assert.match(net, /a === 169 && b === 254/); // link-local / cloud metadata blocked
+      assert.match(net, /Blocked private\/loopback address/);
+      assert.match(net, /AbortSignal\.timeout\(/); // safeFetch applies a hard timeout
     });
 
     await test("data app.mjs uses the visibility-gated poll helper", async () => {

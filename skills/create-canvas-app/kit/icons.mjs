@@ -23,7 +23,18 @@ const VIEWBOX = "0 0 24 24";
 const STROKE_WIDTH = 2;
 
 function resolve(name) {
-  return LUCIDE[name] || LUCIDE[aliases[name]] || null;
+  // Own-property lookups only. Bracket access on a plain object reaches inherited
+  // Object.prototype members, so a name like "toString"/"constructor"/
+  // "hasOwnProperty" would otherwise resolve to a function (making hasIcon() lie
+  // and Icon()/lucideSVG() throw in nodeToString). Object.hasOwn keeps resolution
+  // to the real, vendored icon set.
+  if (typeof name !== "string") return null;
+  if (Object.hasOwn(LUCIDE, name)) return LUCIDE[name];
+  if (Object.hasOwn(aliases, name)) {
+    const target = aliases[name];
+    if (Object.hasOwn(LUCIDE, target)) return LUCIDE[target];
+  }
+  return null;
 }
 
 function kebab(k) {
