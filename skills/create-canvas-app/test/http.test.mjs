@@ -186,6 +186,15 @@ async function main() {
     assert.equal(body.code, "unknown_action");
   });
 
+  await test("schema-invalid input returns a 400 invalid_input before the handler", async () => {
+    // status is an enum(open|decided|parked); "bogus" violates the inputSchema, so
+    // the runtime rejects it at the boundary (400) instead of running the handler.
+    const { status, body } = await action(open.url, "set_status", { id: "x", status: "bogus" });
+    assert.equal(status, 400);
+    assert.equal(body.ok, false);
+    assert.equal(body.code, "invalid_input");
+  });
+
   await test("handler validation error surfaces as a 500 failure", async () => {
     const { status, body } = await action(open.url, "add_decision", { title: "   " });
     assert.equal(status, 500); // handler throw -> 500 (a kit error like unknown_action is 400)
