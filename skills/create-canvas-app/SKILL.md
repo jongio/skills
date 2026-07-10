@@ -354,8 +354,10 @@ const href = buildSessionDeepLink({
   repo: "owner/repo",                              // required, validated owner/repo
   prompt: `Work on ${quoteUntrusted(item.title)}`, // wrap untrusted text
   mode: "interactive",                             // plan | interactive | autopilot
-  // pr: 42          -> a PR number (cannot be combined with branch)
-  // branch: "main"  -> a base branch (cannot be combined with pr)
+  // pr: 42                   -> a PR number (excludes branch / sourceBranch)
+  // branch: "main"           -> base ref for a NEW worktree branch (excludes pr / sourceBranch)
+  // sourceBranch: "feat/x"   -> open an EXISTING branch directly (excludes pr / branch)
+  // parent: "abc-123"        -> nest under an existing session (excludes pr / sourceBranch)
 });
 
 href && html`<a class="ck-btn ck-btn-sm" href=${href} target="_blank" rel="noopener noreferrer">
@@ -366,7 +368,7 @@ href && html`<a class="ck-btn ck-btn-sm" href=${href} target="_blank" rel="noope
 **The full builder set** (each validates its input and returns a normalized
 `ghapp://` URL, or null on bad input):
 
-- `buildSessionDeepLink({ repo, prompt, pr, branch, mode })`: `session/new`, the primary one.
+- `buildSessionDeepLink({ repo, prompt, pr, branch, sourceBranch, parent, mode })`: `session/new`, the primary one. The three branch selectors (`pr`/`branch`/`sourceBranch`) are mutually exclusive; `sourceBranch` opens an existing branch for collaboration, `parent` nests the new session under an existing one.
 - `buildSessionDetailDeepLink(sessionId)`: open an existing session.
 - `buildChatsDeepLink()`: the Chats surface.
 - `buildNewAutomationDeepLink({ name, prompt, trigger, time, day })`: pre-fill the new-automation dialog.

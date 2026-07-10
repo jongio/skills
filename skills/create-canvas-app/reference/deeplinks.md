@@ -53,16 +53,22 @@ dead link), except where noted that an invalid optional value is dropped.
 
 ### `session/new`: create a session
 
-`buildSessionDeepLink({ repo, prompt, pr, branch, mode })`
+`buildSessionDeepLink({ repo, prompt, pr, branch, sourceBranch, parent, mode })`
 → `ghapp://session/new?repo=owner/repo&…`
 
 | Param | Required | Rule |
 |---|---|---|
 | `repo` | Yes | `owner/repo`. Owner `<=39` chars, `[A-Za-z0-9]` with internal hyphens (no leading/trailing hyphen). Repo `<=100` chars, `[A-Za-z0-9._-]`, not `.` or `..`. |
 | `prompt` | No | Kickoff prompt. Wrap untrusted parts with `quoteUntrusted`. Never include secrets. |
-| `pr` | No | Positive integer. Cannot be combined with `branch`. |
-| `branch` | No | Base branch for the worktree. Cannot be combined with `pr`. |
+| `pr` | No | Positive integer. Cannot be combined with `branch` or `sourceBranch`. |
+| `branch` | No | Base branch for a freshly generated worktree branch. Cannot be combined with `pr` or `sourceBranch`. |
+| `sourceBranch` | No | Emits `source_branch`: open an *existing* branch directly (no new branch is created) — for collaboration links. Cannot be combined with `pr` or `branch`. |
+| `parent` | No | Workspace id of an existing session to nest the new one under (same token shape as `sessions/:sessionId`). Cannot be combined with `pr` or `sourceBranch`; may combine with `branch`. A malformed id returns `null`. |
 | `mode` | No | `plan`, `interactive`, or `autopilot`. |
+
+The three branch selectors (`pr`, `branch`, `sourceBranch`) are mutually exclusive:
+at most one may be set. `parent` only applies when creating a new session from a repo
+or base branch, so it cannot combine with `pr` or `sourceBranch`.
 
 If the repo is not yet a project, the app clones it first (after confirmation), then
 opens the session.

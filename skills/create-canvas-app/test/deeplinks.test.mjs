@@ -146,6 +146,69 @@ async function main() {
     assert.equal(p.get("prompt"), prompt);
   });
 
+  await test("buildSessionDeepLink accepts sourceBranch (emits source_branch)", () => {
+    const p = q(buildSessionDeepLink({ repo: "a/b", sourceBranch: "feature/collab" }));
+    assert.equal(p.get("source_branch"), "feature/collab");
+    assert.equal(p.get("branch"), null);
+    assert.equal(p.get("pr"), null);
+  });
+
+  await test("buildSessionDeepLink accepts parent (emits parent)", () => {
+    const p = q(buildSessionDeepLink({ repo: "a/b", parent: "abc-123_4.5" }));
+    assert.equal(p.get("parent"), "abc-123_4.5");
+    assert.equal(p.get("repo"), "a/b");
+  });
+
+  await test("buildSessionDeepLink allows parent + branch together", () => {
+    const p = q(buildSessionDeepLink({ repo: "a/b", parent: "ws-1", branch: "main" }));
+    assert.equal(p.get("parent"), "ws-1");
+    assert.equal(p.get("branch"), "main");
+    assert.equal(p.get("source_branch"), null);
+  });
+
+  await test("buildSessionDeepLink allows parent + prompt + mode together", () => {
+    const p = q(
+      buildSessionDeepLink({ repo: "a/b", parent: "ws-1", prompt: "look", mode: "plan" }),
+    );
+    assert.equal(p.get("parent"), "ws-1");
+    assert.equal(p.get("prompt"), "look");
+    assert.equal(p.get("mode"), "plan");
+  });
+
+  await test("buildSessionDeepLink enforces the branch-selector mutual exclusion", () => {
+    // At most one of pr / branch / source_branch may be set.
+    assert.equal(buildSessionDeepLink({ repo: "a/b", pr: 1, sourceBranch: "x" }), null);
+    assert.equal(buildSessionDeepLink({ repo: "a/b", branch: "x", sourceBranch: "y" }), null);
+    assert.equal(
+      buildSessionDeepLink({ repo: "a/b", pr: 1, branch: "x", sourceBranch: "y" }),
+      null,
+    );
+  });
+
+  await test("buildSessionDeepLink rejects parent combined with pr or source_branch", () => {
+    assert.equal(buildSessionDeepLink({ repo: "a/b", parent: "ws-1", pr: 5 }), null);
+    assert.equal(buildSessionDeepLink({ repo: "a/b", parent: "ws-1", sourceBranch: "x" }), null);
+  });
+
+  await test("buildSessionDeepLink rejects a malformed parent id (fail closed)", () => {
+    for (const bad of ["a b", "a/b", "a?x=1", ".", "..", "a#b", "x".repeat(257), 123]) {
+      assert.equal(buildSessionDeepLink({ repo: "a/b", parent: bad }), null, JSON.stringify(bad));
+    }
+  });
+
+  await test("hostile sourceBranch/parent text cannot inject a query key or change the route", () => {
+    // sourceBranch is a structured single-line param: it is URLSearchParams-encoded,
+    // so '&'/'=' stay inside the value and never leak into sibling params.
+    const link = buildSessionDeepLink({ repo: "a/b", sourceBranch: "x&pr=999&evil=1" });
+    const p = q(link);
+    assert.equal(p.get("source_branch"), "x&pr=999&evil=1");
+    assert.equal(p.get("pr"), null);
+    assert.equal(p.get("evil"), null);
+    assert.equal(new URL(link).host, "session"); // route unchanged
+    // A parent carrying URL metacharacters is not a safe id: rejected outright.
+    assert.equal(buildSessionDeepLink({ repo: "a/b", parent: "x&evil=1" }), null);
+  });
+
   // ---- buildSessionDetailDeepLink ------------------------------------------
   await test("buildSessionDetailDeepLink builds ghapp://sessions/:id", () => {
     assert.equal(buildSessionDetailDeepLink("abc-123_4.5"), "ghapp://sessions/abc-123_4.5");

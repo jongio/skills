@@ -54,6 +54,21 @@ function isRepoName(v) {
   );
 }
 
+// A safe session/workspace id: 1-256 chars of [A-Za-z0-9._-], excluding the dot
+// segments "." and ".." (which WHATWG URL parsing would otherwise collapse into an
+// id-less path). Shared by the `sessions/:sessionId` route and `session/new`'s
+// `parent` param, which the app documents as taking that same id shape.
+function isSafeSessionId(v) {
+  return (
+    typeof v === "string" &&
+    v.length > 0 &&
+    v.length <= 256 &&
+    v !== "." &&
+    v !== ".." &&
+    SAFE_ID_RE.test(v)
+  );
+}
+
 /**
  * True when `value` is a valid `owner/repo` full name, matching github-app's own
  * validation. Exposed so a canvas can check a repo before offering a link (and so
@@ -138,33 +153,56 @@ export function quoteUntrusted(value) {
 
 /**
  * Build a `ghapp://session/new` deep link: the primary way a canvas opens a
- * session in the app. `repo` is required and validated as owner/repo; `pr` must
- * be a positive integer and cannot be combined with `branch`; `mode` must be one
- * of plan|interactive|autopilot. All values are URL-encoded via URLSearchParams,
- * so untrusted text cannot inject a query key. Returns null when the inputs can't
- * form a valid link, so a caller can withhold the control instead of rendering a
- * dead one. Do NOT put secrets or sensitive content in `prompt`.
+ * session in the app. `repo` is required and validated as owner/repo. The three
+ * branch selectors are mutually exclusive — at most one of `pr` (a positive
+ * integer), `branch` (base ref for a freshly generated worktree branch), or
+ * `sourceBranch` (open an EXISTING branch directly, e.g. a collaboration link).
+ * `parent` nests the new session under an existing workspace id (same id shape as
+ * buildSessionDetailDeepLink); it cannot combine with `pr` or `sourceBranch`, but
+ * may combine with `branch`. `mode` must be one of plan|interactive|autopilot. All
+ * values are URL-encoded via URLSearchParams, so untrusted text cannot inject a
+ * query key. Returns null when the inputs can't form a valid link, so a caller can
+ * withhold the control instead of rendering a dead one. Do NOT put secrets or
+ * sensitive content in `prompt`.
  * @param {object} parts
  * @param {string} parts.repo            required "owner/repo"
  * @param {string} [parts.prompt]        kickoff prompt (wrap untrusted parts with quoteUntrusted)
- * @param {number|string} [parts.pr]     positive PR number (mutually exclusive with branch)
- * @param {string} [parts.branch]        base branch (mutually exclusive with pr)
+ * @param {number|string} [parts.pr]     positive PR number (excludes branch / sourceBranch)
+ * @param {string} [parts.branch]        base branch for a NEW worktree branch (excludes pr / sourceBranch)
+ * @param {string} [parts.sourceBranch]  open an EXISTING branch directly (excludes pr / branch)
+ * @param {string} [parts.parent]        workspace id to nest under (excludes pr / sourceBranch; may combine with branch)
  * @param {string} [parts.mode]          plan | interactive | autopilot
  * @returns {string|null}
  */
-export function buildSessionDeepLink({ repo, prompt, pr, branch, mode } = {}) {
+export function buildSessionDeepLink({ repo, prompt, pr, branch, sourceBranch, parent, mode } = {}) {
   if (!isRepoFullName(repo)) return null;
 
   const prNum = toPositiveInt(pr);
   if (pr != null && pr !== "" && prNum == null) return null; // pr given but invalid
   const branchStr = cleanLine(branch);
-  if (prNum != null && branchStr) return null; // pr + branch are mutually exclusive
+  const sourceBranchStr = cleanLine(sourceBranch);
+  // The three branch selectors are mutually exclusive: at most one may be set.
+  const selectors = (prNum != null ? 1 : 0) + (branchStr ? 1 : 0) + (sourceBranchStr ? 1 : 0);
+  if (selectors > 1) return null;
+
+  // `parent` nests the new session under an existing workspace id. Reject a
+  // given-but-malformed id (fail closed), and enforce the contract: `parent`
+  // cannot combine with `pr` or `source_branch` (it may combine with `branch`).
+  let parentId = null;
+  if (parent != null && parent !== "") {
+    if (!isSafeSessionId(parent)) return null;
+    if (prNum != null || sourceBranchStr) return null;
+    parentId = parent;
+  }
+
   if (mode != null && mode !== "" && !SESSION_MODES.has(mode)) return null;
 
   const params = new URLSearchParams();
   params.set("repo", repo);
   if (prNum != null) params.set("pr", String(prNum));
   else if (branchStr) params.set("branch", branchStr);
+  else if (sourceBranchStr) params.set("source_branch", sourceBranchStr);
+  if (parentId) params.set("parent", parentId);
   const promptStr = cleanText(prompt);
   if (promptStr) params.set("prompt", promptStr);
   if (mode && SESSION_MODES.has(mode)) params.set("mode", mode);
@@ -181,16 +219,7 @@ export function buildSessionDeepLink({ repo, prompt, pr, branch, mode } = {}) {
  * @returns {string|null}
  */
 export function buildSessionDetailDeepLink(sessionId) {
-  if (
-    typeof sessionId !== "string" ||
-    sessionId.length === 0 ||
-    sessionId.length > 256 ||
-    sessionId === "." ||
-    sessionId === ".." ||
-    !SAFE_ID_RE.test(sessionId)
-  ) {
-    return null;
-  }
+  if (!isSafeSessionId(sessionId)) return null;
   return safeDeepLinkUrl(`${APP_DEEP_LINK_SCHEME}://sessions/${sessionId}`);
 }
 

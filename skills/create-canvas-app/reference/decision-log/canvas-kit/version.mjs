@@ -10,4 +10,4 @@
 // convention (the skill ships as files, not an npm version); a commit short-sha
 // works too. Re-exported from client.mjs so a canvas can read it at runtime.
 
-export const KIT_VERSION = "2026-07-07.6";
+export const KIT_VERSION = "2026-07-10.1";
