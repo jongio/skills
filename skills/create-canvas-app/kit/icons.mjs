@@ -1,7 +1,7 @@
 // canvas-kit/icons.mjs
 //
 // Lucide icons for canvases — the SAME icon set and version github-app uses
-// (lucide-react@1.22.0, catalogued in github-app src/lib/icons.tsx). The full
+// (lucide-react@1.23.0, catalogued in github-app src/lib/icons.tsx). The full
 // set is vendored offline in vendor/lucide.mjs (no CDN, no build) and rendered
 // as inline SVG with stroke="currentColor", so icons inherit the surrounding
 // theme-token text color automatically.

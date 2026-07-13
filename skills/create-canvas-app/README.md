@@ -50,7 +50,7 @@ to your request, and validates it visually before handing it back.
 - **Primer theming** — `ck-*` classes mapped to the host theme tokens with
   GitHub-dark fallbacks.
 - **Official GitHub icons** — the exact Lucide set github-app ships
-  (`lucide-react@1.22.0`), vendored and byte-identical.
+  (`lucide-react@1.23.0`), vendored and byte-identical.
 - **Host AI in a handler** — call the Copilot app's own model from an action with
   `ctx.ai(question)` (silent, no keys, no history) or hand work to the main agent
   with `ctx.askAgent(prompt)`. No API keys, no model picker, no external `fetch`.
