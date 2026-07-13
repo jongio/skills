@@ -124,7 +124,7 @@ corrupt state. It's opt-in — omit it and any state shape is allowed.
 
 ## Icons — official GitHub Lucide, always
 
-The kit vendors the **exact Lucide set github-app ships** (`lucide-react@1.22.0`,
+The kit vendors the **exact Lucide set github-app ships** (`lucide-react@1.23.0`,
 byte-identical). Use it for *every* icon; do not hand-write SVGs or pull a CDN.
 
 ```js
