@@ -651,6 +651,10 @@ A canvas isn't done because the server boots. Verify the UI:
 - **Never** repaint with `innerHTML`; render through Preact so pushes don't eat
   keystrokes.
 - **Never** key state by `instanceId` — key by domain so panels stay in sync.
+- **Never** hand `open_canvas` an `instanceId` outside `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`
+  — ≤128 chars, an alphanumeric first character, then only `A-Za-z0-9._-`. A malformed
+  handle (leading `-`/`_`, spaces, over-long) is rejected by the runtime with
+  `Invalid canvas instance ID` before your canvas ever opens.
 - **Never** hand-roll or CDN-load icons — use `/kit/client.mjs`'s `Icon`.
 - **Never** put SDK imports outside `extension.mjs`.
 - **Never** pass `strokeWidth` to `Icon` or invent pixel sizes off the scale.
