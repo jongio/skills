@@ -19,6 +19,12 @@
       "source": "./skills/create-gh-pages-site",
       "description": "Scaffold a working GitHub Pages site from a vetted template (static, Astro, React + Vite, Eleventy, or Jekyll) into your current repo by default, inject the correct base path for the target repo, wire the official GitHub Actions Pages deploy workflow, set the repo's Website link, and explain how to enable Pages.",
       "version": "1.1.0"
+    },
+    {
+      "name": "model-intel",
+      "source": "./skills/model-intel",
+      "description": "Discover all AI models available in your Copilot environment, research capabilities and benchmarks, and generate a comprehensive intelligence report with comparison charts, decision trees, head-to-head matchups, and model pairing strategies.",
+      "version": "1.0.0"
     }
   ]
 }

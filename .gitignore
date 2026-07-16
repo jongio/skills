@@ -11,6 +11,9 @@ vally-results/
 # Local canvas state written by the reference extension / generated canvases.
 artifacts/
 
+# Generated report output (re-generate with `node scripts/generate-html-report.mjs`)
+*-report.html
+
 # OS / editor noise
 .DS_Store
 Thumbs.db
