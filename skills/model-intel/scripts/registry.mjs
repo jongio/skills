@@ -8,26 +8,10 @@
  * - Task area classifications:
  *   https://docs.github.com/en/copilot/reference/ai-models/model-comparison
  *
- * SCORE METHODOLOGY:
- * The `scores` object contains normalized 0-100 values derived from public benchmarks.
- * Mapping of dimensions to their primary benchmark sources:
- *
- *   codeGeneration     -> SWE-bench Verified, Terminal-Bench (see sources.mjs)
- *   codeReview         -> SWE-bench Pro, code review tasks in provider evals
- *   reasoning          -> GPQA Diamond, ARC-AGI-2, FrontierMath, USAMO
- *   contextLength      -> Max context tier from GitHub docs (1M = 92, 200K = 75)
- *   instructionFollowing -> IFEval, provider instruction-following evals
- *   speed              -> Inverse of pricing tier and known latency class (flash > standard > reasoning)
- *   costEfficiency     -> Derived from pricing.input + pricing.output (lower cost = higher score)
- *   multiFile          -> OSWorld, multi-file agent benchmarks
- *   creativeWriting    -> LMArena/LMSYS ELO (creative writing category), GDPval-AA
- *   toolUse            -> Provider tool-use evaluations, MCP Atlas scores
- *
- * Scores for models without direct benchmark data in a dimension are interpolated
- * from family/generation position (e.g., Opus 4.8 > Opus 4.7 > Opus 4.6 within
- * the same architecture). These interpolated values are conservative estimates.
- *
- * All benchmark citations with URLs are in ./sources.mjs
+ * BENCHMARK NOTE:
+ * We no longer maintain internal benchmark scores in this registry.
+ * Use each model's `llmStatsSlug` field to link to llm-stats.com
+ * for public benchmark summaries and external comparisons.
  */
 
 export const PROVIDERS = {
@@ -62,7 +46,7 @@ export const PROVIDERS = {
  * @property {boolean} supports1MContext - Whether this model supports 1M token context
  * @property {boolean} supportsReasoning - Whether this model supports configurable reasoning
  * @property {string} taskArea - Official GitHub task area classification
- * @property {Object} scores - Normalized capability scores (0-100)
+ * @property {string} llmStatsSlug - llm-stats.com slug derived from the model name
  */
 
 /** @type {ModelEntry[]} */
@@ -71,6 +55,7 @@ export const MODEL_REGISTRY = [
   {
     id: 'claude-sonnet-4.5',
     name: 'Claude Sonnet 4.5',
+    llmStatsSlug: 'claude-sonnet-4-5',
     provider: 'anthropic',
     family: 'sonnet',
     contextTiers: ['default'],
@@ -86,22 +71,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: false,
     taskArea: 'General-purpose coding and agent tasks',
     pricing: { input: 3.00, cachedInput: 0.30, cacheWrite: 3.75, output: 15.00 },
-    scores: {
-      codeGeneration: 82,
-      codeReview: 78,
-      reasoning: 80,
-      contextLength: 75,
-      instructionFollowing: 85,
-      speed: 88,
-      costEfficiency: 78,
-      multiFile: 74,
-      creativeWriting: 80,
-      toolUse: 82,
-    },
   },
   {
     id: 'claude-sonnet-4.6',
     name: 'Claude Sonnet 4.6',
+    llmStatsSlug: 'claude-sonnet-4-6',
     provider: 'anthropic',
     family: 'sonnet',
     contextTiers: ['default', 'long_context'],
@@ -117,22 +91,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'General-purpose coding and agent tasks',
     pricing: { input: 3.00, cachedInput: 0.30, cacheWrite: 3.75, output: 15.00 },
-    scores: {
-      codeGeneration: 88,
-      codeReview: 85,
-      reasoning: 86,
-      contextLength: 92,
-      instructionFollowing: 90,
-      speed: 82,
-      costEfficiency: 78,
-      multiFile: 82,
-      creativeWriting: 83,
-      toolUse: 90,
-    },
   },
   {
     id: 'claude-sonnet-5',
     name: 'Claude Sonnet 5',
+    llmStatsSlug: 'claude-sonnet-5',
     provider: 'anthropic',
     family: 'sonnet',
     contextTiers: ['default', 'long_context'],
@@ -148,22 +111,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'General-purpose coding and agent tasks',
     pricing: { input: 2.00, cachedInput: 0.20, cacheWrite: 2.50, output: 10.00 },
-    scores: {
-      codeGeneration: 93,
-      codeReview: 90,
-      reasoning: 92,
-      contextLength: 92,
-      instructionFollowing: 94,
-      speed: 75,
-      costEfficiency: 82,
-      multiFile: 88,
-      creativeWriting: 88,
-      toolUse: 94,
-    },
   },
   {
     id: 'claude-haiku-4.5',
     name: 'Claude Haiku 4.5',
+    llmStatsSlug: 'claude-haiku-4-5',
     provider: 'anthropic',
     family: 'haiku',
     contextTiers: ['default'],
@@ -179,22 +131,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: false,
     taskArea: 'Fast help with simple or repetitive tasks',
     pricing: { input: 1.00, cachedInput: 0.10, cacheWrite: 1.25, output: 5.00 },
-    scores: {
-      codeGeneration: 70,
-      codeReview: 65,
-      reasoning: 68,
-      contextLength: 70,
-      instructionFollowing: 75,
-      speed: 96,
-      costEfficiency: 95,
-      multiFile: 60,
-      creativeWriting: 68,
-      toolUse: 72,
-    },
   },
   {
     id: 'claude-opus-4.6',
     name: 'Claude Opus 4.6',
+    llmStatsSlug: 'claude-opus-4-6',
     provider: 'anthropic',
     family: 'opus',
     contextTiers: ['default', 'long_context'],
@@ -210,22 +151,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Deep reasoning and debugging',
     pricing: { input: 5.00, cachedInput: 0.50, cacheWrite: 6.25, output: 25.00 },
-    scores: {
-      codeGeneration: 90,
-      codeReview: 92,
-      reasoning: 94,
-      contextLength: 92,
-      instructionFollowing: 91,
-      speed: 55,
-      costEfficiency: 45,
-      multiFile: 90,
-      creativeWriting: 92,
-      toolUse: 88,
-    },
   },
   {
     id: 'claude-opus-4.7',
     name: 'Claude Opus 4.7',
+    llmStatsSlug: 'claude-opus-4-7',
     provider: 'anthropic',
     family: 'opus',
     contextTiers: ['default', 'long_context'],
@@ -241,22 +171,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Deep reasoning and debugging',
     pricing: { input: 5.00, cachedInput: 0.50, cacheWrite: 6.25, output: 25.00 },
-    scores: {
-      codeGeneration: 92,
-      codeReview: 94,
-      reasoning: 96,
-      contextLength: 92,
-      instructionFollowing: 92,
-      speed: 50,
-      costEfficiency: 40,
-      multiFile: 92,
-      creativeWriting: 93,
-      toolUse: 90,
-    },
   },
   {
     id: 'claude-opus-4.8',
     name: 'Claude Opus 4.8',
+    llmStatsSlug: 'claude-opus-4-8',
     provider: 'anthropic',
     family: 'opus',
     contextTiers: ['default', 'long_context'],
@@ -272,24 +191,13 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Deep reasoning and debugging',
     pricing: { input: 5.00, cachedInput: 0.50, cacheWrite: 6.25, output: 25.00 },
-    scores: {
-      codeGeneration: 94,
-      codeReview: 95,
-      reasoning: 97,
-      contextLength: 92,
-      instructionFollowing: 93,
-      speed: 45,
-      costEfficiency: 35,
-      multiFile: 94,
-      creativeWriting: 95,
-      toolUse: 92,
-    },
   },
 
   // ─── OpenAI GPT ───────────────────────────────────────────────────────────
   {
     id: 'gpt-5-mini',
     name: 'GPT-5 mini',
+    llmStatsSlug: 'gpt-5-mini',
     provider: 'openai',
     family: 'gpt-5',
     contextTiers: ['default'],
@@ -305,22 +213,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'General-purpose coding and writing',
     pricing: { input: 0.25, cachedInput: 0.025, output: 2.00 },
-    scores: {
-      codeGeneration: 72,
-      codeReview: 68,
-      reasoning: 70,
-      contextLength: 70,
-      instructionFollowing: 74,
-      speed: 94,
-      costEfficiency: 96,
-      multiFile: 58,
-      creativeWriting: 70,
-      toolUse: 74,
-    },
   },
   {
     id: 'gpt-5.3-codex',
     name: 'GPT-5.3-Codex',
+    llmStatsSlug: 'gpt-5-3-codex',
     provider: 'openai',
     family: 'gpt-5',
     contextTiers: ['default', 'long_context'],
@@ -336,22 +233,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Agentic software development',
     pricing: { input: 1.75, cachedInput: 0.175, output: 14.00 },
-    scores: {
-      codeGeneration: 94,
-      codeReview: 82,
-      reasoning: 84,
-      contextLength: 92,
-      instructionFollowing: 86,
-      speed: 72,
-      costEfficiency: 65,
-      multiFile: 86,
-      creativeWriting: 65,
-      toolUse: 84,
-    },
   },
   {
     id: 'gpt-5.4',
     name: 'GPT-5.4',
+    llmStatsSlug: 'gpt-5-4',
     provider: 'openai',
     family: 'gpt-5',
     contextTiers: ['default', 'long_context'],
@@ -367,22 +253,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Deep reasoning and debugging',
     pricing: { input: 2.50, cachedInput: 0.25, output: 15.00, longInput: 5.00, longOutput: 22.50 },
-    scores: {
-      codeGeneration: 88,
-      codeReview: 86,
-      reasoning: 88,
-      contextLength: 92,
-      instructionFollowing: 88,
-      speed: 68,
-      costEfficiency: 60,
-      multiFile: 85,
-      creativeWriting: 86,
-      toolUse: 86,
-    },
   },
   {
     id: 'gpt-5.4-mini',
     name: 'GPT-5.4 mini',
+    llmStatsSlug: 'gpt-5-4-mini',
     provider: 'openai',
     family: 'gpt-5',
     contextTiers: ['default'],
@@ -398,22 +273,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Agentic software development',
     pricing: { input: 0.75, cachedInput: 0.075, output: 4.50 },
-    scores: {
-      codeGeneration: 80,
-      codeReview: 76,
-      reasoning: 78,
-      contextLength: 70,
-      instructionFollowing: 80,
-      speed: 90,
-      costEfficiency: 90,
-      multiFile: 72,
-      creativeWriting: 75,
-      toolUse: 80,
-    },
   },
   {
     id: 'gpt-5.5',
     name: 'GPT-5.5',
+    llmStatsSlug: 'gpt-5-5',
     provider: 'openai',
     family: 'gpt-5',
     contextTiers: ['default', 'long_context'],
@@ -429,22 +293,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Deep reasoning and debugging',
     pricing: { input: 5.00, cachedInput: 0.50, output: 30.00, longInput: 10.00, longOutput: 45.00 },
-    scores: {
-      codeGeneration: 91,
-      codeReview: 88,
-      reasoning: 90,
-      contextLength: 92,
-      instructionFollowing: 90,
-      speed: 65,
-      costEfficiency: 50,
-      multiFile: 88,
-      creativeWriting: 87,
-      toolUse: 88,
-    },
   },
   {
     id: 'gpt-5.6-sol',
     name: 'GPT-5.6 Sol',
+    llmStatsSlug: 'gpt-5-6-sol',
     provider: 'openai',
     family: 'gpt-5.6',
     contextTiers: ['default', 'long_context'],
@@ -460,22 +313,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Deep reasoning and debugging',
     pricing: { input: 5.00, cachedInput: 0.50, output: 30.00, longInput: 10.00, longOutput: 45.00 },
-    scores: {
-      codeGeneration: 93,
-      codeReview: 91,
-      reasoning: 95,
-      contextLength: 92,
-      instructionFollowing: 92,
-      speed: 55,
-      costEfficiency: 42,
-      multiFile: 90,
-      creativeWriting: 88,
-      toolUse: 92,
-    },
   },
   {
     id: 'gpt-5.6-terra',
     name: 'GPT-5.6 Terra',
+    llmStatsSlug: 'gpt-5-6-terra',
     provider: 'openai',
     family: 'gpt-5.6',
     contextTiers: ['default', 'long_context'],
@@ -491,22 +333,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'General-purpose coding and agent tasks',
     pricing: { input: 2.50, cachedInput: 0.25, output: 15.00, longInput: 5.00, longOutput: 22.50 },
-    scores: {
-      codeGeneration: 91,
-      codeReview: 89,
-      reasoning: 92,
-      contextLength: 92,
-      instructionFollowing: 91,
-      speed: 62,
-      costEfficiency: 55,
-      multiFile: 89,
-      creativeWriting: 87,
-      toolUse: 90,
-    },
   },
   {
     id: 'gpt-5.6-luna',
     name: 'GPT-5.6 Luna',
+    llmStatsSlug: 'gpt-5-6-luna',
     provider: 'openai',
     family: 'gpt-5.6',
     contextTiers: ['default', 'long_context'],
@@ -522,24 +353,13 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Fast help with simple or repetitive tasks',
     pricing: { input: 1.00, cachedInput: 0.10, output: 6.00, longInput: 2.00, longOutput: 9.00 },
-    scores: {
-      codeGeneration: 89,
-      codeReview: 87,
-      reasoning: 90,
-      contextLength: 92,
-      instructionFollowing: 90,
-      speed: 70,
-      costEfficiency: 65,
-      multiFile: 87,
-      creativeWriting: 94,
-      toolUse: 89,
-    },
   },
 
   // ─── Google Gemini ────────────────────────────────────────────────────────
   {
     id: 'gemini-3.1-pro-preview',
     name: 'Gemini 3.1 Pro',
+    llmStatsSlug: 'gemini-3-1-pro',
     provider: 'google',
     family: 'gemini-pro',
     contextTiers: ['default', 'long_context'],
@@ -555,22 +375,11 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Deep reasoning and debugging',
     pricing: { input: 2.00, cachedInput: 0.20, output: 12.00, longInput: 4.00, longOutput: 18.00 },
-    scores: {
-      codeGeneration: 86,
-      codeReview: 84,
-      reasoning: 88,
-      contextLength: 92,
-      instructionFollowing: 84,
-      speed: 60,
-      costEfficiency: 60,
-      multiFile: 88,
-      creativeWriting: 82,
-      toolUse: 80,
-    },
   },
   {
     id: 'gemini-3.5-flash',
     name: 'Gemini 3.5 Flash',
+    llmStatsSlug: 'gemini-3-5-flash',
     provider: 'google',
     family: 'gemini-flash',
     contextTiers: ['default', 'long_context'],
@@ -586,24 +395,13 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'Fast help with simple or repetitive tasks',
     pricing: { input: 1.50, cachedInput: 0.15, output: 9.00 },
-    scores: {
-      codeGeneration: 78,
-      codeReview: 74,
-      reasoning: 76,
-      contextLength: 92,
-      instructionFollowing: 78,
-      speed: 92,
-      costEfficiency: 82,
-      multiFile: 85,
-      creativeWriting: 74,
-      toolUse: 76,
-    },
   },
 
   // ─── Microsoft ────────────────────────────────────────────────────────────
   {
     id: 'mai-code-1-flash-picker',
     name: 'MAI-Code-1-Flash',
+    llmStatsSlug: 'mai-code-1-flash',
     provider: 'microsoft',
     family: 'mai-code',
     contextTiers: ['default'],
@@ -619,18 +417,6 @@ export const MODEL_REGISTRY = [
     supportsReasoning: true,
     taskArea: 'General-purpose coding and writing',
     pricing: { input: 0.75, cachedInput: 0.075, output: 4.50 },
-    scores: {
-      codeGeneration: 76,
-      codeReview: 70,
-      reasoning: 72,
-      contextLength: 55,
-      instructionFollowing: 74,
-      speed: 92,
-      costEfficiency: 90,
-      multiFile: 62,
-      creativeWriting: 60,
-      toolUse: 72,
-    },
   },
 ];
 
@@ -647,81 +433,280 @@ export function groupByProvider() {
   return groups;
 }
 
+
 /**
- * Get all models sorted by a specific score dimension.
- * @param {string} dimension - Score key to sort by
+ * Get all models sorted by a metadata dimension.
+ * @param {'pricing'|'contextWindow'|'category'|'tier'|'release'} dimension
  * @returns {ModelEntry[]}
  */
+const CATEGORY_RANK = {
+  Powerful: 3,
+  Versatile: 2,
+  Lightweight: 1,
+};
+
+const TIER_RANK = {
+  premium: 2,
+  standard: 1,
+};
+
+function compareDescending(left, right) {
+  return right - left;
+}
+
+function compareAscending(left, right) {
+  return left - right;
+}
+
+function comparePreferred(valueA, valueB, preferred) {
+  return compareDescending(Number(valueA === preferred), Number(valueB === preferred));
+}
+
+function compareListPreference(valueA, valueB, preferredValues) {
+  const fallbackIndex = preferredValues.length;
+  const indexA = preferredValues.indexOf(valueA);
+  const indexB = preferredValues.indexOf(valueB);
+  return compareAscending(indexA === -1 ? fallbackIndex : indexA, indexB === -1 ? fallbackIndex : indexB);
+}
+
+function compareBoolean(valueA, valueB) {
+  return compareDescending(Number(Boolean(valueA)), Number(Boolean(valueB)));
+}
+
+function compareReleaseDate(left, right) {
+  return right.localeCompare(left);
+}
+
+function getPricingValue(model, key = 'input') {
+  if (key === 'total') {
+    return model.pricing.input + model.pricing.output;
+  }
+  return model.pricing[key] ?? Number.POSITIVE_INFINITY;
+}
+
+function isCodeSpecialized(model) {
+  return model.id.includes('codex')
+    || model.id.startsWith('mai-code-')
+    || /code-specialized|code model|code completions|code generation|multi-file edits/i.test(model.architecture);
+}
+
+function compareModels(left, right, comparators) {
+  for (const comparator of comparators) {
+    const result = comparator(left, right);
+    if (result !== 0) {
+      return result;
+    }
+  }
+  return left.name.localeCompare(right.name);
+}
+
 export function rankBy(dimension) {
-  return [...MODEL_REGISTRY]
-    .filter(m => m.scores[dimension] !== undefined)
-    .sort((a, b) => b.scores[dimension] - a.scores[dimension]);
+  const comparatorsByDimension = {
+    pricing: [
+      (left, right) => compareAscending(getPricingValue(left, 'total'), getPricingValue(right, 'total')),
+      (left, right) => compareAscending(getPricingValue(left, 'input'), getPricingValue(right, 'input')),
+      (left, right) => compareAscending(getPricingValue(left, 'output'), getPricingValue(right, 'output')),
+      (left, right) => compareReleaseDate(left.releaseDate, right.releaseDate),
+    ],
+    contextWindow: [
+      (left, right) => compareDescending(left.maxContextWindow, right.maxContextWindow),
+      (left, right) => compareDescending(left.contextWindow, right.contextWindow),
+      (left, right) => compareDescending(CATEGORY_RANK[left.category] ?? 0, CATEGORY_RANK[right.category] ?? 0),
+      (left, right) => compareReleaseDate(left.releaseDate, right.releaseDate),
+    ],
+    category: [
+      (left, right) => compareDescending(CATEGORY_RANK[left.category] ?? 0, CATEGORY_RANK[right.category] ?? 0),
+      (left, right) => compareDescending(left.maxContextWindow, right.maxContextWindow),
+      (left, right) => compareAscending(getPricingValue(left, 'input'), getPricingValue(right, 'input')),
+      (left, right) => compareReleaseDate(left.releaseDate, right.releaseDate),
+    ],
+    tier: [
+      (left, right) => compareDescending(TIER_RANK[left.tier] ?? 0, TIER_RANK[right.tier] ?? 0),
+      (left, right) => compareDescending(CATEGORY_RANK[left.category] ?? 0, CATEGORY_RANK[right.category] ?? 0),
+      (left, right) => compareReleaseDate(left.releaseDate, right.releaseDate),
+    ],
+    release: [
+      (left, right) => compareReleaseDate(left.releaseDate, right.releaseDate),
+      (left, right) => compareDescending(CATEGORY_RANK[left.category] ?? 0, CATEGORY_RANK[right.category] ?? 0),
+      (left, right) => compareAscending(getPricingValue(left, 'input'), getPricingValue(right, 'input')),
+    ],
+  };
+
+  const comparators = comparatorsByDimension[dimension];
+  if (!comparators) {
+    throw new Error(`Unsupported rank dimension: ${dimension}`);
+  }
+
+  return [...MODEL_REGISTRY].sort((left, right) => compareModels(left, right, comparators));
+}
+
+function resolveTaskProfile(input) {
+  if (typeof input === 'string') {
+    return TASK_PROFILES[input]?.weights ?? null;
+  }
+  if (input && typeof input === 'object' && 'weights' in input) {
+    return input.weights;
+  }
+  return input ?? null;
+}
+
+function getProfileComparators(profile) {
+  const comparators = [];
+
+  if (profile?.preferStandardTier) {
+    comparators.push((left, right) => comparePreferred(left.tier, right.tier, 'standard'));
+  }
+
+  if (profile?.preferPremiumTier) {
+    comparators.push((left, right) => comparePreferred(left.tier, right.tier, 'premium'));
+  }
+
+  if (profile?.preferReasoning) {
+    comparators.push((left, right) => compareBoolean(left.supportsReasoning, right.supportsReasoning));
+  }
+
+  if (profile?.prefer1MContext) {
+    comparators.push((left, right) => compareBoolean(left.supports1MContext, right.supports1MContext));
+  }
+
+  if (profile?.preferCodeSpecialized) {
+    comparators.push((left, right) => compareBoolean(isCodeSpecialized(left), isCodeSpecialized(right)));
+  }
+
+  if (profile?.categoryPreference?.length) {
+    comparators.push((left, right) => compareListPreference(left.category, right.category, profile.categoryPreference));
+  }
+
+  if (profile?.sortByContextWindow) {
+    comparators.push((left, right) => compareDescending(left.maxContextWindow, right.maxContextWindow));
+    comparators.push((left, right) => compareDescending(left.contextWindow, right.contextWindow));
+  }
+
+  if (profile?.sortByPricing) {
+    comparators.push((left, right) => compareAscending(getPricingValue(left, profile.sortByPricing), getPricingValue(right, profile.sortByPricing)));
+  }
+
+  if (profile?.sortByRelease !== false) {
+    comparators.push((left, right) => compareReleaseDate(left.releaseDate, right.releaseDate));
+  }
+
+  comparators.push((left, right) => compareDescending(CATEGORY_RANK[left.category] ?? 0, CATEGORY_RANK[right.category] ?? 0));
+  comparators.push((left, right) => compareAscending(getPricingValue(left, 'input'), getPricingValue(right, 'input')));
+
+  return comparators;
 }
 
 /**
- * Find the best model for a given task profile.
- * @param {Object} weights - Dimension weights (0-1)
- * @returns {ModelEntry[]} Sorted by weighted score
+ * Find the best models for a given task profile.
+ * @param {string|Object} profileInput
+ * @returns {ModelEntry[]}
  */
-export function recommendFor(weights) {
-  const scored = MODEL_REGISTRY.map(model => {
-    let total = 0;
-    let weightSum = 0;
-    for (const [dim, weight] of Object.entries(weights)) {
-      if (model.scores[dim] !== undefined) {
-        total += model.scores[dim] * weight;
-        weightSum += weight;
-      }
-    }
-    return { model, score: weightSum > 0 ? total / weightSum : 0 };
-  });
-  return scored.sort((a, b) => b.score - a.score).map(s => s.model);
+export function recommendFor(profileInput) {
+  const profile = resolveTaskProfile(profileInput);
+  if (!profile) {
+    throw new Error('Unknown task profile');
+  }
+
+  const comparators = getProfileComparators(profile);
+  return [...MODEL_REGISTRY].sort((left, right) => compareModels(left, right, comparators));
 }
 
-/** Task profiles for the decision tree. */
+/** Task profiles for metadata-based recommendations. */
 export const TASK_PROFILES = {
   quickEdit: {
     label: 'Quick edits and completions',
-    weights: { speed: 0.4, costEfficiency: 0.3, codeGeneration: 0.3 },
+    weights: {
+      preferStandardTier: true,
+      categoryPreference: ['Lightweight', 'Versatile', 'Powerful'],
+      sortByPricing: 'input',
+    },
   },
   complexRefactor: {
     label: 'Complex refactoring across files',
-    weights: { multiFile: 0.3, codeGeneration: 0.25, reasoning: 0.25, contextLength: 0.2 },
+    weights: {
+      prefer1MContext: true,
+      categoryPreference: ['Powerful', 'Versatile', 'Lightweight'],
+      preferReasoning: true,
+      sortByContextWindow: true,
+    },
   },
   debugging: {
     label: 'Debugging and root-cause analysis',
-    weights: { reasoning: 0.4, codeReview: 0.3, multiFile: 0.2, toolUse: 0.1 },
+    weights: {
+      preferReasoning: true,
+      categoryPreference: ['Powerful', 'Versatile', 'Lightweight'],
+      prefer1MContext: true,
+      sortByContextWindow: true,
+    },
   },
   architectureReview: {
     label: 'Architecture and design review',
-    weights: { reasoning: 0.35, codeReview: 0.3, multiFile: 0.2, creativeWriting: 0.15 },
+    weights: {
+      preferReasoning: true,
+      categoryPreference: ['Powerful', 'Versatile', 'Lightweight'],
+      prefer1MContext: true,
+      sortByContextWindow: true,
+    },
   },
   codeReview: {
     label: 'Code review (PR review)',
-    weights: { codeReview: 0.4, reasoning: 0.25, multiFile: 0.2, instructionFollowing: 0.15 },
+    weights: {
+      preferReasoning: true,
+      categoryPreference: ['Powerful', 'Versatile', 'Lightweight'],
+      prefer1MContext: true,
+      sortByContextWindow: true,
+    },
   },
   documentation: {
     label: 'Writing documentation',
-    weights: { creativeWriting: 0.35, instructionFollowing: 0.3, reasoning: 0.2, speed: 0.15 },
+    weights: {
+      categoryPreference: ['Versatile', 'Lightweight', 'Powerful'],
+      preferStandardTier: true,
+      sortByPricing: 'input',
+    },
   },
   testGeneration: {
     label: 'Test generation',
-    weights: { codeGeneration: 0.35, reasoning: 0.25, instructionFollowing: 0.25, speed: 0.15 },
+    weights: {
+      preferCodeSpecialized: true,
+      preferStandardTier: true,
+      preferReasoning: true,
+      sortByPricing: 'input',
+    },
   },
   securityAudit: {
     label: 'Security audit',
-    weights: { reasoning: 0.35, codeReview: 0.3, multiFile: 0.2, toolUse: 0.15 },
+    weights: {
+      preferReasoning: true,
+      categoryPreference: ['Powerful', 'Versatile', 'Lightweight'],
+      prefer1MContext: true,
+      sortByContextWindow: true,
+    },
   },
   creativeTask: {
     label: 'Creative/ideation tasks',
-    weights: { creativeWriting: 0.4, reasoning: 0.25, instructionFollowing: 0.2, speed: 0.15 },
+    weights: {
+      categoryPreference: ['Versatile', 'Lightweight', 'Powerful'],
+      preferReasoning: true,
+      sortByPricing: 'input',
+    },
   },
   longContext: {
     label: 'Large codebase analysis (long context)',
-    weights: { contextLength: 0.4, multiFile: 0.3, reasoning: 0.2, speed: 0.1 },
+    weights: {
+      prefer1MContext: true,
+      sortByContextWindow: true,
+      categoryPreference: ['Powerful', 'Versatile', 'Lightweight'],
+      sortByPricing: 'input',
+    },
   },
   bulkProcessing: {
     label: 'Bulk/batch processing (many files)',
-    weights: { speed: 0.35, costEfficiency: 0.3, codeGeneration: 0.2, multiFile: 0.15 },
+    weights: {
+      preferStandardTier: true,
+      sortByPricing: 'input',
+      categoryPreference: ['Lightweight', 'Versatile', 'Powerful'],
+      prefer1MContext: true,
+    },
   },
 };

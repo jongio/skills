@@ -1,14 +1,5 @@
 #!/usr/bin/env node
-/**
- * generate-html-report.mjs (v3 - "Actually Useful" Data Studio)
- *
- * Focus: Help the user CHOOSE a model, not just compare specs.
- * Unique charts: Heatmap, Parallel Coordinates, Efficiency Frontier,
- * Model DNA Fingerprints, Gap Analysis, Workload Simulator.
- */
-
-import { MODEL_REGISTRY, PROVIDERS, groupByProvider, rankBy, recommendFor, TASK_PROFILES } from './registry.mjs';
-import { VERIFIED_BENCHMARKS, INDEPENDENT_SOURCES, PROVIDER_DOCS, getBenchmarks } from './sources.mjs';
+import { MODEL_REGISTRY, PROVIDERS, groupByProvider, recommendFor, TASK_PROFILES } from './registry.mjs';
 import { writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
@@ -17,1206 +8,1795 @@ const openBrowser = args.includes('--open');
 const outputIdx = args.indexOf('--output');
 const outputPath = outputIdx >= 0 && args[outputIdx + 1] ? args[outputIdx + 1] : './model-intel-report.html';
 
-// Helpers
-const DIMS = ['codeGeneration','codeReview','reasoning','contextLength','instructionFollowing','speed','costEfficiency','multiFile','creativeWriting','toolUse'];
-const DIM_LABELS = { codeGeneration:'Code Gen', codeReview:'Code Review', reasoning:'Reasoning', contextLength:'Context', instructionFollowing:'Instructions', speed:'Speed', costEfficiency:'Cost Eff.', multiFile:'Multi-file', creativeWriting:'Writing', toolUse:'Tool Use' };
 const PROV_COLORS = { anthropic:'#a78bfa', openai:'#34d399', google:'#60a5fa', microsoft:'#fb923c' };
-
-function avgScore(m) { return Math.round(DIMS.reduce((s,d) => s + m.scores[d], 0) / DIMS.length); }
 
 function generateHTML() {
   const now = new Date().toISOString().slice(0,16).replace('T',' ');
-  const groups = groupByProvider();
+  const providerGroups = groupByProvider();
+  const providerSummary = Object.fromEntries(
+    [...providerGroups.entries()].map(([provider, list]) => [
+      provider,
+      {
+        count: list.length,
+        standard: list.filter(model => model.tier === 'standard').length,
+        premium: list.filter(model => model.tier === 'premium').length,
+      },
+    ])
+  );
+  const metadataRecommendationsReady = typeof recommendFor === 'function';
+  const totalModels = MODEL_REGISTRY.length;
+  const standardCount = MODEL_REGISTRY.filter(model => model.tier === 'standard').length;
+  const premiumCount = MODEL_REGISTRY.filter(model => model.tier === 'premium').length;
+  const oneMillionCount = MODEL_REGISTRY.filter(model => model.supports1MContext).length;
 
   return `<!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Model Intel | Which model should you use?</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/lucide@latest"></script>
-<style>
-:root {
-  --font: 'Inter', -apple-system, sans-serif;
-  --mono: 'JetBrains Mono', monospace;
-  --radius: 10px;
-  --radius-lg: 14px;
-  --transition: 0.2s cubic-bezier(0.4,0,0.2,1);
-  --gradient: linear-gradient(135deg, #3b82f6, #8b5cf6);
-  --gradient-text: linear-gradient(135deg, #60a5fa, #a78bfa);
-}
-[data-theme="dark"] {
-  --bg: #08080d;
-  --bg-raised: #0f0f16;
-  --bg-card: #13131c;
-  --bg-hover: #1a1a26;
-  --bg-input: #1a1a26;
-  --border: #2a2a3d;
-  --border-subtle: #1e1e2e;
-  --text: #eeeef5;
-  --text-2: #b0b0c5;
-  --text-3: #6a6a82;
-  --glow: rgba(99,102,241,0.08);
-}
-[data-theme="light"] {
-  --bg: #f8f9fc;
-  --bg-raised: #ffffff;
-  --bg-card: #ffffff;
-  --bg-hover: #f0f1f5;
-  --bg-input: #f0f1f5;
-  --border: #e2e4ea;
-  --border-subtle: #ecedf2;
-  --text: #1a1a2e;
-  --text-2: #555570;
-  --text-3: #999;
-  --glow: rgba(99,102,241,0.04);
-}
-* { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:var(--font); background:var(--bg); color:var(--text); line-height:1.6; transition:background var(--transition),color var(--transition); }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Copilot Model Decision Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    :root {
+      --font-sans: 'Inter', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+      --bg: #070b14;
+      --bg-elevated: rgba(12, 18, 32, 0.88);
+      --panel: #0f172a;
+      --panel-2: #111c33;
+      --card-bg: #0f172a;
+      --card-alt: #13203c;
+      --border: rgba(148, 163, 184, 0.18);
+      --border-strong: rgba(148, 163, 184, 0.3);
+      --text: #e5eefc;
+      --muted: #94a3b8;
+      --muted-2: #64748b;
+      --accent-1: #3b82f6;
+      --accent-2: #8b5cf6;
+      --accent-3: #22c55e;
+      --danger: #ef4444;
+      --warn: #f59e0b;
+      --success: #22c55e;
+      --shadow: 0 24px 60px rgba(2, 8, 23, 0.45);
+      --gradient: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      --surface-glass: rgba(15, 23, 42, 0.74);
+      --row-alt: rgba(148, 163, 184, 0.04);
+      --row-hover: rgba(59, 130, 246, 0.08);
+    }
 
-/* === TOPBAR === */
-.topbar { position:sticky; top:0; z-index:100; background:var(--bg-raised); border-bottom:1px solid var(--border-subtle); padding:0.6rem 1.5rem; display:flex; align-items:center; gap:1rem; backdrop-filter:blur(16px); }
-.topbar-brand { display:flex; align-items:center; gap:0.5rem; font-weight:800; font-size:0.85rem; }
-.brand-icon { width:26px; height:26px; background:var(--gradient); border-radius:7px; display:flex; align-items:center; justify-content:center; }
-.brand-icon i { color:white; width:14px; height:14px; }
-.topbar-nav { display:flex; gap:0.2rem; margin-left:1.5rem; overflow-x:auto; scrollbar-width:none; }
-.topbar-nav::-webkit-scrollbar { display:none; }
-.nav-btn { padding:0.45rem 0.75rem; border:none; background:transparent; color:var(--text-3); font-size:0.73rem; font-family:var(--font); font-weight:500; border-radius:6px; cursor:pointer; white-space:nowrap; transition:all var(--transition); }
-.nav-btn:hover { color:var(--text-2); background:var(--bg-hover); }
-.nav-btn.active { color:var(--text); background:var(--bg-input); border:1px solid var(--border-subtle); }
-.theme-btn { margin-left:auto; width:32px; height:32px; border:1px solid var(--border); border-radius:8px; background:var(--bg-card); display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--text-3); }
-.theme-btn:hover { color:var(--text); }
+    [data-theme="light"] {
+      --bg: #f4f7fb;
+      --bg-elevated: rgba(255, 255, 255, 0.84);
+      --panel: #ffffff;
+      --panel-2: #f8fbff;
+      --card-bg: #ffffff;
+      --card-alt: #f3f7fd;
+      --border: rgba(15, 23, 42, 0.1);
+      --border-strong: rgba(15, 23, 42, 0.18);
+      --text: #0f172a;
+      --muted: #475569;
+      --muted-2: #64748b;
+      --shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      --surface-glass: rgba(255, 255, 255, 0.78);
+      --row-alt: rgba(15, 23, 42, 0.03);
+      --row-hover: rgba(59, 130, 246, 0.08);
+    }
 
-/* === LAYOUT === */
-.main { max-width:1500px; margin:0 auto; padding:1.5rem; }
-.panel { display:none; animation:slideIn 0.25s ease; }
-.panel.active { display:block; }
-@keyframes slideIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font-sans);
+      background:
+        radial-gradient(circle at top left, rgba(59,130,246,0.18), transparent 28%),
+        radial-gradient(circle at top right, rgba(139,92,246,0.18), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      transition: background 0.2s ease, color 0.2s ease;
+    }
 
-/* === PICKER (the hero feature) === */
-.picker-section { background: var(--bg-raised); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:2.5rem; margin-bottom:2rem; position:relative; overflow:hidden; }
-.picker-section::before { content:''; position:absolute; top:-50%; right:-20%; width:400px; height:400px; background:radial-gradient(circle, rgba(99,102,241,0.06) 0%, transparent 70%); pointer-events:none; }
-.picker-title { font-size:1.8rem; font-weight:900; letter-spacing:-0.04em; margin-bottom:0.3rem; }
-.picker-subtitle { color:var(--text-2); font-size:0.95rem; margin-bottom:2rem; }
-.picker-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:1.5rem; margin-bottom:2rem; }
-.picker-q { }
-.picker-q label { display:block; font-size:0.72rem; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-3); margin-bottom:0.5rem; }
-.picker-opts { display:flex; flex-direction:column; gap:0.4rem; }
-.picker-opt { padding:0.6rem 0.9rem; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-card); font-size:0.82rem; cursor:pointer; transition:all var(--transition); display:flex; align-items:center; gap:0.5rem; }
-.picker-opt:hover { border-color:var(--border); background:var(--bg-hover); }
-.picker-opt.selected { border-color:#6366f1; background:rgba(99,102,241,0.08); color:var(--text); }
-.picker-opt i { width:14px; height:14px; color:var(--text-3); }
-.picker-result { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.5rem 2rem; display:none; }
-.picker-result.visible { display:flex; align-items:center; gap:1.5rem; }
-.result-model { font-size:1.4rem; font-weight:800; background:var(--gradient-text); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
-.result-reason { font-size:0.85rem; color:var(--text-2); flex:1; }
-.result-badge { padding:0.4rem 0.8rem; border-radius:9999px; font-size:0.72rem; font-weight:600; }
-.result-badge.standard { background:rgba(16,185,129,0.1); color:#34d399; }
-.result-badge.premium { background:rgba(139,92,246,0.1); color:#a78bfa; }
+    a { color: inherit; }
+    button, input, select {
+      font: inherit;
+      color: inherit;
+    }
 
-/* === SECTION HEADERS === */
-.sec-head { display:flex; align-items:center; gap:0.7rem; margin:2rem 0 1.25rem; }
-.sec-head .ico { width:32px; height:32px; background:var(--glow); border:1px solid var(--border-subtle); border-radius:8px; display:flex; align-items:center; justify-content:center; }
-.sec-head .ico i { width:16px; height:16px; color:#6366f1; }
-.sec-head h2 { font-size:1.15rem; font-weight:700; letter-spacing:-0.02em; }
-.sec-head .muted { margin-left:auto; font-size:0.75rem; color:var(--text-3); }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 24px;
+      background: var(--surface-glass);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border);
+    }
 
-/* === HEATMAP === */
-.heatmap-wrap { overflow-x:auto; border:1px solid var(--border-subtle); border-radius:var(--radius-lg); background:var(--bg-card); }
-.data-table { width:100%; border-collapse:collapse; }
-.data-table th { padding:0.6rem 0.75rem; background:var(--bg-raised); color:var(--text-3); font-weight:600; text-transform:uppercase; letter-spacing:0.04em; font-size:0.65rem; text-align:left; border-bottom:1px solid var(--border-subtle); position:sticky; top:0; }
-.data-table td { padding:0.55rem 0.75rem; border-bottom:1px solid var(--border-subtle); color:var(--text-1); }
-.data-table tbody tr:hover td { background:var(--bg-hover) !important; }
-.heatmap { width:100%; border-collapse:collapse; font-size:0.72rem; }
-.heatmap th { padding:0.6rem 0.5rem; background:var(--bg-raised); color:var(--text-3); font-weight:600; text-transform:uppercase; letter-spacing:0.04em; font-size:0.62rem; text-align:center; border-bottom:1px solid var(--border-subtle); position:sticky; top:0; }
-.heatmap th:first-child { text-align:left; padding-left:1rem; min-width:140px; }
-.heatmap td { padding:0.5rem; text-align:center; font-family:var(--mono); font-weight:600; font-size:0.72rem; border-bottom:1px solid var(--border-subtle); position:relative; }
-.heatmap td:first-child { text-align:left; padding-left:1rem; font-family:var(--font); font-weight:500; }
-.heatmap tr:hover td { background:var(--bg-hover) !important; }
-.heat-cell { width:100%; height:100%; display:flex; align-items:center; justify-content:center; border-radius:4px; padding:0.3rem; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
 
-/* === PARALLEL COORDINATES === */
-.parallel-wrap { background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:1.5rem; }
-.parallel-wrap svg { width:100%; height:auto; }
-.parallel-legend { display:flex; flex-wrap:wrap; gap:0.75rem; margin-top:1rem; justify-content:center; }
-.parallel-legend-item { display:flex; align-items:center; gap:0.35rem; font-size:0.72rem; color:var(--text-2); cursor:pointer; padding:0.2rem 0.5rem; border-radius:4px; transition:background var(--transition); }
-.parallel-legend-item:hover { background:var(--bg-hover); }
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background: var(--gradient);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 12px 24px rgba(59, 130, 246, 0.25);
+      flex-shrink: 0;
+    }
 
-/* === GAP ANALYSIS === */
-.gap-card { background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:1.5rem; margin-bottom:1rem; }
-.gap-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
-.gap-title { font-weight:700; font-size:0.95rem; }
-.gap-score { font-family:var(--mono); font-weight:700; font-size:1.2rem; }
-.gap-bars { display:grid; grid-template-columns:1fr 1fr; gap:0.4rem 1.5rem; }
-.gap-bar-row { display:flex; align-items:center; gap:0.5rem; }
-.gap-bar-label { font-size:0.7rem; color:var(--text-3); min-width:80px; }
-.gap-bar-track { flex:1; height:6px; background:var(--bg-raised); border-radius:3px; overflow:hidden; position:relative; }
-.gap-bar-base { position:absolute; height:100%; border-radius:3px; opacity:0.3; }
-.gap-bar-model { position:absolute; height:100%; border-radius:3px; }
-.gap-bar-val { font-family:var(--mono); font-size:0.65rem; min-width:1.5rem; text-align:right; }
+    .brand-mark i {
+      width: 20px;
+      height: 20px;
+      color: white;
+    }
 
-/* === SIMULATOR === */
-.sim-section { background:var(--bg-raised); border:1px solid var(--border-subtle); border-radius:var(--radius-lg); padding:2rem; }
-.sim-controls { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1.25rem; margin-bottom:1.5rem; }
-.sim-control label { display:block; font-size:0.7rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-3); margin-bottom:0.4rem; }
-.sim-control input[type=range] { width:100%; accent-color:#6366f1; }
-.sim-control .val { font-family:var(--mono); font-size:0.85rem; font-weight:600; color:var(--text); }
-.sim-results { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; }
-.sim-result-card { background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius); padding:1rem; text-align:center; }
-.sim-result-card .model-name { font-size:0.78rem; font-weight:600; margin-bottom:0.3rem; }
-.sim-result-card .cost-val { font-size:1.3rem; font-weight:800; font-family:var(--mono); }
-.sim-result-card .cost-label { font-size:0.65rem; color:var(--text-3); margin-top:0.2rem; }
-.sim-result-card.best { border-color:#6366f1; background:rgba(99,102,241,0.05); }
+    .brand-copy h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
 
-/* === UPGRADE PATH === */
-.upgrade-track { position:relative; padding:1rem 0; }
-.upgrade-step { display:flex; align-items:stretch; gap:1rem; margin-bottom:0.75rem; }
-.upgrade-line { width:3px; background:var(--border); border-radius:2px; position:relative; flex-shrink:0; margin-left:1rem; }
-.upgrade-line::before { content:''; position:absolute; top:0; left:-4px; width:11px; height:11px; border-radius:50%; background:var(--gradient); }
-.upgrade-content { flex:1; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius); padding:1rem 1.25rem; }
-.upgrade-trigger { font-size:0.75rem; color:var(--text-3); margin-bottom:0.3rem; }
-.upgrade-model { font-weight:700; font-size:0.9rem; }
-.upgrade-why { font-size:0.78rem; color:var(--text-2); margin-top:0.3rem; }
+    .brand-copy p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
 
-/* === DNA FINGERPRINTS === */
-.dna-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:0.75rem; }
-.dna-card { background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:var(--radius); padding:1rem; text-align:center; transition:all var(--transition); }
-.dna-card:hover { border-color:var(--border); transform:translateY(-2px); }
-.dna-card svg { margin:0.5rem auto; display:block; }
-.dna-name { font-size:0.72rem; font-weight:600; margin-top:0.4rem; }
-.dna-score { font-family:var(--mono); font-size:0.65rem; color:var(--text-3); }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
 
-/* === COMMON === */
-.grid-2 { display:grid; grid-template-columns:repeat(auto-fit, minmax(400px, 1fr)); gap:1.25rem; }
-.grid-3 { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:1rem; }
-.badge { display:inline-flex; padding:0.2rem 0.55rem; border-radius:9999px; font-size:0.65rem; font-weight:600; }
-.badge-s { background:rgba(16,185,129,0.1); color:#34d399; }
-.badge-p { background:rgba(139,92,246,0.1); color:#a78bfa; }
+    .mini-stat {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(59, 130, 246, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.18);
+      color: var(--muted);
+      font-size: 0.8rem;
+      white-space: nowrap;
+    }
 
-/* === SOURCES === */
-.source-link { color:var(--accent-1); text-decoration:none; font-size:0.75rem; }
-.source-link:hover { text-decoration:underline; }
-.source-cards-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:1rem; }
-.source-card { background:var(--card-bg); border:1px solid var(--border-subtle); border-radius:0.75rem; padding:1.25rem; transition:border-color 0.2s; }
-.source-card:hover { border-color:var(--accent-1); }
-.source-card-title { font-weight:600; margin-bottom:0.35rem; }
-.source-card-title a { color:var(--text-1); text-decoration:none; }
-.source-card-title a:hover { color:var(--accent-1); }
-.source-card-desc { font-size:0.78rem; color:var(--text-2); margin-bottom:0.4rem; }
-.source-card-meta { font-size:0.68rem; color:var(--text-3); font-family:var(--mono); }
-.methodology-box { background:var(--card-bg); border:1px solid var(--border-subtle); border-radius:0.75rem; padding:1.5rem; margin-bottom:2rem; }
-.methodology-box h3 { margin:0 0 0.75rem; font-size:0.9rem; }
-.methodology-box ul { list-style:none; padding:0; margin:0; }
-.methodology-box li { padding:0.4rem 0; font-size:0.8rem; color:var(--text-2); border-bottom:1px solid var(--border-subtle); }
-.methodology-box li:last-child { border-bottom:none; }
-.methodology-box li strong { color:var(--text-1); }
-.sources-section-title { font-size:1rem; font-weight:700; color:var(--text-1); margin-bottom:0.5rem; }
-.prov-docs-wrap { display:flex; flex-direction:column; gap:0.5rem; }
-.prov-doc-row { display:flex; align-items:center; gap:0.75rem; padding:0.5rem 0; border-bottom:1px solid var(--border-subtle); }
-.prov-doc-name { font-weight:700; min-width:100px; }
-.prov-doc-link { display:inline-flex; align-items:center; gap:0.25rem; padding:0.25rem 0.6rem; background:var(--card-bg); border:1px solid var(--border-subtle); border-radius:6px; font-size:0.72rem; color:var(--text-2); text-decoration:none; transition:border-color 0.2s,color 0.2s; }
-.prov-doc-link:hover { border-color:var(--accent-1); color:var(--accent-1); }
-.section-subtitle { font-size:0.82rem; color:var(--text-2); margin-bottom:1.5rem; }
+    .icon-button {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
 
-/* === GLOBAL FILTER BAR === */
-.filter-bar { background:var(--bg-raised); border-bottom:1px solid var(--border-subtle); padding:0.6rem 2rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; position:sticky; top:48px; z-index:90; }
-.filter-group { display:flex; align-items:center; gap:0.4rem; }
-.filter-label { font-size:0.65rem; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-3); white-space:nowrap; }
-.filter-pill { padding:0.25rem 0.6rem; border:1px solid var(--border-subtle); border-radius:9999px; font-size:0.7rem; cursor:pointer; transition:all 0.15s; background:transparent; color:var(--text-2); }
-.filter-pill:hover { border-color:var(--border); background:var(--bg-hover); }
-.filter-pill.active { border-color:#6366f1; background:rgba(99,102,241,0.12); color:#818cf8; font-weight:600; }
-.filter-pill[data-provider="anthropic"].active { border-color:#a78bfa; background:rgba(167,139,250,0.12); color:#a78bfa; }
-.filter-pill[data-provider="openai"].active { border-color:#34d399; background:rgba(52,211,153,0.12); color:#34d399; }
-.filter-pill[data-provider="google"].active { border-color:#60a5fa; background:rgba(96,165,250,0.12); color:#60a5fa; }
-.filter-pill[data-provider="microsoft"].active { border-color:#fb923c; background:rgba(251,146,60,0.12); color:#fb923c; }
-.filter-search { padding:0.3rem 0.7rem; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-card); color:var(--text-1); font-size:0.75rem; width:180px; outline:none; transition:border-color 0.15s; }
-.filter-search:focus { border-color:#6366f1; }
-.filter-search::placeholder { color:var(--text-3); }
-.filter-divider { width:1px; height:20px; background:var(--border-subtle); }
-.filter-slider-group { display:flex; align-items:center; gap:0.4rem; }
-.filter-slider { width:80px; accent-color:#6366f1; cursor:pointer; }
-.filter-slider-val { font-family:var(--mono); font-size:0.68rem; color:var(--text-2); min-width:18px; }
-.filter-count { font-size:0.65rem; color:var(--text-3); margin-left:auto; font-family:var(--mono); }
+    .icon-button:hover {
+      transform: translateY(-1px);
+      border-color: var(--border-strong);
+      background: var(--card-alt);
+    }
 
-/* === SORTABLE TABLE HEADERS === */
-.sortable-th { cursor:pointer; user-select:none; position:relative; padding-right:18px !important; }
-.sortable-th:hover { color:var(--text-1); background:var(--bg-hover); }
-.sortable-th::after { content:''; position:absolute; right:4px; top:50%; transform:translateY(-50%); border:4px solid transparent; border-top-color:var(--text-3); opacity:0.3; }
-.sortable-th.sort-asc::after { border-top-color:transparent; border-bottom-color:#6366f1; opacity:1; transform:translateY(-70%); }
-.sortable-th.sort-desc::after { border-top-color:#6366f1; opacity:1; transform:translateY(-30%); }
-.table-search-wrap { display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem; }
-.table-search { padding:0.35rem 0.8rem; border:1px solid var(--border-subtle); border-radius:8px; background:var(--bg-card); color:var(--text-1); font-size:0.78rem; flex:1; max-width:300px; outline:none; }
-.table-search:focus { border-color:#6366f1; }
-.table-search::placeholder { color:var(--text-3); }
-.table-match-count { font-size:0.68rem; color:var(--text-3); font-family:var(--mono); }
-tr.filtered-out { display:none !important; }
+    .filterbar {
+      position: sticky;
+      top: 75px;
+      z-index: 45;
+      margin: 0 24px;
+      padding: 14px 16px;
+      background: var(--surface-glass);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      display: grid;
+      gap: 12px;
+      box-shadow: var(--shadow);
+    }
 
-/* === RESPONSIVE === */
-@media(max-width:900px) {
-  .picker-grid { grid-template-columns:1fr; }
-  .main { padding:1rem; }
-  .grid-2 { grid-template-columns:1fr; }
-  .source-cards-grid { grid-template-columns:1fr; }
-  .filter-bar { padding:0.5rem 1rem; gap:0.5rem; }
-  .filter-search { width:120px; }
-}
-</style>
+    .filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .filter-label {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-right: 4px;
+    }
+
+    .provider-toggle,
+    .segmented button,
+    .preset-pill,
+    .tab-button,
+    .action-button,
+    .ghost-button {
+      transition: all 0.2s ease;
+    }
+
+    .provider-toggle {
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      padding: 9px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+    }
+
+    .provider-toggle.active {
+      color: white;
+      border-color: transparent;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+    }
+
+    .provider-toggle[data-provider="anthropic"].active { background: rgba(167, 139, 250, 0.9); }
+    .provider-toggle[data-provider="openai"].active { background: rgba(52, 211, 153, 0.92); }
+    .provider-toggle[data-provider="google"].active { background: rgba(96, 165, 250, 0.92); }
+    .provider-toggle[data-provider="microsoft"].active { background: rgba(251, 146, 60, 0.92); }
+
+    .provider-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .segmented {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--card-bg);
+    }
+
+    .segmented button {
+      border: none;
+      background: transparent;
+      padding: 8px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .segmented button.active,
+    .tab-button.active {
+      background: var(--gradient);
+      color: white;
+      box-shadow: 0 8px 20px rgba(59, 130, 246, 0.22);
+    }
+
+    .field,
+    .select,
+    .number-input {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      color: var(--text);
+      min-height: 42px;
+    }
+
+    .field {
+      min-width: 220px;
+    }
+
+    .toggle-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+
+    .main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .stat-card {
+      background: linear-gradient(180deg, rgba(59,130,246,0.06), transparent 100%), var(--card-bg);
+    }
+
+    .stat-label {
+      font-size: 0.76rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 1.8rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .stat-help {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .tabs {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .tab-button {
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 10px 16px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.active {
+      display: block;
+      animation: fadeIn 0.2s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .section-head {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .section-head h2,
+    .section-head h3 {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .section-head p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .subtle {
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .table-wrap {
+      overflow: auto;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 14px 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      text-align: left;
+      font-size: 0.92rem;
+    }
+
+    tbody tr:nth-child(even) td {
+      background: var(--row-alt);
+    }
+
+    tbody tr:hover td {
+      background: var(--row-hover);
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: var(--panel-2);
+      z-index: 2;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .sort-button {
+      border: none;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      font: inherit;
+      text-transform: inherit;
+      letter-spacing: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .sort-button:hover {
+      text-decoration: underline;
+    }
+
+    .sort-indicator {
+      color: var(--muted-2);
+      font-size: 0.92em;
+      min-width: 10px;
+    }
+
+    .model-cell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 180px;
+    }
+
+    .mono {
+      font-family: var(--font-mono);
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .pill-standard {
+      background: rgba(34, 197, 94, 0.14);
+      color: #22c55e;
+    }
+
+    .pill-premium {
+      background: rgba(139, 92, 246, 0.14);
+      color: #8b5cf6;
+    }
+
+    .pill-powerful {
+      background: rgba(59, 130, 246, 0.14);
+      color: #60a5fa;
+    }
+
+    .pill-versatile {
+      background: rgba(139, 92, 246, 0.14);
+      color: #a78bfa;
+    }
+
+    .pill-lightweight {
+      background: rgba(34, 197, 94, 0.14);
+      color: #4ade80;
+    }
+
+    .flag {
+      font-weight: 700;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    .external-button,
+    .action-button,
+    .ghost-button {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+    }
+
+    .action-button {
+      background: var(--gradient);
+      color: white;
+      border-color: transparent;
+    }
+
+    .action-button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .ghost-button,
+    .external-button {
+      background: var(--card-bg);
+      color: var(--text);
+    }
+
+    .ghost-button:hover,
+    .external-button:hover,
+    .action-button:hover:not(:disabled),
+    .preset-pill:hover,
+    .compare-card:hover {
+      transform: translateY(-1px);
+      border-color: var(--border-strong);
+    }
+
+    .icon-inline {
+      width: 14px;
+      height: 14px;
+    }
+
+    .status-yes {
+      color: var(--success);
+      font-weight: 800;
+    }
+
+    .status-no {
+      color: var(--danger);
+      font-weight: 800;
+    }
+
+    .wizard-grid {
+      display: grid;
+      grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+      gap: 20px;
+      align-items: start;
+    }
+
+    .wizard-step {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .step-label {
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .radio-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .radio-pill {
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      border-radius: 999px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    .radio-pill.active {
+      background: rgba(59, 130, 246, 0.14);
+      border-color: rgba(59, 130, 246, 0.38);
+      color: var(--text);
+    }
+
+    .recommendation-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .recommendation-main {
+      background: linear-gradient(180deg, rgba(59,130,246,0.10), rgba(139,92,246,0.08)), var(--card-bg);
+      border: 1px solid rgba(99, 102, 241, 0.24);
+    }
+
+    .recommendation-header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .recommendation-title {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin: 0;
+    }
+
+    .recommendation-meta,
+    .key-stats,
+    .provider-summary,
+    .compare-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .key-stat {
+      background: var(--card-alt);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      min-width: 120px;
+    }
+
+    .key-stat small {
+      display: block;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.7rem;
+      margin-bottom: 6px;
+    }
+
+    .key-stat strong {
+      font-size: 0.96rem;
+    }
+
+    .runner-up {
+      display: grid;
+      gap: 12px;
+    }
+
+    .recommendation-empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 36px 20px;
+    }
+
+    .calc-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .control-block label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 800;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    .slider-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      accent-color: #3b82f6;
+    }
+
+    .cost-bar {
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(148, 163, 184, 0.16);
+      overflow: hidden;
+      margin-top: 8px;
+    }
+
+    .cost-bar > span {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+    }
+
+    .cost-good { color: #22c55e; }
+    .cost-mid { color: #f59e0b; }
+    .cost-high { color: #ef4444; }
+    .bar-good { background: linear-gradient(90deg, #22c55e, #4ade80); }
+    .bar-mid { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+    .bar-high { background: linear-gradient(90deg, #ef4444, #fb7185); }
+
+    .compare-layout {
+      display: grid;
+      gap: 18px;
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .compare-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      cursor: pointer;
+      display: grid;
+      gap: 12px;
+    }
+
+    .compare-card.selected {
+      border-color: rgba(59, 130, 246, 0.38);
+      background: rgba(59, 130, 246, 0.08);
+    }
+
+    .compare-card-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .compare-card-title {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 800;
+    }
+
+    .checkbox {
+      width: 18px;
+      height: 18px;
+      accent-color: #3b82f6;
+      margin-top: 2px;
+      flex-shrink: 0;
+    }
+
+    .preset-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .preset-pill {
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      border-radius: 999px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .footer {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 12px 24px 36px;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin: 10px 0;
+    }
+
+    .footer a {
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .footer a:hover {
+      text-decoration: underline;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 1200px) {
+      .hero-grid,
+      .compare-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .calc-controls {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 900px) {
+      .topbar {
+        padding: 14px 16px;
+      }
+
+      .filterbar {
+        top: 83px;
+        margin: 0 16px;
+      }
+
+      .main {
+        padding: 16px;
+      }
+
+      .wizard-grid,
+      .hero-grid,
+      .calc-controls,
+      .compare-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .mini-stat {
+        display: none;
+      }
+    }
+  </style>
 </head>
 <body>
-<!-- TOPBAR -->
-<header class="topbar">
-  <div class="topbar-brand"><div class="brand-icon"><i data-lucide="brain"></i></div>Model Intel</div>
-  <nav class="topbar-nav">
-    <button class="nav-btn active" data-tab="pick">Pick a Model</button>
-    <button class="nav-btn" data-tab="heatmap">Heatmap</button>
-    <button class="nav-btn" data-tab="parallel">Parallel</button>
-    <button class="nav-btn" data-tab="gap">Gap Analysis</button>
-    <button class="nav-btn" data-tab="frontier">Frontier</button>
-    <button class="nav-btn" data-tab="sim">Simulator</button>
-    <button class="nav-btn" data-tab="upgrade">Upgrade Path</button>
-    <button class="nav-btn" data-tab="dna">DNA</button>
-    <button class="nav-btn" data-tab="census">All Models</button>
-    <button class="nav-btn" data-tab="sources">Sources</button>
-  </nav>
-  <button class="theme-btn" onclick="toggleTheme()"><i data-lucide="sun" style="width:15px;height:15px"></i></button>
-</header>
-
-<main class="main">
-
-<!-- GLOBAL FILTER BAR -->
-<div class="filter-bar" id="global-filters">
-  <div class="filter-group">
-    <span class="filter-label">Provider</span>
-    <button class="filter-pill active" data-provider="anthropic" onclick="toggleProvider(this)">Anthropic</button>
-    <button class="filter-pill active" data-provider="openai" onclick="toggleProvider(this)">OpenAI</button>
-    <button class="filter-pill active" data-provider="google" onclick="toggleProvider(this)">Google</button>
-    <button class="filter-pill active" data-provider="microsoft" onclick="toggleProvider(this)">Microsoft</button>
-  </div>
-  <div class="filter-divider"></div>
-  <div class="filter-group">
-    <span class="filter-label">Tier</span>
-    <button class="filter-pill active" data-tier="standard" onclick="toggleTier(this)">Standard</button>
-    <button class="filter-pill active" data-tier="premium" onclick="toggleTier(this)">Premium</button>
-  </div>
-  <div class="filter-divider"></div>
-  <div class="filter-group">
-    <span class="filter-label">1M Context</span>
-    <button class="filter-pill" data-ctx="1m" onclick="toggle1MCtx(this)">Only 1M</button>
-  </div>
-  <div class="filter-divider"></div>
-  <div class="filter-slider-group">
-    <span class="filter-label">Min Score</span>
-    <input type="range" class="filter-slider" id="global-min-score" min="0" max="95" value="0" step="5" oninput="updateMinScore(this)">
-    <span class="filter-slider-val" id="global-min-score-val">0</span>
-  </div>
-  <div class="filter-divider"></div>
-  <div class="filter-group">
-    <input type="text" class="filter-search" id="global-search" placeholder="Search models..." oninput="updateGlobalSearch(this)">
-  </div>
-  <span class="filter-count" id="filter-count">${MODEL_REGISTRY.length} models</span>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     TAB: PICK A MODEL (the main event)
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="panel active" id="panel-pick">
-  <div class="picker-section">
-    <div class="picker-title">What model should you use?</div>
-    <div class="picker-subtitle">Answer 3 questions. Get your answer.</div>
-
-    <div class="picker-grid">
-      <div class="picker-q">
-        <label>What are you doing?</label>
-        <div class="picker-opts" id="q-task">
-          <div class="picker-opt" data-val="quick"><i data-lucide="zap"></i>Quick edits / completions</div>
-          <div class="picker-opt" data-val="code"><i data-lucide="code"></i>Writing / refactoring code</div>
-          <div class="picker-opt" data-val="review"><i data-lucide="search"></i>Code review / debugging</div>
-          <div class="picker-opt" data-val="arch"><i data-lucide="boxes"></i>Architecture / design</div>
-          <div class="picker-opt" data-val="test"><i data-lucide="test-tubes"></i>Test generation</div>
-          <div class="picker-opt" data-val="docs"><i data-lucide="book-open"></i>Documentation / writing</div>
-          <div class="picker-opt" data-val="security"><i data-lucide="shield"></i>Security audit</div>
-          <div class="picker-opt" data-val="bulk"><i data-lucide="layers"></i>Bulk / batch processing</div>
-        </div>
-      </div>
-      <div class="picker-q">
-        <label>How complex is it?</label>
-        <div class="picker-opts" id="q-complexity">
-          <div class="picker-opt" data-val="simple"><i data-lucide="minus"></i>Simple (1-2 files)</div>
-          <div class="picker-opt" data-val="medium"><i data-lucide="equal"></i>Medium (3-10 files)</div>
-          <div class="picker-opt" data-val="complex"><i data-lucide="git-merge"></i>Complex (10+ files, deep reasoning)</div>
-        </div>
-      </div>
-      <div class="picker-q">
-        <label>Budget preference?</label>
-        <div class="picker-opts" id="q-budget">
-          <div class="picker-opt" data-val="free"><i data-lucide="piggy-bank"></i>Standard only (included)</div>
-          <div class="picker-opt" data-val="balanced"><i data-lucide="scale"></i>Balanced (some premium OK)</div>
-          <div class="picker-opt" data-val="best"><i data-lucide="crown"></i>Best quality (cost no object)</div>
-        </div>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"><i data-lucide="sparkles"></i></div>
+      <div class="brand-copy">
+        <h1>Copilot Model Decision Hub</h1>
+        <p>Choose the right Copilot model by metadata, cost, context, and task fit.</p>
       </div>
     </div>
+    <div class="topbar-actions">
+      <div class="mini-stat">${totalModels} models, ${Object.keys(PROVIDERS).length} providers</div>
+      <button id="themeToggle" class="icon-button" type="button" aria-label="Toggle theme">
+        <i data-lucide="moon-star"></i>
+      </button>
+    </div>
+  </header>
 
-    <div class="picker-result" id="picker-result">
-      <div>
-        <div style="font-size:0.7rem;color:var(--text-3);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:0.2rem">Recommended</div>
-        <div class="result-model" id="result-model"></div>
+  <div class="filterbar">
+    <div class="filter-row">
+      <span class="filter-label">Providers</span>
+      <button class="provider-toggle active" type="button" data-provider="anthropic"><span class="provider-dot" style="background:${PROV_COLORS.anthropic}"></span>Anthropic</button>
+      <button class="provider-toggle active" type="button" data-provider="openai"><span class="provider-dot" style="background:${PROV_COLORS.openai}"></span>OpenAI</button>
+      <button class="provider-toggle active" type="button" data-provider="google"><span class="provider-dot" style="background:${PROV_COLORS.google}"></span>Google</button>
+      <button class="provider-toggle active" type="button" data-provider="microsoft"><span class="provider-dot" style="background:${PROV_COLORS.microsoft}"></span>Microsoft</button>
+    </div>
+    <div class="filter-row">
+      <span class="filter-label">Filters</span>
+      <div class="segmented" id="tierFilter">
+        <button type="button" class="active" data-tier="all">All tiers</button>
+        <button type="button" data-tier="standard">Standard</button>
+        <button type="button" data-tier="premium">Premium</button>
       </div>
-      <div class="result-reason" id="result-reason"></div>
-      <div>
-        <span class="result-badge" id="result-badge"></span>
-      </div>
+      <label class="toggle-wrap" for="needs1MGlobal">
+        <input id="needs1MGlobal" type="checkbox">
+        Show only 1M context models
+      </label>
+      <input id="searchInput" class="field" type="search" placeholder="Search by model name">
+      <button id="resetFilters" class="ghost-button" type="button">Reset</button>
     </div>
   </div>
 
-  <!-- Quick decision matrix below picker -->
-  <div class="sec-head"><div class="ico"><i data-lucide="grid-3x3"></i></div><h2>Quick Decision Matrix</h2><span class="muted">For every scenario</span></div>
-  ${generateQuickMatrix()}
-</div>
+  <main class="main">
+    <section class="hero-grid">
+      <div class="card stat-card">
+        <div class="stat-label">Catalog</div>
+        <div class="stat-value">${totalModels}</div>
+        <div class="stat-help">Complete Copilot-visible model set in one place.</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-label">Standard tier</div>
+        <div class="stat-value">${standardCount}</div>
+        <div class="stat-help">Lower request cost, ideal for everyday usage.</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-label">Premium tier</div>
+        <div class="stat-value">${premiumCount}</div>
+        <div class="stat-help">Higher-end models for complex reasoning and depth.</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-label">1M context ready</div>
+        <div class="stat-value">${oneMillionCount}</div>
+        <div class="stat-help">${metadataRecommendationsReady ? 'Metadata-based recommendations are available.' : 'Metadata recommendations unavailable.'}</div>
+      </div>
+    </section>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     TAB: HEATMAP
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="panel" id="panel-heatmap">
-  <div class="sec-head"><div class="ico"><i data-lucide="grid-3x3"></i></div><h2>Capability Heatmap</h2><span class="muted">All models, all dimensions, one view</span></div>
-  ${generateHeatmap()}
-  <div style="margin-top:2rem">
-    <h3 style="font-size:0.9rem;font-weight:700;margin-bottom:0.75rem"><i data-lucide="microscope" style="width:15px;height:15px;vertical-align:middle"></i> Raw Benchmark Data (verified)</h3>
-    <p style="font-size:0.75rem;color:var(--text-3);margin-bottom:0.75rem">The composite scores above are derived from these real benchmarks. Each links to its source.</p>
-    ${generateInlineBenchmarks()}
-  </div>
-</div>
+    <nav class="tabs" aria-label="Report tabs">
+      <button class="tab-button active" type="button" data-tab="models">Models</button>
+      <button class="tab-button" type="button" data-tab="picker">Pick a Model</button>
+      <button class="tab-button" type="button" data-tab="calculator">Cost Calculator</button>
+      <button class="tab-button" type="button" data-tab="compare">Compare</button>
+    </nav>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     TAB: PARALLEL COORDINATES
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="panel" id="panel-parallel">
-  <div class="sec-head"><div class="ico"><i data-lucide="activity"></i></div><h2>Parallel Coordinates</h2><span class="muted">Each line is a model. See the tradeoffs.</span></div>
-  ${generateParallelCoords()}
-</div>
+    <section id="tab-models" class="tab-panel active">
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <h2>Models</h2>
+            <p>Sort by pricing, tier, category, release freshness, or context capacity. Use the Benchmarks button for llm-stats.com deep-dives.</p>
+          </div>
+          <div class="subtle" id="modelsCountLabel">Showing 0 models</div>
+        </div>
+        <div class="provider-summary" id="providerSummary"></div>
+      </div>
+      <div class="table-wrap" style="margin-top:16px;">
+        <table>
+          <thead>
+            <tr id="modelsTableHead"></tr>
+          </thead>
+          <tbody id="modelsTableBody"></tbody>
+        </table>
+      </div>
+    </section>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     TAB: GAP ANALYSIS
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="panel" id="panel-gap">
-  <div class="sec-head"><div class="ico"><i data-lucide="diff"></i></div><h2>Gap Analysis</h2><span class="muted">What you lose by picking a cheaper model vs the best</span></div>
-  ${generateGapAnalysis()}
-</div>
+    <section id="tab-picker" class="tab-panel">
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <h2>Pick a Model</h2>
+            <p>Answer three quick questions. The picker updates instantly and respects the global filters above.</p>
+          </div>
+          <div class="subtle" id="pickerPoolLabel">Considering 0 models</div>
+        </div>
+        <div class="wizard-grid">
+          <div class="card">
+            <div class="wizard-step">
+              <label class="step-label" for="taskProfileSelect">Step 1, what are you doing?</label>
+              <select id="taskProfileSelect" class="select"></select>
+            </div>
+            <div class="wizard-step">
+              <div class="step-label">Step 2, what's your budget?</div>
+              <div class="radio-group" id="budgetRadios"></div>
+            </div>
+            <div class="wizard-step">
+              <div class="step-label">Step 3, need 1M context?</div>
+              <div class="radio-group" id="picker1MRadios"></div>
+            </div>
+          </div>
+          <div class="recommendation-grid" id="recommendationPanel"></div>
+        </div>
+      </div>
+    </section>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     TAB: FRONTIER
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="panel" id="panel-frontier">
-  <div class="sec-head"><div class="ico"><i data-lucide="trending-up"></i></div><h2>Efficiency Frontier</h2><span class="muted">Pareto-optimal models (you should be on the curve)</span></div>
-  ${generateFrontierChart()}
-</div>
+    <section id="tab-calculator" class="tab-panel">
+      <div class="card">
+        <div class="section-head">
+          <div>
+            <h2>Cost Calculator</h2>
+            <p>Estimate daily and monthly token costs. Toggle long context rows to see the difference where pricing changes.</p>
+          </div>
+          <div class="subtle" id="calculatorSummary">Sorted by lowest daily cost</div>
+        </div>
+        <div class="calc-controls">
+          <div class="control-block">
+            <label for="inputTokensK">Estimated input tokens per day, K</label>
+            <input id="inputTokensK" class="number-input" type="number" min="0" step="1" value="500">
+          </div>
+          <div class="control-block">
+            <label for="outputTokensK">Estimated output tokens per day, K</label>
+            <input id="outputTokensK" class="number-input" type="number" min="0" step="1" value="120">
+          </div>
+          <div class="control-block">
+            <label for="workingDays">Working days per month</label>
+            <div class="slider-row">
+              <input id="workingDays" type="range" min="1" max="31" step="1" value="22">
+              <span id="workingDaysValue" class="mono">22</span>
+            </div>
+          </div>
+          <div class="control-block">
+            <label class="hidden" for="showLongRows">Long context rows</label>
+            <label class="toggle-wrap" for="showLongRows" style="margin-top:27px;">
+              <input id="showLongRows" type="checkbox" checked>
+              Show long context rows
+            </label>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr id="costTableHead"></tr>
+            </thead>
+            <tbody id="costTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     TAB: SIMULATOR
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="panel" id="panel-sim">
-  <div class="sec-head"><div class="ico"><i data-lucide="calculator"></i></div><h2>Workload Simulator</h2><span class="muted">Estimate your premium usage</span></div>
-  ${generateSimulator()}
-</div>
+    <section id="tab-compare" class="tab-panel">
+      <div class="card compare-layout">
+        <div class="section-head">
+          <div>
+            <h2>Compare</h2>
+            <p>Select any two or more visible models, then open a benchmark comparison on llm-stats.com.</p>
+          </div>
+          <div class="subtle" id="compareSelectionLabel">0 selected</div>
+        </div>
+        <div>
+          <div class="step-label" style="margin-bottom:10px;">Quick presets</div>
+          <div class="preset-row">
+            <button class="preset-pill" type="button" data-preset="powerful">All Powerful models</button>
+            <button class="preset-pill" type="button" data-preset="lightweight">All Lightweight models</button>
+            <button class="preset-pill" type="button" data-preset="standard">All Standard tier</button>
+            <button class="preset-pill" type="button" data-preset="flagships">Anthropic vs OpenAI flagships</button>
+          </div>
+        </div>
+        <div class="compare-meta">
+          <button id="openCompareButton" class="action-button" type="button" disabled>
+            Open comparison on llm-stats.com
+            <i data-lucide="external-link" class="icon-inline"></i>
+          </button>
+          <button id="clearCompareButton" class="ghost-button" type="button">Clear selection</button>
+        </div>
+        <div id="compareGrid" class="compare-grid"></div>
+      </div>
+    </section>
+  </main>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     TAB: UPGRADE PATH
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="panel" id="panel-upgrade">
-  <div class="sec-head"><div class="ico"><i data-lucide="arrow-up-circle"></i></div><h2>When to Upgrade</h2><span class="muted">Signals that you should move to a stronger model</span></div>
-  ${generateUpgradePath()}
-</div>
+  <footer class="footer">
+    <div>Data sourced from GitHub Copilot public documentation. Benchmarks via llm-stats.com.</div>
+    <div class="footer-links">
+      <a href="https://docs.github.com/en/copilot/reference/ai-models/supported-models" target="_blank" rel="noreferrer">GitHub supported models <i data-lucide="external-link" class="icon-inline"></i></a>
+      <a href="https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" target="_blank" rel="noreferrer">GitHub pricing <i data-lucide="external-link" class="icon-inline"></i></a>
+      <a href="https://llm-stats.com" target="_blank" rel="noreferrer">llm-stats.com <i data-lucide="external-link" class="icon-inline"></i></a>
+    </div>
+    <div>Generated at ${now}.</div>
+  </footer>
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     TAB: DNA FINGERPRINTS
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="panel" id="panel-dna">
-  <div class="sec-head"><div class="ico"><i data-lucide="fingerprint"></i></div><h2>Model DNA</h2><span class="muted">Unique capability signature per model</span></div>
-  ${generateDNA()}
-</div>
+  <script>
+    const models = ${JSON.stringify(MODEL_REGISTRY)};
+    const providers = ${JSON.stringify(PROVIDERS)};
+    const taskProfiles = ${JSON.stringify(TASK_PROFILES)};
+    const providerSummary = ${JSON.stringify(providerSummary)};
+    const providerColors = ${JSON.stringify(PROV_COLORS)};
+    const metadataRecommendationsReady = ${JSON.stringify(metadataRecommendationsReady)};
 
-<!-- ═══════════════════════════════════════════════════════════════════════════
-     TAB: CENSUS
-     ═══════════════════════════════════════════════════════════════════════════ -->
-<div class="panel" id="panel-census">
-  <div class="sec-head"><div class="ico"><i data-lucide="list"></i></div><h2>Full Model Census</h2></div>
-  ${generateCensus(groups)}
-</div>
+    const filterState = {
+      providers: new Set(Object.keys(providers)),
+      tier: 'all',
+      needs1M: null,
+      search: ''
+    };
 
-<div class="panel" id="panel-sources">
-  <div class="sec-head"><div class="ico"><i data-lucide="book-open"></i></div><h2>Sources &amp; Methodology</h2></div>
-  <p class="section-subtitle">Every data point in this report is traceable. Click any source to verify independently.</p>
-  ${generateSourcesPanel()}
-</div>
+    const sortState = {
+      models: { key: null, dir: null },
+      costs: { key: 'dailyCost', dir: 'asc' }
+    };
 
-</main>
+    const wizardState = {
+      taskKey: Object.keys(taskProfiles)[0] || '',
+      budget: 'any',
+      needs1M: 'any'
+    };
 
-<footer style="text-align:center;padding:1.5rem;color:var(--text-3);font-size:0.7rem;border-top:1px solid var(--border-subtle)">model-intel v1.0.0 | Generated ${now}</footer>
+    const calculatorState = {
+      inputTokensK: 500,
+      outputTokensK: 120,
+      workingDays: 22,
+      showLongRows: true
+    };
 
-<script>
-// === Tab switching ===
-document.querySelectorAll('.nav-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
-  });
-});
+    const compareSelection = new Set();
 
-// === Theme ===
-function toggleTheme() {
-  const t = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = t;
-  lucide.createIcons();
-}
+    const TASK_WEIGHTS = {
+      quickEdit: { preferCheap: true, preferFast: true, preferPowerful: false, preferLightweight: true, preferReasoning: false },
+      complexRefactor: { preferCheap: false, preferFast: false, preferPowerful: true, preferVersatile: true, needs1M: true, preferReasoning: true },
+      debugging: { preferCheap: false, preferFast: false, preferPowerful: true, preferReasoning: true, needs1M: false },
+      architectureReview: { preferCheap: false, preferFast: false, preferPowerful: true, preferVersatile: true, preferReasoning: true },
+      codeReview: { preferCheap: false, preferFast: false, preferPowerful: true, preferVersatile: true, preferReasoning: true },
+      documentation: { preferCheap: true, preferFast: true, preferPowerful: false, preferVersatile: true, preferReasoning: false },
+      testGeneration: { preferCheap: true, preferFast: false, preferPowerful: false, preferVersatile: true, preferReasoning: true },
+      securityAudit: { preferCheap: false, preferFast: false, preferPowerful: true, preferReasoning: true, needs1M: true },
+      creativeTask: { preferCheap: false, preferFast: false, preferPowerful: false, preferVersatile: true, preferReasoning: true },
+      longContext: { preferCheap: false, preferFast: false, preferPowerful: true, preferVersatile: true, needs1M: true, preferReasoning: true },
+      bulkProcessing: { preferCheap: true, preferFast: true, preferPowerful: false, preferLightweight: true, needs1M: true }
+    };
 
-// === Model Picker Logic ===
-const MODELS = ${JSON.stringify(MODEL_REGISTRY.map(m => ({ id:m.id, name:m.name, provider:m.provider, tier:m.tier, scores:m.scores })))};
-
-const TASK_WEIGHTS = {
-  quick:    {speed:0.4, costEfficiency:0.3, codeGeneration:0.3},
-  code:     {codeGeneration:0.35, multiFile:0.25, reasoning:0.2, toolUse:0.2},
-  review:   {codeReview:0.35, reasoning:0.3, multiFile:0.2, toolUse:0.15},
-  arch:     {reasoning:0.35, codeReview:0.25, multiFile:0.25, creativeWriting:0.15},
-  test:     {codeGeneration:0.35, reasoning:0.25, instructionFollowing:0.25, speed:0.15},
-  docs:     {creativeWriting:0.35, instructionFollowing:0.3, reasoning:0.2, speed:0.15},
-  security: {reasoning:0.35, codeReview:0.3, multiFile:0.2, toolUse:0.15},
-  bulk:     {speed:0.35, costEfficiency:0.35, codeGeneration:0.15, multiFile:0.15}
-};
-
-const COMPLEXITY_MODS = {
-  simple:  {speed:0.2, costEfficiency:0.1},
-  medium:  {multiFile:0.1, reasoning:0.05},
-  complex: {reasoning:0.2, multiFile:0.15, contextLength:0.1}
-};
-
-let pickerState = { task:null, complexity:null, budget:null };
-
-document.querySelectorAll('.picker-opts').forEach(group => {
-  group.querySelectorAll('.picker-opt').forEach(opt => {
-    opt.addEventListener('click', () => {
-      group.querySelectorAll('.picker-opt').forEach(o => o.classList.remove('selected'));
-      opt.classList.add('selected');
-      const qId = group.id.replace('q-','');
-      pickerState[qId] = opt.dataset.val;
-      runPicker();
-    });
-  });
-});
-
-function runPicker() {
-  if (!pickerState.task || !pickerState.complexity || !pickerState.budget) return;
-
-  let weights = {...TASK_WEIGHTS[pickerState.task]};
-  const mods = COMPLEXITY_MODS[pickerState.complexity];
-  for (const [k,v] of Object.entries(mods)) weights[k] = (weights[k]||0) + v;
-
-  // Normalize
-  const sum = Object.values(weights).reduce((a,b)=>a+b,0);
-  for (const k in weights) weights[k] /= sum;
-
-  // Filter by budget
-  let pool = MODELS;
-  if (pickerState.budget === 'free') pool = pool.filter(m => m.tier === 'standard');
-
-  // Score
-  const scored = pool.map(m => {
-    let s = 0;
-    for (const [dim, w] of Object.entries(weights)) {
-      s += (m.scores[dim]||0) * w;
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
-    return { ...m, finalScore: s };
-  }).sort((a,b) => b.finalScore - a.finalScore);
 
-  const best = scored[0];
-  const el = document.getElementById('picker-result');
-  el.classList.add('visible');
-  document.getElementById('result-model').textContent = best.name;
+    function providerName(provider) {
+      return providers[provider] ? providers[provider].name : provider;
+    }
 
-  // Build reason
-  const topDims = Object.entries(weights).sort((a,b)=>b[1]-a[1]).slice(0,3);
-  const reasons = topDims.map(([d]) => {
-    const labels = ${JSON.stringify(DIM_LABELS)};
-    return labels[d] + ': ' + best.scores[d];
-  });
-  document.getElementById('result-reason').textContent = 'Top scores in ' + reasons.join(', ') + '. ' + (best.tier==='standard' ? 'Included in your plan.' : 'Uses premium requests.');
-  const badge = document.getElementById('result-badge');
-  badge.textContent = best.tier;
-  badge.className = 'result-badge ' + best.tier;
-}
+    function formatPrice(value) {
+      return '$' + Number(value || 0).toFixed(2);
+    }
 
-// === Simulator ===
-function updateSim() {
-  const edits = +document.getElementById('sim-edits').value;
-  const reviews = +document.getElementById('sim-reviews').value;
-  const complexity = +document.getElementById('sim-complexity').value;
-  document.getElementById('sim-edits-val').textContent = edits;
-  document.getElementById('sim-reviews-val').textContent = reviews;
-  document.getElementById('sim-complexity-val').textContent = ['Low','Medium','High'][complexity-1];
+    function formatCurrency(value) {
+      return '$' + Number(value || 0).toFixed(2);
+    }
 
-  const results = document.getElementById('sim-results');
-  // Premium cost estimation (simplified model)
-  const scenarios = [
-    { name:'All Standard', model:'Sonnet 4.6 + Haiku', premium:0, quality: 78 + complexity*3 },
-    { name:'Mixed', model:'Sonnet 5 (complex) + 4.6 (rest)', premium: Math.round((edits*0.3 + reviews*0.5) * complexity * 0.7), quality: 85 + complexity*3 },
-    { name:'All Premium', model:'Opus 4.8 + Sonnet 5', premium: Math.round((edits + reviews) * complexity * 1.2), quality: 92 + complexity*2 },
-  ];
-  results.innerHTML = scenarios.map((s,i) => \`
-    <div class="sim-result-card \${i===1?'best':''}">
-      <div class="model-name">\${s.name}</div>
-      <div style="font-size:0.7rem;color:var(--text-3);margin-bottom:0.5rem">\${s.model}</div>
-      <div class="cost-val">\${s.premium}</div>
-      <div class="cost-label">premium reqs/day</div>
-      <div style="margin-top:0.5rem;font-size:0.7rem;color:var(--text-2)">Quality: \${s.quality}/100</div>
-    </div>
-  \`).join('');
-}
+    function formatContext(value) {
+      return Number(value || 0).toLocaleString() + 'K';
+    }
 
-// Init
-lucide.createIcons();
-document.querySelectorAll('input[type=range]:not(.filter-slider)').forEach(r => r.addEventListener('input', updateSim));
-if (document.getElementById('sim-edits')) updateSim();
+    function formatEffort(model) {
+      return model.effortLevels && model.effortLevels.length ? model.effortLevels.join(', ') : 'None';
+    }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GLOBAL FILTER ENGINE
-// ═══════════════════════════════════════════════════════════════════════════
-const filterState = {
-  providers: new Set(['anthropic','openai','google','microsoft']),
-  tiers: new Set(['standard','premium']),
-  only1M: false,
-  minScore: 0,
-  search: ''
-};
+    function themeIconName() {
+      return document.documentElement.dataset.theme === 'dark' ? 'sun-medium' : 'moon-star';
+    }
 
-function toggleProvider(btn) {
-  const p = btn.dataset.provider;
-  if (filterState.providers.has(p)) { filterState.providers.delete(p); btn.classList.remove('active'); }
-  else { filterState.providers.add(p); btn.classList.add('active'); }
-  applyFilters();
-}
+    function setTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      localStorage.setItem('copilot-model-decision-theme', theme);
+      document.getElementById('themeToggle').innerHTML = '<i data-lucide="' + themeIconName() + '"></i>';
+      refreshIcons();
+    }
 
-function toggleTier(btn) {
-  const t = btn.dataset.tier;
-  if (filterState.tiers.has(t)) { filterState.tiers.delete(t); btn.classList.remove('active'); }
-  else { filterState.tiers.add(t); btn.classList.add('active'); }
-  applyFilters();
-}
+    function initTheme() {
+      const saved = localStorage.getItem('copilot-model-decision-theme');
+      setTheme(saved === 'light' ? 'light' : 'dark');
+    }
 
-function toggle1MCtx(btn) {
-  filterState.only1M = !filterState.only1M;
-  btn.classList.toggle('active', filterState.only1M);
-  applyFilters();
-}
+    function refreshIcons() {
+      if (window.lucide && typeof window.lucide.createIcons === 'function') {
+        window.lucide.createIcons();
+      }
+    }
 
-function updateMinScore(el) {
-  filterState.minScore = +el.value;
-  document.getElementById('global-min-score-val').textContent = el.value;
-  applyFilters();
-}
+    function matchesGlobalFilter(model) {
+      if (!filterState.providers.has(model.provider)) return false;
+      if (filterState.tier !== 'all' && model.tier !== filterState.tier) return false;
+      if (filterState.needs1M === true && !model.supports1MContext) return false;
+      if (filterState.search) {
+        const needle = filterState.search.toLowerCase();
+        if (!String(model.name).toLowerCase().includes(needle)) return false;
+      }
+      return true;
+    }
 
-function updateGlobalSearch(el) {
-  filterState.search = el.value.toLowerCase().trim();
-  applyFilters();
-}
+    function getFilteredModels() {
+      return models.filter(matchesGlobalFilter);
+    }
 
-function applyFilters() {
-  let visible = 0;
-  document.querySelectorAll('tr[data-provider]').forEach(row => {
-    const p = row.dataset.provider;
-    const t = row.dataset.tier;
-    const name = row.dataset.model || '';
-    const avg = parseFloat(row.dataset.avg || 0);
-    const ctx = row.dataset.ctx || 'default';
+    function getSortIndicator(target, key) {
+      const state = sortState[target];
+      if (state.key !== key || !state.dir) return '↕';
+      return state.dir === 'asc' ? '↑' : '↓';
+    }
 
-    let show = filterState.providers.has(p)
-      && filterState.tiers.has(t)
-      && avg >= filterState.minScore
-      && (!filterState.only1M || ctx === '1m')
-      && (!filterState.search || name.includes(filterState.search));
+    function renderSortHeader(target, key, label) {
+      return '<th><button class="sort-button" type="button" data-sort-target="' + target + '" data-sort-key="' + key + '">' + escapeHtml(label) + '<span class="sort-indicator">' + getSortIndicator(target, key) + '</span></button></th>';
+    }
 
-    row.classList.toggle('filtered-out', !show);
-    if (show) visible++;
-  });
+    function getModelSortValue(model, key) {
+      if (key === 'model') return String(model.name).toLowerCase();
+      if (key === 'provider') return providerName(model.provider).toLowerCase();
+      if (key === 'category') return String(model.category).toLowerCase();
+      if (key === 'tier') return model.tier === 'standard' ? 0 : 1;
+      if (key === 'input') return Number(model.pricing && model.pricing.input || 0);
+      if (key === 'output') return Number(model.pricing && model.pricing.output || 0);
+      if (key === 'context') return Number(model.maxContextWindow || model.contextWindow || 0);
+      if (key === 'effort') return model.effortLevels ? model.effortLevels.length : 0;
+      if (key === 'oneMillion') return model.supports1MContext ? 1 : 0;
+      if (key === 'reasoning') return model.supportsReasoning ? 1 : 0;
+      if (key === 'benchmarks') return model.llmStatsSlug ? 1 : 0;
+      return String(model.name).toLowerCase();
+    }
 
-  // Also hide/show SVG chart elements (parallel coords, DNA, frontier)
-  document.querySelectorAll('[data-model-provider]').forEach(el => {
-    const p = el.dataset.modelProvider;
-    const t = el.dataset.modelTier || 'premium';
-    const name = (el.dataset.modelName || '').toLowerCase();
-    const avg = parseFloat(el.dataset.modelAvg || 0);
-    const ctx = el.dataset.modelCtx || 'default';
+    function sortItems(items, target, getter) {
+      const state = sortState[target];
+      const list = items.slice();
+      if (!state.key || !state.dir) {
+        return list.sort((a, b) => String(a.name || a.modelName || '').localeCompare(String(b.name || b.modelName || '')));
+      }
+      const dir = state.dir === 'asc' ? 1 : -1;
+      return list.sort(function(a, b) {
+        const aVal = getter(a, state.key);
+        const bVal = getter(b, state.key);
+        if (typeof aVal === 'number' && typeof bVal === 'number') return (aVal - bVal) * dir;
+        return String(aVal).localeCompare(String(bVal), undefined, { numeric: true, sensitivity: 'base' }) * dir;
+      });
+    }
 
-    let show = filterState.providers.has(p)
-      && filterState.tiers.has(t)
-      && avg >= filterState.minScore
-      && (!filterState.only1M || ctx === '1m')
-      && (!filterState.search || name.includes(filterState.search));
+    function categoryPill(category) {
+      const slug = String(category || '').toLowerCase();
+      return '<span class="pill pill-' + slug + '">' + escapeHtml(category) + '</span>';
+    }
 
-    el.style.display = show ? '' : 'none';
-  });
+    function tierPill(tier) {
+      return '<span class="pill ' + (tier === 'standard' ? 'pill-standard' : 'pill-premium') + '">' + escapeHtml(tier) + '</span>';
+    }
 
-  // Also filter gap-card and dna-card divs
-  document.querySelectorAll('.gap-card[data-provider], .dna-card[data-provider]').forEach(card => {
-    const p = card.dataset.provider;
-    const t = card.dataset.tier || 'premium';
-    const name = (card.dataset.model || '').toLowerCase();
-    const avg = parseFloat(card.dataset.avg || 0);
-    const ctx = card.dataset.ctx || 'default';
+    function providerBadge(provider) {
+      return '<span class="pill" style="background:rgba(148,163,184,0.12);color:var(--text);"><span class="provider-dot" style="background:' + providerColors[provider] + '"></span>' + escapeHtml(providerName(provider)) + '</span>';
+    }
 
-    let show = filterState.providers.has(p)
-      && filterState.tiers.has(t)
-      && avg >= filterState.minScore
-      && (!filterState.only1M || ctx === '1m')
-      && (!filterState.search || name.includes(filterState.search));
+    function renderProviderSummary() {
+      const entries = Object.keys(providerSummary);
+      const html = entries.map(function(provider) {
+        const item = providerSummary[provider];
+        return '<div class="pill" style="background:rgba(148,163,184,0.08);color:var(--text);border:1px solid var(--border);"><span class="provider-dot" style="background:' + providerColors[provider] + '"></span>' + escapeHtml(providerName(provider)) + ': ' + item.count + ' total, ' + item.standard + ' standard, ' + item.premium + ' premium</div>';
+      }).join('');
+      document.getElementById('providerSummary').innerHTML = html;
+    }
 
-    card.style.display = show ? '' : 'none';
-  });
+    function renderModelsTable() {
+      const filtered = getFilteredModels();
+      const headers = [
+        ['model', 'Model'],
+        ['provider', 'Provider'],
+        ['category', 'Category'],
+        ['tier', 'Tier'],
+        ['input', 'Input $/1M'],
+        ['output', 'Output $/1M'],
+        ['context', 'Context'],
+        ['effort', 'Effort Levels'],
+        ['oneMillion', '1M Context'],
+        ['reasoning', 'Reasoning'],
+        ['benchmarks', 'Benchmarks']
+      ];
+      document.getElementById('modelsTableHead').innerHTML = headers.map(function(pair) {
+        return renderSortHeader('models', pair[0], pair[1]);
+      }).join('');
 
-  document.getElementById('filter-count').textContent = visible + ' models';
+      const sorted = sortItems(filtered, 'models', getModelSortValue);
+      const rows = sorted.map(function(model) {
+        const benchmarkCell = model.llmStatsSlug
+          ? '<a class="external-button" href="https://llm-stats.com/models/' + encodeURIComponent(model.llmStatsSlug) + '" target="_blank" rel="noreferrer">Open <i data-lucide="external-link" class="icon-inline"></i></a>'
+          : '<span class="muted">Unavailable</span>';
+        return '<tr>' +
+          '<td><div class="model-cell"><span class="provider-dot" style="background:' + providerColors[model.provider] + '"></span><div><div><strong>' + escapeHtml(model.name) + '</strong></div><div class="muted mono">' + escapeHtml(model.id) + '</div></div></div></td>' +
+          '<td>' + escapeHtml(providerName(model.provider)) + '</td>' +
+          '<td>' + categoryPill(model.category) + '</td>' +
+          '<td>' + tierPill(model.tier) + '</td>' +
+          '<td class="mono">' + formatPrice(model.pricing.input) + '</td>' +
+          '<td class="mono">' + formatPrice(model.pricing.output) + '</td>' +
+          '<td class="mono">' + formatContext(model.contextWindow) + ' / ' + formatContext(model.maxContextWindow || model.contextWindow) + '</td>' +
+          '<td>' + escapeHtml(formatEffort(model)) + '</td>' +
+          '<td><span class="' + (model.supports1MContext ? 'status-yes' : 'status-no') + '">' + (model.supports1MContext ? '✓' : '✕') + '</span></td>' +
+          '<td><span class="' + (model.supportsReasoning ? 'status-yes' : 'status-no') + '">' + (model.supportsReasoning ? '✓' : '✕') + '</span></td>' +
+          '<td>' + benchmarkCell + '</td>' +
+        '</tr>';
+      }).join('');
 
-  // Update per-table match counts
-  document.querySelectorAll('.table-search-wrap').forEach(wrap => {
-    const table = wrap.nextElementSibling?.querySelector('table');
-    if (!table) return;
-    const total = table.querySelectorAll('tbody tr[data-provider]').length;
-    const shown = table.querySelectorAll('tbody tr[data-provider]:not(.filtered-out)').length;
-    const counter = wrap.querySelector('.table-match-count');
-    if (counter) counter.textContent = shown + '/' + total;
-  });
-}
+      document.getElementById('modelsTableBody').innerHTML = rows || '<tr><td colspan="11" class="recommendation-empty">No models match the current filters.</td></tr>';
+      document.getElementById('modelsCountLabel').textContent = 'Showing ' + filtered.length + ' model' + (filtered.length === 1 ? '' : 's');
+      refreshIcons();
+    }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// PER-TABLE SEARCH
-// ═══════════════════════════════════════════════════════════════════════════
-function filterTable(input) {
-  const q = input.value.toLowerCase().trim();
-  const wrap = input.closest('.table-search-wrap');
-  const table = wrap?.nextElementSibling?.querySelector('table') || wrap?.parentElement?.querySelector('table');
-  if (!table) return;
+    function pickModel(taskKey, budgetFilter, needs1M) {
+      let candidates = models.slice();
+      if (budgetFilter === 'standard') candidates = candidates.filter(function(model) { return model.tier === 'standard'; });
+      if (budgetFilter === 'premium') candidates = candidates.filter(function(model) { return model.tier === 'premium'; });
+      if (needs1M === true) candidates = candidates.filter(function(model) { return model.supports1MContext; });
+      candidates = candidates.filter(matchesGlobalFilter);
 
-  let shown = 0, total = 0;
-  table.querySelectorAll('tbody tr').forEach(row => {
-    total++;
-    const text = row.textContent.toLowerCase();
-    const match = !q || text.includes(q);
-    row.classList.toggle('filtered-out', !match);
-    if (match) shown++;
-  });
+      const poolSize = candidates.length;
+      const weights = TASK_WEIGHTS[taskKey] || {};
+      const scored = candidates.map(function(model) {
+        let score = 50;
+        if (weights.preferPowerful && model.category === 'Powerful') score += 30;
+        if (weights.preferPowerful && model.category === 'Versatile') score += 15;
+        if (weights.preferVersatile && model.category === 'Versatile') score += 22;
+        if (weights.preferLightweight && model.category === 'Lightweight') score += 25;
+        if (weights.preferCheap && model.tier === 'standard') score += 20;
+        if (weights.preferCheap) score += Math.max(0, 20 - Number(model.pricing.input || 0) * 4);
+        if (weights.preferFast && model.category === 'Lightweight') score += 18;
+        if (weights.preferFast && model.category === 'Versatile') score += 8;
+        if (weights.preferReasoning && model.supportsReasoning) score += 20;
+        if (weights.needs1M && model.supports1MContext) score += 18;
+        if (needs1M === false && !model.supports1MContext) score += 4;
+        if (model.contextWindow >= 200) score += 4;
+        if (model.maxContextWindow >= 1000) score += 6;
+        const inputPrice = Number(model.pricing.input || 0);
+        const outputPrice = Number(model.pricing.output || 0);
+        score += Math.max(0, 12 - inputPrice * 2);
+        score += Math.max(0, 8 - outputPrice * 0.2);
+        const parts = String(model.releaseDate || '2025-01').split('-');
+        const year = parseInt(parts[0], 10) || 2025;
+        const month = parseInt(parts[1], 10) || 1;
+        score += (year - 2025) * 2 + month * 0.5;
+        return { model: model, score: score };
+      });
 
-  const counter = wrap.querySelector('.table-match-count');
-  if (counter) counter.textContent = q ? shown + '/' + total : '';
-}
+      scored.sort(function(a, b) { return b.score - a.score; });
+      return { ranked: scored, poolSize: poolSize };
+    }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SORTABLE TABLES
-// ═══════════════════════════════════════════════════════════════════════════
-document.querySelectorAll('.sortable-th').forEach(th => {
-  th.addEventListener('click', () => {
-    const table = th.closest('table');
-    const tbody = table.querySelector('tbody');
-    const col = parseInt(th.dataset.col);
-    const wasDesc = th.classList.contains('sort-desc');
-    const wasAsc = th.classList.contains('sort-asc');
+    function renderModelHighlights(model, scoreLabel) {
+      return '<div class="key-stats">' +
+        '<div class="key-stat"><small>Provider</small><strong>' + escapeHtml(providerName(model.provider)) + '</strong></div>' +
+        '<div class="key-stat"><small>Tier</small><strong>' + escapeHtml(model.tier) + '</strong></div>' +
+        '<div class="key-stat"><small>Category</small><strong>' + escapeHtml(model.category) + '</strong></div>' +
+        '<div class="key-stat"><small>Input</small><strong>' + formatPrice(model.pricing.input) + '/1M</strong></div>' +
+        '<div class="key-stat"><small>Context</small><strong>' + formatContext(model.contextWindow) + ' / ' + formatContext(model.maxContextWindow || model.contextWindow) + '</strong></div>' +
+        '<div class="key-stat"><small>Reasoning</small><strong>' + (model.supportsReasoning ? 'Supported' : 'No') + '</strong></div>' +
+        '<div class="key-stat"><small>Picker score</small><strong>' + scoreLabel + '</strong></div>' +
+      '</div>';
+    }
 
-    // Clear all sort indicators on this table
-    table.querySelectorAll('.sortable-th').forEach(h => { h.classList.remove('sort-asc','sort-desc'); });
+    function llmCompareUrl(ids) {
+      const slugs = ids.map(function(id) {
+        const model = models.find(function(item) { return item.id === id; });
+        return model && model.llmStatsSlug ? model.llmStatsSlug : null;
+      }).filter(Boolean);
+      if (slugs.length < 2) return '';
+      return 'https://llm-stats.com/models/compare?models=' + slugs.join(',');
+    }
 
-    // Determine direction: cycle none -> desc -> asc -> desc
-    let dir;
-    if (!wasDesc && !wasAsc) dir = 'desc';
-    else if (wasDesc) dir = 'asc';
-    else dir = 'desc';
+    function renderPicker() {
+      const needs1M = wizardState.needs1M === 'yes' ? true : wizardState.needs1M === 'no' ? false : null;
+      const result = pickModel(wizardState.taskKey, wizardState.budget, needs1M);
+      const ranked = result.ranked;
+      const top = ranked[0];
+      const runnerUp = ranked[1];
+      document.getElementById('pickerPoolLabel').textContent = 'Considering ' + result.poolSize + ' model' + (result.poolSize === 1 ? '' : 's');
 
-    th.classList.add('sort-' + dir);
+      if (!top) {
+        document.getElementById('recommendationPanel').innerHTML = '<div class="card recommendation-empty">No models match both the wizard and the global filters.</div>';
+        refreshIcons();
+        return;
+      }
 
-    const rows = [...tbody.querySelectorAll('tr')];
-    rows.sort((a,b) => {
-      let av = getCellSortVal(a, col);
-      let bv = getCellSortVal(b, col);
-      let cmp;
-      if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
-      else cmp = String(av).localeCompare(String(bv));
-      return dir === 'desc' ? -cmp : cmp;
+      const compareUrl = runnerUp ? llmCompareUrl([top.model.id, runnerUp.model.id]) : '';
+      const runnerUpHtml = runnerUp
+        ? '<div class="card">' +
+            '<div class="section-head"><div><h3>Runner-up</h3><p>A strong alternative if you want a different price or tier balance.</p></div></div>' +
+            '<div class="recommendation-header">' +
+              '<div>' +
+                '<p class="recommendation-title" style="font-size:1.1rem;">' + escapeHtml(runnerUp.model.name) + '</p>' +
+                '<div class="recommendation-meta">' + providerBadge(runnerUp.model.provider) + categoryPill(runnerUp.model.category) + tierPill(runnerUp.model.tier) + '</div>' +
+              '</div>' +
+              '<div class="mono muted">Score ' + runnerUp.score.toFixed(1) + '</div>' +
+            '</div>' +
+            renderModelHighlights(runnerUp.model, runnerUp.score.toFixed(1)) +
+          '</div>'
+        : '';
+
+      const compareButton = compareUrl
+        ? '<a class="action-button" href="' + compareUrl + '" target="_blank" rel="noreferrer">Compare these on llm-stats.com <i data-lucide="external-link" class="icon-inline"></i></a>'
+        : '<button class="action-button" type="button" disabled>Compare these on llm-stats.com</button>';
+
+      const reasoningNote = metadataRecommendationsReady
+        ? 'This picker uses client-side metadata scoring tuned for Copilot tasks.'
+        : 'This picker is client-side only and does not depend on benchmark scores.';
+
+      document.getElementById('recommendationPanel').innerHTML =
+        '<div class="card recommendation-main">' +
+          '<div class="recommendation-header">' +
+            '<div>' +
+              '<div class="step-label" style="margin-bottom:8px;">Top pick</div>' +
+              '<p class="recommendation-title">' + escapeHtml(top.model.name) + '</p>' +
+              '<div class="recommendation-meta">' + providerBadge(top.model.provider) + categoryPill(top.model.category) + tierPill(top.model.tier) + '</div>' +
+            '</div>' +
+            '<div class="mono muted">Score ' + top.score.toFixed(1) + '</div>' +
+          '</div>' +
+          '<p class="subtle" style="margin-top:0;">' + reasoningNote + '</p>' +
+          renderModelHighlights(top.model, top.score.toFixed(1)) +
+          '<div style="margin-top:16px;">' + compareButton + '</div>' +
+        '</div>' +
+        '<div class="runner-up">' + runnerUpHtml + '</div>';
+      refreshIcons();
+    }
+
+    function buildCostRows() {
+      const inputTokens = Number(calculatorState.inputTokensK || 0);
+      const outputTokens = Number(calculatorState.outputTokensK || 0);
+      const filtered = getFilteredModels();
+      const rows = [];
+      filtered.forEach(function(model) {
+        const dailyDefault = (inputTokens * 1000 / 1000000 * Number(model.pricing.input || 0)) + (outputTokens * 1000 / 1000000 * Number(model.pricing.output || 0));
+        rows.push({
+          id: model.id + ':default',
+          name: model.name,
+          modelName: model.name,
+          mode: 'Default',
+          provider: model.provider,
+          category: model.category,
+          tier: model.tier,
+          dailyCost: dailyDefault,
+          monthlyCost: dailyDefault * Number(calculatorState.workingDays || 0)
+        });
+        if (calculatorState.showLongRows && (model.pricing.longInput || model.pricing.longOutput)) {
+          const longInput = Number(model.pricing.longInput || model.pricing.input || 0);
+          const longOutput = Number(model.pricing.longOutput || model.pricing.output || 0);
+          const dailyLong = (inputTokens * 1000 / 1000000 * longInput) + (outputTokens * 1000 / 1000000 * longOutput);
+          rows.push({
+            id: model.id + ':long',
+            name: model.name,
+            modelName: model.name,
+            mode: 'Long context',
+            provider: model.provider,
+            category: model.category,
+            tier: model.tier,
+            dailyCost: dailyLong,
+            monthlyCost: dailyLong * Number(calculatorState.workingDays || 0)
+          });
+        }
+      });
+      return rows;
+    }
+
+    function getCostSortValue(row, key) {
+      if (key === 'model') return String(row.modelName).toLowerCase() + String(row.mode).toLowerCase();
+      if (key === 'dailyCost') return Number(row.dailyCost || 0);
+      if (key === 'monthlyCost') return Number(row.monthlyCost || 0);
+      return Number(row.dailyCost || 0);
+    }
+
+    function renderCostTable() {
+      const headers = [
+        ['model', 'Model'],
+        ['dailyCost', 'Daily Cost'],
+        ['monthlyCost', 'Monthly Cost']
+      ];
+      document.getElementById('costTableHead').innerHTML = headers.map(function(pair) {
+        return renderSortHeader('costs', pair[0], pair[1]);
+      }).join('');
+
+      const rows = sortItems(buildCostRows(), 'costs', getCostSortValue);
+      const maxMonthly = rows.reduce(function(max, row) { return Math.max(max, row.monthlyCost); }, 0);
+      const total = rows.length || 1;
+      const body = rows.map(function(row, index) {
+        let band = 'good';
+        if (index >= Math.ceil(total * 2 / 3)) band = 'high';
+        else if (index >= Math.ceil(total / 3)) band = 'mid';
+        const width = maxMonthly > 0 ? Math.max(4, row.monthlyCost / maxMonthly * 100) : 0;
+        return '<tr>' +
+          '<td>' +
+            '<div class="model-cell"><span class="provider-dot" style="background:' + providerColors[row.provider] + '"></span><div><div><strong>' + escapeHtml(row.modelName) + '</strong></div><div class="muted">' + escapeHtml(row.mode) + ', ' + escapeHtml(row.tier) + ', ' + escapeHtml(row.category) + '</div></div></div>' +
+          '</td>' +
+          '<td class="mono cost-' + band + '">' + formatCurrency(row.dailyCost) + '</td>' +
+          '<td class="mono">' + formatCurrency(row.monthlyCost) + '<div class="cost-bar"><span class="bar-' + band + '" style="width:' + width.toFixed(2) + '%"></span></div></td>' +
+        '</tr>';
+      }).join('');
+      document.getElementById('costTableBody').innerHTML = body || '<tr><td colspan="3" class="recommendation-empty">No cost rows available for the current filters.</td></tr>';
+      document.getElementById('calculatorSummary').textContent = 'Sorted by ' + (sortState.costs.key === 'monthlyCost' ? 'monthly' : sortState.costs.key === 'model' ? 'model name' : 'lowest daily cost');
+    }
+
+    function flagshipFor(provider) {
+      const candidates = models.filter(function(model) {
+        return model.provider === provider && model.llmStatsSlug;
+      });
+      candidates.sort(function(a, b) {
+        const scoreA = (a.category === 'Powerful' ? 3 : a.category === 'Versatile' ? 2 : 1) + (a.tier === 'premium' ? 2 : 0) + (a.supportsReasoning ? 1 : 0);
+        const scoreB = (b.category === 'Powerful' ? 3 : b.category === 'Versatile' ? 2 : 1) + (b.tier === 'premium' ? 2 : 0) + (b.supportsReasoning ? 1 : 0);
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        return String(b.releaseDate).localeCompare(String(a.releaseDate));
+      });
+      return candidates[0] || null;
+    }
+
+    function visibleCompareModels() {
+      return getFilteredModels();
+    }
+
+    function renderCompareGrid() {
+      const visible = visibleCompareModels();
+      const html = visible.map(function(model) {
+        const selected = compareSelection.has(model.id);
+        return '<label class="compare-card' + (selected ? ' selected' : '') + '">' +
+          '<div class="compare-card-header">' +
+            '<div>' +
+              '<div class="model-cell" style="align-items:flex-start;"><span class="provider-dot" style="background:' + providerColors[model.provider] + ';margin-top:6px;"></span><div><p class="compare-card-title">' + escapeHtml(model.name) + '</p><div class="muted">' + escapeHtml(providerName(model.provider)) + '</div></div></div>' +
+            '</div>' +
+            '<input class="checkbox" type="checkbox" data-compare-id="' + escapeHtml(model.id) + '"' + (selected ? ' checked' : '') + '>' +
+          '</div>' +
+          '<div class="compare-meta">' + categoryPill(model.category) + tierPill(model.tier) + '</div>' +
+        '</label>';
+      }).join('');
+      document.getElementById('compareGrid').innerHTML = html || '<div class="card recommendation-empty">No models available for comparison with the current filters.</div>';
+      updateCompareButton();
+      refreshIcons();
+    }
+
+    function updateCompareButton() {
+      const validSelected = Array.from(compareSelection).filter(function(id) {
+        const model = models.find(function(item) { return item.id === id; });
+        return model && model.llmStatsSlug && matchesGlobalFilter(model);
+      });
+      const button = document.getElementById('openCompareButton');
+      button.disabled = validSelected.length < 2;
+      button.dataset.url = validSelected.length >= 2 ? llmCompareUrl(validSelected) : '';
+      document.getElementById('compareSelectionLabel').textContent = validSelected.length + ' selected';
+    }
+
+    function applyPreset(preset) {
+      const visible = visibleCompareModels();
+      let ids = [];
+      if (preset === 'powerful') ids = visible.filter(function(model) { return model.category === 'Powerful' && model.llmStatsSlug; }).map(function(model) { return model.id; });
+      if (preset === 'lightweight') ids = visible.filter(function(model) { return model.category === 'Lightweight' && model.llmStatsSlug; }).map(function(model) { return model.id; });
+      if (preset === 'standard') ids = visible.filter(function(model) { return model.tier === 'standard' && model.llmStatsSlug; }).map(function(model) { return model.id; });
+      if (preset === 'flagships') {
+        const anthropic = flagshipFor('anthropic');
+        const openai = flagshipFor('openai');
+        ids = [anthropic && anthropic.id, openai && openai.id].filter(Boolean).filter(function(id) {
+          const model = models.find(function(item) { return item.id === id; });
+          return model && matchesGlobalFilter(model);
+        });
+      }
+      compareSelection.clear();
+      ids.forEach(function(id) { compareSelection.add(id); });
+      renderCompareGrid();
+      const url = llmCompareUrl(Array.from(compareSelection));
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    function applyFilters() {
+      renderModelsTable();
+      renderPicker();
+      renderCostTable();
+      renderCompareGrid();
+    }
+
+    function cycleSort(target, key) {
+      const state = sortState[target];
+      if (state.key !== key) {
+        state.key = key;
+        state.dir = 'asc';
+      } else if (state.dir === 'asc') {
+        state.dir = 'desc';
+      } else if (state.dir === 'desc') {
+        state.key = null;
+        state.dir = null;
+      } else {
+        state.dir = 'asc';
+      }
+      applyFilters();
+    }
+
+    function setTab(tabName) {
+      document.querySelectorAll('.tab-button').forEach(function(button) {
+        button.classList.toggle('active', button.dataset.tab === tabName);
+      });
+      document.querySelectorAll('.tab-panel').forEach(function(panel) {
+        panel.classList.toggle('active', panel.id === 'tab-' + tabName);
+      });
+    }
+
+    function initTaskOptions() {
+      const select = document.getElementById('taskProfileSelect');
+      select.innerHTML = Object.keys(taskProfiles).map(function(key) {
+        const item = taskProfiles[key];
+        const label = item && item.label ? item.label : key;
+        return '<option value="' + escapeHtml(key) + '">' + escapeHtml(label) + '</option>';
+      }).join('');
+      select.value = wizardState.taskKey;
+    }
+
+    function renderRadioPills(containerId, current, options) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = options.map(function(option) {
+        return '<button class="radio-pill' + (option.value === current ? ' active' : '') + '" type="button" data-radio-group="' + containerId + '" data-value="' + option.value + '">' + escapeHtml(option.label) + '</button>';
+      }).join('');
+    }
+
+    function initWizardControls() {
+      renderRadioPills('budgetRadios', wizardState.budget, [
+        { value: 'any', label: 'Any' },
+        { value: 'standard', label: 'Standard tier only' },
+        { value: 'premium', label: 'Premium OK' }
+      ]);
+      renderRadioPills('picker1MRadios', wizardState.needs1M, [
+        { value: 'yes', label: 'Yes' },
+        { value: 'no', label: 'No' },
+        { value: 'any', label: 'Do not care' }
+      ]);
+    }
+
+    function resetFilters() {
+      filterState.providers = new Set(Object.keys(providers));
+      filterState.tier = 'all';
+      filterState.needs1M = null;
+      filterState.search = '';
+      document.querySelectorAll('.provider-toggle').forEach(function(button) {
+        button.classList.add('active');
+      });
+      document.querySelectorAll('#tierFilter button').forEach(function(button) {
+        button.classList.toggle('active', button.dataset.tier === 'all');
+      });
+      document.getElementById('needs1MGlobal').checked = false;
+      document.getElementById('searchInput').value = '';
+      applyFilters();
+    }
+
+    document.addEventListener('click', function(event) {
+      const tabButton = event.target.closest('.tab-button');
+      if (tabButton) {
+        setTab(tabButton.dataset.tab);
+        return;
+      }
+
+      const sortButton = event.target.closest('.sort-button');
+      if (sortButton) {
+        cycleSort(sortButton.dataset.sortTarget, sortButton.dataset.sortKey);
+        return;
+      }
+
+      const providerButton = event.target.closest('.provider-toggle');
+      if (providerButton) {
+        const provider = providerButton.dataset.provider;
+        if (filterState.providers.has(provider)) filterState.providers.delete(provider);
+        else filterState.providers.add(provider);
+        providerButton.classList.toggle('active', filterState.providers.has(provider));
+        applyFilters();
+        return;
+      }
+
+      const tierButton = event.target.closest('#tierFilter button');
+      if (tierButton) {
+        filterState.tier = tierButton.dataset.tier;
+        document.querySelectorAll('#tierFilter button').forEach(function(button) {
+          button.classList.toggle('active', button.dataset.tier === filterState.tier);
+        });
+        applyFilters();
+        return;
+      }
+
+      const radioPill = event.target.closest('.radio-pill');
+      if (radioPill) {
+        const group = radioPill.dataset.radioGroup;
+        const value = radioPill.dataset.value;
+        if (group === 'budgetRadios') wizardState.budget = value;
+        if (group === 'picker1MRadios') wizardState.needs1M = value;
+        initWizardControls();
+        renderPicker();
+        return;
+      }
+
+      const presetButton = event.target.closest('.preset-pill');
+      if (presetButton) {
+        applyPreset(presetButton.dataset.preset);
+        return;
+      }
+
+      const compareButton = event.target.closest('#openCompareButton');
+      if (compareButton && compareButton.dataset.url) {
+        window.open(compareButton.dataset.url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+
+      if (event.target.closest('#clearCompareButton')) {
+        compareSelection.clear();
+        renderCompareGrid();
+        return;
+      }
+
+      if (event.target.closest('#themeToggle')) {
+        const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+        setTheme(nextTheme);
+        return;
+      }
+
+      if (event.target.closest('#resetFilters')) {
+        resetFilters();
+      }
     });
 
-    for (const row of rows) tbody.appendChild(row);
-  });
-});
+    document.addEventListener('change', function(event) {
+      const target = event.target;
+      if (target.id === 'taskProfileSelect') {
+        wizardState.taskKey = target.value;
+        renderPicker();
+        return;
+      }
 
-function getCellSortVal(row, col) {
-  const cell = row.children[col];
-  if (!cell) return '';
+      if (target.id === 'needs1MGlobal') {
+        filterState.needs1M = target.checked ? true : null;
+        applyFilters();
+        return;
+      }
 
-  // Check for explicit sort value
-  if (cell.dataset.sortVal) return parseFloat(cell.dataset.sortVal);
+      if (target.id === 'showLongRows') {
+        calculatorState.showLongRows = target.checked;
+        renderCostTable();
+        return;
+      }
 
-  // Try to parse as number
-  const text = cell.textContent.trim().replace(/[%$,K]/g, '');
-  const num = parseFloat(text);
-  if (!isNaN(num)) return num;
-  return text.toLowerCase();
-}
-</script>
+      if (target.dataset.compareId) {
+        if (target.checked) compareSelection.add(target.dataset.compareId);
+        else compareSelection.delete(target.dataset.compareId);
+        updateCompareButton();
+        renderCompareGrid();
+      }
+    });
+
+    document.addEventListener('input', function(event) {
+      const target = event.target;
+      if (target.id === 'searchInput') {
+        filterState.search = target.value.trim();
+        applyFilters();
+        return;
+      }
+
+      if (target.id === 'inputTokensK') {
+        calculatorState.inputTokensK = Math.max(0, Number(target.value || 0));
+        renderCostTable();
+        return;
+      }
+
+      if (target.id === 'outputTokensK') {
+        calculatorState.outputTokensK = Math.max(0, Number(target.value || 0));
+        renderCostTable();
+        return;
+      }
+
+      if (target.id === 'workingDays') {
+        calculatorState.workingDays = Math.max(1, Number(target.value || 1));
+        document.getElementById('workingDaysValue').textContent = String(calculatorState.workingDays);
+        renderCostTable();
+      }
+    });
+
+    function init() {
+      initTheme();
+      initTaskOptions();
+      initWizardControls();
+      renderProviderSummary();
+      document.getElementById('workingDaysValue').textContent = String(calculatorState.workingDays);
+      applyFilters();
+      refreshIcons();
+    }
+
+    init();
+  </script>
 </body>
 </html>`;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SECTION GENERATORS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function generateQuickMatrix() {
-  // Helper: get a model's top benchmark with source link
-  function cite(modelId, benchName) {
-    const mb = getBenchmarks(modelId);
-    if (!mb) return '';
-    const entry = mb.benchmarks.find(b => b.benchmark === benchName);
-    if (!entry) return '';
-    return ` <a href="${entry.source}" target="_blank" rel="noopener" style="color:var(--accent-1);font-size:0.68rem" title="${entry.sourceLabel}">[${entry.score}%]</a>`;
-  }
-
-  const scenarios = [
-    { scenario:'Quick edit, 1 file, stay free', rec:'Claude Haiku 4.5', why:'Fastest standard model, 96 speed score', citeHtml:'' },
-    { scenario:'Multi-file refactor, budget OK', rec:'Claude Sonnet 5', why:'SWE-bench 85.2%, Terminal-Bench 80.4%', citeHtml: cite('claude-sonnet-5','SWE-bench Verified') },
-    { scenario:'PR review, need to find bugs', rec:'Claude Opus 4.8', why:'SWE-bench 88.6% (highest in pool)', citeHtml: cite('claude-opus-4.8','SWE-bench Verified') },
-    { scenario:'Whole-repo analysis', rec:'Gemini 3.1 Pro', why:'1M token context, GPQA Diamond 94.3%', citeHtml: cite('gemini-3.1-pro-preview','GPQA Diamond') },
-    { scenario:'Architecture design session', rec:'Claude Opus 4.7', why:'Reasoning 96, creative 93, deep extended thinking', citeHtml:'' },
-    { scenario:'Batch processing many files cheaply', rec:'Gemini 3.5 Flash', why:'1M context + standard tier, Terminal-Bench 76.2%', citeHtml: cite('gemini-3.5-flash','Terminal-Bench 2.1') },
-    { scenario:'Security audit with deep reasoning', rec:'GPT-5.6 Sol', why:'Terminal-Bench 91.9%, CTF Cyber 96.7%', citeHtml: cite('gpt-5.6-sol','Terminal-Bench 2.1') },
-    { scenario:'Write docs and READMEs', rec:'GPT-5.6 Luna', why:'Best creative writing in OpenAI (94 score)', citeHtml:'' },
-    { scenario:'Generate test suites fast', rec:'Claude Sonnet 5', why:'SWE-bench Pro 63.2%, instructions 94', citeHtml: cite('claude-sonnet-5','SWE-bench Pro') },
-    { scenario:'Debug a gnarly production issue', rec:'Claude Opus 4.8', why:'SWE-bench Pro 69.2%, highest reasoning', citeHtml: cite('claude-opus-4.8','SWE-bench Pro') },
-  ];
-
-  let rows = scenarios.map(s => `
-    <tr>
-      <td style="font-weight:500">${s.scenario}</td>
-      <td style="font-weight:700;background:var(--gradient-text);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text">${s.rec}</td>
-      <td style="font-size:0.75rem;color:var(--text-2)">${s.why}${s.citeHtml}</td>
-    </tr>`).join('');
-
-  return `<div class="heatmap-wrap"><table class="data-table" style="font-size:0.82rem">
-    <thead><tr><th style="min-width:250px">Scenario</th><th style="min-width:160px">Use This</th><th>Why</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>`;
-}
-
-function generateHeatmap() {
-  const sorted = [...MODEL_REGISTRY].sort((a,b) => avgScore(b) - avgScore(a));
-
-  let headerCells = '<th class="sortable-th" data-col="0">Model</th>' + DIMS.map((d,i) => `<th class="sortable-th" data-col="${i+1}">${DIM_LABELS[d]}</th>`).join('') + `<th class="sortable-th sort-desc" data-col="${DIMS.length+1}">Avg</th>`;
-  let rows = '';
-  for (const m of sorted) {
-    let cells = `<td><span style="color:${PROV_COLORS[m.provider]}">${m.name}</span></td>`;
-    for (const d of DIMS) {
-      const v = m.scores[d];
-      const hue = v >= 90 ? '142,70%,45%' : v >= 80 ? '200,80%,50%' : v >= 70 ? '45,90%,48%' : '0,75%,55%';
-      const bg = `hsla(${hue},${v >= 80 ? 0.18 : 0.12})`;
-      const color = `hsl(${hue})`;
-      cells += `<td><div class="heat-cell" style="background:${bg};color:${color}">${v}</div></td>`;
-    }
-    const avg = avgScore(m);
-    cells += `<td style="font-weight:700">${avg}</td>`;
-    rows += `<tr data-provider="${m.provider}" data-tier="${m.tier}" data-model="${m.name.toLowerCase()}" data-avg="${avg}" data-ctx="${m.supports1MContext ? '1m' : 'default'}">${cells}</tr>`;
-  }
-
-  return `<div class="table-search-wrap"><input type="text" class="table-search" placeholder="Filter models..." oninput="filterTable(this)"><span class="table-match-count"></span></div>
-  <div class="heatmap-wrap"><table class="heatmap sortable-table"><thead><tr>${headerCells}</tr></thead><tbody>${rows}</tbody></table></div>`;
-}
-
-function generateParallelCoords() {
-  const w = 1100, h = 420;
-  const padL = 20, padR = 20, padT = 40, padB = 60;
-  const plotW = w - padL - padR;
-  const plotH = h - padT - padB;
-  const axisGap = plotW / (DIMS.length - 1);
-
-  // Axes
-  let axes = '';
-  for (let i = 0; i < DIMS.length; i++) {
-    const x = padL + i * axisGap;
-    axes += `<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT + plotH}" stroke="var(--border)" stroke-width="1"/>`;
-    axes += `<text x="${x}" y="${h - 15}" text-anchor="middle" style="font-size:9px;fill:var(--text-3);font-family:var(--font)">${DIM_LABELS[DIMS[i]]}</text>`;
-    // Tick labels
-    for (let t = 0; t <= 100; t += 25) {
-      const y = padT + plotH - (t / 100) * plotH;
-      if (i === 0) axes += `<text x="${padL - 5}" y="${y + 3}" text-anchor="end" style="font-size:7px;fill:var(--text-3);font-family:var(--mono)">${t}</text>`;
-    }
-  }
-
-  // Lines for each model
-  let lines = '';
-  let legendItems = [];
-  const topModels = [...MODEL_REGISTRY].sort((a,b) => avgScore(b) - avgScore(a)).slice(0, 10);
-
-  for (let mi = 0; mi < topModels.length; mi++) {
-    const m = topModels[mi];
-    const color = PROV_COLORS[m.provider];
-    const opacity = mi < 5 ? 0.8 : 0.4;
-    let points = '';
-    for (let i = 0; i < DIMS.length; i++) {
-      const x = padL + i * axisGap;
-      const y = padT + plotH - (m.scores[DIMS[i]] / 100) * plotH;
-      points += `${x},${y} `;
-    }
-    lines += `<polyline data-model-provider="${m.provider}" data-model-tier="${m.tier}" data-model-name="${m.name}" data-model-avg="${avgScore(m)}" data-model-ctx="${m.supports1MContext ? '1m' : 'default'}" points="${points}" fill="none" stroke="${color}" stroke-width="${mi < 3 ? 2.5 : 1.5}" stroke-opacity="${opacity}" stroke-linecap="round" stroke-linejoin="round"/>`;
-    legendItems.push(`<div class="parallel-legend-item" data-model-provider="${m.provider}" data-model-tier="${m.tier}" data-model-name="${m.name}" data-model-avg="${avgScore(m)}" data-model-ctx="${m.supports1MContext ? '1m' : 'default'}"><div style="width:12px;height:3px;background:${color};border-radius:2px;opacity:${opacity}"></div>${m.name}</div>`);
-  }
-
-  return `<div class="parallel-wrap">
-    <svg viewBox="0 0 ${w} ${h}">${axes}${lines}</svg>
-    <div class="parallel-legend">${legendItems.join('')}</div>
-  </div>`;
-}
-
-function generateGapAnalysis() {
-  const best = MODEL_REGISTRY.reduce((a,b) => avgScore(a) > avgScore(b) ? a : b);
-  const budgetModels = MODEL_REGISTRY.filter(m => m.tier === 'standard').sort((a,b) => avgScore(b) - avgScore(a));
-
-  let html = '';
-  for (const m of budgetModels.slice(0, 4)) {
-    const gaps = DIMS.map(d => ({
-      dim: DIM_LABELS[d],
-      modelVal: m.scores[d],
-      bestVal: best.scores[d],
-      gap: best.scores[d] - m.scores[d]
-    })).sort((a,b) => b.gap - a.gap);
-
-    const totalGap = gaps.reduce((s,g) => s + g.gap, 0);
-    const avgGap = Math.round(totalGap / gaps.length);
-
-    let bars = gaps.map(g => `
-      <div class="gap-bar-row">
-        <span class="gap-bar-label">${g.dim}</span>
-        <div class="gap-bar-track">
-          <div class="gap-bar-base" style="width:${g.bestVal}%;background:${PROV_COLORS[best.provider]}"></div>
-          <div class="gap-bar-model" style="width:${g.modelVal}%;background:${PROV_COLORS[m.provider]}"></div>
-        </div>
-        <span class="gap-bar-val" style="color:${g.gap > 15 ? '#ef4444' : g.gap > 8 ? '#f59e0b' : '#34d399'}">${g.gap > 0 ? '-' + g.gap : '='}</span>
-      </div>
-    `).join('');
-
-    html += `<div class="gap-card" data-provider="${m.provider}" data-tier="${m.tier}" data-model="${m.name.toLowerCase()}" data-avg="${avgScore(m)}" data-ctx="${m.supports1MContext ? '1m' : 'default'}">
-      <div class="gap-header">
-        <div>
-          <div class="gap-title" style="color:${PROV_COLORS[m.provider]}">${m.name} <span style="font-weight:400;font-size:0.75rem;color:var(--text-3)">vs ${best.name}</span></div>
-        </div>
-        <div class="gap-score" style="color:${avgGap > 15 ? '#ef4444' : avgGap > 8 ? '#f59e0b' : '#34d399'}">-${avgGap} avg gap</div>
-      </div>
-      <div class="gap-bars">${bars}</div>
-    </div>`;
-  }
-  return html;
-}
-
-function generateFrontierChart() {
-  const w = 900, h = 500;
-  const pad = { t:40, r:30, b:60, l:60 };
-  const plotW = w - pad.l - pad.r;
-  const plotH = h - pad.t - pad.b;
-
-  const data = MODEL_REGISTRY.map(m => ({ name:m.name, provider:m.provider, tier:m.tier, x:m.scores.costEfficiency, y:avgScore(m), ctx:m.supports1MContext ? '1m' : 'default' }));
-  const xMin = 30, xMax = 100, yMin = 60, yMax = 95;
-
-  // Grid
-  let grid = '';
-  for (let v = 40; v <= 100; v += 10) {
-    const x = pad.l + ((v - xMin) / (xMax - xMin)) * plotW;
-    grid += `<line x1="${x}" y1="${pad.t}" x2="${x}" y2="${pad.t + plotH}" stroke="var(--border-subtle)" stroke-width="0.5"/>`;
-    grid += `<text x="${x}" y="${h - 20}" text-anchor="middle" style="font-size:10px;fill:var(--text-3);font-family:var(--mono)">${v}</text>`;
-  }
-  for (let v = 60; v <= 95; v += 5) {
-    const y = pad.t + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
-    grid += `<line x1="${pad.l}" y1="${y}" x2="${w - pad.r}" y2="${y}" stroke="var(--border-subtle)" stroke-width="0.5"/>`;
-    grid += `<text x="${pad.l - 8}" y="${y + 3}" text-anchor="end" style="font-size:10px;fill:var(--text-3);font-family:var(--mono)">${v}</text>`;
-  }
-
-  // Compute Pareto frontier
-  const sorted = [...data].sort((a,b) => a.x - b.x);
-  let frontier = [];
-  let maxY = -1;
-  for (const d of sorted.sort((a,b) => b.x - a.x)) {
-    if (d.y > maxY) { frontier.push(d); maxY = d.y; }
-  }
-  frontier.sort((a,b) => a.x - b.x);
-
-  // Frontier curve
-  let frontierPath = '';
-  if (frontier.length > 1) {
-    const pts = frontier.map(d => {
-      const x = pad.l + ((d.x - xMin) / (xMax - xMin)) * plotW;
-      const y = pad.t + plotH - ((d.y - yMin) / (yMax - yMin)) * plotH;
-      return `${x},${y}`;
-    });
-    frontierPath = `<polyline points="${pts.join(' ')}" fill="none" stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6 3"/>`;
-    // Shaded area above frontier
-    const areaPath = `M ${pts[0]} ${pts.join(' L ')} L ${pad.l + ((frontier[frontier.length-1].x - xMin)/(xMax-xMin))*plotW},${pad.t} L ${pad.l + ((frontier[0].x - xMin)/(xMax-xMin))*plotW},${pad.t} Z`;
-    frontierPath += `<path d="${areaPath}" fill="url(#grad)" fill-opacity="0.04"/>`;
-  }
-
-  // Dots
-  let dots = '';
-  for (const d of data) {
-    const x = pad.l + ((d.x - xMin) / (xMax - xMin)) * plotW;
-    const y = pad.t + plotH - ((d.y - yMin) / (yMax - yMin)) * plotH;
-    const col = PROV_COLORS[d.provider];
-    const isFrontier = frontier.some(f => f.name === d.name);
-    const r = isFrontier ? 7 : 5;
-    const stroke = isFrontier ? `stroke="${col}" stroke-width="2"` : '';
-    const gAttrs = `data-model-provider="${d.provider}" data-model-tier="${d.tier}" data-model-name="${d.name.toLowerCase()}" data-model-avg="${d.y.toFixed(0)}" data-model-ctx="${d.ctx}"`;
-    dots += `<g ${gAttrs}>`;
-    dots += `<circle cx="${x}" cy="${y}" r="${r}" fill="${col}" fill-opacity="${isFrontier ? 0.9 : 0.5}" ${stroke}/>`;
-    if (isFrontier || d.y >= 85 || d.x >= 88) {
-      dots += `<text x="${x}" y="${y - 10}" text-anchor="middle" style="font-size:9px;fill:var(--text-2);font-family:var(--font)">${d.name.replace('Claude ','').replace('GPT-','G').replace('Gemini ','Gem ')}</text>`;
-    }
-    dots += '</g>';
-  }
-
-  return `<div class="parallel-wrap">
-    <svg viewBox="0 0 ${w} ${h}">
-      <defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#8b5cf6"/></linearGradient></defs>
-      ${grid}${frontierPath}${dots}
-      <text x="${w/2}" y="${h - 3}" text-anchor="middle" style="font-size:11px;fill:var(--text-3);font-family:var(--font)">Cost Efficiency →</text>
-      <text x="13" y="${h/2}" text-anchor="middle" transform="rotate(-90,13,${h/2})" style="font-size:11px;fill:var(--text-3);font-family:var(--font)">↑ Average Quality</text>
-      <text x="${w - pad.r - 5}" y="${pad.t + 15}" text-anchor="end" style="font-size:9px;fill:var(--text-3);font-style:italic">Pareto frontier (dashed)</text>
-    </svg>
-    <div style="display:flex;gap:1.5rem;justify-content:center;margin-top:1rem;font-size:0.75rem;color:var(--text-2)">
-      <span><span style="color:#a78bfa">●</span> Anthropic</span>
-      <span><span style="color:#34d399">●</span> OpenAI</span>
-      <span><span style="color:#60a5fa">●</span> Google</span>
-      <span><span style="color:#fb923c">●</span> Microsoft</span>
-      <span style="color:var(--text-3)">| ◯ = on Pareto frontier</span>
-    </div>
-  </div>`;
-}
-
-function generateSimulator() {
-  return `<div class="sim-section">
-    <p style="color:var(--text-2);font-size:0.85rem;margin-bottom:1.5rem">Estimate how many premium requests your typical workday would consume with different model strategies.</p>
-    <div class="sim-controls">
-      <div class="sim-control">
-        <label>Code edits per day</label>
-        <input type="range" id="sim-edits" min="5" max="80" value="25" step="5">
-        <span class="val" id="sim-edits-val">25</span>
-      </div>
-      <div class="sim-control">
-        <label>Reviews / debug sessions</label>
-        <input type="range" id="sim-reviews" min="1" max="20" value="5" step="1">
-        <span class="val" id="sim-reviews-val">5</span>
-      </div>
-      <div class="sim-control">
-        <label>Avg complexity</label>
-        <input type="range" id="sim-complexity" min="1" max="3" value="2" step="1">
-        <span class="val" id="sim-complexity-val">Medium</span>
-      </div>
-    </div>
-    <div class="sim-results" id="sim-results"></div>
-  </div>`;
-}
-
-function generateUpgradePath() {
-  const steps = [
-    { trigger:'Starting out / simple tasks', model:'Claude Haiku 4.5 or GPT-5.4 mini', why:'Free (standard tier), fast, good enough for 1-2 file edits and completions. Start here.' },
-    { trigger:'Multi-file edits feel incomplete or buggy', model:'Claude Sonnet 4.6', why:'Still standard tier. Much better multi-file understanding (82) and tool use (90). Zero premium cost increase.' },
-    { trigger:'Complex refactors need more intelligence', model:'Claude Sonnet 5', why:'First premium step. Code gen 93, tool use 94. Worth it when Sonnet 4.6 misses relationships between files.' },
-    { trigger:'Code review misses subtle bugs', model:'Claude Opus 4.7 or 4.8', why:'Code review 94-95, reasoning 96-97. Use when correctness matters more than speed (security, financial, auth code).' },
-    { trigger:'Need to analyze a massive codebase at once', model:'Gemini 3.1 Pro', why:'1M token context. Use when the problem requires seeing 50+ files simultaneously. Nothing else comes close on context.' },
-    { trigger:'Need frontier reasoning for architecture', model:'GPT-5.6 Sol or Opus 4.8 (max effort)', why:'Max reasoning ceiling. Use for system design, complex debugging where you need the model to think deeper than you can.' },
-  ];
-
-  let html = '<div class="upgrade-track">';
-  for (const s of steps) {
-    html += `<div class="upgrade-step">
-      <div class="upgrade-line"></div>
-      <div class="upgrade-content">
-        <div class="upgrade-trigger">${s.trigger}</div>
-        <div class="upgrade-model">${s.model}</div>
-        <div class="upgrade-why">${s.why}</div>
-      </div>
-    </div>`;
-  }
-  html += '</div>';
-  return html;
-}
-
-function generateDNA() {
-  let html = '<div class="dna-grid">';
-  const sorted = [...MODEL_REGISTRY].sort((a,b) => avgScore(b) - avgScore(a));
-
-  for (const m of sorted) {
-    // Generate a unique SVG "fingerprint" based on scores
-    const size = 80;
-    const cx = size/2, cy = size/2, r = 30;
-    const n = DIMS.length;
-    const angleStep = (2 * Math.PI) / n;
-    const color = PROV_COLORS[m.provider];
-
-    let points = '';
-    for (let i = 0; i < n; i++) {
-      const val = m.scores[DIMS[i]] / 100;
-      const angle = i * angleStep - Math.PI / 2;
-      const x = cx + r * val * Math.cos(angle);
-      const y = cy + r * val * Math.sin(angle);
-      points += `${x},${y} `;
-    }
-
-    // Ring
-    let ring = '';
-    for (let i = 0; i < n; i++) {
-      const angle = i * angleStep - Math.PI / 2;
-      const x1 = cx + (r * 0.3) * Math.cos(angle);
-      const y1 = cy + (r * 0.3) * Math.sin(angle);
-      const x2 = cx + r * Math.cos(angle);
-      const y2 = cy + r * Math.sin(angle);
-      ring += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${color}" stroke-opacity="0.15" stroke-width="0.5"/>`;
-    }
-
-    const svg = `<svg viewBox="0 0 ${size} ${size}" width="70" height="70">
-      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-opacity="0.1" stroke-width="0.5"/>
-      <circle cx="${cx}" cy="${cy}" r="${r*0.6}" fill="none" stroke="${color}" stroke-opacity="0.07" stroke-width="0.5"/>
-      ${ring}
-      <polygon points="${points}" fill="${color}" fill-opacity="0.2" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
-    </svg>`;
-
-    html += `<div class="dna-card" data-provider="${m.provider}" data-tier="${m.tier}" data-model="${m.name.toLowerCase()}" data-avg="${avgScore(m)}" data-ctx="${m.supports1MContext ? '1m' : 'default'}">
-      ${svg}
-      <div class="dna-name" style="color:${color}">${m.name.replace('Claude ','').replace('GPT-','').replace('Gemini ','')}</div>
-      <div class="dna-score">avg ${avgScore(m)}</div>
-    </div>`;
-  }
-  html += '</div>';
-  return html;
-}
-
-function generateInlineBenchmarks() {
-  // Compact cross-model benchmark comparison with source links
-  const benchmarkNames = ['SWE-bench Verified', 'Terminal-Bench 2.1', 'SWE-bench Pro', 'OSWorld-Verified', 'BrowseComp'];
-  let header = '<th>Model</th>' + benchmarkNames.map(b => `<th style="font-size:0.68rem">${b}</th>`).join('');
-  let rows = '';
-
-  for (const mb of VERIFIED_BENCHMARKS) {
-    const model = MODEL_REGISTRY.find(m => m.id === mb.modelId);
-    if (!model) continue;
-    const color = PROV_COLORS[model.provider];
-    let cells = `<td style="font-weight:600;color:${color};white-space:nowrap">${model.name}</td>`;
-    for (const bName of benchmarkNames) {
-      const entry = mb.benchmarks.find(b => b.benchmark === bName);
-      if (entry) {
-        cells += `<td><a href="${entry.source}" target="_blank" rel="noopener" style="color:var(--text-1);text-decoration:none;border-bottom:1px dotted var(--accent-1)" title="${entry.sourceLabel}">${entry.score}%</a></td>`;
-      } else {
-        cells += '<td style="color:var(--text-3)">--</td>';
-      }
-    }
-    rows += `<tr data-provider="${model.provider}" data-tier="${model.tier}" data-model="${model.name.toLowerCase()}">${cells}</tr>`;
-  }
-
-  return `<div class="heatmap-wrap"><table class="data-table" style="font-size:0.76rem">
-    <thead><tr>${header}</tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>
-  <p style="font-size:0.68rem;color:var(--text-3);margin-top:0.5rem">Click any score to open source. Hover for citation. See the <strong>Sources</strong> tab for the full dataset.</p>`;
-}
-
-function generateSourcesPanel() {
-  // Verified benchmarks table (grouped by model)
-  let benchRows = '';
-  for (const mb of VERIFIED_BENCHMARKS) {
-    const model = MODEL_REGISTRY.find(m => m.id === mb.modelId);
-    const modelName = model ? model.name : mb.modelId;
-    for (const b of mb.benchmarks) {
-      benchRows += `<tr data-provider="${model ? model.provider : ''}" data-tier="${model ? model.tier : ''}" data-model="${modelName.toLowerCase()}">
-        <td style="font-weight:600">${modelName}</td>
-        <td>${b.benchmark}</td>
-        <td style="font-family:var(--mono);font-weight:700">${b.score}${typeof b.score === 'number' ? '%' : ''}</td>
-        <td><a href="${b.source}" target="_blank" rel="noopener" class="source-link">${b.sourceLabel} <i data-lucide="external-link" style="width:10px;height:10px;vertical-align:middle"></i></a></td>
-      </tr>`;
-    }
-  }
-
-  // Independent leaderboards
-  let leaderboardCards = INDEPENDENT_SOURCES.map(src => `
-    <div class="source-card">
-      <div class="source-card-title"><a href="${src.url}" target="_blank" rel="noopener">${src.name} <i data-lucide="external-link" style="width:11px;height:11px"></i></a></div>
-      <div class="source-card-desc">${src.description}</div>
-      <div class="source-card-meta">Updated: ${src.lastUpdated}</div>
-    </div>
-  `).join('');
-
-  // Provider docs
-  let providerLinks = Object.entries(PROVIDER_DOCS).map(([key, docs]) => {
-    const links = Object.entries(docs).map(([type, url]) =>
-      `<a href="${url}" target="_blank" rel="noopener" class="prov-doc-link">${type} <i data-lucide="external-link" style="width:9px;height:9px"></i></a>`
-    ).join(' ');
-    return `<div class="prov-doc-row"><span class="prov-doc-name" style="color:${PROV_COLORS[key] || 'var(--text-1)'}">${key.charAt(0).toUpperCase() + key.slice(1)}</span>${links}</div>`;
-  }).join('');
-
-  // Methodology note
-  const methodology = `
-    <div class="methodology-box">
-      <h3><i data-lucide="flask-conical" style="width:16px;height:16px;vertical-align:middle"></i> Methodology</h3>
-      <ul>
-        <li><strong>Normalized Scores (0-100)</strong>: Composite ratings derived from multiple benchmarks, weighted by relevance to each dimension. They are NOT raw benchmark percentages; they represent relative capability within the Copilot model pool.</li>
-        <li><strong>Sources</strong>: Official provider announcements, system cards, and independent third-party benchmarks. Each raw number links to its origin.</li>
-        <li><strong>Recommendation Engine</strong>: Uses weighted dimension profiles matched to your stated task + complexity + budget constraints. Weights come from empirical testing across development workflows.</li>
-        <li><strong>Freshness</strong>: Data as of July 2026. Models and benchmarks evolve rapidly; re-run this report periodically for current data.</li>
-      </ul>
-    </div>`;
-
-  return `
-    ${methodology}
-    <h3 class="sources-section-title"><i data-lucide="beaker" style="width:16px;height:16px;vertical-align:middle"></i> Verified Benchmarks</h3>
-    <p style="font-size:0.78rem;color:var(--text-2);margin-bottom:1rem">Raw benchmark scores from official announcements and independent evaluation. Each entry links to its source.</p>
-    <div class="heatmap-wrap"><table class="data-table" style="font-size:0.78rem">
-      <thead><tr><th>Model</th><th>Benchmark</th><th>Score</th><th>Source</th></tr></thead>
-      <tbody>${benchRows}</tbody>
-    </table></div>
-
-    <h3 class="sources-section-title" style="margin-top:2rem"><i data-lucide="trophy" style="width:16px;height:16px;vertical-align:middle"></i> Independent Leaderboards</h3>
-    <p style="font-size:0.78rem;color:var(--text-2);margin-bottom:1rem">Third-party evaluation platforms (not controlled by any provider).</p>
-    <div class="source-cards-grid">${leaderboardCards}</div>
-
-    <h3 class="sources-section-title" style="margin-top:2rem"><i data-lucide="building-2" style="width:16px;height:16px;vertical-align:middle"></i> Provider Documentation</h3>
-    <div class="prov-docs-wrap">${providerLinks}</div>
-  `;
-}
-
-function generateCensus(groups) {
-  let rows = '';
-  for (const [provKey, models] of groups) {
-    for (const m of models) {
-      const ctx1M = m.supports1MContext ? '<span style="color:#34d399" title="Supports 1M token context">1M</span>' : `${m.contextWindow}K`;
-      const reasoning = m.supportsReasoning ? '<span style="color:#34d399">Yes</span>' : '<span style="color:var(--text-3)">No</span>';
-      const priceIn = m.pricing ? `$${m.pricing.input}` : '?';
-      const priceOut = m.pricing ? `$${m.pricing.output}` : '?';
-      rows += `<tr data-provider="${provKey}" data-tier="${m.tier}" data-model="${m.name.toLowerCase()}" data-avg="${avgScore(m)}" data-ctx="${m.supports1MContext ? '1m' : 'default'}">
-        <td><span style="color:${PROV_COLORS[provKey]};font-weight:600">${PROVIDERS[provKey].name}</span></td>
-        <td><strong>${m.name}</strong></td>
-        <td style="font-family:var(--mono);font-size:0.68rem">${ctx1M}</td>
-        <td>${reasoning}</td>
-        <td><span class="badge badge-${m.tier === 'standard' ? 's' : 'p'}">${m.tier}</span></td>
-        <td style="font-size:0.72rem;color:var(--text-2)">${m.category || ''}</td>
-        <td style="font-family:var(--mono);font-size:0.72rem" data-sort-val="${m.pricing ? m.pricing.input : 999}">${priceIn} / ${priceOut}</td>
-        <td style="font-size:0.72rem">${m.effortLevels.length ? m.effortLevels.join(', ') : 'N/A'}</td>
-        <td style="font-family:var(--mono);font-weight:600">${avgScore(m)}</td>
-      </tr>`;
-    }
-  }
-  return `<div class="table-search-wrap"><input type="text" class="table-search" placeholder="Filter models..." oninput="filterTable(this)"><span class="table-match-count"></span></div>
-  <div class="heatmap-wrap"><table class="data-table sortable-table" style="font-size:0.78rem">
-    <thead><tr><th class="sortable-th" data-col="0">Provider</th><th class="sortable-th" data-col="1">Model</th><th class="sortable-th" data-col="2">Max Ctx</th><th class="sortable-th" data-col="3">Reasoning</th><th class="sortable-th" data-col="4">Tier</th><th class="sortable-th" data-col="5">Category</th><th class="sortable-th" data-col="6">Price (in/out per 1M)</th><th class="sortable-th" data-col="7">Effort Levels</th><th class="sortable-th sort-desc" data-col="8">Avg</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>
-  <p style="font-size:0.68rem;color:var(--text-3);margin-top:0.5rem">Context: models marked "1M" support extended 1M token context window via long_context tier. Pricing from <a href="https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing" target="_blank" rel="noopener" style="color:var(--accent-1)">GitHub Copilot pricing docs</a>.</p>`;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MAIN
-// ═══════════════════════════════════════════════════════════════════════════════
-
 const html = generateHTML();
-writeFileSync(outputPath, html, 'utf8');
-console.log(`Report: ${outputPath}`);
+writeFileSync(outputPath, html, 'utf-8');
+console.log(`Report written to ${outputPath}`);
 if (openBrowser) {
-  try { if (process.platform === 'win32') execSync(`start "" "${outputPath}"`, {stdio:'ignore'}); } catch {}
+  try {
+    if (process.platform === 'win32') execSync(`start "" "${outputPath}"`, { stdio: 'ignore' });
+    else if (process.platform === 'darwin') execSync(`open "${outputPath}"`, { stdio: 'ignore' });
+    else execSync(`xdg-open "${outputPath}"`, { stdio: 'ignore' });
+  } catch { /* browser open is best-effort */ }
 }

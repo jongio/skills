@@ -11,11 +11,19 @@ test('MODEL_REGISTRY is a non-empty array', () => {
 });
 
 test('every model has required fields', () => {
-  const requiredFields = ['id', 'name', 'provider', 'family', 'contextTiers', 'effortLevels', 'releaseDate', 'contextWindow', 'architecture', 'tier', 'scores'];
+  const requiredFields = ['id', 'name', 'llmStatsSlug', 'provider', 'family', 'contextTiers', 'effortLevels', 'releaseDate', 'contextWindow', 'architecture', 'tier'];
   for (const model of MODEL_REGISTRY) {
     for (const field of requiredFields) {
       assert.ok(field in model, `Model ${model.id || 'unknown'} missing field: ${field}`);
     }
+    assert.ok(!('scores' in model), `Model ${model.id} should not include scores`);
+  }
+});
+
+test('llmStatsSlug is derived from the model name', () => {
+  for (const model of MODEL_REGISTRY) {
+    const expected = model.name.toLowerCase().replaceAll(' ', '-').replaceAll('.', '-');
+    assert.equal(model.llmStatsSlug, expected, `Unexpected llmStatsSlug for ${model.id}`);
   }
 });
 
@@ -28,17 +36,6 @@ test('model IDs are unique', () => {
 test('every model provider exists in PROVIDERS', () => {
   for (const model of MODEL_REGISTRY) {
     assert.ok(model.provider in PROVIDERS, `Model ${model.id} has unknown provider: ${model.provider}`);
-  }
-});
-
-test('scores are numbers between 0 and 100', () => {
-  const DIMS = ['codeGeneration', 'codeReview', 'reasoning', 'contextLength', 'instructionFollowing', 'speed', 'costEfficiency', 'multiFile', 'creativeWriting', 'toolUse'];
-  for (const model of MODEL_REGISTRY) {
-    for (const dim of DIMS) {
-      const val = model.scores[dim];
-      assert.ok(typeof val === 'number', `${model.id}.scores.${dim} is not a number`);
-      assert.ok(val >= 0 && val <= 100, `${model.id}.scores.${dim} = ${val} is out of range [0,100]`);
-    }
   }
 });
 
@@ -67,27 +64,42 @@ test('groupByProvider returns all providers', () => {
   assert.equal(total, MODEL_REGISTRY.length);
 });
 
-test('rankBy returns models sorted descending', () => {
-  const ranked = rankBy('codeGeneration');
+test('rankBy pricing sorts cheapest models first', () => {
+  const ranked = rankBy('pricing');
   assert.ok(ranked.length > 0);
   for (let i = 1; i < ranked.length; i++) {
-    assert.ok(ranked[i - 1].scores.codeGeneration >= ranked[i].scores.codeGeneration,
-      `Not sorted: ${ranked[i - 1].name}(${ranked[i - 1].scores.codeGeneration}) < ${ranked[i].name}(${ranked[i].scores.codeGeneration})`);
+    const prevCost = ranked[i - 1].pricing.input + ranked[i - 1].pricing.output;
+    const nextCost = ranked[i].pricing.input + ranked[i].pricing.output;
+    assert.ok(prevCost <= nextCost, `Not sorted by pricing: ${ranked[i - 1].name} > ${ranked[i].name}`);
   }
 });
 
-test('recommendFor returns models sorted by weighted score', () => {
+test('rankBy contextWindow sorts largest context first', () => {
+  const ranked = rankBy('contextWindow');
+  assert.ok(ranked.length > 0);
+  for (let i = 1; i < ranked.length; i++) {
+    assert.ok(ranked[i - 1].maxContextWindow >= ranked[i].maxContextWindow,
+      `Not sorted by context window: ${ranked[i - 1].name} < ${ranked[i].name}`);
+  }
+});
+
+test('recommendFor quickEdit prioritizes standard lightweight models', () => {
   const profile = TASK_PROFILES.quickEdit;
   const result = recommendFor(profile.weights);
-  assert.ok(result.length === MODEL_REGISTRY.length);
-  // Top result should have high speed + cost efficiency + code gen
+  assert.equal(result.length, MODEL_REGISTRY.length);
   const top = result[0];
-  assert.ok(top.scores.speed >= 80 || top.scores.costEfficiency >= 80,
-    `Top pick ${top.name} for quickEdit should be fast/cheap`);
+  assert.equal(top.tier, 'standard');
+  assert.equal(top.category, 'Lightweight');
+});
+
+test('recommendFor testGeneration prioritizes code-specialized models', () => {
+  const result = recommendFor('testGeneration');
+  const top = result[0];
+  assert.ok(top.id === 'mai-code-1-flash-picker' || top.id === 'gpt-5.3-codex', `Unexpected testGeneration top pick: ${top.id}`);
 });
 
 test('TASK_PROFILES covers expected tasks', () => {
-  const expected = ['quickEdit', 'complexRefactor', 'debugging', 'architectureReview', 'codeReview', 'documentation', 'testGeneration', 'securityAudit'];
+  const expected = ['quickEdit', 'complexRefactor', 'debugging', 'architectureReview', 'codeReview', 'documentation', 'testGeneration', 'securityAudit', 'longContext', 'bulkProcessing'];
   for (const task of expected) {
     assert.ok(task in TASK_PROFILES, `Missing task profile: ${task}`);
     assert.ok(TASK_PROFILES[task].label, `${task} missing label`);
@@ -99,7 +111,7 @@ test('releaseDate follows YYYY-MM format', () => {
   const datePattern = /^\d{4}-\d{2}$/;
   for (const model of MODEL_REGISTRY) {
     assert.ok(datePattern.test(model.releaseDate),
-      `${model.id} releaseDate "${model.releaseDate}" doesn't match YYYY-MM`);
+      `${model.id} releaseDate "${model.releaseDate}" does not match YYYY-MM`);
   }
 });
 
