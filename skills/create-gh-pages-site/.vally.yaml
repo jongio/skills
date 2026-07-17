@@ -1,0 +1,15 @@
+# .vally.yaml — Vally project config for the create-gh-pages-site skill eval.
+#
+# Wires the skill into the built-in copilot-sdk executor: `vally eval --skill-dir .`
+# reads paths.skills below to discover this skill (node_modules is ignored) and
+# loads it into the agent session. Stimuli omit `environment.skills` on purpose so
+# file graders only see what the agent produced.
+#
+# Run from this folder (skills/create-gh-pages-site), after `npm install`:
+#   npx vally lint --eval-spec evals/create-gh-pages-site/eval.yaml
+#   npx vally eval --eval-spec evals/create-gh-pages-site/eval.yaml --skill-dir .
+
+paths:
+  skills: "."
+  evals: "evals"
+  results: "vally-results"

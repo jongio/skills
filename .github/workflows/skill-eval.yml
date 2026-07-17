@@ -1,0 +1,53 @@
+name: Skill Eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      skill:
+        description: "Skill directory to evaluate (e.g. skills/create-gh-pages-site)"
+        required: false
+        type: string
+  schedule:
+    # Nightly at 03:00 UTC
+    - cron: "0 3 * * *"
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - skill: skills/create-gh-pages-site
+            eval_spec: evals/create-gh-pages-site/eval.yaml
+          - skill: skills/create-canvas-app
+            eval_spec: evals/create-canvas-app/eval.yaml
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.skill }}
+        run: npm install
+
+      - name: Install Vally CLI
+        run: npm install -g @microsoft/vally-cli
+
+      - name: Run eval
+        working-directory: ${{ matrix.skill }}
+        run: |
+          vally eval \
+            --eval-spec ${{ matrix.eval_spec }} \
+            --skill-dir . \
+            --output-dir ./vally-results
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_CLI_TOKEN }}
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ matrix.skill }}
+          path: ${{ matrix.skill }}/vally-results/

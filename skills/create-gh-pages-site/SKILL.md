@@ -3,18 +3,16 @@ name: create-gh-pages-site
 description: >-
   Scaffold a working GitHub Pages website from a vetted template and wire it to
   deploy automatically. Use when the user wants to create, scaffold, or publish a
-  site on GitHub Pages — a static page, an Astro or Eleventy site, a React (Vite)
-  SPA, or a Jekyll site. Picks the right template for the use case, injects the
-  correct base path for the target repo (the #1 thing people get wrong), adds the
-  current official GitHub Actions Pages deploy workflow, and sets it up in the
-  user's current repo by default (the repo in context) — or a new one if asked —
-  and explains how to turn Pages on. Crucially, it does not stop at the template's
-  demo content: it digests the target repo (README, manifests, entry points, docs)
-  and authors a site that is actually about that repo — a CLI reference, an
-  API/usage page, a feature tour, or a catalog of parts as appropriate — with
-  labeled image placeholders the user swaps in. Do NOT use for
-  non-Pages hosting (Vercel/Netlify/Azure), for deploying an existing app without
-  a Pages target, or for plain web pages unrelated to GitHub Pages.
+  site on GitHub Pages: a static page, an Astro or Eleventy site, a React (Vite)
+  SPA, or a Jekyll site. Picks the right template, injects the correct base path
+  for the target repo (the #1 thing people get wrong), adds the official GitHub
+  Actions Pages deploy workflow, and sets it up in the user's current repo by
+  default or a new one if asked. Does not stop at demo content: it digests the
+  target repo (README, manifests, entry points, docs) and authors a site about
+  that repo (CLI reference, API/usage page, feature tour, or catalog) with labeled
+  image placeholders the user swaps in. Do NOT use for non-Pages hosting
+  (Vercel/Netlify/Azure), deploying an existing app without a Pages target, or
+  plain web pages unrelated to GitHub Pages.
 ---
 
 # Create GitHub Pages Site

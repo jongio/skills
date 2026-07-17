@@ -1,0 +1,38 @@
+name: Skill Lint
+
+on:
+  pull_request:
+    paths:
+      - "skills/**/SKILL.md"
+      - "skills/**/*.yaml"
+      - "skills/**/eval.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "skills/**/SKILL.md"
+      - "skills/**/*.yaml"
+      - "skills/**/eval.yaml"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Vally CLI
+        run: npm install -g @microsoft/vally-cli
+
+      - name: Lint all skills (spec-compliance)
+        run: vally lint .
+
+      - name: Validate eval specs
+        run: |
+          for spec in $(find skills -name "eval.yaml" -path "*/evals/*"); do
+            echo "Validating $spec"
+            vally lint --eval-spec "$spec" --strict
+          done

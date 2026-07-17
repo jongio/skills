@@ -1,0 +1,158 @@
+name: create-gh-pages-site
+description: >-
+  Capability eval for the create-gh-pages-site skill. The agent must scaffold a
+  working GitHub Pages site with the correct base path injected, the official
+  deploy workflow added, and content that reflects the target repo rather than
+  generic template demo text. Deterministic graders inspect produced files; an
+  LLM rubric judges content quality and template adherence.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 10m
+  executor: copilot-sdk
+
+scoring:
+  weights:
+    file-exists: 1
+    file-contains: 2
+    file-not-contains: 1
+    run-command: 2
+    prompt: 2
+  threshold: 0.8
+
+stimuli:
+  - name: astro-site-for-cli-tool
+    prompt: >-
+      Use the create-gh-pages-site skill to scaffold an Astro GitHub Pages site
+      for the repo "octocat/hello-cli". The repo is a CLI tool. Use the astro
+      template. Make sure the base path, deploy workflow, and site content are
+      correct for that repo.
+    tags:
+      template: astro
+      cost: high
+    environment:
+      files:
+        - path: README.md
+          content: |
+            # hello-cli
+
+            A friendly CLI tool that greets the world.
+
+            ## Install
+
+            ```bash
+            npm install -g hello-cli
+            ```
+
+            ## Usage
+
+            ```bash
+            hello-cli --name "World"
+            ```
+        - path: package.json
+          content: |
+            {
+              "name": "hello-cli",
+              "version": "1.0.0",
+              "description": "A friendly CLI tool that greets the world.",
+              "bin": { "hello-cli": "./bin/cli.js" }
+            }
+    graders:
+      - type: file-exists
+        name: deploy-workflow-created
+        config:
+          path: "**/.github/workflows/*.yml"
+      - type: file-exists
+        name: astro-config-exists
+        config:
+          path: "**/astro.config.*"
+      - type: file-exists
+        name: index-page-exists
+        config:
+          path: "**/src/pages/index.astro"
+      - type: file-contains
+        name: base-path-injected
+        config:
+          path: "**/astro.config.*"
+          value: "/hello-cli/"
+      - type: file-contains
+        name: workflow-uses-deploy-pages
+        config:
+          path: "**/.github/workflows/*.yml"
+          value: "actions/deploy-pages"
+      - type: file-not-contains
+        name: no-leftover-sentinels
+        config:
+          path: "**/astro.config.*"
+          value: "__BASE_PATH__"
+      - type: file-not-contains
+        name: no-generic-site-name
+        config:
+          path: "**/src/pages/index.astro"
+          value: "__SITE_NAME__"
+      - type: prompt
+        name: content-reflects-repo
+        config:
+          prompt: >-
+            Review the generated site. Does the content mention "hello-cli" and
+            describe it as a CLI tool? Is the content specific to the repo rather
+            than generic template placeholder text? Score 1.0 if yes, 0.5 if
+            partially, 0.0 if the site still shows default demo content.
+
+  - name: static-html-for-library
+    prompt: >-
+      Use the create-gh-pages-site skill to scaffold a static HTML GitHub Pages
+      site for the repo "octocat/math-utils". The repo is a JavaScript math
+      utility library. Use the static-html template.
+    tags:
+      template: static-html
+      cost: high
+    environment:
+      files:
+        - path: README.md
+          content: |
+            # math-utils
+
+            Lightweight zero-dependency math utilities for JavaScript.
+
+            ## API
+
+            - `add(a, b)` — returns `a + b`
+            - `multiply(a, b)` — returns `a * b`
+            - `clamp(value, min, max)` — clamps value to range
+        - path: package.json
+          content: |
+            {
+              "name": "math-utils",
+              "version": "2.1.0",
+              "description": "Lightweight zero-dependency math utilities for JavaScript.",
+              "main": "index.js"
+            }
+    graders:
+      - type: file-exists
+        name: deploy-workflow-created
+        config:
+          path: "**/.github/workflows/*.yml"
+      - type: file-exists
+        name: index-html-exists
+        config:
+          path: "**/index.html"
+      - type: file-contains
+        name: workflow-uses-deploy-pages
+        config:
+          path: "**/.github/workflows/*.yml"
+          value: "actions/deploy-pages"
+      - type: file-not-contains
+        name: no-leftover-sentinels
+        config:
+          path: "**/index.html"
+          value: "__SITE_NAME__"
+      - type: prompt
+        name: content-reflects-repo
+        config:
+          prompt: >-
+            Review the generated static HTML site. Does it mention "math-utils"
+            and describe the library's API functions (add, multiply, clamp)?
+            Score 1.0 if yes with real content, 0.5 if partially specific, 0.0
+            if still generic demo content.
