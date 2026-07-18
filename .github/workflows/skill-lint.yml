@@ -1,0 +1,75 @@
+name: Skill Lint
+
+on:
+  pull_request:
+    paths:
+      - "skills/**/SKILL.md"
+      - "skills/**/*.yaml"
+      - "skills/**/eval.yaml"
+  push:
+    branches: [main]
+    paths:
+      - "skills/**/SKILL.md"
+      - "skills/**/*.yaml"
+      - "skills/**/eval.yaml"
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Vally CLI
+        run: npm install -g @microsoft/vally-cli
+
+      - name: Determine skills to lint
+        id: skills
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Lint only skills with changes in this PR
+            DIRS=$(git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD \
+              -- 'skills/*/SKILL.md' 'skills/*/*.yaml' 'skills/*/evals/**' \
+              | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u)
+          else
+            # Push to main or manual dispatch: lint all skills
+            DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
+          fi
+          if [ -z "$DIRS" ]; then
+            echo "dirs=" >> "$GITHUB_OUTPUT"
+            echo "No skill directories to lint"
+          else
+            echo "dirs<<EOF" >> "$GITHUB_OUTPUT"
+            echo "$DIRS" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            echo "Will lint: $DIRS"
+          fi
+
+      - name: Lint skills (spec-compliance)
+        if: steps.skills.outputs.dirs != ''
+        run: |
+          FAILED=0
+          while IFS= read -r dir; do
+            echo "::group::Linting $dir"
+            if ! vally lint "$dir"; then
+              FAILED=1
+            fi
+            echo "::endgroup::"
+          done <<< "${{ steps.skills.outputs.dirs }}"
+          exit $FAILED
+
+      - name: Validate eval specs
+        if: steps.skills.outputs.dirs != ''
+        run: |
+          while IFS= read -r dir; do
+            for spec in $(find "$dir" -name "eval.yaml" -path "*/evals/*" 2>/dev/null); do
+              echo "Validating $spec"
+              vally lint --eval-spec "$spec" --strict
+            done
+          done <<< "${{ steps.skills.outputs.dirs }}"

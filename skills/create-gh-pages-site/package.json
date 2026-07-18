@@ -7,6 +7,11 @@
   "type": "module",
   "scripts": {
     "test": "node test/generator.test.mjs && node test/digest.test.mjs",
-    "new": "node scripts/new-site.mjs"
+    "new": "node scripts/new-site.mjs",
+    "eval:lint": "vally lint --eval-spec evals/create-gh-pages-site/eval.yaml",
+    "eval": "vally eval --eval-spec evals/create-gh-pages-site/eval.yaml --skill-dir ."
+  },
+  "devDependencies": {
+    "@microsoft/vally-cli": "latest"
   }
 }
