@@ -1,0 +1,6 @@
+{
+  "name": "hello-cli",
+  "version": "1.0.0",
+  "description": "A friendly CLI tool that greets the world.",
+  "bin": { "hello-cli": "./bin/cli.js" }
+}

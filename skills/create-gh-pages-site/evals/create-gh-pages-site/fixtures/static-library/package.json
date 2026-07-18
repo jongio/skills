@@ -1,0 +1,6 @@
+{
+  "name": "math-utils",
+  "version": "2.1.0",
+  "description": "Lightweight zero-dependency math utilities for JavaScript.",
+  "main": "index.js"
+}

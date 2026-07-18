@@ -14,11 +14,10 @@ defaults:
 
 scoring:
   weights:
-    file-exists: 1
-    file-contains: 2
-    file-not-contains: 1
-    run-command: 2
-    prompt: 2
+    file-exists: 0.15
+    file-contains: 0.25
+    file-not-contains: 0.10
+    prompt: 0.50
   threshold: 0.8
 
 stimuli:
@@ -33,31 +32,10 @@ stimuli:
       cost: high
     environment:
       files:
-        - path: README.md
-          content: |
-            # hello-cli
-
-            A friendly CLI tool that greets the world.
-
-            ## Install
-
-            ```bash
-            npm install -g hello-cli
-            ```
-
-            ## Usage
-
-            ```bash
-            hello-cli --name "World"
-            ```
-        - path: package.json
-          content: |
-            {
-              "name": "hello-cli",
-              "version": "1.0.0",
-              "description": "A friendly CLI tool that greets the world.",
-              "bin": { "hello-cli": "./bin/cli.js" }
-            }
+        - src: fixtures/astro-cli/README.md
+          dest: README.md
+        - src: fixtures/astro-cli/package.json
+          dest: package.json
     graders:
       - type: file-exists
         name: deploy-workflow-created
@@ -110,25 +88,10 @@ stimuli:
       cost: high
     environment:
       files:
-        - path: README.md
-          content: |
-            # math-utils
-
-            Lightweight zero-dependency math utilities for JavaScript.
-
-            ## API
-
-            - `add(a, b)` — returns `a + b`
-            - `multiply(a, b)` — returns `a * b`
-            - `clamp(value, min, max)` — clamps value to range
-        - path: package.json
-          content: |
-            {
-              "name": "math-utils",
-              "version": "2.1.0",
-              "description": "Lightweight zero-dependency math utilities for JavaScript.",
-              "main": "index.js"
-            }
+        - src: fixtures/static-library/README.md
+          dest: README.md
+        - src: fixtures/static-library/package.json
+          dest: package.json
     graders:
       - type: file-exists
         name: deploy-workflow-created
