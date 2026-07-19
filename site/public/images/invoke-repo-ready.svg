@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400" role="img" aria-label="repo-ready skill thumbnail">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3fb950" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#3fb950" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="640" height="400" rx="16" fill="url(#bg)"/>
+
+  <!-- Subtle dot grid -->
+  <g fill="#21262d" opacity="0.6">
+    <circle cx="40" cy="40" r="1.2"/><circle cx="80" cy="40" r="1.2"/><circle cx="120" cy="40" r="1.2"/><circle cx="160" cy="40" r="1.2"/><circle cx="200" cy="40" r="1.2"/><circle cx="240" cy="40" r="1.2"/><circle cx="280" cy="40" r="1.2"/><circle cx="320" cy="40" r="1.2"/><circle cx="360" cy="40" r="1.2"/><circle cx="400" cy="40" r="1.2"/><circle cx="440" cy="40" r="1.2"/><circle cx="480" cy="40" r="1.2"/><circle cx="520" cy="40" r="1.2"/><circle cx="560" cy="40" r="1.2"/><circle cx="600" cy="40" r="1.2"/>
+    <circle cx="40" cy="80" r="1.2"/><circle cx="80" cy="80" r="1.2"/><circle cx="120" cy="80" r="1.2"/><circle cx="160" cy="80" r="1.2"/><circle cx="200" cy="80" r="1.2"/><circle cx="240" cy="80" r="1.2"/><circle cx="280" cy="80" r="1.2"/><circle cx="320" cy="80" r="1.2"/><circle cx="360" cy="80" r="1.2"/><circle cx="400" cy="80" r="1.2"/><circle cx="440" cy="80" r="1.2"/><circle cx="480" cy="80" r="1.2"/><circle cx="520" cy="80" r="1.2"/><circle cx="560" cy="80" r="1.2"/><circle cx="600" cy="80" r="1.2"/>
+    <circle cx="40" cy="120" r="1.2"/><circle cx="80" cy="120" r="1.2"/><circle cx="120" cy="120" r="1.2"/><circle cx="160" cy="120" r="1.2"/><circle cx="200" cy="120" r="1.2"/><circle cx="240" cy="120" r="1.2"/><circle cx="280" cy="120" r="1.2"/><circle cx="320" cy="120" r="1.2"/><circle cx="360" cy="120" r="1.2"/><circle cx="400" cy="120" r="1.2"/><circle cx="440" cy="120" r="1.2"/><circle cx="480" cy="120" r="1.2"/><circle cx="520" cy="120" r="1.2"/><circle cx="560" cy="120" r="1.2"/><circle cx="600" cy="120" r="1.2"/>
+    <circle cx="40" cy="160" r="1.2"/><circle cx="80" cy="160" r="1.2"/><circle cx="120" cy="160" r="1.2"/><circle cx="160" cy="160" r="1.2"/><circle cx="200" cy="160" r="1.2"/><circle cx="240" cy="160" r="1.2"/><circle cx="280" cy="160" r="1.2"/><circle cx="320" cy="160" r="1.2"/><circle cx="360" cy="160" r="1.2"/><circle cx="400" cy="160" r="1.2"/><circle cx="440" cy="160" r="1.2"/><circle cx="480" cy="160" r="1.2"/><circle cx="520" cy="160" r="1.2"/><circle cx="560" cy="160" r="1.2"/><circle cx="600" cy="160" r="1.2"/>
+    <circle cx="40" cy="200" r="1.2"/><circle cx="80" cy="200" r="1.2"/><circle cx="120" cy="200" r="1.2"/><circle cx="160" cy="200" r="1.2"/><circle cx="200" cy="200" r="1.2"/><circle cx="240" cy="200" r="1.2"/><circle cx="280" cy="200" r="1.2"/><circle cx="320" cy="200" r="1.2"/><circle cx="360" cy="200" r="1.2"/><circle cx="400" cy="200" r="1.2"/><circle cx="440" cy="200" r="1.2"/><circle cx="480" cy="200" r="1.2"/><circle cx="520" cy="200" r="1.2"/><circle cx="560" cy="200" r="1.2"/><circle cx="600" cy="200" r="1.2"/>
+    <circle cx="40" cy="240" r="1.2"/><circle cx="80" cy="240" r="1.2"/><circle cx="120" cy="240" r="1.2"/><circle cx="160" cy="240" r="1.2"/><circle cx="200" cy="240" r="1.2"/><circle cx="240" cy="240" r="1.2"/><circle cx="280" cy="240" r="1.2"/><circle cx="320" cy="240" r="1.2"/><circle cx="360" cy="240" r="1.2"/><circle cx="400" cy="240" r="1.2"/><circle cx="440" cy="240" r="1.2"/><circle cx="480" cy="240" r="1.2"/><circle cx="520" cy="240" r="1.2"/><circle cx="560" cy="240" r="1.2"/><circle cx="600" cy="240" r="1.2"/>
+    <circle cx="40" cy="280" r="1.2"/><circle cx="80" cy="280" r="1.2"/><circle cx="120" cy="280" r="1.2"/><circle cx="160" cy="280" r="1.2"/><circle cx="200" cy="280" r="1.2"/><circle cx="240" cy="280" r="1.2"/><circle cx="280" cy="280" r="1.2"/><circle cx="320" cy="280" r="1.2"/><circle cx="360" cy="280" r="1.2"/><circle cx="400" cy="280" r="1.2"/><circle cx="440" cy="280" r="1.2"/><circle cx="480" cy="280" r="1.2"/><circle cx="520" cy="280" r="1.2"/><circle cx="560" cy="280" r="1.2"/><circle cx="600" cy="280" r="1.2"/>
+    <circle cx="40" cy="320" r="1.2"/><circle cx="80" cy="320" r="1.2"/><circle cx="120" cy="320" r="1.2"/><circle cx="160" cy="320" r="1.2"/><circle cx="200" cy="320" r="1.2"/><circle cx="240" cy="320" r="1.2"/><circle cx="280" cy="320" r="1.2"/><circle cx="320" cy="320" r="1.2"/><circle cx="360" cy="320" r="1.2"/><circle cx="400" cy="320" r="1.2"/><circle cx="440" cy="320" r="1.2"/><circle cx="480" cy="320" r="1.2"/><circle cx="520" cy="320" r="1.2"/><circle cx="560" cy="320" r="1.2"/><circle cx="600" cy="320" r="1.2"/>
+    <circle cx="40" cy="360" r="1.2"/><circle cx="80" cy="360" r="1.2"/><circle cx="120" cy="360" r="1.2"/><circle cx="160" cy="360" r="1.2"/><circle cx="200" cy="360" r="1.2"/><circle cx="240" cy="360" r="1.2"/><circle cx="280" cy="360" r="1.2"/><circle cx="320" cy="360" r="1.2"/><circle cx="360" cy="360" r="1.2"/><circle cx="400" cy="360" r="1.2"/><circle cx="440" cy="360" r="1.2"/><circle cx="480" cy="360" r="1.2"/><circle cx="520" cy="360" r="1.2"/><circle cx="560" cy="360" r="1.2"/><circle cx="600" cy="360" r="1.2"/>
+  </g>
+
+  <!-- Green glow behind the center icon cluster -->
+  <ellipse cx="320" cy="165" rx="200" ry="120" fill="url(#glow)"/>
+
+  <!-- ========== LEFT: Git branch icon ========== -->
+  <g transform="translate(95, 90)">
+    <!-- Git logo (simplified) -->
+    <g fill="none" stroke="#f0883e" stroke-width="2.5" stroke-linecap="round">
+      <!-- Main trunk -->
+      <line x1="0" y1="0" x2="0" y2="80"/>
+      <!-- Branch -->
+      <path d="M0,25 C20,25 30,10 30,0"/>
+      <!-- Merge -->
+      <path d="M0,55 C20,55 30,70 30,80"/>
+    </g>
+    <!-- Commit dots -->
+    <circle cx="0" cy="0" r="5" fill="#0d1117" stroke="#f0883e" stroke-width="2.5"/>
+    <circle cx="0" cy="40" r="5" fill="#0d1117" stroke="#f0883e" stroke-width="2.5"/>
+    <circle cx="0" cy="80" r="5" fill="#0d1117" stroke="#f0883e" stroke-width="2.5"/>
+    <circle cx="30" cy="0" r="5" fill="#0d1117" stroke="#f0883e" stroke-width="2.5"/>
+    <circle cx="30" cy="80" r="5" fill="#0d1117" stroke="#f0883e" stroke-width="2.5"/>
+  </g>
+
+  <!-- ========== CENTER: Checklist of repo files ========== -->
+  <g transform="translate(185, 80)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="15">
+    <!-- Row 1: .gitignore -->
+    <g transform="translate(0, 0)">
+      <rect x="0" y="0" width="280" height="34" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <!-- Checkmark circle -->
+      <circle cx="22" cy="17" r="10" fill="#238636"/>
+      <polyline points="16,17 20,21 28,13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- File icon -->
+      <path d="M42,6 L42,28 L56,28 L56,12 L50,6 Z" fill="none" stroke="#8b949e" stroke-width="1.5"/>
+      <path d="M50,6 L50,12 L56,12" fill="none" stroke="#8b949e" stroke-width="1.5"/>
+      <text x="65" y="22" fill="#e6edf3">.gitignore</text>
+    </g>
+
+    <!-- Row 2: LICENSE -->
+    <g transform="translate(0, 42)">
+      <rect x="0" y="0" width="280" height="34" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <circle cx="22" cy="17" r="10" fill="#238636"/>
+      <polyline points="16,17 20,21 28,13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- Scale/balance icon for license -->
+      <line x1="49" y1="8" x2="49" y2="26" stroke="#da8ee7" stroke-width="1.5"/>
+      <line x1="42" y1="12" x2="56" y2="12" stroke="#da8ee7" stroke-width="1.5"/>
+      <path d="M42,12 L39,20 L45,20 Z" fill="none" stroke="#da8ee7" stroke-width="1.2"/>
+      <path d="M56,12 L53,20 L59,20 Z" fill="none" stroke="#da8ee7" stroke-width="1.2"/>
+      <line x1="45" y1="26" x2="53" y2="26" stroke="#da8ee7" stroke-width="1.5"/>
+      <text x="65" y="22" fill="#e6edf3">LICENSE</text>
+    </g>
+
+    <!-- Row 3: SECURITY.md -->
+    <g transform="translate(0, 84)">
+      <rect x="0" y="0" width="280" height="34" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <circle cx="22" cy="17" r="10" fill="#238636"/>
+      <polyline points="16,17 20,21 28,13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- Shield icon -->
+      <path d="M49,8 L42,12 L42,19 C42,24 49,28 49,28 C49,28 56,24 56,19 L56,12 Z" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-linejoin="round"/>
+      <text x="65" y="22" fill="#e6edf3">SECURITY.md</text>
+    </g>
+
+    <!-- Row 4: CONTRIBUTING.md -->
+    <g transform="translate(0, 126)">
+      <rect x="0" y="0" width="280" height="34" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+      <circle cx="22" cy="17" r="10" fill="#238636"/>
+      <polyline points="16,17 20,21 28,13" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <!-- People icon -->
+      <circle cx="46" cy="12" r="4" fill="none" stroke="#3fb950" stroke-width="1.5"/>
+      <path d="M39,26 C39,21 43,18 46,18 C49,18 53,21 53,26" fill="none" stroke="#3fb950" stroke-width="1.5"/>
+      <circle cx="55" cy="13" r="3" fill="none" stroke="#3fb950" stroke-width="1.2"/>
+      <path d="M53,25 C53,21 55,19 57,19 C59,19 61,21 61,25" fill="none" stroke="#3fb950" stroke-width="1.2"/>
+      <text x="65" y="22" fill="#e6edf3">CONTRIBUTING.md</text>
+    </g>
+
+    <!-- Row 5: dependabot.yml (unchecked, showing update mode) -->
+    <g transform="translate(0, 168)">
+      <rect x="0" y="0" width="280" height="34" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1" stroke-dasharray="4 3"/>
+      <!-- Empty circle (gap) -->
+      <circle cx="22" cy="17" r="10" fill="none" stroke="#484f58" stroke-width="1.5" stroke-dasharray="4 3"/>
+      <!-- Gear/bot icon -->
+      <g transform="translate(49, 17)" fill="none" stroke="#484f58" stroke-width="1.3">
+        <circle r="4"/>
+        <circle r="1.5" fill="#484f58"/>
+        <line x1="0" y1="-7" x2="0" y2="-5"/><line x1="0" y1="5" x2="0" y2="7"/>
+        <line x1="-7" y1="0" x2="-5" y2="0"/><line x1="5" y1="0" x2="7" y2="0"/>
+        <line x1="-5" y1="-5" x2="-3.5" y2="-3.5"/><line x1="3.5" y1="3.5" x2="5" y2="5"/>
+        <line x1="5" y1="-5" x2="3.5" y2="-3.5"/><line x1="-3.5" y1="3.5" x2="-5" y2="5"/>
+      </g>
+      <text x="65" y="22" fill="#484f58">dependabot.yml</text>
+      <!-- "missing" label -->
+      <rect x="220" y="8" width="50" height="18" rx="9" fill="#30363d"/>
+      <text x="245" y="21" fill="#f0883e" font-size="10" text-anchor="middle" font-family="ui-sans-serif,system-ui,sans-serif">gap</text>
+    </g>
+  </g>
+
+  <!-- ========== RIGHT: Large checkmark accent ========== -->
+  <g transform="translate(510, 100)" opacity="0.12">
+    <polyline points="0,50 30,80 80,10" fill="none" stroke="#3fb950" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- ========== BOTTOM: Title bar ========== -->
+  <rect x="0" y="330" width="640" height="70" rx="0" fill="#0d1117" opacity="0.7"/>
+  <text x="320" y="368" text-anchor="middle" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif" font-size="28" font-weight="700" fill="#e6edf3" letter-spacing="0.5">repo-ready</text>
+  <text x="320" y="390" text-anchor="middle" font-family="ui-sans-serif,system-ui,sans-serif" font-size="13" fill="#8b949e">scaffold &amp; maintain community health files</text>
+
+  <!-- Bottom border accent -->
+  <rect x="240" y="396" width="160" height="3" rx="1.5" fill="#3fb950" opacity="0.6"/>
+</svg>

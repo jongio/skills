@@ -1,0 +1,11 @@
+{
+  "name": "repo-ready",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scaffold and maintain standard community health files for any GitHub repository. Auto-detects stack, interviews the user, generates .gitignore, LICENSE, CONTRIBUTING, issue templates, CI workflows, and more.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node test/detect.test.mjs && node test/scan.test.mjs && node test/generate.test.mjs"
+  }
+}
