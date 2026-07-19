@@ -1,5 +1,7 @@
 # jongio/skills
 
+[![skills.sh](https://skills.sh/b/jongio/skills)](https://skills.sh/jongio/skills)
+
 Jon Gallant's collection of skills for AI coding agents — works with
 [GitHub Copilot](https://docs.github.com/copilot), Claude, Codex, and any agent
 that supports the [`SKILL.md`](https://github.com/vercel-labs/skills) format. A
