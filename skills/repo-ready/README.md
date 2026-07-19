@@ -128,12 +128,15 @@ skills/repo-ready/
   package.json          # Dev tooling
   scripts/
     generate.mjs        # File generator
-    detect-stack.mjs    # Stack auto-detection
+    detect-stack.mjs    # Re-export of lib/detect-stack.mjs + CLI entry point
     scan-repo.mjs       # Existing file scanner (update mode)
   test/
     generate.test.mjs   # Generator tests
     detect.test.mjs     # Stack detection tests
     scan.test.mjs       # Scanner tests
+
+lib/                    # Shared modules (repo root)
+  detect-stack.mjs      # Source of truth for stack detection
 ```
 
 ## License
