@@ -74,33 +74,41 @@ Java, Ruby, Docker, Terraform, etc.) and tailors every generated file to match.
 ### Tier 4: Editor and tooling
 - `.editorconfig` (universal cross-editor config)
 
+### Tier 5: Repo metadata (GitHub API settings)
+- Description ("About" text on repo page)
+- Topics (searchable tag badges)
+- Homepage URL (sidebar link)
+
 ## How the interview works
 
 The skill asks one question at a time and skips anything it can auto-detect or
 that the user already specified. Typical flow:
 
 1. Auto-detect stack from lockfiles and manifests
-2. Ask: project type (library, CLI, web app, API, monorepo)
-3. Ask: audience (open source, internal, personal)
-4. Ask: license (guided with recommendations)
-5. Ask: code of conduct contact
-6. Ask: security contact
-7. Ask: funding platforms (if applicable)
-8. Ask: CODEOWNERS mapping
-9. Ask: dependabot schedule
-10. Confirm: show summary table, let user deselect files
-11. Generate everything in one pass
+2. Auto-detect repo visibility via `gh api` (never guesses)
+3. Ask: project type (library, CLI, web app, API, monorepo)
+4. Ask: audience (defaults based on detected visibility)
+5. Ask: license (guided with recommendations)
+6. Ask: code of conduct contact
+7. Ask: security contact
+8. Ask: funding platforms (if applicable)
+9. Ask: CODEOWNERS mapping
+10. Ask: dependabot schedule
+11. Review repo metadata (description, topics, homepage)
+12. Confirm: show summary table, let user deselect files
+13. Generate everything in one pass
 
 ## Update mode
 
 When running on an existing repo, the skill:
 
 1. Scans for every file in the catalog
-2. Reports a gap analysis table (present/missing/outdated)
-3. Groups suggestions by tier
-4. Interviews only for missing files
-5. Shows diff previews before modifying existing files
-6. Offers to append missing patterns to existing `.gitignore` instead of
+2. Audits repo metadata (description, topics, homepage)
+3. Reports a gap analysis table (present/missing/outdated)
+4. Groups suggestions by tier
+5. Interviews only for missing files and metadata
+6. Shows diff previews before modifying existing files
+7. Offers to append missing patterns to existing `.gitignore` instead of
    overwriting
 
 ## Development
@@ -122,9 +130,6 @@ skills/repo-ready/
     generate.mjs        # File generator
     detect-stack.mjs    # Stack auto-detection
     scan-repo.mjs       # Existing file scanner (update mode)
-  references/
-    file-catalog.json   # Full catalog of files, templates, metadata
-    gitignore-fallbacks/# Offline .gitignore templates
   test/
     generate.test.mjs   # Generator tests
     detect.test.mjs     # Stack detection tests

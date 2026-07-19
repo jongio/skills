@@ -18,6 +18,12 @@ and aim for the listed size. Delete this file once every image is real.
 | `invoke-create-canvas-app.png` | `create-canvas-app` card/detail | Composer screenshot of invoking the skill. |
 | `invoke-create-gh-pages-site.png` | `create-gh-pages-site` card/detail | Composer screenshot of invoking the skill. |
 
+## Needs screenshot
+
+| File | Used by | Notes |
+| --- | --- | --- |
+| _(not yet created)_ `invoke-repo-ready.png` | `repo-ready` card/detail | Composer screenshot of invoking the skill. Currently falls back to `item-thumb.svg`. |
+
 Tips:
 - Export at 2× for crisp display on high-DPI screens, then keep the file small.
 - PNG for screenshots/photos, SVG for logos/diagrams.
