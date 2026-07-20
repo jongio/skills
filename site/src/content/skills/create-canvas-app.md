@@ -3,7 +3,7 @@ title: create-canvas-app
 tagline: "Build GitHub Copilot canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable per-user storage, optional multiplayer state shared through a private GitHub repo, Primer theming, the official Lucide icon set, a one-command generator, and deep links into the app."
 useWhen: "When you want to create, scaffold, or improve an interactive canvas — a side-panel UI the agent can open and drive: dashboards, editors, trackers, boards, or document/preview surfaces."
 repoPath: skills/create-canvas-app
-thumb: images/invoke-create-canvas-app.png
+thumb: images/thumb-create-canvas-app.png
 order: 1
 install:
   - label: Install for GitHub Copilot

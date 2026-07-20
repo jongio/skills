@@ -3,7 +3,7 @@ title: repo-ready
 tagline: "Scaffold and maintain the standard community health files every GitHub repository needs: .gitignore, .gitattributes, LICENSE, CONTRIBUTING, issue templates, CI workflows, dependabot, editorconfig, and repo metadata."
 useWhen: "When you're starting a new repo and need all the standard files, or when you want to audit an existing repo for missing community health files and GitHub settings."
 repoPath: skills/repo-ready
-thumb: images/invoke-repo-ready.svg
+thumb: images/thumb-repo-ready.png
 order: 3
 install:
   - label: Install for GitHub Copilot
