@@ -371,6 +371,7 @@ href && html`<a class="ck-btn ck-btn-sm" href=${href} target="_blank" rel="noope
 - `buildSessionDeepLink({ repo, prompt, pr, branch, sourceBranch, parent, mode })`: `session/new`, the primary one. The three branch selectors (`pr`/`branch`/`sourceBranch`) are mutually exclusive; `sourceBranch` opens an existing branch for collaboration, `parent` nests the new session under an existing one.
 - `buildSessionDetailDeepLink(sessionId)`: open an existing session.
 - `buildChatsDeepLink()`: the Chats surface.
+- `buildNewChatDeepLink({ prompt })`: create a new chat and send `prompt` (required, non-empty; confirmation-gated).
 - `buildNewAutomationDeepLink({ name, prompt, trigger, time, day })`: pre-fill the new-automation dialog.
 - `buildIssueDeepLink({ owner, repo, number })` and `buildPullRequestDeepLink({ owner, repo, number })`.
 

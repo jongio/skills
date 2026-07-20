@@ -17,6 +17,7 @@ import {
   buildSessionDeepLink,
   buildSessionDetailDeepLink,
   buildChatsDeepLink,
+  buildNewChatDeepLink,
   buildNewAutomationDeepLink,
   buildIssueDeepLink,
   buildPullRequestDeepLink,
@@ -230,6 +231,39 @@ async function main() {
     assert.equal(buildChatsDeepLink(), "ghapp://chats");
   });
 
+  // ---- buildNewChatDeepLink ------------------------------------------------
+  await test("buildNewChatDeepLink builds ghapp://chats/new with an encoded prompt", () => {
+    const link = buildNewChatDeepLink({ prompt: "Review the <latest> changes & ship" });
+    assert.ok(link.startsWith("ghapp://chats/new?"), link);
+    assert.equal(q(link).get("prompt"), "Review the <latest> changes & ship");
+    // Raw href must be percent-encoded (no literal space / angle brackets).
+    assert.ok(!/[<> ]/.test(link), `link must be encoded: ${link}`);
+  });
+
+  await test("buildNewChatDeepLink requires a non-empty prompt (fail closed)", () => {
+    assert.equal(buildNewChatDeepLink({ prompt: "" }), null);
+    assert.equal(buildNewChatDeepLink({ prompt: "   " }), null); // whitespace-only trims to empty
+    assert.equal(buildNewChatDeepLink({}), null);
+    assert.equal(buildNewChatDeepLink(), null);
+    assert.equal(buildNewChatDeepLink({ prompt: null }), null);
+  });
+
+  await test("buildNewChatDeepLink: hostile prompt text cannot inject a query key or change the route", () => {
+    const link = buildNewChatDeepLink({ prompt: "hi&model=evil&foo=1" });
+    const p = q(link);
+    // The whole hostile string is ONE prompt value; nothing leaked into siblings.
+    assert.equal(p.get("prompt"), "hi&model=evil&foo=1");
+    assert.equal(p.get("model"), null);
+    assert.equal(p.get("foo"), null);
+    assert.equal(new URL(link).host, "chats"); // route unchanged
+    assert.equal(new URL(link).pathname, "/new");
+  });
+
+  await test("buildNewChatDeepLink round-trips a quoted untrusted prompt", () => {
+    const prompt = `Summarize ${quoteUntrusted("t&t <x>")}`;
+    assert.equal(q(buildNewChatDeepLink({ prompt })).get("prompt"), prompt);
+  });
+
   // ---- buildNewAutomationDeepLink ------------------------------------------
   await test("buildNewAutomationDeepLink fills valid fields and drops invalid ones", () => {
     const link = buildNewAutomationDeepLink({
@@ -360,6 +394,7 @@ async function main() {
       "buildSessionDeepLink",
       "buildSessionDetailDeepLink",
       "buildChatsDeepLink",
+      "buildNewChatDeepLink",
       "buildNewAutomationDeepLink",
       "buildIssueDeepLink",
       "buildPullRequestDeepLink",
