@@ -229,6 +229,28 @@ export function buildChatsDeepLink() {
 }
 
 /**
+ * `ghapp://chats/new?prompt=<text>`: create a NEW chat and send `prompt`. The app
+ * shows a confirmation dialog (the source URL + decoded prompt) before creating the
+ * chat and submitting; denying or dismissing it is a no-op. A non-empty `prompt` is
+ * REQUIRED — returns null without one, so a caller can withhold the control instead
+ * of rendering a dead link. Model, mode, reasoning effort, context tier, and agent
+ * selection all use the app's current defaults (there are no other params). The
+ * value is URL-encoded via URLSearchParams, so untrusted text cannot inject a query
+ * key or change the route; wrap untrusted parts with `quoteUntrusted`, and never put
+ * secrets or sensitive content in `prompt`.
+ * @param {object} parts
+ * @param {string} parts.prompt   required kickoff prompt (wrap untrusted parts with quoteUntrusted)
+ * @returns {string|null}
+ */
+export function buildNewChatDeepLink({ prompt } = {}) {
+  const promptStr = cleanText(prompt);
+  if (!promptStr) return null; // the route requires a non-empty prompt
+  const params = new URLSearchParams();
+  params.set("prompt", promptStr);
+  return safeDeepLinkUrl(`${APP_DEEP_LINK_SCHEME}://chats/new?${params.toString()}`);
+}
+
+/**
  * `ghapp://automations/new`: open the new-automation dialog with fields
  * pre-filled. The dialog is the confirmation step; this never auto-creates a
  * workflow. `trigger` is allowlisted, `time` must be HH:mm, `day` must be 0-6;

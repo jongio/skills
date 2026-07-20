@@ -84,6 +84,20 @@ path segments or query keys.
 
 `buildChatsDeepLink()` → `ghapp://chats`
 
+### `chats/new`: create a chat and send a prompt
+
+`buildNewChatDeepLink({ prompt })` → `ghapp://chats/new?prompt=…`
+
+The app shows a confirmation dialog (source URL + decoded prompt); clicking Allow
+creates a new chat and submits the prompt, denying or dismissing is a no-op.
+
+| Param | Required | Rule |
+|---|---|---|
+| `prompt` | Yes | Non-empty kickoff prompt. Wrap untrusted parts with `quoteUntrusted`. Never include secrets. A missing/empty (or whitespace-only) prompt returns `null`. |
+
+Model, mode, reasoning effort, context tier, and agent selection use the app's
+current defaults — `prompt` is the only parameter.
+
 ### `automations/new`: pre-fill the new-automation dialog
 
 `buildNewAutomationDeepLink({ name, prompt, trigger, time, day })`

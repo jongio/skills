@@ -145,6 +145,7 @@ async function main() {
       "buildSessionDeepLink",
       "buildSessionDetailDeepLink",
       "buildChatsDeepLink",
+      "buildNewChatDeepLink",
       "buildNewAutomationDeepLink",
       "buildIssueDeepLink",
       "buildPullRequestDeepLink",

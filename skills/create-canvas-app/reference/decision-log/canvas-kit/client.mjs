@@ -37,6 +37,7 @@ export {
   buildSessionDeepLink,
   buildSessionDetailDeepLink,
   buildChatsDeepLink,
+  buildNewChatDeepLink,
   buildNewAutomationDeepLink,
   buildIssueDeepLink,
   buildPullRequestDeepLink,
