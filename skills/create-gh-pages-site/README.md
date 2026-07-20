@@ -180,7 +180,6 @@ placeholder generator. Template + deploy-workflow validation lives in the regist
 ```
 SKILL.md                     The skill (authoring contract + workflow)
 scripts/
-scripts/
   new-site.mjs               Generator — fetch a template, inject the base path
   digest-repo.mjs            Analyze a repo → JSON signals + type classification
   make-placeholder.mjs       Generate placeholder images + an IMAGES.md checklist

@@ -22,11 +22,14 @@ Two modes:
 ### As a Copilot skill (recommended)
 
 ```sh
-# Install the full skills collection
-npx skills add jongio/skills
+# Install just this skill (global, for GitHub Copilot):
+npx skills add jongio/skills --skill repo-ready -g --agent github-copilot
 
-# Or install just this skill
-npx skills add jongio/skills/repo-ready
+# Into the current project instead (drop -g):
+npx skills add jongio/skills --skill repo-ready
+
+# Or install every skill in the repo:
+npx skills add jongio/skills --all
 ```
 
 ### Manual
