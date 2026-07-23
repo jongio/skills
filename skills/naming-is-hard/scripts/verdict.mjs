@@ -51,6 +51,16 @@ export const KEY_PRESETS = Object.freeze({
     { group: 'registries', key: 'npm', label: 'npm package' },
     { group: 'github', key: 'org', label: 'GitHub org' },
   ],
+  'website-first': [
+    { group: 'domains', key: 'com', label: '.com domain' },
+    { group: 'domains', key: 'dev', label: '.dev domain' },
+    { group: 'registries', key: 'npm', label: 'npm package' },
+  ],
+  'brand-first': [
+    { group: 'domains', key: 'com', label: '.com domain' },
+    { group: 'social', key: 'x', label: 'X handle' },
+    { group: 'domains', key: 'dev', label: '.dev domain' },
+  ],
   'social-first': [
     { group: 'social', key: 'x', label: 'X handle' },
     { group: 'domains', key: 'dev', label: '.dev domain' },

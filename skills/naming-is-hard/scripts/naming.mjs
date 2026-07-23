@@ -356,7 +356,7 @@ export function renderReport(ranked, winner, brief) {
     }
   }
   lines.push('');
-  lines.push('(* .com is parked for nearly every name; npm and .dev are the signals that matter.)');
+  lines.push('(* Social handles are link-outs only and cannot be checked programmatically.)');
   return lines.join('\n');
 }
 

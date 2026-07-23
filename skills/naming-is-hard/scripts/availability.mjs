@@ -28,9 +28,9 @@ export const DEFAULT_TLDS = Object.freeze(['dev', 'io', 'ai', 'app', 'co', 'com'
 // (Google Registry). For these, DNS NS-delegation is authoritative and RDAP is skipped.
 export const GOOGLE_REGISTRY_TLDS = new Set(['dev', 'app', 'page']);
 
-// TLDs that are almost always parked, so an "available" is rare and a "taken" is weak
-// signal. Surfaced as a note, not a different status.
-export const LOW_SIGNAL_TLDS = new Set(['com']);
+// TLDs that are frequently parked. Surfaced as a contextual note (not a dismissal)
+// only when the user has NOT chosen a .com-priority preset.
+export const FREQUENTLY_PARKED_TLDS = new Set(['com']);
 
 const REGISTRY_DEFS = {
   npm: { host: 'registry.npmjs.org', url: (s) => `https://registry.npmjs.org/${s}` },
@@ -433,9 +433,9 @@ export async function check(name, opts = {}) {
   const notes = [];
   const npm = registries.npm;
   if (npm && typeof npm === 'object' && npm.note) notes.push(`npm: ${npm.note}`);
-  for (const tld of LOW_SIGNAL_TLDS) {
+  for (const tld of FREQUENTLY_PARKED_TLDS) {
     if (domains[tld] === 'available') {
-      notes.push(`.${tld} shows available but is parked for nearly every name; low-signal.`);
+      notes.push(`.${tld} appears available — verify at your registrar before assuming it is truly free.`);
     }
   }
   return {

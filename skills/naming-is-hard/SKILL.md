@@ -145,11 +145,26 @@ If the context is thin, ask **at most two or three** quick `ask_user` questions 
 fill the biggest gaps (usually audience and tone). Do not interrogate. Store it
 with `init --brief-json` or `brief --json`.
 
-**Ask what channel matters most** (one quick question): the npm/CLI/package name, the
-domain, the GitHub org, or a social handle? Their answer picks the verdict `--preset`
-passed to `report`/`screen`: `cli-first` (default: npm > `.dev` > org), `domain-first`,
-`social-first`, or `balanced`. In practice the npm/CLI name and the `.dev` domain
-matter far more than the always-parked `.com`, and a taken GitHub org can be decorated.
+**Ask what channel matters most** (one quick question). Use `ask_user` with these
+options and let their answer pick the verdict `--preset` passed to `report`/`screen`:
+
+| User says | Preset | Key channels (in priority order) |
+|---|---|---|
+| "npm / CLI / package name" | `cli-first` (default) | npm > `.dev` > GitHub org |
+| "`.dev` domain (developer landing page)" | `domain-first` | `.dev` > npm > GitHub org |
+| "`.com` domain (website / product)" | `website-first` | `.com` > `.dev` > npm |
+| "Brand (domain + social)" | `brand-first` | `.com` > X handle > `.dev` |
+| "Social handles" | `social-first` | X > `.dev` > npm |
+| "No strong preference" | `balanced` | `.dev` > GitHub org > npm |
+
+**Do not assume a default.** The user's answer fundamentally changes which names are
+"Perfect Match" vs "It's Complicated." If they say `.com`, then `.com` availability is
+the gating signal — do not dismiss it as "always parked." If they say npm/CLI, then
+`.com` is background noise. Respect their stated priority throughout the entire flow.
+
+Also ask whether GitHub org availability matters to them (yes/no). If they say no, do
+not include GitHub org status in the primary results table — show it only as a footnote.
+
 Note that social handles are always reported `unknown` (they cannot be checked honestly),
 so a `social-first` finalist stays "It's Complicated" until the user verifies the handle
 by hand.
@@ -245,6 +260,19 @@ any of these, help me decide"), stop swiping and run a **duel** tournament: pres
 finalists head to head, ask which wins, and `duel --winner <id> --loser <id>`. A few
 duels move the model decisively and produce a ranked order without endless swiping.
 
+**Priority correction (when the user changes their mind).** If the user corrects
+their channel priorities mid-flow (e.g. "actually, I need .com, not .dev" or "GitHub
+org doesn't matter to me"), do NOT jump straight to declaring a winner. Instead:
+1. Acknowledge the correction and confirm the new preset.
+2. Re-run `screen` or `check` with the corrected `--preset`.
+3. Show the **full** re-evaluated results table (same detail level as the original),
+   now ranked by the corrected priority.
+4. Let the user pick from the re-ranked options.
+
+Never collapse from "here are 5 options with tables" to "here's your one winner"
+just because the user corrected you. The correction changes the ranking — it does not
+eliminate the user's right to choose.
+
 ## Act 4: the Match (availability + verdict)
 
 Now turn likes into a decision.
@@ -275,22 +303,59 @@ Now turn likes into a decision.
    | 💚 **Perfect Match** | No famous-mark collision and every key channel (per the chosen preset) is free. Grab it. |
 
    The report crowns a winner and lists the field. A Deal Breaker is never the
-   winner. `.com` is shown but flagged low-signal (it is parked for nearly every
-   name); npm and `.dev` are the signals that matter. Present it conversationally.
+   winner. Present results using the user's chosen preset: if they picked
+   `website-first` or `brand-first`, `.com` is the headline signal; if they picked
+   `cli-first`, npm and `.dev` are. Never contradict their stated priority by
+   dismissing a channel they told you matters. Present it conversationally.
+
+5. **Show ALL liked names, not just the winner (mandatory).** The user approved those
+   names — they deserve to know what happened to each one. Present the full field as
+   a ranked list. For every name that is NOT the winner, give an explicit one-line
+   reason why it ranked lower:
+
+   - "`.com` taken (registered to XYZ Corp)"
+   - "Trademark conflict: Clearfork Foods (USPTO #5998237)"
+   - "npm package already exists (last published 2023)"
+   - "GitHub org taken; decorated variants available: `cleanforkhq`, `getcleanfork`"
+   - "No issues found, but ranked #2 on fit score behind the winner"
+
+   **Never silently drop a liked name.** If the user liked 6 names and you show them
+   1 winner with no mention of the other 5, that is a failure. They will feel unheard
+   and wonder if the skill even remembered their choices. The minimum output is:
+
+   ```
+   ## 💚 Winner: Noshcheck
+   [scorecard + why it won]
+
+   ## The rest of your likes:
+   2. 💛 Cleanfork — .com taken (parked by GoDaddy)
+   3. 💛 Dinecheck — .com taken (active restaurant site)
+   4. 🚫 Clearfork — trademark: Clearfork Foods (USPTO #5998237, food industry)
+   5. 💛 Forkwatch — .com taken; GitHub org taken (decorated: forkwatchhq ✅)
+   6. 💚 Platemark — all clear, ranked #2 on fit
+   ```
+
+   This lets the user override the recommendation with full information ("actually
+   I'll take Platemark and live without the .com"). Do not make that choice for them.
 
 ## Act 5: next actions
 
 Once the user picks a winner, give them a concrete **reservation checklist** to lock it
 down (do not do these for them; the skill only checks and links out):
 
-1. **npm / package name** (usually the top priority): reserve it, or `npm publish` a
+1. **Primary domain** (per the user's preset): if they chose `website-first` or
+   `brand-first`, the `.com` is the top priority — register it immediately. If they
+   chose `cli-first` or `domain-first`, the `.dev` is the launch TLD. Register
+   whichever they told you matters most.
+2. **npm / package name** (for CLI/library projects): reserve it, or `npm publish` a
    placeholder. A tombstoned name flagged by the scorecard is blocked; pick another.
-2. **`.dev` domain** (the launch TLD): register it at a registrar. `.com` is optional
-   (it is parked for nearly every name).
-3. **GitHub org / repo**: `https://github.com/organizations/new`. If the bare org is
-   taken, use the decorated variant from `variants` (e.g. `<name>hq`).
-4. **Social handles**: the verify URLs are in the scorecard (`channels.social`).
-5. **Formal trademark clearance**: the screen is not legal advice. Point the user (or
+3. **Secondary domain**: register the other TLD (`.dev` if they got `.com`, or vice
+   versa) as a backup redirect.
+4. **GitHub org / repo**: `https://github.com/organizations/new`. If the bare org is
+   taken, use the decorated variant from `variants` (e.g. `<name>hq`). Skip this if
+   the user said GitHub org doesn't matter to them.
+5. **Social handles**: the verify URLs are in the scorecard (`channels.social`).
+6. **Formal trademark clearance**: the screen is not legal advice. Point the user (or
    their lawyer) at the `channels.trademark.links` and note the relevant class (for
    software, US classes 9 and 42) before they invest in the brand.
 
@@ -342,7 +407,8 @@ sessions. To resume, point the same `--dir` at the existing state and continue w
    share `profile` occasionally.
 5. On Done: `check` the finalists; run a `web_search` per finalist for trademarks
    and businesses.
-6. `report` the ranked matches with verdict tiers; present the winner and scorecards.
+6. `report` the ranked matches with verdict tiers; present ALL liked names with
+   per-name reasons for their ranking (not just the winner).
 7. Offer next actions (grab org/domain/handles) and an option to keep swiping.
 
 ## Exit criteria
@@ -352,5 +418,8 @@ sessions. To resume, point the same `--dir` at the existing state and continue w
   has signal).
 - The finalists were checked for availability and screened for trademark/business
   collisions.
-- A ranked report with verdict tiers was presented, with a winner that is not a Deal
-  Breaker, and the user was given the links to lock the name down.
+- A ranked report with verdict tiers was presented showing EVERY liked name with
+  an explicit reason for its rank/verdict, with a winner that is not a Deal Breaker.
+- The user was given the links to lock the name down.
+- The user was given the opportunity to override the recommendation (they may prefer
+  a #2 name and accept its tradeoffs).

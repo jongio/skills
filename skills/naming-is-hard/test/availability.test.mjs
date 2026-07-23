@@ -324,8 +324,8 @@ await test('builds a scorecard', async () => {
   assert.equal(card.channels.registries.npm, 'available');
   assert.ok(Array.isArray(card.notes));
   assert.ok(
-    card.notes.some((n) => /\.com.*parked.*low-signal/i.test(n)),
-    'surfaces the .com low-signal note when .com reads available',
+    card.notes.some((n) => /\.com.*available.*verify/i.test(n)),
+    'surfaces the .com verification note when .com reads available',
   );
 
   // unusable name short-circuits
