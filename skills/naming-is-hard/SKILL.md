@@ -38,6 +38,22 @@ taken everywhere?".
 Do not use it to rename variables or functions in code (that is ordinary editing),
 or for SEO keyword research.
 
+## On invocation
+
+When the user invokes this skill (e.g. `/naming-is-hard`), **start the naming
+flow immediately**. Do not ask "What can I help you with?" or wait passively.
+
+- If the user provided context alongside the invocation (e.g. "name my CLI tool
+  that does X"), proceed directly to Act 1 (the Profile) using that context.
+- If the user invoked the skill bare with no context, look at the current working
+  directory for a README, package.json, or other project files. If you find a
+  project, ask one focused question: "I see you're working on [project]. Would you
+  like to name this, or something else?" Then proceed to Act 1.
+- If there's no project context at all, ask a single question to get started:
+  "What are we naming? Tell me what it is and I'll kick off the process."
+
+The skill exists to DO naming, not to explain itself. Get moving.
+
 ## How it works: five acts
 
 1. **The Profile.** Read the user's context (a description, a repo path, or a URL)
