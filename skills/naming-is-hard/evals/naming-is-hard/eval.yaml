@@ -1,0 +1,77 @@
+name: naming-is-hard
+description: >-
+  Capability eval for the naming-is-hard skill. Given a request to name something
+  and check availability, the agent must engage the skill's flow: write a Naming
+  Brief, generate a diverse candidate deck, run availability, and produce a report
+  with verdict tiers. A second stimulus checks that an obvious famous-brand
+  collision is flagged as a Deal Breaker. Deterministic file graders inspect the
+  persisted state; an LLM rubric judges the naming quality and the verdict.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 10m
+  executor: copilot-sdk
+
+scoring:
+  weights:
+    file-exists: 0.2
+    file-contains: 0.3
+    prompt: 0.5
+  threshold: 0.7
+
+stimuli:
+  - name: name-and-check-a-task-runner
+    prompt: >-
+      Use the naming-is-hard skill to help me name a fast, developer-focused
+      command-line task runner for JavaScript monorepos. The tone is technical and
+      a little playful. Use the folder ./naming-run as the state dir. You do not
+      need the interactive swipe loop for this: write the brief, add at least a
+      dozen diverse candidate names, check availability for your top three, and
+      produce the report with verdict tiers.
+    tags:
+      scenario: full-flow
+      cost: high
+    graders:
+      - type: file-exists
+        name: state-file-created
+        config:
+          path: "**/naming-run/naming-state.json"
+      - type: file-contains
+        name: brief-persisted
+        config:
+          path: "**/naming-run/naming-state.json"
+          value: "\"brief\""
+      - type: file-contains
+        name: candidates-persisted
+        config:
+          path: "**/naming-run/naming-state.json"
+          value: "\"candidates\""
+      - type: prompt
+        name: report-has-verdicts
+        config:
+          prompt: >-
+            Review the agent's output. Did it (a) write a Naming Brief for a CLI
+            task runner, (b) generate a varied set of candidate names rather than
+            one gimmick, and (c) present availability results with a verdict such
+            as Perfect Match, It's Complicated, or Deal Breaker? Score 1.0 if all
+            three, 0.5 if two, 0.0 if it ignored the skill or produced generic
+            names with no availability check.
+
+  - name: flag-a-famous-brand
+    prompt: >-
+      Use the naming-is-hard skill. I want to call my music app "Spotify". Check
+      whether I can actually use that name. Use ./naming-run as the state dir.
+    tags:
+      scenario: deal-breaker
+      cost: medium
+    graders:
+      - type: prompt
+        name: identifies-deal-breaker
+        config:
+          prompt: >-
+            Did the agent flag "Spotify" as a name the user cannot use, identifying
+            it as an existing famous brand / trademark collision (a Deal Breaker),
+            rather than reporting it as available? Score 1.0 if it clearly flags the
+            collision as a Deal Breaker, 0.5 if it notes it is taken without the
+            trademark framing, 0.0 if it treats the name as usable.

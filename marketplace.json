@@ -21,6 +21,12 @@
       "version": "1.1.0"
     },
     {
+      "name": "naming-is-hard",
+      "source": "./skills/naming-is-hard",
+      "description": "Interactive naming assistant: profile what you're building, explore on-brief candidate names while a preference model learns your taste, then validate against real availability (domains via DNS + RDAP, GitHub, npm/PyPI/crates/RubyGems/NuGet, social handles) plus a trademark and existing-business screen. Every finalist rolls up to one of three verdicts: Deal Breaker, It's Complicated, or Perfect Match.",
+      "version": "1.0.0"
+    },
+    {
       "name": "repo-ready",
       "source": "./skills/repo-ready",
       "description": "Scaffold and maintain standard community health files for any GitHub repository. Two modes: init (interview, detect stack, scaffold everything) and update (scan for gaps, suggest additions). Generates .gitignore, .gitattributes, LICENSE, README, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue/PR templates, dependabot, CI workflows, CODEOWNERS, .editorconfig, and more.",

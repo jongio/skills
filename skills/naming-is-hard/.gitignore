@@ -1,0 +1,14 @@
+# Dependencies are not committed; the optional Vally eval pulls dev deps.
+node_modules/
+
+# Skill dev tooling (optional Vally eval) writes results + a lockfile.
+package-lock.json
+vally-results/
+
+# Scratch state written by naming runs during eval/smoke
+naming-run/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
