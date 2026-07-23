@@ -81,13 +81,37 @@ naming playbook and channel details are under [`references/`](references/).
 ## Engine CLI (for the curious)
 
 ```bash
+# Setup and brief
 node scripts/naming.mjs init   --dir ./run
+node scripts/naming.mjs init   --dir ./run --brief-json '{"what":"a task runner"}'
+node scripts/naming.mjs brief  --dir ./run --json '{"what":"a task runner","audience":"devs"}'
+
+# Candidate management
 node scripts/naming.mjs add    --dir ./run --json '[{"name":"Brightloom","strategy":"compound"}]'
-node scripts/naming.mjs next   --dir ./run
-node scripts/naming.mjs swipe  --dir ./run --id brightloom --label like
-node scripts/naming.mjs profile --dir ./run
+node scripts/naming.mjs next   --dir ./run                # best unseen card
+node scripts/naming.mjs next   --dir ./run --count 5      # batch of 5
+
+# Swipe and learn
+node scripts/naming.mjs swipe  --dir ./run --id brightloom --label like   # like|pass|superlike|skip|dislike
+node scripts/naming.mjs rank   --dir ./run                # ranked list by score
+node scripts/naming.mjs rank   --dir ./run --limit 5      # top 5
+node scripts/naming.mjs profile --dir ./run               # explain learned type
+node scripts/naming.mjs suggest --dir ./run --name Brightloom   # morphological variants
+
+# Availability and verdict
 node scripts/naming.mjs check  --dir ./run --names Brightloom
-node scripts/naming.mjs report --dir ./run --names Brightloom
+node scripts/naming.mjs screen --dir ./run --names Brightloom,Flowly --preset cli-first
+node scripts/naming.mjs variants --dir ./run --name Brightloom  # decorated handle variants
+node scripts/naming.mjs report --dir ./run --names Brightloom   # full verdict report
+node scripts/naming.mjs report --dir ./run --names Brightloom --preset domain-first --as-json
+
+# Decision and confusability
+node scripts/naming.mjs similar --dir ./run --name Brightloom --against Bloomlight,Brightroom
+node scripts/naming.mjs duel   --dir ./run --winner brightloom --loser flowly
+
+# State management
+node scripts/naming.mjs state  --dir ./run                # dump current state
+node scripts/naming.mjs reset  --dir ./run                # clear state
 ```
 
 `check`, `screen`, and `variants` are the commands that use the network. A real-network sanity check:
