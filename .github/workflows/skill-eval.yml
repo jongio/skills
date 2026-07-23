@@ -18,9 +18,14 @@ jobs:
       matrix:
         include:
           - skill: skills/create-gh-pages-site
+            skill_id: create-gh-pages-site
             eval_spec: evals/create-gh-pages-site/eval.yaml
           - skill: skills/create-canvas-app
+            skill_id: create-canvas-app
             eval_spec: evals/create-canvas-app/eval.yaml
+          - skill: skills/naming-is-hard
+            skill_id: naming-is-hard
+            eval_spec: evals/naming-is-hard/eval.yaml
     steps:
       - uses: actions/checkout@v4
 
@@ -49,5 +54,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: eval-results-${{ matrix.skill }}
+          name: eval-results-${{ matrix.skill_id }}
           path: ${{ matrix.skill }}/vally-results/

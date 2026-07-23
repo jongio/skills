@@ -28,8 +28,7 @@ jobs:
         uses: withastro/action@v2
         with:
           path: ./site               # the Astro project lives in the site/ subfolder
-        #   node-version: 24         # Node version (default 24)
-        #   package-manager: npm     # auto-detected from your lockfile
+          node-version: 22
 
   deploy:
     needs: build

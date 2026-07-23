@@ -18,13 +18,13 @@ defaults:
 # (does it actually parse?) and the LLM rubric carry the most signal.
 scoring:
   weights:
-    file-exists: 1
-    file-contains: 1
-    file-not-contains: 1
-    file-not-matches: 1
-    output-matches: 1
-    run-command: 2
-    prompt: 2
+    file-exists: 0.10
+    file-contains: 0.10
+    file-not-contains: 0.10
+    file-not-matches: 0.10
+    output-matches: 0.10
+    run-command: 0.25
+    prompt: 0.25
   threshold: 0.8
 
 stimuli:
