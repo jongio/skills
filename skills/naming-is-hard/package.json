@@ -1,0 +1,18 @@
+{
+  "name": "naming-is-hard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interactive naming assistant: profile your project, explore on-brief candidates while the model learns your taste, then validate against real availability (domains, GitHub, registries, social) and a trademark/business screen that flags Deal Breakers.",
+  "license": "MIT",
+  "engines": { "node": ">=18" },
+  "type": "module",
+  "scripts": {
+    "test": "node test/net.test.mjs && node test/features.test.mjs && node test/similarity.test.mjs && node test/marks.test.mjs && node test/model.test.mjs && node test/verdict.test.mjs && node test/availability.test.mjs && node test/store.test.mjs && node test/cli.test.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "eval:lint": "vally lint --eval-spec evals/naming-is-hard/eval.yaml",
+    "eval": "vally eval --eval-spec evals/naming-is-hard/eval.yaml --skill-dir ."
+  },
+  "devDependencies": {
+    "@microsoft/vally-cli": "latest"
+  }
+}

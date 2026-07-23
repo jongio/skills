@@ -1,0 +1,14 @@
+# .vally.yaml : Vally project config for the naming-is-hard skill eval.
+#
+# Wires the skill into the built-in copilot-sdk executor: `vally eval --skill-dir .`
+# reads paths.skills below to discover this skill (node_modules is ignored) and
+# loads it into the agent session.
+#
+# Run from this folder (skills/naming-is-hard), after `npm install`:
+#   npx vally lint --eval-spec evals/naming-is-hard/eval.yaml
+#   npx vally eval --eval-spec evals/naming-is-hard/eval.yaml --skill-dir .
+
+paths:
+  skills: "."
+  evals: "evals"
+  results: "vally-results"
