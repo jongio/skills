@@ -18,14 +18,15 @@ description: >-
 
 # naming-is-hard
 
-There are only two hard things in computer science: cache invalidation and naming
-things. This skill owns the second one.
+An interactive naming assistant for projects, CLIs, products, packages, and
+organizations. It guides you from a blank slate to a validated name you can
+actually ship.
 
-Picking a name has the same shape as dating. You do not write a spec for the
-perfect name; you react to candidates and your taste reveals itself. So this skill
-is a dating app for names: your project gets a profile, candidate names show up as
-cards you swipe on, the app learns your type, and your matches are the names you
-love that are also actually free to use.
+The core insight: you rarely know what name you want until you see candidates and
+react to them. This skill generates diverse on-brief names, learns your
+preferences as you rank them, then validates your finalists against real-world
+availability (domains, GitHub, npm/PyPI, social handles) and flags trademark or
+confusable-name collisions before you commit.
 
 ## When to use it
 
@@ -41,7 +42,7 @@ or for SEO keyword research.
 
 1. **The Profile.** Read the user's context (a description, a repo path, or a URL)
    and write a Naming Brief: what the thing is and will be, who it is for, the
-   tone, and any constraints. This is the dating profile of the project.
+   tone, and any constraints. This anchors all candidate generation.
 2. **The Deck.** Generate a diverse, on-brief pool of candidate names across many
    naming strategies. Each candidate is tagged so the model can learn from it.
 3. **The Swipe.** Show one card at a time. The user swipes Like / Pass / Super-like.
@@ -259,7 +260,7 @@ Now turn likes into a decision.
 
    The report crowns a winner and lists the field. A Deal Breaker is never the
    winner. `.com` is shown but flagged low-signal (it is parked for nearly every
-   name); npm and `.dev` are the signals that matter. Present it in the dating voice.
+   name); npm and `.dev` are the signals that matter. Present it conversationally.
 
 ## Act 5: next actions
 
