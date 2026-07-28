@@ -11,10 +11,19 @@ on:
     # Nightly at 03:00 UTC
     - cron: "0 3 * * *"
 
+# copilot-requests lets the built-in GITHUB_TOKEN authenticate the Copilot
+# SDK that vally drives, so no PAT secret is needed. In a personally-owned
+# repo the usage bills to the repo owner's Copilot seat.
+permissions:
+  contents: read
+  copilot-requests: write
+
 jobs:
   eval:
     runs-on: ubuntu-latest
     strategy:
+      # One skill's eval failing must not cancel the other skills' evals.
+      fail-fast: false
       matrix:
         include:
           - skill: skills/create-gh-pages-site
@@ -48,7 +57,10 @@ jobs:
             --skill-dir . \
             --output-dir ./vally-results
         env:
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_CLI_TOKEN }}
+          # Copilot resolves COPILOT_GITHUB_TOKEN ahead of GITHUB_TOKEN, so set
+          # both to the Actions token and let the SDK pick up either one.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload eval results
         if: always()
