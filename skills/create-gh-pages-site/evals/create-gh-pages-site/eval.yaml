@@ -20,6 +20,27 @@ scoring:
     prompt: 0.50
   threshold: 0.8
 
+# Grader `path` globs use the shape
+# `{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}<file>` instead of a
+# plain `**/<file>`. `**` descends into `node_modules`, so a vendored dependency
+# that ships a same-named file can satisfy a grader on its own and turn a real
+# failure into a false pass. That is not hypothetical: `**/.github/workflows/*.yml`
+# matched `hello-cli/node_modules/@ungap/structured-clone/.github/workflows/node.js.yml`
+# in CI. It passed only because the real deploy workflow happened to match too.
+#
+# The grader config accepts only `path` and `negate` (vally's globFiles() calls
+# picomatch(pattern) with no options and there is no `ignore` option), so the
+# exclusion has to live inside the pattern. `!(node_modules)` guards each leading
+# segment. A `**/!(node_modules)/**/` shape does NOT work, because the leading
+# `**` absorbs `node_modules` before the guard is ever reached.
+#
+# Note that `.github` is spelled literally rather than reached through `**`:
+# picomatch defaults to `dot: false` and will not descend into a dot-directory.
+#
+# Verified with picomatch against the layouts the agent produces (site scaffolded
+# into a subfolder and into the repo root) plus node_modules negative controls.
+# Do not "simplify" these back to `**/`.
+
 stimuli:
   - name: astro-site-for-cli-tool
     prompt: >-
@@ -40,34 +61,34 @@ stimuli:
       - type: file-exists
         name: deploy-workflow-created
         config:
-          path: "**/.github/workflows/*.yml"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}.github/workflows/*.yml"
       - type: file-exists
         name: astro-config-exists
         config:
-          path: "**/astro.config.*"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}astro.config.*"
       - type: file-exists
         name: index-page-exists
         config:
-          path: "**/src/pages/index.astro"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}src/pages/index.astro"
       - type: file-contains
         name: base-path-injected
         config:
-          path: "**/astro.config.*"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}astro.config.*"
           value: "/hello-cli/"
       - type: file-contains
         name: workflow-uses-deploy-pages
         config:
-          path: "**/.github/workflows/*.yml"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}.github/workflows/*.yml"
           value: "actions/deploy-pages"
       - type: file-not-contains
         name: no-leftover-sentinels
         config:
-          path: "**/astro.config.*"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}astro.config.*"
           value: "__BASE_PATH__"
       - type: file-not-contains
         name: no-generic-site-name
         config:
-          path: "**/src/pages/index.astro"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}src/pages/index.astro"
           value: "__SITE_NAME__"
       - type: prompt
         name: content-reflects-repo
@@ -96,20 +117,20 @@ stimuli:
       - type: file-exists
         name: deploy-workflow-created
         config:
-          path: "**/.github/workflows/*.yml"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}.github/workflows/*.yml"
       - type: file-exists
         name: index-html-exists
         config:
-          path: "**/index.html"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}index.html"
       - type: file-contains
         name: workflow-uses-deploy-pages
         config:
-          path: "**/.github/workflows/*.yml"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}.github/workflows/*.yml"
           value: "actions/deploy-pages"
       - type: file-not-contains
         name: no-leftover-sentinels
         config:
-          path: "**/index.html"
+          path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}index.html"
           value: "__SITE_NAME__"
       - type: prompt
         name: content-reflects-repo
