@@ -22,9 +22,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Node 24, not 22. Vally declares `npm>=11.11.1`, and Node 22 still
+      # bundles npm 10.x, which makes every install log an EBADENGINE warning.
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
 
       # Pinned to the same range the skills' package.json files declare. This
       # job lints every skill, including ones with no package.json of their own,
