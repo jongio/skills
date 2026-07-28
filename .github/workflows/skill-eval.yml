@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       skill:
-        description: "Skill directory to evaluate (e.g. skills/create-gh-pages-site)"
+        description: "Skill to evaluate, by id or path (e.g. create-canvas-app). Leave empty to run every skill."
         required: false
         type: string
   schedule:
@@ -19,22 +19,46 @@ permissions:
   copilot-requests: write
 
 jobs:
+  # Resolves the workflow_dispatch `skill` input into the job matrix. The skill
+  # list lives here only, so adding a skill means editing one place.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - name: Select skills to evaluate
+        id: select
+        env:
+          # Passed via env, never interpolated into the script, so a crafted
+          # dispatch input cannot inject shell.
+          SKILL: ${{ inputs.skill }}
+        run: |
+          set -euo pipefail
+          all='[
+            {"skill":"skills/create-gh-pages-site","skill_id":"create-gh-pages-site","eval_spec":"evals/create-gh-pages-site/eval.yaml"},
+            {"skill":"skills/create-canvas-app","skill_id":"create-canvas-app","eval_spec":"evals/create-canvas-app/eval.yaml"},
+            {"skill":"skills/naming-is-hard","skill_id":"naming-is-hard","eval_spec":"evals/naming-is-hard/eval.yaml"}
+          ]'
+          if [ -z "${SKILL:-}" ]; then
+            selected=$(jq -c . <<<"$all")
+          else
+            selected=$(jq -c --arg s "$SKILL" '[.[] | select(.skill_id == $s or .skill == $s)]' <<<"$all")
+            if [ "$(jq 'length' <<<"$selected")" -eq 0 ]; then
+              echo "::error::No skill matches '$SKILL'. Valid ids: $(jq -r '[.[].skill_id] | join(", ")' <<<"$all")"
+              exit 1
+            fi
+          fi
+          echo "matrix=$selected" >> "$GITHUB_OUTPUT"
+          echo "Evaluating: $(jq -r '[.[].skill_id] | join(", ")' <<<"$selected")"
+
   eval:
+    needs: plan
     runs-on: ubuntu-latest
     strategy:
       # One skill's eval failing must not cancel the other skills' evals.
       fail-fast: false
       matrix:
-        include:
-          - skill: skills/create-gh-pages-site
-            skill_id: create-gh-pages-site
-            eval_spec: evals/create-gh-pages-site/eval.yaml
-          - skill: skills/create-canvas-app
-            skill_id: create-canvas-app
-            eval_spec: evals/create-canvas-app/eval.yaml
-          - skill: skills/naming-is-hard
-            skill_id: naming-is-hard
-            eval_spec: evals/naming-is-hard/eval.yaml
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
