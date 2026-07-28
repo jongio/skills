@@ -6,12 +6,16 @@ on:
       - "skills/**/SKILL.md"
       - "skills/**/*.yaml"
       - "skills/**/eval.yaml"
+      # Without this, edits to this workflow never lint themselves, so a
+      # change here can only be verified by a manual workflow_dispatch.
+      - ".github/workflows/skill-lint.yml"
   push:
     branches: [main]
     paths:
       - "skills/**/SKILL.md"
       - "skills/**/*.yaml"
       - "skills/**/eval.yaml"
+      - ".github/workflows/skill-lint.yml"
   workflow_dispatch:
 
 jobs:
