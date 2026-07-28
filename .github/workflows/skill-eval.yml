@@ -60,9 +60,9 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -70,13 +70,16 @@ jobs:
         working-directory: ${{ matrix.skill }}
         run: npm install
 
-      - name: Install Vally CLI
-        run: npm install -g @microsoft/vally-cli
-
+      # Deliberately NOT a global `npm install -g @microsoft/vally-cli`. The
+      # step above already installs the skill's own devDependencies, so running
+      # the local binary keeps CI on exactly the version the skill's
+      # package.json declares. A global install floats to whatever is newest and
+      # silently diverges from what `npm run eval` uses locally, which is how CI
+      # ended up on 0.11.0 while package.json still pinned ^0.10.0.
       - name: Run eval
         working-directory: ${{ matrix.skill }}
         run: |
-          vally eval \
+          ./node_modules/.bin/vally eval \
             --eval-spec ${{ matrix.eval_spec }} \
             --skill-dir . \
             --output-dir ./vally-results
@@ -88,7 +91,7 @@ jobs:
 
       - name: Upload eval results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: eval-results-${{ matrix.skill_id }}
           path: ${{ matrix.skill }}/vally-results/

@@ -732,7 +732,7 @@ on:
     node: () => {
       const pm = opts.pkgManager || 'npm';
       const install = pm === 'pnpm'
-        ? `      - uses: pnpm/action-setup@v4\n      - run: pnpm install --frozen-lockfile`
+        ? `      - uses: pnpm/action-setup@v6\n      - run: pnpm install --frozen-lockfile`
         : pm === 'yarn'
           ? '      - run: yarn install --frozen-lockfile'
           : '      - run: npm ci';
@@ -744,9 +744,9 @@ on:
       matrix:
         node-version: [20.x, 22.x]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Use Node.js \${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: \${{ matrix.node-version }}
 ${install}
@@ -762,9 +762,9 @@ ${install}
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Python \${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: \${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
@@ -775,8 +775,8 @@ ${install}
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: go build -v ./...
@@ -787,7 +787,7 @@ ${install}
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build
         run: cargo build --verbose
       - name: Run tests
@@ -802,8 +802,8 @@ ${install}
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 9.0.x
       - run: dotnet restore
@@ -818,7 +818,7 @@ ${install}
       matrix:
         ruby-version: ["3.2", "3.3"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: \${{ matrix.ruby-version }}
@@ -830,8 +830,8 @@ ${install}
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 21

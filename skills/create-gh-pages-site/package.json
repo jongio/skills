@@ -12,6 +12,6 @@
     "eval": "vally eval --eval-spec evals/create-gh-pages-site/eval.yaml --skill-dir ."
   },
   "devDependencies": {
-    "@microsoft/vally-cli": "latest"
+    "@microsoft/vally-cli": "^0.11.0"
   }
 }

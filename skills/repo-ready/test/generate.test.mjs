@@ -168,9 +168,9 @@ function teardown() {
 {
   const content = generateCIWorkflow(['node'], { pkgManager: 'pnpm' });
   assert(content.includes('name: CI'));
-  assert(content.includes('actions/checkout@v4'));
-  assert(content.includes('actions/setup-node@v4'));
-  assert(content.includes('pnpm/action-setup@v4'));
+  assert(content.includes('actions/checkout@v7'));
+  assert(content.includes('actions/setup-node@v7'));
+  assert(content.includes('pnpm/action-setup@v6'));
   assert(content.includes('pnpm install --frozen-lockfile'));
   assert(content.includes('pnpm test'));
   console.log('PASS: CI workflow generated for Node.js with pnpm');
@@ -179,7 +179,7 @@ function teardown() {
 // Test: generateCIWorkflow for Python
 {
   const content = generateCIWorkflow(['python']);
-  assert(content.includes('actions/setup-python@v5'));
+  assert(content.includes('actions/setup-python@v7'));
   assert(content.includes('pytest'));
   console.log('PASS: CI workflow generated for Python');
 }
@@ -187,7 +187,7 @@ function teardown() {
 // Test: generateCIWorkflow for Go
 {
   const content = generateCIWorkflow(['go']);
-  assert(content.includes('actions/setup-go@v5'));
+  assert(content.includes('actions/setup-go@v7'));
   assert(content.includes('go build'));
   assert(content.includes('go test'));
   console.log('PASS: CI workflow generated for Go');

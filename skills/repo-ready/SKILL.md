@@ -328,11 +328,11 @@ validation, and checkboxes.
 ### CI workflow
 
 Generate based on detected stack. Use the latest stable action versions:
-- `actions/checkout@v4`
-- `actions/setup-node@v4`
-- `actions/setup-python@v5`
-- `actions/setup-go@v5`
-- `actions/setup-dotnet@v4`
+- `actions/checkout@v7`
+- `actions/setup-node@v7`
+- `actions/setup-python@v7`
+- `actions/setup-go@v7`
+- `actions/setup-dotnet@v6`
 
 ### CONTRIBUTING.md
 

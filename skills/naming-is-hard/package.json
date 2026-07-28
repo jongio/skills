@@ -13,6 +13,6 @@
     "eval": "vally eval --eval-spec evals/naming-is-hard/eval.yaml --skill-dir ."
   },
   "devDependencies": {
-    "@microsoft/vally-cli": "latest"
+    "@microsoft/vally-cli": "^0.11.0"
   }
 }

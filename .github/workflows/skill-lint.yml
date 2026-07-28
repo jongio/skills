@@ -18,16 +18,20 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
+      # Pinned to the same range the skills' package.json files declare. This
+      # job lints every skill, including ones with no package.json of their own,
+      # so it cannot use a local install the way skill-eval.yml does. Keep this
+      # range in step with skills/*/package.json when bumping vally.
       - name: Install Vally CLI
-        run: npm install -g @microsoft/vally-cli
+        run: npm install -g "@microsoft/vally-cli@^0.11.0"
 
       - name: Determine skills to lint
         id: skills

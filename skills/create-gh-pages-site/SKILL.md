@@ -78,12 +78,12 @@ Every template deploys via the **GitHub Actions** Pages source (not "deploy from
 branch"), using the current first-party actions:
 
 ```
-actions/configure-pages@v5  →  build  →  actions/upload-pages-artifact@v3  →  actions/deploy-pages@v4
+actions/configure-pages@v6  →  build  →  actions/upload-pages-artifact@v5  →  actions/deploy-pages@v5
 ```
 
 - `static-html`, `react-vite`, `eleventy` use that chain directly.
-- `astro` uses the official `withastro/action@v2` (it builds + produces the Pages
-  artifact) then `actions/deploy-pages@v4`.
+- `astro` uses the official `withastro/action@v6` (it builds + produces the Pages
+  artifact) then `actions/deploy-pages@v5`.
 - `jekyll` uses GitHub's official `actions/jekyll-build-pages@v1` then `deploy-pages`.
 
 Every workflow declares `permissions: { contents: read, pages: write,
