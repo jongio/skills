@@ -35,13 +35,22 @@ scoring:
 # `file-not-*` graders, passes vacuously on zero matches). The optional `{,.*/}`
 # segment makes the dot-directory explicit while still matching the generator's
 # default non-dot folder. Do not "simplify" these back to `**/`.
+#
+# Both stimuli also pin the install target to the working directory. SKILL.md
+# offers two targets (`.github/extensions/<name>` and
+# `$COPILOT_HOME/extensions/<name>`), and vally only walks the run's workDir.
+# When the agent picked COPILOT_HOME the canvas landed outside the graded tree,
+# so every workspace grader saw an empty repo even though the agent had done
+# the work correctly. Pinning removes that coin flip; it does not weaken the
+# eval, since `.github/extensions/` is the target SKILL.md lists first.
 
 stimuli:
   - name: kanban-board-canvas
     prompt: >-
       Build a kanban board canvas with the create-canvas-app skill. Scaffold it
-      with the generator, keep the vendored canvas-kit folder, shape a small
-      board (columns / cards), and make sure it boots.
+      with the generator into .github/extensions/ inside the current working
+      directory (not COPILOT_HOME), keep the vendored canvas-kit folder, shape a
+      small board (columns / cards), and make sure it boots.
     tags:
       canvas: kanban
       cost: high
@@ -147,9 +156,10 @@ stimuli:
   - name: data-canvas-autorefresh
     prompt: >-
       Build a data canvas that fetches from an API and auto-refreshes, using the
-      create-canvas-app skill's data template. Point it at a JSON API, fetch
-      inside an action handler with a timeout, and refresh on a visibility-gated
-      timer.
+      create-canvas-app skill's data template. Scaffold it into
+      .github/extensions/ inside the current working directory (not
+      COPILOT_HOME). Point it at a JSON API, fetch inside an action handler with
+      a timeout, and refresh on a visibility-gated timer.
     tags:
       canvas: data
       cost: high
