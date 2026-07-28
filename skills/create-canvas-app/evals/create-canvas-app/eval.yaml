@@ -27,6 +27,15 @@ scoring:
     prompt: 0.25
   threshold: 0.8
 
+# Grader `path` globs use the shape `{,**/}{,.*/}{,**/}<file>` instead of a plain
+# `**/<file>`. vally's globFiles() calls picomatch(pattern) with no options, so
+# `dot` defaults to false and `**` will not descend into a dot-directory. SKILL.md
+# tells the agent to install into `.github/extensions/<name>/` first, so a plain
+# `**/canvas.mjs` matches nothing and every file grader fails (or, for the
+# `file-not-*` graders, passes vacuously on zero matches). The optional `{,.*/}`
+# segment makes the dot-directory explicit while still matching the generator's
+# default non-dot folder. Do not "simplify" these back to `**/`.
+
 stimuli:
   - name: kanban-board-canvas
     prompt: >-
@@ -40,39 +49,39 @@ stimuli:
       - type: file-exists
         name: canvas-scaffolded
         config:
-          path: "**/canvas.mjs"
+          path: "{,**/}{,.*/}{,**/}canvas.mjs"
       - type: file-exists
         name: view-scaffolded
         config:
-          path: "**/web/app.mjs"
+          path: "{,**/}{,.*/}{,**/}web/app.mjs"
       - type: file-exists
         name: kit-vendored
         config:
-          path: "**/canvas-kit/server.mjs"
+          path: "{,**/}{,.*/}{,**/}canvas-kit/server.mjs"
       - type: file-contains
         name: sdk-in-extension
         config:
-          path: "**/extension.mjs"
+          path: "{,**/}{,.*/}{,**/}extension.mjs"
           value: "@github/copilot-sdk/extension"
       - type: file-not-contains
         name: no-sdk-in-canvas
         config:
-          path: "**/canvas.mjs"
+          path: "{,**/}{,.*/}{,**/}canvas.mjs"
           value: "@github/copilot-sdk"
       - type: file-not-contains
         name: no-sdk-in-view
         config:
-          path: "**/web/app.mjs"
+          path: "{,**/}{,.*/}{,**/}web/app.mjs"
           value: "@github/copilot-sdk"
       - type: file-contains
         name: uses-mountcanvas
         config:
-          path: "**/web/app.mjs"
+          path: "{,**/}{,.*/}{,**/}web/app.mjs"
           value: "mountCanvas"
       - type: file-contains
         name: uses-kit-nid
         config:
-          path: "**/canvas.mjs"
+          path: "{,**/}{,.*/}{,**/}canvas.mjs"
           value: "nid"
       - type: file-not-matches
         name: no-innerhtml-repaint
@@ -81,7 +90,7 @@ stimuli:
           # substring "innerHTML" — the kit legitimately uses Preact's
           # `dangerouslySetInnerHTML` to render Lucide SVGs, and comments may
           # mention innerHTML.
-          path: "**/web/app.mjs"
+          path: "{,**/}{,.*/}{,**/}web/app.mjs"
           pattern: "\\.innerHTML\\s*\\+?="
       - type: run-command
         name: generated-sources-parse
@@ -148,30 +157,30 @@ stimuli:
       - type: file-exists
         name: canvas-scaffolded
         config:
-          path: "**/canvas.mjs"
+          path: "{,**/}{,.*/}{,**/}canvas.mjs"
       - type: file-exists
         name: view-scaffolded
         config:
-          path: "**/web/app.mjs"
+          path: "{,**/}{,.*/}{,**/}web/app.mjs"
       - type: file-contains
         name: uses-pollwhilevisible
         config:
-          path: "**/web/app.mjs"
+          path: "{,**/}{,.*/}{,**/}web/app.mjs"
           value: "pollWhileVisible"
       - type: file-contains
         name: fetch-timeout-in-handler
         config:
-          path: "**/canvas.mjs"
+          path: "{,**/}{,.*/}{,**/}canvas.mjs"
           value: "AbortSignal.timeout"
       - type: file-not-contains
         name: no-fetch-in-view
         config:
-          path: "**/web/app.mjs"
+          path: "{,**/}{,.*/}{,**/}web/app.mjs"
           value: "fetch("
       - type: file-not-contains
         name: no-sdk-in-view
         config:
-          path: "**/web/app.mjs"
+          path: "{,**/}{,.*/}{,**/}web/app.mjs"
           value: "@github/copilot-sdk"
       - type: output-matches
         name: mentions-refresh
