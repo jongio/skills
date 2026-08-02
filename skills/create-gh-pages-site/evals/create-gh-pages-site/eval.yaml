@@ -47,7 +47,8 @@ stimuli:
       Use the create-gh-pages-site skill to scaffold an Astro GitHub Pages site
       for the repo "octocat/hello-cli". The repo is a CLI tool. Use the astro
       template. Make sure the base path, deploy workflow, and site content are
-      correct for that repo.
+      correct for that repo. The current working directory contains the target
+      repo fixture; scaffold the site into that directory, not elsewhere.
     tags:
       template: astro
       cost: high
@@ -103,7 +104,9 @@ stimuli:
     prompt: >-
       Use the create-gh-pages-site skill to scaffold a static HTML GitHub Pages
       site for the repo "octocat/math-utils". The repo is a JavaScript math
-      utility library. Use the static-html template.
+      utility library. Use the static-html template. The current working directory
+      contains the target repo fixture; scaffold the site into that directory, not
+      elsewhere.
     tags:
       template: static-html
       cost: high

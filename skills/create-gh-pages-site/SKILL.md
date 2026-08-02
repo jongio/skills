@@ -140,6 +140,23 @@ only for the gaps. When you **inferred** rather than were told, confirm in one l
 before scaffolding — e.g. *"Astro site → octocat/blog (current repo), base `/blog/` —
 go?"*
 
+## Output location invariant
+
+**The user's current working directory is the destination workspace.** A repo slug
+such as `octocat/blog` determines the Pages base path and URLs; it does not mean the
+site belongs in `/tmp/blog`, a sibling directory, or the skill's own directory.
+
+- If the workspace already contains repo files, scaffold in place with
+  `--dir . --force`, even when it is not a git checkout and the prompt supplies the
+  repo slug explicitly.
+- Never `cd` into the skill directory to run the generator. Invoke
+  `scripts/new-site.mjs` by its absolute path while keeping the workspace as the
+  process working directory.
+- Use another output directory only when the user explicitly asks for a subfolder
+  or a new/different repo.
+- Before reporting completion, confirm the generated config, content, and
+  `.github/workflows` files exist under the original working directory.
+
 ## The workflow you follow
 
 1. **Interview / gather context.** Resolve the questions above via `ask_user`. You
@@ -152,8 +169,9 @@ go?"*
    site URL, and title, and lays down the deploy workflow.
 4. **Place it in the repo:**
    - *Current repo (default)*: stamp into the repo root (or a subfolder if it's a
-     subdirectory site, adjusting the workflow's upload path). Pass `--dir .`
-     `--force` to write in place, and reconcile an existing `deploy.yml` rather than
+     subdirectory site, adjusting the workflow's upload path). From the original
+     working directory, invoke the generator by absolute path and pass `--dir .`
+     `--force` to write in place. Reconcile an existing `deploy.yml` rather than
      blindly overwriting it.
    - *New repo (only when asked)*: create it (e.g. `gh repo create <name> --public`),
      stamp into it, and push. Match the repo name you used for the base path.
@@ -204,17 +222,19 @@ Pass `--templates-dir <path>` to scaffold from a local copy offline.
 Examples:
 
 ```sh
-# Scaffold for the CURRENT repo (base path inferred from its origin remote):
-node scripts/new-site.mjs astro
+# Run from the target workspace; SKILL_DIR is this skill's absolute directory.
+# Scaffold in place for the current repo (base inferred from its origin remote):
+node "$SKILL_DIR/scripts/new-site.mjs" astro --dir . --force
 
-# An Astro content site for a specific project repo:
-node scripts/new-site.mjs astro --repo octocat/blog --site-name "Octocat's Blog"
+# The workspace is an existing project without git metadata; the slug only supplies
+# deployment identity and the base path. Output still goes into the workspace:
+node "$SKILL_DIR/scripts/new-site.mjs" astro --repo octocat/blog --dir . --force
 
-# A React SPA dashboard:
-node scripts/new-site.mjs react-vite --repo octocat/dashboard
+# Create a subfolder only when the user explicitly requested one:
+node "$SKILL_DIR/scripts/new-site.mjs" react-vite --repo octocat/dashboard --dir ./site
 
 # A user site (served from "/") or a quick local scaffold:
-node scripts/new-site.mjs static-html --base / --dir ./site
+node "$SKILL_DIR/scripts/new-site.mjs" static-html --base / --dir . --force
 ```
 
 The generator replaces a small set of sentinels (`__BASE_PATH__`, `__BASE_URL__`,
