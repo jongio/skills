@@ -4,7 +4,9 @@
   "private": true,
   "description": "Interactive naming assistant: profile your project, explore on-brief candidates while the model learns your taste, then validate against real availability (domains, GitHub, registries, social) and a trademark/business screen that flags Deal Breakers.",
   "license": "MIT",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "type": "module",
   "scripts": {
     "test": "node test/net.test.mjs && node test/features.test.mjs && node test/similarity.test.mjs && node test/marks.test.mjs && node test/model.test.mjs && node test/verdict.test.mjs && node test/availability.test.mjs && node test/store.test.mjs && node test/cli.test.mjs",
@@ -13,6 +15,11 @@
     "eval": "vally eval --eval-spec evals/naming-is-hard/eval.yaml --skill-dir ."
   },
   "devDependencies": {
-    "@microsoft/vally-cli": "^0.11.0"
+    "@microsoft/vally-cli": "0.14.0"
+  },
+  "allowScripts": {
+    "@vscode/deviceid": false,
+    "better-sqlite3": false,
+    "koffi": false
   }
 }

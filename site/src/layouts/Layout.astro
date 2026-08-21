@@ -39,11 +39,18 @@ const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.gi
       :root {
         --bg: #0d1117; --panel: #161b22; --border: #30363d;
         --fg: #e6edf3; --muted: #9198a1; --accent: #2f81f7;
+        /* Separate from --accent on purpose. --accent is tuned for link text on
+           the dark background, where a lighter blue reads better. White text on
+           that same blue is only 3.75:1, below the 4.5:1 WCAG AA minimum, so
+           solid fills use a darker blue (4.63:1). Darkening --accent itself
+           would fix buttons but drop link contrast to 4.08:1. */
+        --accent-solid: #1f6feb;
         --radius: 12px;
       }
       :root[data-theme="light"] {
         --bg: #fff; --panel: #f6f8fa; --border: #d0d7de;
         --fg: #1f2328; --muted: #59636e; --accent: #0969da;
+        --accent-solid: #0969da;
       }
       * { box-sizing: border-box; }
       body {
@@ -82,7 +89,7 @@ const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.gi
       .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem 1.4rem; margin: 1rem 0; }
       .card h2 { margin: 0 0 0.5rem; font-size: 1.2rem; }
       .muted { color: var(--muted); }
-      .btn { display: inline-block; padding: 0.55rem 1.05rem; border-radius: 9px; background: var(--accent); color: #fff; border: 1px solid transparent; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+      .btn { display: inline-block; padding: 0.55rem 1.05rem; border-radius: 9px; background: var(--accent-solid); color: #fff; border: 1px solid transparent; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
       ul.posts { list-style: none; padding: 0; }
       ul.posts li { display: flex; justify-content: space-between; gap: 1rem; padding: 0.6rem 0; border-bottom: 1px solid var(--border); }
       .codeblock { position: relative; }
@@ -94,7 +101,7 @@ const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.gi
         cursor: pointer; transition: color 0.15s, border-color 0.15s, background 0.15s;
       }
       .copy-btn:hover { color: var(--fg); border-color: var(--accent); }
-      .copy-btn.copied { color: #fff; background: var(--accent); border-color: var(--accent); }
+      .copy-btn.copied { color: #fff; background: var(--accent-solid); border-color: var(--accent-solid); }
       @media (prefers-reduced-motion: reduce) { body { transition: none; } }
     </style>
   </head>

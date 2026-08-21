@@ -1,0 +1,21 @@
+{
+  "name": "eli5",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A context-grounded skill for clear, accurate, beginner-friendly explanations.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node test/registration.test.mjs",
+    "eval:lint": "vally lint --eval-spec evals/eli5/eval.yaml --strict",
+    "eval": "vally eval --eval-spec evals/eli5/eval.yaml --skill-dir ."
+  },
+  "devDependencies": {
+    "@microsoft/vally-cli": "0.14.0"
+  },
+  "allowScripts": {
+    "@vscode/deviceid": false,
+    "better-sqlite3": false,
+    "koffi": false
+  }
+}

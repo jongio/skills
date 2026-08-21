@@ -12,6 +12,11 @@
     "eval": "vally eval --eval-spec evals/create-gh-pages-site/eval.yaml --skill-dir ."
   },
   "devDependencies": {
-    "@microsoft/vally-cli": "^0.11.0"
+    "@microsoft/vally-cli": "0.14.0"
+  },
+  "allowScripts": {
+    "@vscode/deviceid": false,
+    "better-sqlite3": false,
+    "koffi": false
   }
 }

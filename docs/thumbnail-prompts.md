@@ -55,7 +55,8 @@ the per-skill accent color):
 - Minimal text, crisp and professional, no photorealism.
 
 Per-skill accent: `create-canvas-app` = purple/indigo, `create-gh-pages-site` =
-blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green.
+blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
+`eli5` = sky blue + warm amber.
 
 ## Prompts
 
@@ -115,3 +116,25 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green.
 > mark. Palette warm rose pink and GitHub green with soft lavender accents on white,
 > generous white space, crisp professional flat design, clean legible sans serif text, no
 > photorealism.
+
+### eli5 (exact prompt used)
+
+> Flat vector illustration app thumbnail on a pure white background, 1024x1024,
+> centered composition, clean modern rounded shapes with soft long shadows,
+> subtle dashed guide lines and tiny sparkles. Theme: turning something
+> complicated into a simple and honest explanation, promoting a tool called ELI5.
+> Left third: a rounded light gray panel holding a tangled knot of overlapping
+> wires, a jagged zigzag line chart and four dense unreadable gray text lines,
+> representing the confusing original. Middle: a short thick amber arrow pointing
+> right, with two tiny sparkles above it. Right two thirds: a rounded sky blue
+> panel holding four evenly spaced white rounded tiles in a two by two grid, each
+> tile carrying one simple icon and a small green check badge in its corner, in
+> this order: a glowing light bulb for the big idea, two interlocking puzzle
+> pieces for the familiar comparison, a small luggage style name tag for the real
+> terms, and a dashed boundary line with one small amber dot for the point where
+> the comparison stops working. Above the blue panel, a small rounded pill banner
+> shows the exact word 'ELI5' in clean bold sans serif. Include the GitHub Octocat
+> logo as a clean small mark in the top right corner, linked to the scene by a
+> thin dashed guide line. Palette sky blue and warm amber with GitHub green check
+> marks and soft neutral gray for the confusing side, generous white space, crisp
+> professional flat design, clean legible sans serif text, no photorealism.
