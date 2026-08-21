@@ -31,6 +31,12 @@
       "source": "./skills/repo-ready",
       "description": "Scaffold and maintain standard community health files for any GitHub repository. Two modes: init (interview, detect stack, scaffold everything) and update (scan for gaps, suggest additions). Generates .gitignore, .gitattributes, LICENSE, README, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue/PR templates, dependabot, CI workflows, CODEOWNERS, .editorconfig, and more.",
       "version": "1.0.0"
+    },
+    {
+      "name": "eli5",
+      "source": "./skills/eli5",
+      "description": "Explain the subject already in context using plain language, a useful analogy, the proper grown-up terms, and an honest note about where the analogy stops working.",
+      "version": "1.0.0"
     }
   ]
 }

@@ -32,6 +32,10 @@ stimuli:
     tags:
       scenario: full-flow
       cost: high
+    rubric:
+      - The output includes a Naming Brief tailored to a command-line task runner.
+      - The candidate set is varied rather than repeating one naming gimmick.
+      - Availability results use the skill's Perfect Match, It's Complicated, or Deal Breaker verdicts.
     graders:
       - type: file-exists
         name: state-file-created
@@ -65,6 +69,9 @@ stimuli:
     tags:
       scenario: deal-breaker
       cost: medium
+    rubric:
+      - Spotify is identified as an existing famous brand and trademark collision.
+      - The name receives a Deal Breaker verdict rather than being presented as usable.
     graders:
       - type: prompt
         name: identifies-deal-breaker

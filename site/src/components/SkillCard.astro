@@ -1,13 +1,16 @@
 ---
 interface Props {
   href: string;
+  skillId: string;
   title: string;
   tagline: string;
   thumb: string;
 }
-const { href, title, tagline, thumb } = Astro.props;
+const { href, skillId, title, tagline, thumb } = Astro.props;
 const base = import.meta.env.BASE_URL;
-const install = `install ${title} from jongio/skills`;
+// The install command must use the skill id, not the display title. The title
+// is human-readable and may differ from the id it is installed by.
+const install = `install ${skillId} from jongio/skills`;
 ---
 
 <article class="skill-card">

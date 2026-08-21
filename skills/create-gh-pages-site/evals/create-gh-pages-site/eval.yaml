@@ -52,6 +52,9 @@ stimuli:
     tags:
       template: astro
       cost: high
+    rubric:
+      - The generated content names hello-cli and accurately describes it as a CLI tool.
+      - The site content is specific to the target repository rather than template placeholder text.
     environment:
       files:
         - src: fixtures/astro-cli/README.md
@@ -110,6 +113,9 @@ stimuli:
     tags:
       template: static-html
       cost: high
+    rubric:
+      - The generated content names math-utils and describes its add, multiply, and clamp functions.
+      - The site contains repository-specific content rather than generic template text.
     environment:
       files:
         - src: fixtures/static-library/README.md

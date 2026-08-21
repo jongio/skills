@@ -31,6 +31,7 @@ const skills = (await getCollection("skills")).sort(
       {skills.map((s) => (
         <SkillCard
           href={`${base}catalog/${s.id}/`}
+          skillId={s.id}
           title={s.data.title}
           tagline={s.data.tagline}
           thumb={s.data.thumb}

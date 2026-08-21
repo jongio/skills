@@ -1,8 +1,7 @@
 # Dependencies are not committed; the optional Vally eval pulls dev deps.
 node_modules/
 
-# Skill dev tooling (optional Vally eval) writes results + a lockfile.
-package-lock.json
+# Skill dev tooling (optional Vally eval) writes local results.
 vally-results/
 
 # Scratch state written by naming runs during eval/smoke
