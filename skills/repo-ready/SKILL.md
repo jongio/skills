@@ -10,8 +10,7 @@ description: >-
   best practices, and suggest additions file by file). Use when the user says
   "repo ready", "repo init", "repo health", "community health", "add
   gitignore", "add license", "repo files", "repo setup", or asks about
-  missing repo files. Do NOT use for project code scaffolding (use
-  devx-scaffold), GitHub Pages setup (use create-gh-pages-site), or CI
+  missing repo files. Do NOT use for project code scaffolding, GitHub Pages setup (use create-gh-pages-site), or CI
   pipeline design beyond the starter workflow.
 ---
 

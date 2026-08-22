@@ -441,17 +441,17 @@ from the environment, never logged.
 
 - **Test suite**: 84 passed, 0 failed (9 test files)
 - **Test plan reconciled**: 46 functionality units (F1 through F46), zero GAP rows, Status COVERED
-- **devx-code-review**: Invoked via MQ. 2 LOW findings found and fixed:
+- **Code review**: Invoked via MQ. 2 LOW findings found and fixed:
   - CR-001: Added `isValidShape()` guard in `store.mjs` to validate loaded state shape at boundary
   - CR-002: Replaced overly broad `endsWith('naming.mjs')` direct-invocation check with URL pathname comparison
-- **devx-refactoring**: Invoked via MQ. 1 LOW finding found and fixed:
+- **Refactoring scan**: Invoked via MQ. 1 LOW finding found and fixed:
   - RF-001: Extracted shared test mock factories (`res`, `mockFetch`, `publicResolver`, `nsAbsent`, `nsMock`, `tmp`) to `test/helpers.mjs`
-- **devx-dependencies**: Invoked via MQ. 0 findings. Zero runtime deps, one devDependency (`@microsoft/vally-cli`)
-- **devx-idiomatic-audit**: Invoked via MQ. 1 LOW finding found and fixed:
+- **Dependency review**: Invoked via MQ. 0 findings. Zero runtime deps, one devDependency (`@microsoft/vally-cli`)
+- **Idiomatic audit**: Invoked via MQ. 1 LOW finding found and fixed:
   - IDIO-001: Added `"engines": {"node": ">=18"}` to `package.json`
-- **devx-test-health**: Invoked via MQ. 0 findings. All 84 tests deterministic, no flaky/skip/pending
-- **devx-secops**: Invoked via MQ. 0 CRITICAL/HIGH. SSRF-safe design verified (slug sanitization to `[a-z0-9-]`, host allowlist, DNS rebinding protection with both syntactic and resolution checks, redirect hop guard)
-- **devx-smells**: Invoked via MQ. 0 findings
+- **Test health**: Invoked via MQ. 0 findings. All 84 tests deterministic, no flaky/skip/pending
+- **Security review**: Invoked via MQ. 0 CRITICAL/HIGH. SSRF-safe design verified (slug sanitization to `[a-z0-9-]`, host allowlist, DNS rebinding protection with both syntactic and resolution checks, redirect hop guard)
+- **Code smell scan**: Invoked via MQ. 0 findings
 - **CRITICAL/HIGH remaining**: 0
 - **Bloat check**: Clean. No orphan files, no speculative infrastructure, no single-impl abstractions
 - **Feature surface completeness**: All 8 engine modules wired through CLI, all exports tested
@@ -459,8 +459,8 @@ from the environment, never logged.
 
 ### GATE EVIDENCE: phase: 4
 
-- **devx-max-quality**: Invoked as skill (full 4-wave pipeline). All gates READY. 4 LOW findings total, all fixed before certification
-- **devx-doc-check**: Invoked. README.md, SKILL.md, evals/README.md all substantive. Root README.md references skill in table. Spec and test plan exist. No gaps
+- **Full quality pipeline**: Invoked as skill (full 4-wave pipeline). All gates READY. 4 LOW findings total, all fixed before certification
+- **Documentation audit**: Invoked. README.md, SKILL.md, evals/README.md all substantive. Root README.md references skill in table. Spec and test plan exist. No gaps
 - **Plan verify**: All 22 acceptance criteria satisfied (AC1 through AC22 verified against implementation files and test names). 46 functionality units mapped, zero gaps
 - **Goal challenge**: Original goal was a "dating for names" skill with preference learning, real-time availability checking, trademark screening, and verdict tiers. Delivery matches: 8 engine modules, 84 tests, 22 ACs, Vally eval spec, SSRF-safe network boundary. Goal achieved
 - **Date**: 2026-07-22

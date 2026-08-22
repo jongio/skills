@@ -5,7 +5,7 @@
 GATE EVIDENCE:
   phase: 1
   gate: scope-and-plan
-  command: devx-product-requirements; devx-board-review; devx-interview; devx-architecture-design; devx-plan; devx-gut-check
+  command: product requirements; board review; interview; architecture design; plan; gut check
   exit_code: 0
   scope: P1 user-facing installable skill; issue creation deferred to Phase 5 human gate
   output: 6 acceptance criteria, 0 open questions, 7 planned tests, approved product and architecture documents
@@ -30,12 +30,12 @@ GATE EVIDENCE:
   exit_code: 0
   scope: new skill contract, capability evals, deterministic parity test, distribution manifests, Astro catalog, CI workflows, skill dependency lockfiles
   output: 5/5 skill test suites pass; skill lint 2/2; 3/3 eval specs valid under strict lint; site builds 8 pages including the new catalog route; npm ci validates for all 4 skills plus site; 0 vulnerabilities across all 4 skills (was 4 moderate in 3 of them)
-  devx_reviews: devx-code-review, devx-secops, devx-refactoring, devx-smells, devx-idiomatic-audit, devx-dependencies, devx-test-health
+  reviews: code review, security review, refactoring, code smells, idiomatic audit, dependencies, test health
   findings_fixed: 8 (categorical no-tools contract rule, new injection eval scenario, 6 parity-test hardening assertions, base.sha env routing, duplicated trigger paths collapsed, OTel advisories cleared, engine floor corrected, test-plan reconciliation corrected)
   findings_rejected: 3 (allowScripts "inert lavamoat schema" disproved; "injection contract adequate" rested on a fabricated SKILL.md quote; "new eval keys may fail strict lint" disproved by running the lint)
   findings_deferred: 1 (IDIO-001 GitHub Actions SHA pinning, owner-accepted as a repo-wide policy change; all five refs are first-party actions/*)
   ci_hygiene_added: job timeout-minutes on all three jobs; npm caching enabled by the committed lockfiles
-  upstream_blocker: source-lock.mjs --entry code-review exits 1 (gh HTTP 404 on the pinned private source wbreza/skills@349f8c31). Neither authenticated account can read it, so devx-wbreza-code-review, devx-wbreza-security-review, and devx-wbreza-ux-verification cannot run and no proof receipt can be recorded. The protocol forbids running a partial or unverified upstream workflow, so this is recorded as blocked rather than satisfied or waived. Root cause is environmental access to a third-party private repository, independent of this change set. Repository owner elected on 2026-08-21 to skip the pinned upstream review for now and proceed. This gate remains OPEN and must be satisfied before the P1 claim is complete.
+  upstream_blocker: the pinned upstream source lock exits non-zero (HTTP 404 on a private source repository). Neither authenticated account can read it, so the pinned upstream code review, security review, and UX verification cannot run and no proof receipt can be recorded. The protocol forbids running a partial or unverified upstream workflow, so this is recorded as blocked rather than satisfied or waived. Root cause is environmental access to a third-party private repository, independent of this change set. Repository owner elected on 2026-08-21 to skip the pinned upstream review for now and proceed. This gate remains OPEN and must be satisfied before the P1 claim is complete.
   upstream_blocker_triage: N/A (blocked)
   upstream_approval_equivalent: N/A (blocked)
   upstream_source: N/A (blocked)
@@ -51,7 +51,7 @@ GATE EVIDENCE:
   phase: 4
   gate: certify
   status: COMPLETE
-  command: devx-doc-check; devx-anti-slop; devx-accessibility-audit; devx-design-review; npm test (x5 skills); npm run build (site); vally lint
+  command: documentation audit; anti-slop check; accessibility audit; design review; npm test (x5 skills); npm run build (site); vally lint
   exit_code: 0
   scope: user-facing documentation, catalog copy, the new catalog route, and the new thumbnail
   acceptance_criteria: 6 of 6 satisfied (AC-1 through AC-6 mapped to T1 through T15 and to executed commands)
