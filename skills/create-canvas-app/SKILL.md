@@ -43,7 +43,7 @@ use repaints the whole tree and loses keystrokes on every push. Don't do that.
 
 ## The model (read this before coding)
 
-```
+```text
 extension.mjs   ── the ONLY file that imports the Copilot SDK (thin adapter; also wires host AI)
 canvas.mjs      ── your canvas: id, schema, state load/save, action handlers (SDK-free)
 canvas-kit/     ── the kit (copied in verbatim; do not edit)
@@ -275,7 +275,7 @@ Stamp this whole shape with `node scripts/new-canvas.mjs <name> --template data`
 ## Build a canvas — fastest path
 
 1. **Stamp it** (one working canvas, kit already nested, a smoke test included):
-   ```
+   ```sh
    node scripts/new-canvas.mjs <name> --dir <target> --title "Display Name"
    ```
    Target `.github/extensions/<name>` for an in-repo extension (committed, shared
@@ -312,7 +312,7 @@ vendored copies honest.
 
 - **Re-sync after a kit change.** Bump `KIT_VERSION` when you change any kit file,
   then refresh each vendored copy:
-  ```
+  ```sh
   node scripts/sync-kit.mjs <extension-dir>
   ```
   This makes `<extension-dir>/canvas-kit/` an exact mirror of `kit/` —
@@ -322,7 +322,7 @@ vendored copies honest.
 
 - **Gate drift in CI (offline).** Fail the build if any vendored kit has drifted
   from `kit/` — by file set, by file contents, or by recorded version:
-  ```
+  ```sh
   node scripts/check-kit-freshness.mjs <extensions-dir>
   ```
   Point it at a folder of extensions (e.g. `.github/extensions`), a single
@@ -337,7 +337,7 @@ out-of-band, so it never counts against `kit/` ↔ `canvas-kit/` parity.
   AUTO-GENERATED to match the exact `lucide-react` release the Copilot host app
   ships, so canvases render the same glyphs the host does. When the host bumps its
   Lucide version, regenerate the file deterministically rather than hand-editing:
-  ```
+  ```sh
   node scripts/vendor-lucide.mjs <version>
   ```
   Then bump `KIT_VERSION` and re-sync vendored copies. Pass `--icons-dir <path>`

@@ -323,7 +323,7 @@ Now turn likes into a decision.
    1 winner with no mention of the other 5, that is a failure. They will feel unheard
    and wonder if the skill even remembered their choices. The minimum output is:
 
-   ```
+   ```text
    ## 💚 Winner: Noshcheck
    [scorecard + why it won]
 

@@ -2,7 +2,7 @@
   "name": "create-canvas-app",
   "version": "0.0.0",
   "private": true,
-  "description": "Dev tooling for the create-canvas-app skill (tests + Vally eval). Shipped canvases never get a package.json — this is for the skill repo only.",
+  "description": "Dev tooling for the create-canvas-app skill (tests + Vally eval). Shipped canvases never get a package.json; this is for the skill repo only.",
   "license": "MIT",
   "scripts": {
     "test": "node test/http.test.mjs && node test/client.test.mjs && node test/kit-parity.test.mjs && node test/deeplinks.test.mjs && node test/generator.test.mjs && node test/tooling.test.mjs && node test/vendor-lucide.test.mjs && node test/kit-runtime.test.mjs",

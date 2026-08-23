@@ -1,8 +1,8 @@
 {
   "name": "naming-is-hard",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "private": true,
-  "description": "Interactive naming assistant: profile your project, explore on-brief candidates while the model learns your taste, then validate against real availability (domains, GitHub, registries, social) and a trademark/business screen that flags Deal Breakers.",
+  "description": "Dev tooling for the naming-is-hard skill (tests + Vally eval). The shipped skill carries no package.json; this is for the skill repo only.",
   "license": "MIT",
   "engines": {
     "node": ">=22.12.0"

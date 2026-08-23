@@ -12,6 +12,16 @@ vally-results/
 # Local canvas state written by the reference extension / generated canvases.
 artifacts/
 
+# Local browser automation session artifacts.
+.playwright-cli/
+.playwright-mcp/
+
+# Local agent tooling state and review receipts. These were previously covered
+# only by .git/info/exclude, which is per-clone and never shared, so a fresh
+# clone would have committed them.
+.impeccable/
+.code-review/
+
 # OS / editor noise
 .DS_Store
 Thumbs.db

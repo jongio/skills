@@ -1,0 +1,27 @@
+{
+  "name": "dns-doctor",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Dev tooling for the dns-doctor skill (tests + Vally eval). The shipped skill carries no package.json; this is for the skill repo only.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "npm": ">=11.11.1"
+  },
+  "packageManager": "npm@11.18.0",
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:coverage": "node --experimental-test-coverage --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=90 --test \"test/*.test.mjs\"",
+    "eval:lint": "vally lint --eval-spec evals/dns-doctor/eval.yaml",
+    "eval": "vally eval --eval-spec evals/dns-doctor/eval.yaml --skill-dir ."
+  },
+  "allowScripts": {
+    "@vscode/deviceid": false,
+    "better-sqlite3": false,
+    "koffi": false
+  },
+  "devDependencies": {
+    "@microsoft/vally-cli": "0.14.0"
+  }
+}

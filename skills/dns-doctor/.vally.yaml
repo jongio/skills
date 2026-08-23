@@ -1,0 +1,10 @@
+# Vally project config for the dns-doctor capability evaluation.
+#
+# Run from skills/dns-doctor after npm ci --ignore-scripts:
+#   npm run eval:lint
+#   npm run eval
+
+paths:
+  skills: "."
+  evals: "evals"
+  results: "vally-results"

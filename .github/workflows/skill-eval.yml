@@ -16,7 +16,12 @@ on:
 # repo the usage bills to the repo owner's Copilot seat.
 permissions:
   contents: read
+  # Required for Vally's Copilot SDK authentication on trusted-context runs.
   copilot-requests: write
+
+concurrency:
+  group: skill-eval-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   # Resolves the workflow_dispatch `skill` input into the job matrix. The skill
@@ -27,6 +32,10 @@ jobs:
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
       - name: Select skills to evaluate
         id: select
         env:
@@ -39,7 +48,9 @@ jobs:
             {"skill":"skills/create-gh-pages-site","skill_id":"create-gh-pages-site","eval_spec":"evals/create-gh-pages-site/eval.yaml"},
             {"skill":"skills/create-canvas-app","skill_id":"create-canvas-app","eval_spec":"evals/create-canvas-app/eval.yaml"},
             {"skill":"skills/naming-is-hard","skill_id":"naming-is-hard","eval_spec":"evals/naming-is-hard/eval.yaml"},
-            {"skill":"skills/eli5","skill_id":"eli5","eval_spec":"evals/eli5/eval.yaml"}
+            {"skill":"skills/eli5","skill_id":"eli5","eval_spec":"evals/eli5/eval.yaml"},
+            {"skill":"skills/repo-ready","skill_id":"repo-ready","eval_spec":"evals/repo-ready/eval.yaml"},
+            {"skill":"skills/dns-doctor","skill_id":"dns-doctor","eval_spec":"evals/dns-doctor/eval.yaml"}
           ]'
           if [ -z "${SKILL:-}" ]; then
             selected=$(jq -c . <<<"$all")
@@ -63,14 +74,15 @@ jobs:
     strategy:
       # One skill's eval failing must not cancel the other skills' evals.
       fail-fast: false
+      max-parallel: 2
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Node 24, not 22. Vally declares `npm>=11.11.1`, and Node 22 still
       # bundles npm 10.x, which makes every install log an EBADENGINE warning.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
@@ -80,6 +92,19 @@ jobs:
         working-directory: ${{ matrix.skill }}
         run: npm ci
 
+      # Scoped to the skills that ship a test suite plus an eval spec.
+      # `--if-present` lets one step serve both without inventing scripts a
+      # skill does not declare: dns-doctor has a coverage gate, repo-ready
+      # does not.
+      - name: Validate skill
+        if: matrix.skill_id == 'dns-doctor' || matrix.skill_id == 'repo-ready'
+        working-directory: ${{ matrix.skill }}
+        run: |
+          set -euo pipefail
+          npm run test --if-present
+          npm run test:coverage --if-present
+          npm run eval:lint --if-present
+
       # Deliberately NOT a global `npm install -g @microsoft/vally-cli`. The
       # step above already installs the skill's own devDependencies, so running
       # the local binary keeps CI on exactly the version the skill's
@@ -88,20 +113,71 @@ jobs:
       # ended up on 0.11.0 while package.json still pinned ^0.10.0.
       - name: Run eval
         working-directory: ${{ matrix.skill }}
-        run: |
-          ./node_modules/.bin/vally eval \
-            --eval-spec ${{ matrix.eval_spec }} \
-            --skill-dir . \
-            --output-dir ./vally-results
         env:
           # Copilot resolves COPILOT_GITHUB_TOKEN ahead of GITHUB_TOKEN, so set
           # both to the Actions token and let the SDK pick up either one.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUNS: "5"
+        run: |
+          ./node_modules/.bin/vally --version
+          ./node_modules/.bin/vally eval \
+            --eval-spec ${{ matrix.eval_spec }} \
+            --skill-dir . \
+            --output-dir ./vally-results \
+            --runs "$RUNS" \
+            --workers 2 \
+            --max-retries 0
+
+      - name: Assert eval passed
+        working-directory: ${{ matrix.skill }}
+        run: |
+          set -euo pipefail
+          summary=$(find vally-results -name results.jsonl -type f -print -quit)
+          test -n "$summary"
+          # This gate is deliberately STRICTER than vally's own verdict, in two
+          # different ways, and the difference matters when authoring stimuli.
+          #
+          # Prompt graders are forgiven: vally averages their scores into
+          # `overallScore`, so a stimulus that scores 4/5 still contributes and
+          # the eval can pass on the mean.
+          #
+          # skill-invocation, diff-empty, and tool-calls are NOT forgiven. Every
+          # trial of every stimulus must pass all three, and RUNS below is 5, so
+          # one flaky trial in 5 fails the whole job.
+          #
+          # The practical consequence: a stimulus whose correct answer can be
+          # produced WITHOUT opening the skill (a flat refusal, or a question
+          # back to the user) will intermittently fail skill-invocation and make
+          # this job look randomly broken. Write every stimulus so a correct
+          # answer requires skill-specific knowledge.
+          jq -s -e '
+            ([.[] | select(.type == "trial-result")] | group_by(.stimulus)) as $stimuli |
+            ([.[] | select(.type == "run-summary")] | last) as $run |
+            ($run.passed == true) and
+            ($run.hadExecutionErrors == false) and
+            ($run.evals | length > 0) and
+            ($run.evals | all(
+              (.passed == true) and
+              (.scoringApplied == true) and
+              (.overallScore >= .threshold)
+            )) and
+            ($stimuli | length > 0) and
+            ($stimuli | all(
+              all(.[].gradeResult.details[];
+                if (.name | test("^(skill-invocation|diff-empty|tool-calls)"))
+                then .passed == true
+                else true
+                end
+              )
+            ))
+          ' "$summary" > /dev/null
 
       - name: Upload eval results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: eval-results-${{ matrix.skill_id }}
-          path: ${{ matrix.skill }}/vally-results/
+          path: |
+            ${{ matrix.skill }}/vally-results/
+            !${{ matrix.skill }}/vally-results/**/events.jsonl

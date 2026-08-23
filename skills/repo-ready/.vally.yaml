@@ -1,0 +1,10 @@
+# Vally project config for the repo-ready capability evaluation.
+#
+# Run from skills/repo-ready after npm ci --ignore-scripts:
+#   npm run eval:lint
+#   npm run eval
+
+paths:
+  skills: "."
+  evals: "evals"
+  results: "vally-results"

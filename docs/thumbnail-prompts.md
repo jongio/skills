@@ -40,8 +40,9 @@ print("saved", os.environ["OUT"])
 '@ | python -
 ```
 
-The catalog site also keeps a copy at `site/public/images/thumb-<skill>.png`, referenced
-from `site/src/content/skills/<skill>.md` frontmatter.
+The catalog site also keeps a PNG or SVG asset at
+`site/public/images/thumb-<skill>.<ext>`, referenced from
+`site/src/content/skills/<skill>.md` frontmatter.
 
 ## House style
 
@@ -57,6 +58,7 @@ the per-skill accent color):
 Per-skill accent: `create-canvas-app` = purple/indigo, `create-gh-pages-site` =
 blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 `eli5` = sky blue + warm amber.
+`dns-doctor` = DNS blue + health green + warning amber.
 
 ## Prompts
 
@@ -138,3 +140,26 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 > thin dashed guide line. Palette sky blue and warm amber with GitHub green check
 > marks and soft neutral gray for the confusing side, generous white space, crisp
 > professional flat design, clean legible sans serif text, no photorealism.
+### dns-doctor (exact prompt used)
+
+> Flat vector illustration app thumbnail on a pure white background, 1024x1024,
+> centered composition, matching a polished GitHub developer-tools catalog.
+> Create one cohesive DNS diagnostic workstation scene, not a generic icon
+> panel. Center: a large dark-navy browser-style diagnostic console with rounded
+> corners and soft long shadow. Inside it, show a luminous blue domain globe at
+> the top branching through clean dashed routing lines to three distinct DNS
+> record cards below: an A record card with a server icon, an MX record card
+> with an envelope icon, and a TLS certificate card with a shield icon. Each
+> record card has crisp layered details and a small status badge: two green
+> checks and one amber warning. Wrap a teal stethoscope around the domain globe,
+> with its chest piece becoming a blue magnifying lens inspecting the amber
+> record. Add a tiny red broken-link indicator on one branch to suggest
+> diagnosis without making the scene alarming. Place a small GitHub Octocat
+> mark in a circular badge near the upper-right, connected to the console by a
+> subtle dotted guide line. Palette: deep GitHub navy, Azure blue, teal and
+> health green, amber warning, very restrained coral red. Rich but uncluttered
+> flat vector detail, clean modern rounded geometry, consistent medium-weight
+> outlines, subtle dashed guide lines, tiny sparkles, generous white space,
+> crisp professional finish. No words, no letters, no fake text, no
+> photorealism, no 3D render, no giant magnifying glass obscuring the
+> composition, no ECG pulse line.

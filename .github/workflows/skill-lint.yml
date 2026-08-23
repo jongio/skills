@@ -126,3 +126,31 @@ jobs:
         run: |
           npm ci --prefix site
           npm run build --prefix site
+
+  # The dns-doctor cache engine resolves platform cache paths and refuses
+  # redirected paths, and both behave differently per operating system. macOS
+  # in particular puts os.tmpdir() under /var, which is itself a link to
+  # /private/var, so a guard that compares a path to its own resolved form
+  # fails there and nowhere else. That regression is only observable on this
+  # matrix, so the suite runs on all three.
+  dns-doctor-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: skills/dns-doctor/package-lock.json
+      - name: Install dependencies
+        working-directory: skills/dns-doctor
+        run: npm ci --ignore-scripts
+      - name: Run tests and enforce coverage
+        working-directory: skills/dns-doctor
+        run: npm run test:coverage

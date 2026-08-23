@@ -1,0 +1,12 @@
+{
+  "name": "skills-ci-vally",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "devDependencies": {
+    "@microsoft/vally-cli": "0.14.0"
+  },
+  "overrides": {
+    "@azure/monitor-opentelemetry-exporter": "1.0.0-beta.44"
+  }
+}
