@@ -41,7 +41,7 @@ or reference it in your Copilot instructions.
 
 In any Copilot-enabled agent (GitHub Copilot, Claude Code, Cursor, etc.):
 
-```
+```text
 repo-ready          # Init mode: scaffold all files with guided interview
 repo-ready init     # Same as above (explicit)
 repo-ready update   # Update mode: scan for gaps, suggest additions
@@ -123,7 +123,7 @@ npm test    # Run all tests
 
 ### Directory structure
 
-```
+```text
 skills/repo-ready/
   SKILL.md              # Agent instructions (the skill contract)
   README.md             # This file

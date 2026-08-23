@@ -19,6 +19,7 @@ and aim for the listed size. Delete this file once every image is real.
 | `invoke-create-gh-pages-site.png` | `create-gh-pages-site` card/detail | Composer screenshot of invoking the skill. |
 | `invoke-repo-ready.svg` | `repo-ready` card/detail | Illustrated thumbnail: git branch, checklist of health files, gap indicator. |
 | `thumb-eli5.png` | `eli5` card/detail | Generated with `gpt-image-2` from the prompt in `docs/thumbnail-prompts.md`. Byte-identical to `skills/eli5/thumbnail.png`, and a test asserts that. |
+| `thumb-dns-doctor.png` | `dns-doctor` card/detail | GPT Image 2 illustration: DNS diagnostic workstation, record cards, and stethoscope. |
 
 Tips:
 - Export at 2× for crisp display on high-DPI screens, then keep the file small.

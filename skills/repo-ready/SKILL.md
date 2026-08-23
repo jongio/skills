@@ -10,8 +10,9 @@ description: >-
   best practices, and suggest additions file by file). Use when the user says
   "repo ready", "repo init", "repo health", "community health", "add
   gitignore", "add license", "repo files", "repo setup", or asks about
-  missing repo files. Do NOT use for project code scaffolding, GitHub Pages setup (use create-gh-pages-site), or CI
-  pipeline design beyond the starter workflow.
+  missing repo files. Do NOT use for project code scaffolding, GitHub Pages
+  setup (use create-gh-pages-site), or CI pipeline design beyond the starter
+  workflow.
 ---
 
 # Repo Ready
@@ -249,7 +250,7 @@ Multiple stacks combine: a repo with `package.json` + `Dockerfile` +
 
 For `.gitignore` generation, the skill uses the Toptal gitignore.io API:
 
-```
+```text
 GET https://www.toptal.com/developers/gitignore/api/{templates}
 ```
 
@@ -258,14 +259,15 @@ Where `{templates}` is a comma-separated list like `node,macos,windows,visualstu
 The generator always includes OS templates (`macos,windows,linux`) and editor
 templates (`visualstudiocode`) alongside the detected stack templates.
 
-If the API is unreachable, fall back to bundled minimal templates in
-`references/gitignore-fallbacks/`.
+If the API is unreachable, `fetchGitignore()` in `scripts/generate.mjs` falls
+back to a bundled minimal template covering dependencies, build output, env
+files, and OS noise.
 
 ## The GitHub Licenses API
 
 For `LICENSE` generation, use the GitHub API:
 
-```
+```text
 GET https://api.github.com/licenses/{spdx-id}
 ```
 
@@ -408,7 +410,7 @@ When running in update mode (`repo-ready update`):
 
 ## The generator
 
-```
+```sh
 node scripts/generate.mjs <mode> [options]
 ```
 

@@ -25,7 +25,7 @@ npx skills add jongio/skills --skill create-gh-pages-site -g --agent github-copi
 
 **3. Ask Copilot to build a site:**
 
-```
+```text
 /create-gh-pages-site put this repo on GitHub Pages as an Astro blog
 ```
 
@@ -84,11 +84,11 @@ node scripts/make-placeholder.mjs --out site/public/images --preset cli --repo o
 
 Once installed, describe the site you want:
 
-```
+```text
 /create-gh-pages-site a docs site with Eleventy in a new repo called octocat/docs
 ```
 
-```
+```text
 /create-gh-pages-site put this folder of HTML on Pages
 ```
 
@@ -177,7 +177,7 @@ placeholder generator. Template + deploy-workflow validation lives in the regist
 
 ## Layout
 
-```
+```text
 SKILL.md                     The skill (authoring contract + workflow)
 scripts/
   new-site.mjs               Generator — fetch a template, inject the base path

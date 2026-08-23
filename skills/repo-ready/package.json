@@ -1,11 +1,25 @@
 {
   "name": "repo-ready",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "private": true,
-  "description": "Scaffold and maintain standard community health files for any GitHub repository. Auto-detects stack, interviews the user, generates .gitignore, LICENSE, CONTRIBUTING, issue templates, CI workflows, and more.",
+  "description": "Dev tooling for the repo-ready skill (tests). The shipped skill carries no package.json; this is for the skill repo only.",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "npm": ">=11.11.1"
+  },
   "scripts": {
-    "test": "node test/detect.test.mjs && node test/scan.test.mjs && node test/generate.test.mjs"
+    "test": "node test/detect.test.mjs && node test/scan.test.mjs && node test/generate.test.mjs",
+    "eval:lint": "vally lint --eval-spec evals/repo-ready/eval.yaml",
+    "eval": "vally eval --eval-spec evals/repo-ready/eval.yaml --skill-dir ."
+  },
+  "allowScripts": {
+    "@vscode/deviceid": false,
+    "better-sqlite3": false,
+    "koffi": false
+  },
+  "devDependencies": {
+    "@microsoft/vally-cli": "0.14.0"
   }
 }

@@ -23,7 +23,7 @@ npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot
 
 **3. Ask Copilot to build a canvas:**
 
-```
+```text
 /create-canvas-app build a kanban board canvas with todo / doing / done columns
 ```
 
@@ -68,11 +68,11 @@ to your request, and validates it visually before handing it back.
 
 Once installed, invoke the skill by name and describe the canvas you want:
 
-```
+```text
 /create-canvas-app make a canvas that tracks release readiness checklist items
 ```
 
-```
+```text
 /create-canvas-app a canvas to review and triage incoming webhook events
 ```
 
@@ -173,7 +173,7 @@ from jongio/copilot-extensions/extensions/stock-ticker."* No clone, no build.
 
 ## Layout
 
-```
+```text
 SKILL.md                      The Copilot skill (authoring contract + workflow)
 kit/                          The canonical kit — copy into your extension as canvas-kit/
   client.mjs                  Browser runtime: html, mountCanvas, pollWhileVisible, hooks, Icon, formatters, deep-link builders

@@ -17,6 +17,7 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`repo-ready`](skills/repo-ready/) | Scaffold and maintain the standard community health files every GitHub repository needs (.gitignore, LICENSE, CONTRIBUTING, issue templates, CI workflows, dependabot, and more). Two modes: init (interview + scaffold) and update (scan for gaps). |
 | [`naming-is-hard`](skills/naming-is-hard/) | Interactive naming assistant for projects, CLIs, and products. Profiles what you're building, generates diverse candidate names, learns your preferences as you react, and validates finalists against real availability (domains, GitHub, npm/PyPI/crates/RubyGems/NuGet, social handles) plus a trademark and existing-business screen. Every finalist lands a verdict: Deal Breaker, It's Complicated, or Perfect Match. |
 | [`eli5`](skills/eli5/) | Explain the code, error, design, or idea already in context using plain language, a useful analogy, the proper grown-up terms, and an honest note about where the analogy stops working. |
+| [`dns-doctor`](skills/dns-doctor/) | Audit DNS delegation, records, DNSSEC, CAA, web routing, TLS, CDN behavior, mail authentication, takeover exposure, and zone hygiene, then apply exact provider changes only after explicit user approval. |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:
@@ -95,7 +96,7 @@ copilot plugin install jongio/skills
 
 ## Layout
 
-```
+```text
 marketplace.json             Copilot marketplace manifest (indexes skills as plugins)
 plugin.json                   Copilot plugin manifest (skills: "skills/")
 skills/

@@ -48,7 +48,7 @@ internal links resolve under `https://jongio.github.io/skills/`.
 
 ## Structure
 
-```
+```text
 astro.config.mjs              site + base for GitHub Pages
 src/
   content.config.ts           the `skills` content collection schema

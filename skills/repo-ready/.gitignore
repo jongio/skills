@@ -1,0 +1,10 @@
+# Dependencies are not committed; the optional Vally eval pulls dev deps.
+node_modules/
+
+# Skill dev tooling writes results; its lockfile is committed for reproducible CI.
+vally-results/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log

@@ -77,7 +77,7 @@ edit the base) once the repo exists.
 Every template deploys via the **GitHub Actions** Pages source (not "deploy from a
 branch"), using the current first-party actions:
 
-```
+```text
 actions/configure-pages@v6  →  build  →  actions/upload-pages-artifact@v5  →  actions/deploy-pages@v5
 ```
 
@@ -199,7 +199,7 @@ site belongs in `/tmp/blog`, a sibling directory, or the skill's own directory.
 
 ## Stamp a site — the generator
 
-```
+```sh
 node scripts/new-site.mjs <template> --repo <owner/name> [options]
 ```
 
@@ -391,7 +391,7 @@ registry. The skill does **not** bundle its own copy — the generator fetches
 templates from the registry at runtime (override with `--registry <owner/repo>`, or
 scaffold offline from a local checkout with `--templates-dir <path>`):
 
-```
+```sh
 node scripts/new-site.mjs astro --repo octocat/blog            # default registry
 node scripts/new-site.mjs astro --templates-dir ../gh-pages-templates/templates
 ```

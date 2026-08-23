@@ -1,0 +1,191 @@
+name: repo-ready
+description: >-
+  Capability eval for the repo-ready skill. The agent must resolve repository
+  visibility from authoritative data instead of inferring it from a name, keep
+  scaffolding behind the interview protocol, combine detected stacks into the
+  right gitignore templates, restrict update mode to genuine gaps, and map a
+  stated licensing intent onto the correct SPDX identifier. Every stimulus is
+  analysis-only: no network calls, no file writes.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 10m
+  executor: copilot-sdk
+
+scoring:
+  weights:
+    prompt: 0.52
+    skill-invocation: 0.16
+    diff-empty: 0.16
+    tool-calls: 0.16
+  threshold: 0.85
+
+stimuli:
+  - name: visibility-never-inferred
+    prompt: >-
+      Use repo-ready on a repository named "public-tools". Do not run any
+      command and do not create any file. I have not told you whether it is
+      public or private. Tell me how repo-ready establishes repository
+      visibility, the exact command it uses, why the repository name is not
+      acceptable evidence, and which audience default follows from a private
+      result.
+    tags:
+      scenario: visibility
+      cost: medium
+    rubric:
+      - Refuses to infer visibility from the repository name.
+      - Names the authoritative gh api command used to read visibility.
+      - Explains the fallback of asking the user when gh is unavailable.
+      - States that a private result defaults the audience to internal or personal.
+    graders:
+      - type: prompt
+        name: resolves-visibility-authoritatively
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response refuses to treat the name
+            "public-tools" as evidence of visibility, identifies the
+            authoritative source as a gh api call against the repository that
+            reads the private field, states that the user is asked directly
+            when gh is unavailable or fails, and reports that a private
+            repository defaults the audience to internal or personal rather
+            than open source. Score 1 if it asserts the repository is public.
+      - type: skill-invocation
+        config:
+          required: [repo-ready]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: ^(?:powershell|bash)$
+              command: (?i)((?<!['"])https?://|\b(gh|curl(?:\.exe)?|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod|node|npx|deno|bun|python3?)\b)
+            - name: web_fetch|web_search|playwright
+
+  - name: multi-stack-gitignore-composition
+    prompt: >-
+      Use repo-ready on a repository that contains Cargo.toml, pyproject.toml,
+      and a Dockerfile. Do not run any command, do not make a network request,
+      and do not create any file. Tell me which gitignore templates repo-ready
+      requests for this repository, including the templates it always adds
+      regardless of detected stack, which API it requests them from, and what
+      it does when that API cannot be reached.
+    tags:
+      scenario: stack-detection
+      cost: medium
+    rubric:
+      - Combines all three detected stacks rather than choosing one.
+      - Names the OS and editor templates that are always included.
+      - Identifies the gitignore.io API endpoint used for template retrieval.
+      - Describes the offline fallback to a bundled minimal template.
+    graders:
+      - type: prompt
+        name: composes-multi-stack-templates
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response combines all three detected stacks
+            (rust, python, and docker) rather than selecting a single one,
+            states that macos, windows, linux, and visualstudiocode are always
+            included regardless of detected stack, identifies the gitignore.io
+            endpoint at www.toptal.com/developers/gitignore/api as the source,
+            and describes falling back to a bundled minimal template when that
+            request fails. Score 1 if it names only one stack or invents a
+            template source.
+      - type: skill-invocation
+        config:
+          required: [repo-ready]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: ^(?:powershell|bash)$
+              command: (?i)((?<!['"])https?://|\b(gh|curl(?:\.exe)?|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod|node|npx|deno|bun|python3?)\b)
+            - name: web_fetch|web_search|playwright
+
+  - name: update-mode-fills-gaps-only
+    prompt: >-
+      Run repo-ready update on a repository that already has a README.md, a
+      LICENSE, and a .gitignore, but no SECURITY.md, no CODE_OF_CONDUCT.md, and
+      no issue templates. Do not run any command and do not create or modify
+      any file. Tell me exactly what update mode does with the three files that
+      already exist, which missing community health files it would report, and
+      how update mode differs from init mode.
+    tags:
+      scenario: update-mode
+      cost: medium
+    rubric:
+      - Leaves the three existing files untouched rather than regenerating them.
+      - Reports the missing community health files as gaps.
+      - Distinguishes update mode from init mode by scope.
+      - Offers the missing files rather than creating them unprompted.
+    graders:
+      - type: prompt
+        name: restricts-update-to-gaps
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response leaves the existing README, LICENSE,
+            and gitignore untouched rather than overwriting or regenerating
+            them, identifies the missing files as gaps including SECURITY.md,
+            CODE_OF_CONDUCT.md, and the issue templates, explains that update
+            mode creates only what is missing while init mode scaffolds
+            everything, and offers the missing files for confirmation rather
+            than creating them unprompted. Score 1 if it proposes overwriting
+            an existing file.
+      - type: skill-invocation
+        config:
+          required: [repo-ready]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: ^(?:powershell|bash)$
+              command: (?i)((?<!['"])https?://|\b(gh|curl(?:\.exe)?|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod|node|npx|deno|bun|python3?)\b)
+            - name: web_fetch|web_search|playwright
+
+  - name: license-intent-mapping
+    prompt: >-
+      Use repo-ready for the license step only. Do not run any command, do not
+      make a network request, and do not create any file. I want people to be
+      able to use my library freely, but I also want patent protection. Tell me
+      which license repo-ready recommends for that intent, which license it
+      would recommend instead if I wanted every derivative work to stay open,
+      where repo-ready retrieves the license text, and how it determines the
+      copyright holder.
+    tags:
+      scenario: license
+      cost: medium
+    rubric:
+      - Maps the stated patent-protection intent to Apache-2.0.
+      - Maps a strong copyleft intent to GPL-3.0 or AGPL-3.0.
+      - Identifies the GitHub Licenses API as the source of license text.
+      - Defaults the copyright holder to the git user name or detected org.
+    graders:
+      - type: prompt
+        name: maps-intent-to-license
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response recommends Apache-2.0 for the stated
+            combination of permissive use and patent protection, names GPL-3.0
+            or AGPL-3.0 as the alternative when derivatives must stay open,
+            identifies api.github.com/licenses as the source of the license
+            text with year and fullname placeholders to fill in, and states
+            that the copyright holder defaults to the git user name or the
+            organization detected from the remote. Score 1 if it recommends a
+            license that does not grant patent rights for the stated intent.
+      - type: skill-invocation
+        config:
+          required: [repo-ready]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: ^(?:powershell|bash)$
+              command: (?i)((?<!['"])https?://|\b(gh|curl(?:\.exe)?|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod|node|npx|deno|bun|python3?)\b)
+            - name: web_fetch|web_search|playwright

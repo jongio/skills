@@ -37,6 +37,12 @@
       "source": "./skills/eli5",
       "description": "Explain the subject already in context using plain language, a useful analogy, the proper grown-up terms, and an honest note about where the analogy stops working.",
       "version": "1.0.0"
+    },
+    {
+      "name": "dns-doctor",
+      "source": "./skills/dns-doctor",
+      "description": "Audit DNS and domain health with explicit evidence coverage across delegation, records, DNSSEC, CAA, web routing, TLS, CDN behavior, mail authentication, takeover exposure, TTLs, and zone hygiene, then apply exact provider changes only after explicit user approval.",
+      "version": "1.0.0"
     }
   ]
 }
