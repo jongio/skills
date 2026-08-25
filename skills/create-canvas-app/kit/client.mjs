@@ -36,6 +36,7 @@ export {
   hostedLauncherUrl,
   buildSessionDeepLink,
   buildSessionDetailDeepLink,
+  buildSessionRestartDeepLink,
   buildChatsDeepLink,
   buildNewChatDeepLink,
   buildNewAutomationDeepLink,

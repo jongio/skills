@@ -80,6 +80,24 @@ opens the session.
 `sessionId` must be a safe token (`[A-Za-z0-9._-]`, `<=256` chars) so it cannot add
 path segments or query keys.
 
+### `sessions/:sessionId/restart`: restart a session's Copilot CLI process
+
+`buildSessionRestartDeepLink(sessionId)` → `ghapp://sessions/<id>/restart`
+
+Restarts the session's Copilot CLI process — kills the child process and spawns a
+fresh one, the same operation as the `/restart-session` slash command. Use it when
+a canvas needs the app to pick up process-start-resolved state (MCP servers,
+extensions resolved at launch) that a plain `plugins.reload()` / `skills.reload()`
+re-reads from disk but can't respawn.
+
+This route is **destructive** (queued input and any in-flight response are
+discarded) and a global entry point, so it is **always confirmation-gated**: the
+app never navigates directly or self-approves the way `sessions/:sessionId` may for
+a session it already tracks. The id is resolved against the app's own live
+sessions, so an unknown id — or one running on a remote host that can't be
+restarted locally — is rejected before the dialog. `sessionId` uses the same safe
+token shape as `sessions/:sessionId`.
+
 ### `chats`: open Chats
 
 `buildChatsDeepLink()` → `ghapp://chats`
