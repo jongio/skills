@@ -16,6 +16,7 @@ import {
   hostedLauncherUrl,
   buildSessionDeepLink,
   buildSessionDetailDeepLink,
+  buildSessionRestartDeepLink,
   buildChatsDeepLink,
   buildNewChatDeepLink,
   buildNewAutomationDeepLink,
@@ -226,6 +227,22 @@ async function main() {
     assert.equal(buildSessionDetailDeepLink(123), null);
   });
 
+  // ---- buildSessionRestartDeepLink -----------------------------------------
+  await test("buildSessionRestartDeepLink builds ghapp://sessions/:id/restart", () => {
+    assert.equal(buildSessionRestartDeepLink("abc-123_4.5"), "ghapp://sessions/abc-123_4.5/restart");
+  });
+
+  await test("buildSessionRestartDeepLink rejects unsafe ids", () => {
+    assert.equal(buildSessionRestartDeepLink(""), null);
+    assert.equal(buildSessionRestartDeepLink("a/b"), null); // no extra path segments (incl. a forged /restart)
+    assert.equal(buildSessionRestartDeepLink("a b"), null);
+    assert.equal(buildSessionRestartDeepLink("a?x=1"), null);
+    assert.equal(buildSessionRestartDeepLink("."), null);
+    assert.equal(buildSessionRestartDeepLink(".."), null);
+    assert.equal(buildSessionRestartDeepLink("x".repeat(257)), null);
+    assert.equal(buildSessionRestartDeepLink(123), null);
+  });
+
   // ---- buildChatsDeepLink --------------------------------------------------
   await test("buildChatsDeepLink builds ghapp://chats", () => {
     assert.equal(buildChatsDeepLink(), "ghapp://chats");
@@ -393,6 +410,7 @@ async function main() {
       "hostedLauncherUrl",
       "buildSessionDeepLink",
       "buildSessionDetailDeepLink",
+      "buildSessionRestartDeepLink",
       "buildChatsDeepLink",
       "buildNewChatDeepLink",
       "buildNewAutomationDeepLink",

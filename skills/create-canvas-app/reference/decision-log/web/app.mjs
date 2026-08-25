@@ -16,6 +16,7 @@ import {
   relativeTime,
   buildSessionDeepLink,
   buildSessionDetailDeepLink,
+  buildSessionRestartDeepLink,
   buildChatsDeepLink,
   buildNewAutomationDeepLink,
   buildIssueDeepLink,
@@ -123,6 +124,7 @@ function AppIntegrations({ state, invoke }) {
   const issueUrl = repo ? linkFor(buildIssueDeepLink({ owner, repo: name, number: num })) : null;
   const prUrl = repo ? linkFor(buildPullRequestDeepLink({ owner, repo: name, number: num })) : null;
   const sessionUrl = linkFor(buildSessionDetailDeepLink(sessionId.trim()));
+  const restartUrl = linkFor(buildSessionRestartDeepLink(sessionId.trim()));
 
   return html`
     <div class="ck-card dl-integrations ck-col">
@@ -188,6 +190,7 @@ function AppIntegrations({ state, invoke }) {
           onInput=${(e) => setSessionId(e.target.value)}
         />
         <${LinkButton} href=${sessionUrl} icon="app-window" label="Open session" title="Open an existing session by its id" />
+        <${LinkButton} href=${restartUrl} icon="rotate-ccw" label="Restart" title="Restart this session's Copilot CLI process (confirmation-gated)" />
       </div>
     </div>
   `;

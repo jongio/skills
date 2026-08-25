@@ -223,6 +223,31 @@ export function buildSessionDetailDeepLink(sessionId) {
   return safeDeepLinkUrl(`${APP_DEEP_LINK_SCHEME}://sessions/${sessionId}`);
 }
 
+/**
+ * `ghapp://sessions/:sessionId/restart`: restart a session's Copilot CLI process
+ * — kill the child process and spawn a fresh one, the same operation as the
+ * `/restart-session` slash command. Reach for this when a canvas needs the app to
+ * pick up process-start-resolved state (MCP servers, extensions resolved at
+ * launch) that a plain `plugins.reload()` / `skills.reload()` re-reads from disk
+ * but can't actually respawn.
+ *
+ * The route is DESTRUCTIVE (queued input and any in-flight response are discarded)
+ * and a global entry point, so the app ALWAYS shows a confirmation dialog before
+ * restarting and never navigates or self-approves — the canvas only BUILDS the
+ * URL. The id is resolved against the app's own live sessions, so an id that is
+ * not a session on this device (or one that runs on a remote host) is rejected
+ * before the dialog rather than prompting for something known to fail. `sessionId`
+ * must be the same safe token shape as {@link buildSessionDetailDeepLink} (so it
+ * can't smuggle extra path segments or query keys); returns null otherwise, so a
+ * caller can withhold the control instead of rendering a dead link.
+ * @param {string} sessionId
+ * @returns {string|null}
+ */
+export function buildSessionRestartDeepLink(sessionId) {
+  if (!isSafeSessionId(sessionId)) return null;
+  return safeDeepLinkUrl(`${APP_DEEP_LINK_SCHEME}://sessions/${sessionId}/restart`);
+}
+
 /** `ghapp://chats`: open the Chats surface. */
 export function buildChatsDeepLink() {
   return safeDeepLinkUrl(`${APP_DEEP_LINK_SCHEME}://chats`);
