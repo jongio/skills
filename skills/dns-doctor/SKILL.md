@@ -188,6 +188,11 @@ applicable. Count each evaluated SPF `include`, `a`, `mx`, `ptr`, `exists`, or
 `redirect` term once toward the 10-term limit. Do not count one term per MX
 host; the separate per-`mx` address-query limit still applies.
 
+Never construct a DKIM selector target from an MX token, a tenant name, or a
+documented provider pattern, even when the pattern looks certain. Ask for the
+exact values from the provider console or its activation error, and publish
+them at a low TTL until the provider confirms signing.
+
 ### 6. Audit web routing and TLS
 
 Follow [web routing and TLS](references/web-routing-and-tls.md). Test the
@@ -221,6 +226,22 @@ settings from provider-managed behavior.
 A recognizable SaaS target or an unresolved CNAME is not proof of takeover.
 Raise a critical finding only when the hostname is demonstrably claimable or
 the provider binding confirms the exposure.
+
+A signed zone may deny a nonexistent name with `NOERROR` and no data instead of
+`NXDOMAIN`. Never read that as evidence the name still exists. Query a random
+nonce label in the same zone: a matching response means the name is absent.
+
+Before recommending a registrar lock, confirm that registrar exposes the status
+and at what price. Delete and update protection is frequently unavailable or
+sold as a paid product, so present it as a cost against risk decision rather
+than a configuration step, and record a declined control as accepted risk.
+
+Before recording any record as unattributable, read the DNS provider's
+per-record `created_on` and `modified_on` and correlate them against resource
+creation events in the consuming platform. A token created minutes after a
+custom domain or certificate binding is that binding's validation record.
+Platforms stop returning a validation token once a domain is validated, so
+consumer-side state being empty proves nothing.
 
 ### 8. Corroborate material findings
 
