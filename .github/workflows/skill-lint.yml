@@ -10,6 +10,13 @@ on:
       - "skills/**/test/**"
       - "skills/**/*.yaml"
       - "skills/**/eval.yaml"
+      # Reference guidance and shipped scripts are part of the skill's
+      # behaviour, so a change to either must be linted. Without these, a PR
+      # that edits only references/ receives no CI at all: the skill still
+      # lints clean by luck because nothing in the filter changed, and a broken
+      # cross-link or a deleted reference reaches main unchecked.
+      - "skills/**/references/**"
+      - "skills/**/scripts/**"
       - "site/src/content/skills/**"
       - "site/public/images/**"
       - "site/package.json"
@@ -61,10 +68,14 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            # Lint only skills with changes in this PR
+            # Lint only skills with changes in this PR. Keep this list in step
+            # with the `paths` filter above: a path that triggers the workflow
+            # but is missing here selects no skill, so the job runs and lints
+            # nothing while still reporting success.
             DIRS=$(git diff --name-only "$BASE_SHA" HEAD \
               -- 'skills/*/SKILL.md' 'skills/*/package.json' 'skills/*/*.yaml' \
                  'skills/*/evals/**' 'skills/*/test/**' \
+                 'skills/*/references/**' 'skills/*/scripts/**' \
               | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u)
           else
             # Push to main or manual dispatch: lint all skills

@@ -122,6 +122,45 @@ which sorts and de-duplicates RRsets and other unordered observations before
 comparison. Set it to `sequence` only when order has protocol meaning, such as
 redirect hops or certificate chains. Object keys are always sorted.
 
+## Allowed field values
+
+Every enumerated field is validated on save and on load. A value outside these
+sets is rejected with an error naming the offending path, and nothing is
+written. Use these exact strings, including capitalization and hyphens.
+
+| Field | Allowed values |
+|---|---|
+| `checks.<id>.state` | `Verified`, `Corroborated`, `Inferred`, `Not verified`, `Not applicable` |
+| `checks.<id>.health` | `Healthy`, `Degraded`, `Unhealthy`, `Not verified`, `Not applicable` |
+| `checks.<id>.evidenceOrder` | `set`, `sequence` |
+| `findings.<key>.severity` | `Critical`, `High`, `Medium`, `Low`, `Informational` |
+| `findings.<key>.status` | `open`, `resolved`, `accepted-risk` |
+| `remediation.<key>.state` | `not-started`, `planned`, `approved`, `in-progress`, `verified`, `failed`, `rolled-back` |
+
+Health describes the observed condition of the service, while state describes
+the strength of the evidence. They move independently: a `Verified` check can be
+`Unhealthy`, and a `Not verified` check should carry health `Not verified`
+rather than an assumed value.
+
+Note that `verified` is a remediation state but `resolved` is the finding
+status. A completed fix sets the finding to `resolved` and its remediation entry
+to `verified`.
+
+## Saving after a targeted change
+
+A post-change save is not a re-audit. When a fix touches a small number of
+checks, update only those entries and refresh their `observedAt`, then save.
+
+Every untouched check keeps its previous `observedAt`, so the delta reports it
+as `Not reverified` rather than `Unchanged`. That is the intended result. The
+cache refuses to treat a stale timestamp as fresh proof even when the value is
+identical, which is what stops a partial verification from being presented as
+full coverage.
+
+Report those items as a coverage gap, not as passing checks, and say plainly
+that the run verified only the changed scope. Never refresh `observedAt` on a
+check that was not actually re-observed just to make the delta look clean.
+
 ## Data minimization
 
 Cache:
@@ -161,6 +200,22 @@ checks. At minimum, always refresh:
 
 If a check cannot be refreshed, label it `Not verified`. Never report
 `unchanged` based only on the cache.
+
+Record an entry for every checklist ID in the requested scope, including the
+ones that do not apply. A check ruled out as `Not applicable` is a decision
+with a reason, and storing it preserves that reason: without an entry, the next
+run cannot tell a deliberate exclusion from an oversight, and the ID surfaces
+as a coverage gap that gets re-investigated. Write the reason into `observed`,
+for example that the domain publishes no TLSA because DANE is not deployed, or
+that origin probing was not authorized. Coverage arithmetic is unaffected,
+since not-applicable IDs stay out of the denominator.
+
+Applicability is itself a current observation, because scope and deployment
+change. Confirm a not-applicable check still does not apply and refresh its
+`observedAt` when you do. Left untouched it classifies as `Not reverified` like
+any other stale entry, which is accurate but reads as a gap rather than a
+decision. Confirming is cheap, and it keeps the delta honest without weakening
+the rule against refreshing timestamps for checks that were not re-observed.
 
 ## Delta classification
 

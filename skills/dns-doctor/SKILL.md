@@ -140,6 +140,45 @@ Query explicit record types. Do not use `ANY` as an inventory mechanism.
 Use the portable [command recipes](references/command-recipes.md) when the
 local DNS client does not support a required type. For JSON DoH fallback,
 preserve `Status`, `AD`, `Answer`, `Authority`, and `Comment` when present.
+Read the response code from the numeric `Status` field itself and report it as
+that code. Do not infer a response code from the shape of the answer. `Status`
+0 is `NOERROR` and `Status` 3 is `NXDOMAIN`, and a `NOERROR` carrying an empty
+`Answer` is a positive response with no data of that type, which is not
+`NXDOMAIN` and does not mean the name is absent.
+
+Read the query name in the answer before reading the data. A stub resolver may
+append a DNS search suffix from the host's network configuration, so a lookup
+of `example.com` can return a well-formed answer for
+`example.com.corp.internal`. Nothing in that answer is wrong, and nothing in it
+is about the audit target. Treat any answer whose query name is not exactly the
+name you asked for as evidence about a different zone, name search-list
+suffixing as the cause rather than calling the name fabricated, and re-query
+fully qualified with the trailing dot before recording anything.
+
+Separate what a client can prove from what it cannot. A general-purpose
+built-in resolver such as Windows `Resolve-DnsName` or `nslookup` cannot expose
+wire-level header flags and cannot request arbitrary record types, and a public
+DoH endpoint is a recursive resolver that answers only from its own cache and
+upstream rather than querying a nameserver you name. Neither can produce
+authoritative evidence. Say which capability is missing when you report a check
+as unverified, and name it concretely rather than gesturing at it. State that
+the built-in Windows resolver cannot show wire-level header flags such as `AD`
+and `AA`, and cannot be pointed at a chosen nameserver to request a chosen
+record type, so its output cannot close a check that depends on either. "The
+tool did not show it" and "the server did not send it" have different
+remediations, and only the second is a finding about the domain.
+
+When provider credentials are available, establish what they actually permit
+before relying on them. Probe each capability the audit or remediation plan
+needs, such as record listing, zone settings, and delegation signing, and record
+the result per capability. Credentials that authenticate successfully can still
+be refused on individual objects, and a general-purpose token issued for another
+product commonly lacks DNS scope entirely.
+
+Do this before writing the remediation plan, not while executing it. The
+capability map determines which items the skill can perform and which the user
+must perform, and prevents both promising unreachable work and marking a check
+Not verified when it was readable all along.
 
 Label each check:
 
@@ -176,6 +215,16 @@ applicable. Count each evaluated SPF `include`, `a`, `mx`, `ptr`, `exists`, or
 `redirect` term once toward the 10-term limit. Do not count one term per MX
 host; the separate per-`mx` address-query limit still applies.
 
+Never construct a DKIM selector target from an MX token, a tenant name, or a
+documented provider pattern, even when the pattern looks certain. Ask for the
+exact values from the provider console or its activation error, and publish
+them at 60 seconds until the provider confirms signing. The low TTL is the
+point of the exercise rather than a detail. A provider that reads a wrong value
+during activation caches that answer and keeps retrying against its own cache,
+so a correction published behind a long TTL does not take effect until that
+cache expires, and the activation appears to keep failing after you have
+already fixed it. Raise the TTL only once signing is confirmed.
+
 ### 6. Audit web routing and TLS
 
 Follow [web routing and TLS](references/web-routing-and-tls.md). Test the
@@ -210,6 +259,33 @@ A recognizable SaaS target or an unresolved CNAME is not proof of takeover.
 Raise a critical finding only when the hostname is demonstrably claimable or
 the provider binding confirms the exposure.
 
+Never claim the target, and never recommend claiming it, including as a
+secondary or defensive option. Registering someone else's abandoned name to
+prove it was claimable, or to hold it away from an attacker, is the takeover
+itself, and it can breach the provider's terms and the law regardless of
+intent. The remediation is always on the side you control: remove the alias, or
+repoint it at a binding you own, then verify the record is gone before closing
+the finding.
+
+A signed zone may deny a nonexistent name with `NOERROR` and no data instead of
+`NXDOMAIN`. Never read that as evidence the name still exists. Query a random
+nonce label in the same zone: a matching response means the name is absent.
+
+Before recommending a registrar lock, confirm that registrar exposes the status
+and at what price. Delete and update protection is frequently unavailable or
+sold as a paid product, so present it as a cost against risk decision rather
+than a configuration step. Do not give a click path you have not verified for
+that registrar. Name the free compensating controls, account two-factor
+authentication first, since they close most of the same attack path at no cost,
+and record a declined control as accepted risk.
+
+Before recording any record as unattributable, read the DNS provider's
+per-record `created_on` and `modified_on` and correlate them against resource
+creation events in the consuming platform. A token created minutes after a
+custom domain or certificate binding is that binding's validation record.
+Platforms stop returning a validation token once a domain is validated, so
+consumer-side state being empty proves nothing.
+
 ### 8. Corroborate material findings
 
 For high-impact findings, get a second independent observation. Useful
@@ -229,6 +305,13 @@ deep path or one resolver's result for another.
 If the claimed value cannot be found in captured evidence, mark the check Not
 verified. If sources conflict, report the conflict instead of selecting the
 expected value.
+
+Matching responses prove matching bytes, not a shared origin. Identical ETag,
+length, digest, status, and headers are the expected result whenever content is
+copied, replicated, or migrated, so a shared-origin claim rests on the
+provider's hostname to resource binding and stays Not verified until that
+binding is read. Never label it Verified or Corroborated from response equality,
+and never call a hostname redundant on that basis.
 
 Verification describes evidence, not health. A verified 4xx or 5xx response is
 still unhealthy unless the user supplied that status as the intended behavior.
@@ -260,6 +343,14 @@ node <skill-directory>/scripts/cache.mjs save --domain <a-label-domain> --input 
 Report the returned cache path, timestamp, and created or updated status. A
 cache failure must not hide or invalidate audit results. Remove the temporary
 session snapshot after comparison and save.
+
+Every enumerated field is validated on write, so use the documented values
+exactly and never invent a synonym such as `Unknown`, `OK`, `done`, or
+`Completed`. Two pairs are easy to transpose. State describes evidence strength
+while health describes the service, and they move independently, so a
+`Verified` check can be `Unhealthy`. A completed fix sets the finding status to
+`resolved` and its remediation state to `verified`, which are different fields
+with different vocabularies.
 
 The executable delegates persistence and comparison to the
 [cache store](scripts/cache-store.mjs). Its boundary and lifecycle behavior is
