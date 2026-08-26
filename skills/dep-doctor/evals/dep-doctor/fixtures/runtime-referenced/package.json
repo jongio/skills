@@ -1,0 +1,9 @@
+{
+  "name": "fixture-runtime-referenced",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "pino": "9.2.0",
+    "pino-pretty": "11.2.1"
+  }
+}

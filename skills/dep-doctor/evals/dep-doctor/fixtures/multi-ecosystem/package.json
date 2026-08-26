@@ -1,0 +1,12 @@
+{
+  "name": "fixture-multi-ecosystem",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.12.0",
+  "dependencies": {
+    "express": "4.19.2"
+  },
+  "devDependencies": {
+    "vitest": "1.6.0"
+  }
+}

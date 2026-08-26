@@ -7,6 +7,9 @@ on:
     paths: &skill_lint_paths
       - "skills/**/SKILL.md"
       - "skills/**/package.json"
+      - "skills/**/package-lock.json"
+      - "skills/**/thumbnail.png"
+      - "skills/**/README.md"
       - "skills/**/test/**"
       - "skills/**/*.yaml"
       - "skills/**/eval.yaml"
@@ -20,6 +23,9 @@ on:
       # Without this, edits to this workflow never lint themselves, so a
       # change here can only be verified by a manual workflow_dispatch.
       - ".github/workflows/skill-lint.yml"
+      # A change to the eval-matrix workflow can silently drop or duplicate
+      # a skill's entry, so it needs the same registration-parity coverage.
+      - ".github/workflows/skill-eval.yml"
   push:
     branches: [main]
     paths: *skill_lint_paths
@@ -60,15 +66,23 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
+          ALL_DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            # Lint only skills with changes in this PR
-            DIRS=$(git diff --name-only "$BASE_SHA" HEAD \
-              -- 'skills/*/SKILL.md' 'skills/*/package.json' 'skills/*/*.yaml' \
-                 'skills/*/evals/**' 'skills/*/test/**' \
-              | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u)
+            CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
+            # A change to a shared registration surface (catalog, marketplace,
+            # plugin manifest, root README, or either workflow) can silently
+            # break or drop any skill's registration, not just the one that
+            # triggered the diff, so it falls back to linting every skill.
+            if echo "$CHANGED" | grep -qE '^(marketplace\.json|plugin\.json|README\.md|site/|\.github/workflows/skill-lint\.yml|\.github/workflows/skill-eval\.yml)'; then
+              DIRS="$ALL_DIRS"
+            else
+              # Otherwise lint only skills with changes in this PR
+              DIRS=$(echo "$CHANGED" | grep -E '^skills/[^/]+/(SKILL\.md|package\.json|package-lock\.json|thumbnail\.png|README\.md|.*\.yaml|evals/|test/)' \
+                | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u)
+            fi
           else
             # Push to main or manual dispatch: lint all skills
-            DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
+            DIRS="$ALL_DIRS"
           fi
           if [ -z "$DIRS" ]; then
             echo "dirs=" >> "$GITHUB_OUTPUT"

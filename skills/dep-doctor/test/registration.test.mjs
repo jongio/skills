@@ -24,6 +24,8 @@ const [
   lockfile,
   images,
   skillDoc,
+  evalSpec,
+  skillReadme,
 ] = await Promise.all([
     read("README.md"),
     parse("marketplace.json"),
@@ -35,7 +37,25 @@ const [
     parse("skills", skillId, "package-lock.json"),
     read("site", "public", "images", "IMAGES.md"),
     read("skills", skillId, "SKILL.md"),
+    read("skills", skillId, "evals", skillId, "eval.yaml"),
+    read("skills", skillId, "README.md"),
   ]);
+
+// This skill is a standalone port and must remain free of the originating
+// catalog's name across every surface a user or agent reads, not just
+// SKILL.md.
+for (const [surface, text] of [
+  ["SKILL.md", skillDoc],
+  ["skill README.md", skillReadme],
+  ["eval.yaml", evalSpec],
+  ["site entry", siteEntry],
+]) {
+  assert.doesNotMatch(
+    text,
+    /devx/i,
+    `${surface} must remain independent from the source catalog name`,
+  );
+}
 
 // Anchored to the catalog table row, not a bare substring, so prose or a code
 // fence that happens to mention the path cannot satisfy the check.
@@ -129,6 +149,30 @@ assert.match(
   evalWorkflow,
   new RegExp(`"eval_spec"\\s*:\\s*"evals/${skillId}/eval\\.yaml"`),
   "skill-eval.yml matrix must point at the eval spec",
+);
+
+// Parse the embedded matrix rather than regex-matching its fields
+// separately: independent regex matches can each be satisfied by two
+// different entries, reporting parity that does not actually exist.
+const matrixSource = evalWorkflow.match(/all='(\[[\s\S]*?\])'/);
+assert.ok(matrixSource, "skill-eval.yml must embed a JSON matrix in `all`");
+const matrix = JSON.parse(matrixSource[1]);
+const matrixIds = matrix.map(({ skill_id }) => skill_id);
+assert.equal(
+  new Set(matrixIds).size,
+  matrixIds.length,
+  "eval matrix entries must have unique skill_id values",
+);
+const matrixEntries = matrix.filter(({ skill_id }) => skill_id === skillId);
+assert.equal(matrixEntries.length, 1, "eval matrix must contain exactly one entry for this skill");
+assert.deepEqual(
+  matrixEntries[0],
+  {
+    skill: `skills/${skillId}`,
+    skill_id: skillId,
+    eval_spec: `evals/${skillId}/eval.yaml`,
+  },
+  "eval matrix entry for this skill drifted from the expected shape",
 );
 
 assert.equal(packageJson.name, skillId, "package.json name must match the skill id");
