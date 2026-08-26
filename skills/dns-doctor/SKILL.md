@@ -141,6 +141,24 @@ Use the portable [command recipes](references/command-recipes.md) when the
 local DNS client does not support a required type. For JSON DoH fallback,
 preserve `Status`, `AD`, `Answer`, `Authority`, and `Comment` when present.
 
+Read the query name in the answer before reading the data. A stub resolver may
+append a DNS search suffix from the host's network configuration, so a lookup
+of `example.com` can return a well-formed answer for
+`example.com.corp.internal`. Nothing in that answer is wrong, and nothing in it
+is about the audit target. Treat any answer whose query name is not exactly the
+name you asked for as evidence about a different zone, name search-list
+suffixing as the cause rather than calling the name fabricated, and re-query
+fully qualified with the trailing dot before recording anything.
+
+Separate what a client can prove from what it cannot. A general-purpose
+built-in resolver such as Windows `Resolve-DnsName` or `nslookup` cannot expose
+wire-level header flags and cannot request arbitrary record types, and a public
+DoH endpoint is a recursive resolver that answers only from its own cache and
+upstream rather than querying a nameserver you name. Neither can produce
+authoritative evidence. Say which capability is missing when you report a check
+as unverified, because "the tool did not show it" and "the server did not send
+it" have different remediations.
+
 When provider credentials are available, establish what they actually permit
 before relying on them. Probe each capability the audit or remediation plan
 needs, such as record listing, zone settings, and delegation signing, and record
