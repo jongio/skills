@@ -17,6 +17,38 @@ behavior. Use both when possible.
 Check registrar RDAP data for delegation, expiration, and status locks. Treat
 RDAP as registrar evidence, not proof that billing or auto-renew is healthy.
 
+## Failed probes prove nothing until the probe is validated
+
+A probe that fails has two possible causes: the target refused, or the tool
+never made a valid request. Those are indistinguishable from the error alone,
+and attributing a tool failure to the target invents a finding or clears a real
+one.
+
+Before reporting any negative result as target behavior, run a control through
+the same tool, transport, and code path, changing only the thing under test.
+
+| Observation | Control that isolates the cause |
+|---|---|
+| Zone transfer returns `FORMERR` or empty | Same client and transport, ordinary query such as SOA over TCP |
+| Legacy TLS version fails to negotiate | Same client with its security level relaxed, pinned to that version |
+| Record type returns nothing | Same name through a second resolver and the authoritative server |
+| Provider read returns an error status | Any known-good call with the same credential |
+
+If the control also fails, the tool or path is at fault, so mark the check
+`Not verified` and name the blocker. Only when the control succeeds and the
+test still fails may the failure be attributed to the target.
+
+A control that fails because the client cannot make that kind of query at all
+is a capability limit rather than a fault. See minimum client capability in
+[portable command recipes](command-recipes.md) for which clients can satisfy
+which evidence tier.
+
+Record which cause the evidence supports. `FORMERR` in response to a zone
+transfer, alongside a control query that succeeds over the same connection,
+demonstrates refusal and no zone disclosure, even though the server did not send
+the more conventional `REFUSED`. Report the observed code rather than
+normalizing it to the expected one.
+
 ## Required queries
 
 Query each type separately:

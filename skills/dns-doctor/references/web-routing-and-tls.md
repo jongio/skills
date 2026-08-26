@@ -75,7 +75,9 @@ Compare the response body or application marker as well.
 
 ### Legacy protocol acceptance
 
-A failed handshake does not prove the server refused the protocol. Modern TLS
+A failed handshake does not prove the server refused the protocol. This is a
+specific case of the control-query rule in
+[evidence and record discovery](evidence-and-records.md). Modern TLS
 clients refuse deprecated protocols and weak cipher suites on their own, before
 any server decision is observable. OpenSSL 3.x enforces a default security level
 that rejects TLS 1.0 and 1.1 locally, and the resulting error can be

@@ -81,6 +81,12 @@ Never present a recursive answer as authoritative evidence, and never infer
 `AA` or `AD` from a resolver that did not report it. Conflating the two defeats
 the entire evidence ordering.
 
+Capability and correctness are separate questions. A client that *can* make the
+query may still fail for reasons that have nothing to do with the target, so
+pair this section with the control-query rule in
+[evidence and record discovery](evidence-and-records.md) before attributing any
+failed probe to the server.
+
 ## DNS over HTTPS
 
 On Windows, `Resolve-DnsName` has no enum value for **CAA, HTTPS, SVCB, or
