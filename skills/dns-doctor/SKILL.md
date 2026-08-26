@@ -234,7 +234,10 @@ nonce label in the same zone: a matching response means the name is absent.
 Before recommending a registrar lock, confirm that registrar exposes the status
 and at what price. Delete and update protection is frequently unavailable or
 sold as a paid product, so present it as a cost against risk decision rather
-than a configuration step, and record a declined control as accepted risk.
+than a configuration step. Do not give a click path you have not verified for
+that registrar. Name the free compensating controls, account two-factor
+authentication first, since they close most of the same attack path at no cost,
+and record a declined control as accepted risk.
 
 Before recording any record as unattributable, read the DNS provider's
 per-record `created_on` and `modified_on` and correlate them against resource
@@ -262,6 +265,13 @@ deep path or one resolver's result for another.
 If the claimed value cannot be found in captured evidence, mark the check Not
 verified. If sources conflict, report the conflict instead of selecting the
 expected value.
+
+Matching responses prove matching bytes, not a shared origin. Identical ETag,
+length, digest, status, and headers are the expected result whenever content is
+copied, replicated, or migrated, so a shared-origin claim rests on the
+provider's hostname to resource binding and stays Not verified until that
+binding is read. Never label it Verified or Corroborated from response equality,
+and never call a hostname redundant on that basis.
 
 Verification describes evidence, not health. A verified 4xx or 5xx response is
 still unhealthy unless the user supplied that status as the intended behavior.
@@ -293,6 +303,14 @@ node <skill-directory>/scripts/cache.mjs save --domain <a-label-domain> --input 
 Report the returned cache path, timestamp, and created or updated status. A
 cache failure must not hide or invalidate audit results. Remove the temporary
 session snapshot after comparison and save.
+
+Every enumerated field is validated on write, so use the documented values
+exactly and never invent a synonym such as `Unknown`, `OK`, `done`, or
+`Completed`. Two pairs are easy to transpose. State describes evidence strength
+while health describes the service, and they move independently, so a
+`Verified` check can be `Unhealthy`. A completed fix sets the finding status to
+`resolved` and its remediation state to `verified`, which are different fields
+with different vocabularies.
 
 The executable delegates persistence and comparison to the
 [cache store](scripts/cache-store.mjs). Its boundary and lifecycle behavior is
