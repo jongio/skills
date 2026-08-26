@@ -102,6 +102,24 @@ before classifying a wildcard.
 - An apex may use provider-specific flattening or synthesized answers. Public
   DNS cannot reveal the hidden configured target, so use provider inventory.
 
+## Origin identity
+
+Two hostnames that return identical responses are not necessarily the same
+origin. Identical ETag, content length, digest, status, and headers prove that
+the bytes match, which is the expected result whenever content is copied,
+replicated, mirrored, or migrated between origins.
+
+Never claim that hostnames share an origin, that one is a duplicate of another,
+or that one is redundant, on response equality alone. Establish origin identity
+from the controlling binding: the provider's mapping of hostname to bucket,
+service, distribution, or application. Enumerate those bindings per hostname.
+
+This matters most immediately before recommending removal. A hostname that looks
+redundant may be bound to a distinct backing store holding data nothing else
+references, so the correct finding is a separate stale resource rather than a
+duplicate alias. Where the binding cannot be read, mark the relationship
+Inferred and say which provider object would settle it.
+
 ## TTL and resilience
 
 Judge TTLs against change frequency, failover design, negative caching, and

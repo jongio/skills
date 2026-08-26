@@ -141,6 +141,18 @@ Use the portable [command recipes](references/command-recipes.md) when the
 local DNS client does not support a required type. For JSON DoH fallback,
 preserve `Status`, `AD`, `Answer`, `Authority`, and `Comment` when present.
 
+When provider credentials are available, establish what they actually permit
+before relying on them. Probe each capability the audit or remediation plan
+needs, such as record listing, zone settings, and delegation signing, and record
+the result per capability. Credentials that authenticate successfully can still
+be refused on individual objects, and a general-purpose token issued for another
+product commonly lacks DNS scope entirely.
+
+Do this before writing the remediation plan, not while executing it. The
+capability map determines which items the skill can perform and which the user
+must perform, and prevents both promising unreachable work and marking a check
+Not verified when it was readable all along.
+
 Label each check:
 
 - **Verified**: directly observed from the controlling source or endpoint, with

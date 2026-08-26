@@ -55,6 +55,42 @@ Do not invent provider rotation waiting periods. Use the provider's current
 status and documented schedule, then verify each selector independently after
 rotation.
 
+### Publishing selector records
+
+Selector discovery is inference. Publishing a selector record is a change, and
+its target must be copied verbatim from the provider's own output: the mail
+console, its API, or the exact value quoted in its activation error.
+
+Never derive a selector target from an MX hostname token, a tenant or account
+name, an organizational domain, or a documented legacy pattern. Providers
+migrate validation endpoints and keep older documentation reachable, so a
+pattern that matches one tenant can be wrong for another on the same platform.
+
+If the provider value is not yet available, say so and stop. Publishing a
+plausible guess is worse than publishing nothing: the provider's validator
+queries the name, caches the wrong answer for the record's TTL, and blocks
+retries until that cache expires. Publish selector records at a low TTL until
+the provider confirms signing, then raise it.
+
+### Verifying that signing is live
+
+DNS evidence proves that a key is published, not that messages are signed.
+Many providers publish selector keys at their endpoint before the tenant
+enables signing, so a resolvable key is not proof.
+
+Confirm signing from message evidence, in this order:
+
+1. DMARC aggregate reports, when a `rua` destination is already collecting
+2. `Authentication-Results` headers on a message delivered to a mailbox the
+   user controls
+3. read-only provider status
+
+Do not direct the user to send mail to a third-party authentication verifier.
+Those submissions disclose internal mail hostnames, hop addresses, tenant
+identifiers, and message identifiers to an operator outside the user's trust
+boundary, and abandoned verifier domains can outlive the service that ran them.
+The options above answer the same question without disclosure.
+
 ## DMARC
 
 Query `_dmarc.<from-domain>`, applying organizational-domain discovery when

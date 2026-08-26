@@ -49,6 +49,27 @@ Immediately before execution, re-read the object and compare it with the
 approved before state. If any field changed, stop and present a new plan for
 fresh approval. This prevents overwriting concurrent provider changes.
 
+## TTL for externally validated records
+
+Some records exist to be read by another system's validator: DKIM and domain
+verification records, ACME challenges, custom-domain bindings, and delegation
+proofs. Treat the TTL on these as part of the change, not as a zone convention
+to copy from neighbouring records.
+
+Publish them at 60 seconds. Keep the TTL low until the consuming provider
+reports success, then raise it to the zone's normal value in a separate change.
+
+The cost of a long TTL here is asymmetric. A correct value costs nothing extra,
+but a wrong value is cached by the validator for the full TTL, and a validator
+that has already cached a negative answer will not re-query on retry. The user
+is then blocked for the remainder of that period no matter how quickly the
+record is corrected.
+
+Lowering the TTL after the fact does not flush an existing cache entry. It only
+shortens the next one. State this explicitly rather than implying that the
+correction takes effect immediately, and give the user the expected clear time
+computed from the original TTL and the time of the failed validation.
+
 ## Provider tools and credentials
 
 Prefer the provider's current official SDK. Use its REST API or official CLI

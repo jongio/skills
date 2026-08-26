@@ -73,6 +73,30 @@ Validate with SNI and hostname checks:
 A valid certificate does not prove that the intended application is served.
 Compare the response body or application marker as well.
 
+### Legacy protocol acceptance
+
+A failed handshake does not prove the server refused the protocol. Modern TLS
+clients refuse deprecated protocols and weak cipher suites on their own, before
+any server decision is observable. OpenSSL 3.x enforces a default security level
+that rejects TLS 1.0 and 1.1 locally, and the resulting error can be
+indistinguishable from a server-side alert.
+
+Reporting "TLS 1.0 is rejected" from a default client is therefore unsafe: it can
+silently clear a real finding.
+
+Before reporting any legacy protocol as refused:
+
+1. Re-test with client restrictions relaxed, for example an OpenSSL cipher
+   string of `ALL:@SECLEVEL=0` pinned to the single protocol version.
+2. Treat the result as server behavior only when the failure carries a
+   server-generated alert such as `protocol version`, or when the relaxed client
+   still fails.
+3. If the client cannot be relaxed, mark the check Not verified and name the
+   client policy as the blocker. Do not report the protocol as disabled.
+
+Confirm the same way after remediation. A change that appears to have taken
+effect may only reflect the same client-side refusal that was present before.
+
 ## CDN and proxy evidence
 
 Use multiple indicators:

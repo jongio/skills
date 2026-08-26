@@ -771,3 +771,155 @@ stimuli:
             - name: ^(?:powershell|bash)$
               command: (?i)((?<!['"])https?://|\b(curl(?:\.exe)?|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod|Resolve-DnsName|nslookup|dig|kdig|Test-NetConnection|Test-Connection|ping|tracert|traceroute|telnet|nc|ncat|netcat|ssh|scp|sftp|Start-BitsTransfer|openssl|delv|drill|doggo|whois|getent)\b|System\.Net|Net\.WebClient|(?:require\(\s*['"](?:node:)?(?:dns|net|tls|http|https|child_process)['"]|\bimport\s+(?:socket|requests|urllib|httpx|http\.client)\b|\b(fetch|axios|urllib|requests|httpx|socket|http\.client|https?\.(?:request|get)|dns\.(?:resolve|lookup)|net\.connect|tls\.connect)\s*[\(\.]))
             - name: web_fetch|web_search|playwright
+
+  - name: dnssec-denial-encoding
+    prompt: >-
+      Use dns-doctor on example.com to assess the supplied evidence only. Do not
+      make network requests, and run in no-cache mode so no baseline is read
+      from or written to disk. Treat example.com as the established audit scope
+      and do not ask me to restate it. The zone is DNSSEC signed and validating
+      resolvers return AD=true. I deleted the record for images.example.com
+      earlier today and want to confirm it is gone. A query for
+      images.example.com type A returns Status 0 with no Answer section and the
+      example.com SOA in the Authority section. A query for the random label
+      nonce-7c3f9a12.example.com type A returns Status 0 with no Answer section
+      and the same SOA in the Authority section. Both authoritative nameservers
+      return no record for images.example.com. Did the deletion take effect?
+    tags:
+      scenario: dnssec
+      cost: medium
+    rubric:
+      - Concludes that images.example.com does not exist in the zone.
+      - Attributes the NOERROR/NODATA response to synthesized DNSSEC denial rather than to the name existing.
+      - Uses the matching random-nonce response as the discriminating evidence.
+      - Does not cite the absence of NXDOMAIN as proof that the name is still present.
+    graders:
+      - type: prompt
+        name: reads-synthesized-denial-correctly
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the agent concludes images.example.com is absent,
+            explains that a signed zone using synthesized denial answers
+            NOERROR/NODATA rather than NXDOMAIN for names that do not exist, and
+            uses the identical random-nonce response as the discriminator. Score
+            1 if the agent concludes the name still exists, or reasons that
+            NOERROR proves existence because a nonexistent name would return
+            NXDOMAIN.
+      - type: skill-invocation
+        config:
+          required: [dns-doctor]
+      - type: diff-empty
+
+  - name: legacy-protocol-client-refusal
+    prompt: >-
+      Use dns-doctor on example.com to assess the supplied evidence only. Do not
+      make network requests, and run in no-cache mode so no baseline is read
+      from or written to disk. Treat example.com as the established audit scope
+      and do not ask me to restate it. I asked for a deeper TLS review. My
+      scanner runs Python linked against OpenSSL 3.0.16 with default settings.
+      Pinning the handshake to TLS 1.0 against www.example.com port 443 failed
+      with "SSLError: [SSL: NO_CIPHERS_AVAILABLE] no ciphers available". Pinning
+      to TLS 1.1 failed the same way. TLS 1.2 and TLS 1.3 both completed. Can I
+      close out the legacy protocol finding as remediated?
+    tags:
+      scenario: tls
+      cost: medium
+    rubric:
+      - Does not conclude that the server rejects TLS 1.0 or TLS 1.1 from this evidence.
+      - Identifies the local client security level as a possible cause of the failure.
+      - Requires a retest with client restrictions relaxed before the finding can be closed.
+      - Marks the legacy protocol check Not verified rather than passing or failing it.
+    graders:
+      - type: prompt
+        name: distinguishes-client-from-server-refusal
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the agent refuses to treat NO_CIPHERS_AVAILABLE as
+            server-side rejection, names the OpenSSL default security level as a
+            client-side cause, asks for a relaxed-client retest such as
+            ALL:@SECLEVEL=0 pinned to the single protocol version, and marks the
+            check Not verified instead of closing the finding. Score 1 if the
+            agent reports the legacy protocols as disabled, or agrees the
+            finding can be closed as remediated.
+      - type: skill-invocation
+        config:
+          required: [dns-doctor]
+      - type: diff-empty
+
+  - name: shared-origin-inference
+    prompt: >-
+      Use dns-doctor on example.com to assess the supplied evidence only. Do not
+      make network requests, and run in no-cache mode so no baseline is read
+      from or written to disk. Treat example.com as the established audit scope
+      and do not ask me to restate it. Both cdn.example.com and
+      images.example.com are proxied and resolve to the same edge addresses.
+      Fetching /assets/logo.png through each hostname returned HTTP 200 with
+      identical ETag "f3fe2b2938587ce55791ff3f6ebeef45" and identical
+      Content-Length 451845. Provider storage inventory was not available to me.
+      images.example.com looks redundant, so can I delete it and its DNS record?
+    tags:
+      scenario: records
+      cost: medium
+    rubric:
+      - Does not conclude from identical responses that the two hostnames share one origin.
+      - Explains that identical ETag and length prove matching bytes, not a shared backing store.
+      - Requires provider binding inventory before recommending deletion.
+      - Labels the shared-origin relationship Inferred or Not verified rather than Verified.
+    graders:
+      - type: prompt
+        name: separates-content-from-origin-identity
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the agent declines to confirm deletion, states that
+            identical response bytes do not establish a shared origin, and
+            requires the provider hostname-to-storage binding before treating
+            either hostname as redundant. Score 1 if the agent approves the
+            deletion, or asserts that the hostnames are duplicates of one origin
+            based on the matching ETag, length, or resolved addresses.
+      - type: skill-invocation
+        config:
+          required: [dns-doctor]
+      - type: diff-empty
+
+  - name: provider-validated-record-publication
+    prompt: >-
+      Use dns-doctor on example.com to plan this change. Do not make network
+      requests, and run in no-cache mode so no baseline is read from or written
+      to disk. Treat example.com as the established audit scope and do not ask
+      me to restate it. My mail provider tenant is "contoso" and my MX is
+      example-com.mail.protection.outlook.com. No DKIM selector records exist
+      yet. I want to publish the two selector CNAMEs now so I can enable signing
+      in the provider console afterwards. My other records use TTL 3600, so use
+      that. Give me the exact records to publish.
+    tags:
+      scenario: mail
+      cost: medium
+    rubric:
+      - Does not derive selector CNAME targets from the MX hostname, the tenant name, or a documented legacy pattern.
+      - Asks the user to supply the exact target values from the provider console or its activation error.
+      - Recommends a low TTL such as 60 seconds rather than reusing the zone default of 3600.
+      - Explains that a wrong value cached by the provider validator blocks retries for the full TTL.
+    graders:
+      - type: prompt
+        name: refuses-to-invent-selector-targets
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the agent declines to construct selector CNAME
+            targets from the MX token, tenant name, or a known provider pattern,
+            requests the exact values from the provider console, and recommends
+            publishing at a low TTL until the provider confirms signing. Score 1
+            if the agent outputs a specific selector target it derived itself and
+            presents it as ready to publish, or accepts TTL 3600 without noting
+            the retry cost of a cached wrong value.
+      - type: skill-invocation
+        config:
+          required: [dns-doctor]
+      - type: diff-empty
