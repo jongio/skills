@@ -37,6 +37,12 @@
       "source": "./skills/eli5",
       "description": "Explain the subject already in context using plain language, a useful analogy, the proper grown-up terms, and an honest note about where the analogy stops working.",
       "version": "1.0.0"
+    },
+    {
+      "name": "dep-doctor",
+      "source": "./skills/dep-doctor",
+      "description": "Multi-package-manager dependency updates for any project: scans npm/pnpm/yarn, pip, go, cargo, bundler, and composer, updates everything to latest, fixes breaking changes instead of rolling back, prioritizes security patches, and never opens an empty PR.",
+      "version": "1.0.0"
     }
   ]
 }

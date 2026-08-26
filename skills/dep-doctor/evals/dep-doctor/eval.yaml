@@ -1,0 +1,157 @@
+name: dep-doctor
+description: >-
+  Capability eval for multi-package-manager dependency updates: scanning,
+  updating, fixing breaking changes without rollback, and the no-op gate that
+  prevents empty PRs.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 5m
+  executor: copilot-sdk
+
+scoring:
+  weights:
+    prompt: 1.0
+  threshold: 0.75
+
+stimuli:
+  - name: scans-multiple-package-managers
+    prompt: >-
+      Use the dep-doctor skill on a repo that has both a package-lock.json
+      and a requirements.txt. Explain what you will scan and update before
+      making any changes.
+    tags:
+      scenario: scan
+      cost: low
+    graders:
+      - type: prompt
+        name: identifies-both-managers
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response identifies both npm (from
+            package-lock.json) and pip (from requirements.txt) as package
+            managers to scan and update. Score 1 if it only mentions one
+            manager or invents unrelated tooling.
+    rubric:
+      - The response identifies npm from package-lock.json.
+      - The response identifies pip from requirements.txt.
+
+  - name: no-rollback-on-breaking-change
+    prompt: >-
+      Use the dep-doctor skill. After updating a dependency, tests fail
+      because of a breaking API change in the new version. What do you do?
+    tags:
+      scenario: breaking-change
+      cost: low
+    graders:
+      - type: prompt
+        name: fixes-forward-never-reverts
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response says to fix the code to work with
+            the new dependency version and explicitly rules out downgrading
+            or reverting the dependency. Score 1 if it suggests rolling back,
+            pinning to the old version, or silently reverting.
+    rubric:
+      - The response fixes the code rather than the dependency version.
+      - The response explicitly rejects rollback as an option.
+
+  - name: no-op-gate-blocks-empty-pr
+    prompt: >-
+      Use the dep-doctor skill on a repo where every package manager reports
+      zero outdated packages. What should happen next?
+    tags:
+      scenario: no-op-gate
+      cost: low
+    graders:
+      - type: prompt
+        name: reports-up-to-date-no-pr
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response reports the repo is already up to
+            date and explicitly states no branch, commit, or PR should be
+            created. Score 1 if it creates or suggests creating an empty
+            commit, branch, or PR to record the check.
+    rubric:
+      - The response treats zero outdated packages as a successful outcome.
+      - The response does not create an empty branch, commit, or PR.
+
+  - name: prioritizes-security-updates
+    prompt: >-
+      Use the dep-doctor skill. A dependency scan finds one package with a
+      critical CVE and several other packages with routine minor version
+      bumps available. How do you sequence the updates?
+    tags:
+      scenario: security
+      cost: low
+    graders:
+      - type: prompt
+        name: security-first-sequencing
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response prioritizes the critical CVE fix
+            ahead of or independently from the routine minor updates. Score 1
+            if it treats the critical vulnerability as equal priority to
+            routine bumps or ignores it.
+    rubric:
+      - The response addresses the critical CVE with urgency.
+      - The response does not bury the security fix among routine updates.
+
+  - name: holds-back-freshly-published-version
+    prompt: >-
+      Use the dep-doctor skill. The latest version of a package was
+      published to npm 6 hours ago and is not a security fix. What version do
+      you adopt, and why?
+    tags:
+      scenario: cooldown
+      cost: low
+    graders:
+      - type: prompt
+        name: applies-minimum-release-age
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response declines to adopt the 6-hour-old
+            version, explains it is within the minimum release age / cooldown
+            window, and adopts the most recent version older than the
+            cooldown instead. Score 1 if it adopts the brand-new version
+            without any release-age consideration.
+    rubric:
+      - The response withholds the version published 6 hours ago.
+      - The response explains the minimum release age / cooldown rationale.
+      - The response adopts an older, cooldown-safe version instead.
+
+  - name: coexists-with-existing-bot
+    prompt: >-
+      Use the dep-doctor skill on a repo that already has a
+      `.github/dependabot.yml` actively opening weekly npm update PRs. What do
+      you do differently in this run?
+    tags:
+      scenario: bot-coexistence
+      cost: low
+    graders:
+      - type: prompt
+        name: avoids-duplicating-bot-scope
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response recognizes the existing Dependabot
+            config and explicitly avoids duplicating its npm update scope,
+            instead focusing on gaps (other ecosystems, major bumps, urgent
+            CVEs). Score 1 if it ignores the existing bot and redundantly
+            updates the same npm dependencies Dependabot already covers.
+    rubric:
+      - The response detects and acknowledges the existing Dependabot config.
+      - The response avoids duplicating the bot's npm update scope.
+      - The response focuses this run on gaps the bot does not cover.

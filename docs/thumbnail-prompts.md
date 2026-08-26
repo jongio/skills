@@ -56,7 +56,7 @@ the per-skill accent color):
 
 Per-skill accent: `create-canvas-app` = purple/indigo, `create-gh-pages-site` =
 blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
-`eli5` = sky blue + warm amber.
+`eli5` = sky blue + warm amber, `dep-doctor` = teal + warm orange.
 
 ## Prompts
 
@@ -138,3 +138,22 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 > thin dashed guide line. Palette sky blue and warm amber with GitHub green check
 > marks and soft neutral gray for the confusing side, generous white space, crisp
 > professional flat design, clean legible sans serif text, no photorealism.
+
+### dep-doctor (exact prompt used)
+
+> Flat vector illustration app thumbnail, pure white background, 1024x1024,
+> centered composition, clean modern rounded shapes with soft long shadows,
+> subtle dashed guide lines, tiny sparkles. Theme: a friendly dependency
+> health checkup for software packages, promoting a tool called dep doctor.
+> Center: a rounded clipboard chart card behind a small friendly rounded
+> package-box mascot wearing a doctor headband mirror, with a stethoscope
+> looping around a stack of three colored package boxes (an npm-style cube, a
+> hex gear box, and a small crate) each carrying a small green check badge.
+> Around the packages, small dashed upgrade arrows curve upward from a dim
+> gray old-version tag to a bright teal new-version tag. A tiny magnifying
+> glass hovers over one box inspecting it, and a small red bandage icon sits
+> on a box being fixed. Include the GitHub Octocat logo as a clean small mark
+> in the top right corner, linked by a thin dashed guide line. Palette teal
+> and warm orange accents with GitHub green check marks and soft neutral gray
+> for outdated elements, generous white space, crisp professional flat
+> design, clean legible sans serif text, no photorealism.

@@ -7,7 +7,7 @@
     "url": "https://github.com/jongio"
   },
   "license": "MIT",
-  "keywords": ["copilot", "skills", "agent-skills", "canvas", "create-canvas-app", "github-pages", "create-gh-pages-site", "repo-ready", "gitignore", "license", "contributing", "community-health", "naming-is-hard", "naming", "domain-check", "trademark", "availability", "name-generator", "eli5", "explain-like-im-five", "plain-language", "learning"],
+  "keywords": ["copilot", "skills", "agent-skills", "canvas", "create-canvas-app", "github-pages", "create-gh-pages-site", "repo-ready", "gitignore", "license", "contributing", "community-health", "naming-is-hard", "naming", "domain-check", "trademark", "availability", "name-generator", "eli5", "explain-like-im-five", "plain-language", "learning", "dep-doctor", "dependencies", "dependency-update", "npm", "pnpm", "pip", "cargo", "go-modules", "cve", "security-patches"],
   "repository": "https://github.com/jongio/skills",
   "skills": "skills/"
 }
