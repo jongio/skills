@@ -26,6 +26,61 @@ This needs only Node.js 24, which the skill already requires. Windows does not
 ship Python, so a Python-based validator would make an audit impossible on a
 default Windows host.
 
+## The query must be about the name you think it is
+
+Stub resolvers apply the host's DNS search list to any name that is not fully
+qualified. On a domain-joined or corporate-managed machine, a query for
+`example.com` can be silently rewritten to `example.com.corp.internal`,
+resolved successfully, and returned as a normal `NOERROR` answer. Nothing in
+the response is malformed and no error is raised. The result is well-formed,
+confident evidence about a completely different zone.
+
+A parent-delegation query rewritten this way returns a clean nameserver set
+belonging to the search-suffix domain rather than the target, which is
+indistinguishable from a correct answer unless the question section is read.
+
+So:
+
+- Query fully qualified names with a trailing dot (`example.com.`) whenever the
+  client accepts one.
+- Read back the question section and confirm it matches the intended name
+  before using any answer. `nslookup` needs `set debug` to show it; a raw client
+  should surface it directly.
+- Treat any answer whose question does not match the intended name as void.
+  Discard it, do not "correct" it by re-reading the answer section.
+- Prefer clients that do not consult the search list at all. Windows
+  `Resolve-DnsName` does apply it; passing an absolute name avoids that.
+
+Apply this to every hostname the audit derives, not just the audit target. MX
+targets, CNAME targets, and nameserver names are all vulnerable to the same
+rewrite.
+
+## Minimum client capability
+
+Some checks cannot be satisfied by every DNS client, and substituting a weaker
+source silently breaks the evidence model.
+
+| Requirement | Needs |
+|---|---|
+| Direct query to an authoritative server | A client that targets a server and can disable recursion |
+| DNSSEC chain and denial inspection | Wire flags (`AA`, `AD`, `TC`) plus authority-section records |
+| CAA, HTTPS, SVCB, TLSA | A client that can request those types |
+| Zone transfer outcome | AXFR support with the wire RCODE preserved |
+
+Public DoH resolvers are recursive. They cannot query a chosen authoritative
+server, so they satisfy the recursive evidence tier only. Windows
+`Resolve-DnsName` cannot request CAA, HTTPS, SVCB, or TLSA, and does not expose
+wire flags or the authority section.
+
+On a host with no capable client, `dig`, `kdig`, `delv`, or `drill` is the
+normal answer. Where none can be installed, report the affected checks
+(`DEL-02`, `DEL-03`, `SEC-01`, `SEC-04` and any type-specific check) as **Not
+verified** and say which capability was missing.
+
+Never present a recursive answer as authoritative evidence, and never infer
+`AA` or `AD` from a resolver that did not report it. Conflating the two defeats
+the entire evidence ordering.
+
 ## DNS over HTTPS
 
 On Windows, `Resolve-DnsName` has no enum value for **CAA, HTTPS, SVCB, or
@@ -156,6 +211,11 @@ $server = $serverAddress # A previously validated, globally routable IP literal.
 Capture output and exit status. Windows may summarize FORMERR or NOTIMP as a
 generic refusal, so corroborate material results with a client that exposes the
 wire RCODE when available.
+
+`nslookup` applies the system search list, so pass the zone fully qualified and
+confirm the question it actually asked before trusting the outcome. See "The
+query must be about the name you think it is". A transfer that appears refused
+may have been attempted against a suffixed name that is not the target zone.
 
 ## HTTP and TLS
 

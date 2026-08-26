@@ -98,14 +98,63 @@ Classify findings:
 An NXDOMAIN target alone is not proof of takeover. A live SaaS target alone is
 not proof of ownership.
 
+## Registrar controls
+
+Domain-level controls are the foundation every DNS control rests on. An
+attacker who can repoint the delegation does not need to touch the zone, and no
+zone-side monitoring will see it.
+
+EPP status codes describe what a registry can enforce, not what a registrar
+sells. Before recommending any lock, confirm what the specific registrar
+actually exposes for that TLD and account, and at what price:
+
+- Consumer registrars commonly expose one toggle, mapping to
+  `clientTransferProhibited` only. `clientDeleteProhibited` and
+  `clientUpdateProhibited` are frequently unavailable, bundled into a paid
+  protection product, or offered only on some TLDs.
+- Registry lock (the `server*Prohibited` statuses) is a separate, usually
+  expensive, out-of-band service. It is not a checkbox.
+- The observed status set in RDAP tells you what is applied, not what is
+  available. Absence may mean unavailable, not unconfigured.
+
+Never present an unavailable control as a quick configuration change. Doing so
+misstates the achievable posture and sends the owner looking for a setting that
+does not exist. State what the registrar offers, the cost, and the alternative:
+
+- Where the control is paid, give the price and let the owner weigh it against
+  the domain's value. Judge proportionality honestly. Registry lock protects
+  against registrar-account compromise, and account two-factor authentication
+  addresses much of the same path for free.
+- Where the owner declines a control, record it as accepted risk with the
+  compensating controls, rather than leaving an open finding against something
+  they cannot or will not buy.
+
+Renewal is part of this. Expiry causes immediate, total loss of web and mail,
+not a grace-period warning, and recovery gets expensive quickly. Confirm both
+auto-renewal state and a valid payment method; RDAP shows the expiry date but
+proves nothing about billing. Where an owner prefers manual renewal, the
+proportionate substitute is an early multi-year renewal plus a monitored
+registrant contact, not repeated advice to enable auto-renewal.
+
 ## Zone transfer
 
 With authorization, attempt AXFR against every authoritative server using
 `dig`, `kdig`, or another client that supports AXFR. Record the exact outcome,
 including REFUSED, FORMERR, NOTIMP, timeout, transport failure, or successful
-transfer. Any result that returns no zone data is a blocked or unsupported
-transfer, but preserve the RCODE for diagnosis. Do not assume managed DNS
+transfer. Preserve the RCODE for diagnosis. Do not assume managed DNS
 blocks transfers if the test was not run.
+
+An absence of zone data is not by itself proof of a blocked transfer, because a
+malformed or misdirected query returns no zone data either. This matters most
+for FORMERR and for hand-built queries, where the server is reporting that it
+could not parse the request rather than that it declined to serve it.
+
+Before recording the transfer as blocked, validate the probe as described in
+[evidence and record discovery](evidence-and-records.md): issue an ordinary
+query such as SOA to the same server over the same client and transport. A
+control that succeeds while AXFR returns no zone data demonstrates refusal. A
+control that also fails means the tool or path is at fault, so mark the check
+Not verified and name the blocker.
 
 A successful public AXFR is high severity by default. Raise it to critical only
 when the exposed zone data creates immediate material impact.
@@ -123,3 +172,39 @@ Use complete provider inventory when available to identify:
 
 Do not infer staleness from failed ping. Test the protocol each record is
 intended to serve and confirm service ownership before recommending deletion.
+
+### Attributing a record whose owner is unknown
+
+Verification tokens are the common case: an opaque string with no protocol to
+probe and no consumer that still advertises it. Platforms routinely stop
+returning a validation token once the domain reaches a validated state, so
+querying the consuming platform's current state is a dead end by construction,
+not evidence of absence.
+
+Read the DNS provider's own record metadata before concluding anything. Most
+providers expose a creation and last-modified timestamp per record
+(Cloudflare returns `created_on` and `modified_on`). Correlate those against
+creation timestamps of resources in the consuming platform. A token created
+within minutes of a custom domain, certificate, or tenant binding is almost
+certainly that binding's validation record, and the ordering distinguishes
+records that predate a resource from records created to satisfy it.
+
+This is cheap, read-only, and frequently decisive. It can attribute a token in a
+single call after repository history, resource enumeration, and the platform's
+own domain API have all failed. The same timestamps also expose a documented
+purpose that cannot be true, such as a token that predates the resource it
+supposedly verifies.
+
+Order of attribution evidence:
+
+1. Provider record timestamps correlated with consuming-resource events.
+2. Configuration history: infrastructure repositories, change logs, provider
+   audit logs.
+3. Token format compared against formats the platform is known to issue.
+4. Platform support, where the value can be looked up directly.
+
+Only after these record the value as unattributed, and say which were tried.
+An unattributed record is kept and monitored, never deleted on suspicion: the
+payoff for removal is a few bytes and the failure mode is an outage on whatever
+still depends on it. When correlation does identify the owner, write the
+evidence down, including the timestamps, so the question is not reopened.

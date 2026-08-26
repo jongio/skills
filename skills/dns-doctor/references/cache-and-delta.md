@@ -162,6 +162,15 @@ checks. At minimum, always refresh:
 If a check cannot be refreshed, label it `Not verified`. Never report
 `unchanged` based only on the cache.
 
+Record an entry for every checklist ID in the requested scope, including the
+ones that do not apply. A check ruled out as `Not applicable` is a decision
+with a reason, and storing it preserves that reason: without an entry, the next
+run cannot tell a deliberate exclusion from an oversight, and the ID surfaces
+as a coverage gap that gets re-investigated. Write the reason into `observed`,
+for example that the domain publishes no TLSA because DANE is not deployed, or
+that origin probing was not authorized. Coverage arithmetic is unaffected,
+since not-applicable IDs stay out of the denominator.
+
 ## Delta classification
 
 Compare normalized current evidence with the previous baseline:

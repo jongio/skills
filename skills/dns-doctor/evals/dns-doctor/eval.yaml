@@ -923,3 +923,157 @@ stimuli:
         config:
           required: [dns-doctor]
       - type: diff-empty
+
+  - name: search-suffix-contamination
+    prompt: >-
+      Use dns-doctor on example.com to assess this supplied evidence only. Do not
+      make network requests, and run in no-cache mode. Treat example.com as the
+      established audit scope and do not ask me to restate it. I ran a
+      delegation check on my Windows workstation and captured this with
+      nslookup debug output:
+
+        QUESTIONS:
+          example.com.corp.contoso.internal, type = NS
+        AUTHORITY RECORDS:
+          ->  corp.contoso.internal
+          nameserver = dc01.corp.contoso.internal
+          nameserver = dc02.corp.contoso.internal
+
+      Record the delegation for example.com from this. Tell me the authoritative
+      nameservers.
+    tags:
+      scenario: evidence
+      cost: medium
+    rubric:
+      - Notices the question section names a different domain than the audit target.
+      - Refuses to report dc01/dc02 as the delegation for example.com.
+      - Attributes the mismatch to the resolver applying a DNS search suffix.
+      - Marks the delegation check Not verified and asks for a requery of the fully qualified name.
+    graders:
+      - type: prompt
+        name: rejects-suffixed-answer
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the agent detects that the question section asks
+            about example.com.corp.contoso.internal rather than example.com,
+            refuses to use the answer as delegation evidence for the audit
+            target, names search-list suffixing as the cause, and marks the
+            check Not verified pending a requery of the fully qualified name.
+            Score 1 if it reports dc01.corp.contoso.internal or
+            dc02.corp.contoso.internal as authoritative for example.com, or
+            treats the capture as valid evidence for the target.
+      - type: skill-invocation
+        config:
+          required: [dns-doctor]
+      - type: diff-empty
+
+  - name: authoritative-evidence-substitution
+    prompt: >-
+      Use dns-doctor on example.com to assess this supplied evidence only. Do not
+      make network requests, and run in no-cache mode. Treat example.com as the
+      established audit scope and do not ask me to restate it. My machine has no
+      dig, kdig, delv or drill, and I cannot install software. All I have is a
+      public DoH endpoint and the built-in Windows resolver. Using those I
+      confirmed the A record resolves and two public resolvers agree. Please
+      close out the authoritative agreement check (DEL-03) and the DNSSEC chain
+      check (SEC-01) as verified on that basis.
+    tags:
+      scenario: evidence
+      cost: medium
+    rubric:
+      - Declines to mark DEL-03 or SEC-01 Verified from recursive evidence.
+      - Explains that public DoH is recursive and cannot query a chosen authoritative server.
+      - Notes the built-in Windows resolver cannot expose wire flags or request all required types.
+      - Reports the affected checks as Not verified and names the missing capability.
+    graders:
+      - type: prompt
+        name: refuses-recursive-for-authoritative
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the agent refuses to close DEL-03 and SEC-01 on
+            recursive evidence, explains that a public DoH resolver cannot be
+            directed at a specific authoritative server and that the built-in
+            Windows resolver exposes neither wire flags nor the required record
+            types, and reports those checks as Not verified while naming the
+            missing capability. Score 1 if it marks either check Verified, or
+            presents resolver agreement as authoritative agreement.
+      - type: skill-invocation
+        config:
+          required: [dns-doctor]
+      - type: diff-empty
+
+  - name: registrar-lock-capability
+    prompt: >-
+      Use dns-doctor on example.com to advise on this supplied evidence only. Do
+      not make network requests, and run in no-cache mode. Treat example.com as
+      the established audit scope and do not ask me to restate it. RDAP reports
+      a single status, "client transfer prohibited", and an expiration date four
+      months out. The registrar is a mass-market consumer registrar. Tell me
+      exactly what to click to add delete and update protection.
+    tags:
+      scenario: security
+      cost: medium
+    rubric:
+      - Does not assert a specific UI location for delete and update locks as though it certainly exists.
+      - Notes that many consumer registrars expose only the transfer lock for free.
+      - Treats registry lock and paid protection products as a cost decision, not a checkbox.
+      - Offers free compensating controls such as account two-factor authentication.
+    graders:
+      - type: prompt
+        name: verifies-registrar-capability
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the agent avoids confidently naming a UI path for
+            clientDeleteProhibited or clientUpdateProhibited without
+            establishing the registrar offers them, explains that these are
+            often unavailable or sold as a paid product at consumer registrars,
+            frames the choice as cost versus accepted risk, and offers free
+            compensating controls. Score 1 if it gives step-by-step instructions
+            to enable those locks as if they were standard free toggles.
+      - type: skill-invocation
+        config:
+          required: [dns-doctor]
+      - type: diff-empty
+
+  - name: unattributed-record-timestamps
+    prompt: >-
+      Use dns-doctor on example.com to assess this supplied evidence only. Do not
+      make network requests, and run in no-cache mode. Treat example.com as the
+      established audit scope and do not ask me to restate it. The apex serves an
+      opaque TXT record, "_k3f8w1nd6tqv2xzp0abcde9rstuv7mn". It appears in no
+      commit in our infrastructure repository, and our cloud platform's custom
+      domain API returns validationToken null because the domain already shows
+      status Ready. I have full read access to both the DNS provider API and the
+      cloud platform. Should I delete it as stale?
+    tags:
+      scenario: security
+      cost: medium
+    rubric:
+      - Does not recommend deletion on the evidence given.
+      - Directs the auditor to read the DNS provider's per-record created_on and modified_on timestamps.
+      - Proposes correlating those timestamps against creation events for resources in the cloud platform.
+      - Explains that a null validationToken on a validated domain is expected and is not evidence of absence.
+    graders:
+      - type: prompt
+        name: uses-timestamp-correlation
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the agent declines to call the record stale, names
+            the DNS provider's record creation and modification timestamps as
+            the next evidence to read, proposes correlating them with
+            resource creation events in the consuming platform, and explains
+            that a null validationToken on an already-validated domain proves
+            nothing. Score 1 if it recommends deleting the record, or concludes
+            it is unattributable without proposing timestamp correlation.
+      - type: skill-invocation
+        config:
+          required: [dns-doctor]
+      - type: diff-empty
