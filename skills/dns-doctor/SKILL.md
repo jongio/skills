@@ -140,6 +140,11 @@ Query explicit record types. Do not use `ANY` as an inventory mechanism.
 Use the portable [command recipes](references/command-recipes.md) when the
 local DNS client does not support a required type. For JSON DoH fallback,
 preserve `Status`, `AD`, `Answer`, `Authority`, and `Comment` when present.
+Read the response code from the numeric `Status` field itself and report it as
+that code. Do not infer a response code from the shape of the answer. `Status`
+0 is `NOERROR` and `Status` 3 is `NXDOMAIN`, and a `NOERROR` carrying an empty
+`Answer` is a positive response with no data of that type, which is not
+`NXDOMAIN` and does not mean the name is absent.
 
 Read the query name in the answer before reading the data. A stub resolver may
 append a DNS search suffix from the host's network configuration, so a lookup
@@ -156,8 +161,12 @@ wire-level header flags and cannot request arbitrary record types, and a public
 DoH endpoint is a recursive resolver that answers only from its own cache and
 upstream rather than querying a nameserver you name. Neither can produce
 authoritative evidence. Say which capability is missing when you report a check
-as unverified, because "the tool did not show it" and "the server did not send
-it" have different remediations.
+as unverified, and name it concretely rather than gesturing at it. State that
+the built-in Windows resolver cannot show wire-level header flags such as `AD`
+and `AA`, and cannot be pointed at a chosen nameserver to request a chosen
+record type, so its output cannot close a check that depends on either. "The
+tool did not show it" and "the server did not send it" have different
+remediations, and only the second is a finding about the domain.
 
 When provider credentials are available, establish what they actually permit
 before relying on them. Probe each capability the audit or remediation plan
@@ -209,7 +218,12 @@ host; the separate per-`mx` address-query limit still applies.
 Never construct a DKIM selector target from an MX token, a tenant name, or a
 documented provider pattern, even when the pattern looks certain. Ask for the
 exact values from the provider console or its activation error, and publish
-them at a low TTL until the provider confirms signing.
+them at 60 seconds until the provider confirms signing. The low TTL is the
+point of the exercise rather than a detail. A provider that reads a wrong value
+during activation caches that answer and keeps retrying against its own cache,
+so a correction published behind a long TTL does not take effect until that
+cache expires, and the activation appears to keep failing after you have
+already fixed it. Raise the TTL only once signing is confirmed.
 
 ### 6. Audit web routing and TLS
 
@@ -244,6 +258,14 @@ settings from provider-managed behavior.
 A recognizable SaaS target or an unresolved CNAME is not proof of takeover.
 Raise a critical finding only when the hostname is demonstrably claimable or
 the provider binding confirms the exposure.
+
+Never claim the target, and never recommend claiming it, including as a
+secondary or defensive option. Registering someone else's abandoned name to
+prove it was claimable, or to hold it away from an attacker, is the takeover
+itself, and it can breach the provider's terms and the law regardless of
+intent. The remediation is always on the side you control: remove the alias, or
+repoint it at a binding you own, then verify the record is gone before closing
+the finding.
 
 A signed zone may deny a nonexistent name with `NOERROR` and no data instead of
 `NXDOMAIN`. Never read that as evidence the name still exists. Query a random
