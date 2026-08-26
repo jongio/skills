@@ -156,11 +156,21 @@ jobs:
 
   eval:
     needs: plan
-    # Two distinct skips. `plan` is skipped entirely for a fork pull request,
-    # and an empty matrix is a workflow error rather than a no-op, which
-    # happens on a PR that matches the paths filter without touching a skill,
-    # such as a change to this workflow alone. Require both.
-    if: needs.plan.result == 'success' && needs.plan.outputs.count != '0'
+    # `always()` for the same reason `plan` needs it. `authorize` is skipped on
+    # an owner pull request, and that skip propagates down the chain: `plan`
+    # opts out with always() and runs, but a plain `if` here would still see a
+    # skipped transitive dependency and skip. Without this the approval gate
+    # silently disables every eval, which is worse than having no gate.
+    #
+    # Removing the implicit success requirement means both conditions below are
+    # load-bearing. `plan` must have actually succeeded, and it must have
+    # selected at least one skill, since an empty matrix is a workflow error
+    # rather than a no-op. That second case happens on a PR matching the paths
+    # filter without touching a skill, such as a change to this workflow alone.
+    if: >-
+      always() &&
+      needs.plan.result == 'success' &&
+      needs.plan.outputs.count != '0'
     runs-on: ubuntu-latest
     # Each matrix job drives a real agent through the Copilot SDK, so an
     # unbounded hang would burn Actions minutes and Copilot usage up to the
