@@ -37,18 +37,69 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Owner-authored pull requests run without ceremony. Anyone else's has to be
+  # approved first, because a single eval is roughly 28 agent sessions billed
+  # to the repo owner's Copilot seat, and a pull request can be pushed to
+  # repeatedly.
+  #
+  # The gate is a near-empty job whose only purpose is to carry the
+  # `skill-eval` environment. Everything expensive waits behind it, so the cost
+  # of the approval step itself is a few seconds of a runner.
+  #
+  # REQUIRED SETUP: the `skill-eval` environment must exist with a required
+  # reviewer before this is relied on. A workflow that names an environment
+  # which does not exist causes GitHub to create it implicitly with NO
+  # protection rules, and the gate then passes straight through without ever
+  # asking anyone. Verify at Settings, Environments, skill-eval, that
+  # "Required reviewers" is set.
+  authorize:
+    # Skipped entirely for the owner, for the nightly, and for a manual
+    # dispatch. Also skipped for a fork, which cannot run the eval at all for
+    # the token reason described on `plan`; asking for approval on a run that
+    # is going to skip anyway just trains people to approve without reading.
+    # Only a non-owner pull request from a branch in this repo waits here.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.author_association != 'OWNER'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: skill-eval
+    steps:
+      - name: Record approval
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+        run: |
+          echo "Approved by the repo owner."
+          echo "  pull request author: $PR_AUTHOR"
+          echo "  association:         $ASSOCIATION"
+
   # Resolves the workflow_dispatch `skill` input into the job matrix. The skill
   # list lives here only, so adding a skill means editing one place.
   plan:
+    needs: [authorize]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Three conditions, and the ordering of the first two matters.
+    #
+    # `always()` is required because `authorize` is SKIPPED for owner pull
+    # requests, the nightly and dispatch, and a skipped dependency would
+    # otherwise skip this job too. It also means an authorize that was denied
+    # or cancelled reaches here, so the result is checked explicitly rather
+    # than relying on the default success requirement that `always()` removes.
+    #
     # A pull_request from a fork gets a read-only GITHUB_TOKEN with no
     # copilot-requests scope, so the SDK cannot authenticate and every matrix
     # job would fail on something the contributor cannot fix. Skip cleanly
     # instead, and rely on the nightly run to cover merged fork work.
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      always() &&
+      (needs.authorize.result == 'success' || needs.authorize.result == 'skipped') &&
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       count: ${{ steps.select.outputs.count }}
