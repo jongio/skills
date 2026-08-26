@@ -10,6 +10,16 @@ on:
   schedule:
     # Nightly at 03:00 UTC
     - cron: "0 3 * * *"
+  pull_request:
+    # Only the inputs that can change how an agent behaves. Editing the site,
+    # the README, or another skill must not spend Copilot usage here.
+    paths:
+      - "skills/**/SKILL.md"
+      - "skills/**/references/**"
+      - "skills/**/scripts/**"
+      - "skills/**/evals/**"
+      - "skills/**/package.json"
+      - ".github/workflows/skill-eval.yml"
 
 # copilot-requests lets the built-in GITHUB_TOKEN authenticate the Copilot
 # SDK that vally drives, so no PAT secret is needed. In a personally-owned
@@ -20,8 +30,11 @@ permissions:
   copilot-requests: write
 
 concurrency:
-  group: skill-eval-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Include the PR number so pushing twice to one branch cancels the stale run
+  # instead of paying for both. Scheduled and dispatch runs keep the old
+  # behaviour of queueing rather than cancelling.
+  group: skill-eval-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Resolves the workflow_dispatch `skill` input into the job matrix. The skill
@@ -29,8 +42,16 @@ jobs:
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # A pull_request from a fork gets a read-only GITHUB_TOKEN with no
+    # copilot-requests scope, so the SDK cannot authenticate and every matrix
+    # job would fail on something the contributor cannot fix. Skip cleanly
+    # instead, and rely on the nightly run to cover merged fork work.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
+      count: ${{ steps.select.outputs.count }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -42,6 +63,8 @@ jobs:
           # Passed via env, never interpolated into the script, so a crafted
           # dispatch input cannot inject shell.
           SKILL: ${{ inputs.skill }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           all='[
@@ -52,7 +75,17 @@ jobs:
             {"skill":"skills/repo-ready","skill_id":"repo-ready","eval_spec":"evals/repo-ready/eval.yaml"},
             {"skill":"skills/dns-doctor","skill_id":"dns-doctor","eval_spec":"evals/dns-doctor/eval.yaml"}
           ]'
-          if [ -z "${SKILL:-}" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # Evaluate only the skills this PR actually touches. Keep these
+            # paths in step with the `paths` filter above, or the workflow
+            # triggers and then evaluates nothing while reporting success.
+            changed=$(git diff --name-only "$BASE_SHA" HEAD \
+              -- 'skills/*/SKILL.md' 'skills/*/references/**' \
+                 'skills/*/scripts/**' 'skills/*/evals/**' \
+                 'skills/*/package.json' \
+              | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u | jq -R . | jq -sc .)
+            selected=$(jq -c --argjson c "$changed" '[.[] | select(.skill as $s | $c | index($s))]' <<<"$all")
+          elif [ -z "${SKILL:-}" ]; then
             selected=$(jq -c . <<<"$all")
           else
             selected=$(jq -c --arg s "$SKILL" '[.[] | select(.skill_id == $s or .skill == $s)]' <<<"$all")
@@ -61,11 +94,22 @@ jobs:
               exit 1
             fi
           fi
+          count=$(jq 'length' <<<"$selected")
           echo "matrix=$selected" >> "$GITHUB_OUTPUT"
-          echo "Evaluating: $(jq -r '[.[].skill_id] | join(", ")' <<<"$selected")"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          if [ "$count" -eq 0 ]; then
+            echo "No skill evals to run for this change."
+          else
+            echo "Evaluating: $(jq -r '[.[].skill_id] | join(", ")' <<<"$selected")"
+          fi
 
   eval:
     needs: plan
+    # Two distinct skips. `plan` is skipped entirely for a fork pull request,
+    # and an empty matrix is a workflow error rather than a no-op, which
+    # happens on a PR that matches the paths filter without touching a skill,
+    # such as a change to this workflow alone. Require both.
+    if: needs.plan.result == 'success' && needs.plan.outputs.count != '0'
     runs-on: ubuntu-latest
     # Each matrix job drives a real agent through the Copilot SDK, so an
     # unbounded hang would burn Actions minutes and Copilot usage up to the
@@ -118,7 +162,15 @@ jobs:
           # both to the Actions token and let the SDK pick up either one.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUNS: "5"
+          # One trial per stimulus on a pull request, five on the nightly.
+          # Both halves of that matter. Cost: a full dns-doctor suite is 28
+          # stimuli, so five trials is 140 agent sessions to gate one PR.
+          # Stability: the assert step below requires EVERY trial to pass
+          # skill-invocation, diff-empty and tool-calls, so raising the trial
+          # count strictly raises the chance one flaky trial blocks a good
+          # change. The nightly keeps five because catching that flakiness is
+          # exactly its job, and nothing is blocked while it does.
+          RUNS: ${{ github.event_name == 'pull_request' && '1' || '5' }}
         run: |
           ./node_modules/.bin/vally --version
           ./node_modules/.bin/vally eval \
@@ -143,8 +195,10 @@ jobs:
           # the eval can pass on the mean.
           #
           # skill-invocation, diff-empty, and tool-calls are NOT forgiven. Every
-          # trial of every stimulus must pass all three, and RUNS below is 5, so
-          # one flaky trial in 5 fails the whole job.
+          # trial of every stimulus must pass all three, so on the nightly a
+          # single flaky trial in five fails the whole job. A pull request runs
+          # one trial per stimulus, which keeps that gate meaningful without
+          # multiplying the chance of a spurious block.
           #
           # The practical consequence: a stimulus whose correct answer can be
           # produced WITHOUT opening the skill (a flat refusal, or a question
