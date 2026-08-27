@@ -43,6 +43,12 @@
       "source": "./skills/dns-doctor",
       "description": "Audit DNS and domain health with explicit evidence coverage across delegation, records, DNSSEC, CAA, web routing, TLS, CDN behavior, mail authentication, takeover exposure, TTLs, and zone hygiene, then apply exact provider changes only after explicit user approval.",
       "version": "1.0.0"
+    },
+    {
+      "name": "deps-doctor",
+      "source": "./skills/deps-doctor",
+      "description": "Audit, update, and secure dependencies across npm, pnpm, Yarn, pip, Pipenv, Poetry, uv, Go, Cargo, Bundler, Composer, NuGet, Maven, Gradle, Swift, pub, and Hex, plus Docker base images, GitHub Actions, Terraform, and dev container features. Finds outdated, unused, and undeclared packages, withholds releases too new to have been vetted, ranks vulnerabilities by exploitation evidence, screens supply-chain risk, and fixes breaking changes forward without ever opening an empty pull request.",
+      "version": "1.0.0"
     }
   ]
 }
