@@ -55,10 +55,62 @@ the per-skill accent color):
 - Green check marks for "available / done"; a coherent per-skill accent palette.
 - Minimal text, crisp and professional, no photorealism.
 
+### The recurring structure
+
+Reviewing the shipped set, four things repeat in every one of them and are worth
+stating outright, because a prompt that omits them produces an image that looks
+adjacent to the catalog rather than part of it.
+
+1. **One hero surface holds the scene.** A browser window, a console panel, a
+   card, or an open folder. The subject sits inside or on that surface rather
+   than floating as loose icons. `create-canvas-app` and `create-gh-pages-site`
+   use a browser chrome, `dns-doctor` and `deps-doctor` a dark console,
+   `naming-is-hard` a swipe card, `repo-ready` an intake box.
+2. **A left-to-right or top-to-bottom transformation.** Messy or old on one
+   side, resolved or current on the other, joined by arrows or dashed
+   connectors: tangle to clean grid in `eli5`, drafts to published globe in
+   `create-gh-pages-site`, Octocat down into the folder in `repo-ready`, amber
+   to green packages in `deps-doctor`. The reader should see a direction.
+3. **Status is carried by badge, not by prose.** Small circular green checks,
+   an amber warning, a red problem dot. This is what survives the downscale.
+4. **The Octocat is a small mark with a dotted tether**, usually upper-right,
+   never the subject of the image.
+
+### Two legitimate text treatments, and nothing in between
+
+The set splits cleanly, and a new thumbnail should commit to one side:
+
+- **Wordmark.** The skill's name is the artwork, set large and deliberate.
+  `naming-is-hard` and `eli5` do this; the words are the product, so they earn
+  the space.
+- **Diagram.** No readable characters at all. Labels are faked with short
+  abstract dashes and rounded pills. `create-canvas-app`,
+  `create-gh-pages-site`, `repo-ready`, `dns-doctor`, and `deps-doctor` do this.
+
+The failure mode is landing between the two: many small real labels that are
+neither the hero nor abstract. The catalog card renders a 1024x1024 square,
+letterboxed by `object-fit: contain` into a 16:10 box, at roughly **175 pixels**.
+At that size incidental text is texture. Before committing a thumbnail,
+downscale it to 175 pixels and confirm the concept still reads.
+
+### Drawing real-world objects
+
+Image models reliably mangle objects with branching parts. A stethoscope is the
+one in this catalog: it must be a single continuous instrument with exactly two
+ear tubes meeting at one Y junction and exactly one tube continuing to the chest
+piece. Spell that out and add "no extra tubes, no floating or disconnected tube
+segments" to the negative list, or the result grows a spare tube.
+
+More generally, close every prompt with an explicit negative list. The
+`dns-doctor` and `deps-doctor` prompts below show the pattern: bar words,
+letters, numerals, fake text, photorealism, 3D, and whatever specific artifact
+that scene tends to attract.
+
 Per-skill accent: `create-canvas-app` = purple/indigo, `create-gh-pages-site` =
 blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 `eli5` = sky blue + warm amber.
 `dns-doctor` = DNS blue + health green + warning amber.
+`deps-doctor` = slate graphite + warning amber to health green.
 
 ## Prompts
 
@@ -163,3 +215,46 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 > crisp professional finish. No words, no letters, no fake text, no
 > photorealism, no 3D render, no giant magnifying glass obscuring the
 > composition, no ECG pulse line.
+
+### deps-doctor (exact prompt used)
+
+> Generated against the `gpt-image-2` deployment on `jong-image-westus3`. The
+> earlier thumbnail for this skill was a dense infographic carrying roughly
+> twenty separate text labels, which is unreadable at the size the catalog card
+> actually renders: a 1024x1024 square is letterboxed by `object-fit: contain`
+> into a 16:10 card about 175 pixels tall, so every label became texture. This
+> prompt follows the `dns-doctor` pattern instead, one hero object with a few
+> supporting elements and no real words anywhere, and it was verified by
+> downscaling the result to 175 pixels and confirming the concept still reads.
+> The stethoscope anatomy is spelled out segment by segment because the first
+> generation grew a spare tube that connected to nothing.
+
+> Flat vector illustration app thumbnail on a pure white background, 1024x1024,
+> centered composition, matching a polished GitHub developer-tools catalog.
+> Create one cohesive dependency health-check scene, not a dashboard of panels.
+> Center: a large rounded slate-graphite console with a soft long shadow holding
+> a tidy branching dependency graph built from rounded package cubes. The left
+> side of the graph is a cluster of warning-amber cubes, the right side is a
+> cluster of health-green cubes, and clean dashed upgrade arcs sweep from left
+> to right only, never right to left, so the direction of travel is
+> unmistakable. Drape one single continuous stethoscope across the lower left of
+> the scene. The stethoscope has exactly two short ear tubes at the top that
+> curve together and meet at one Y junction, and exactly one single tube
+> continuing from that junction down to one round chest piece. The chest piece
+> is a magnifying lens resting over one amber cube. Draw exactly three tube
+> segments in total and nothing else: two above the Y junction and one below it.
+> Every tube end must terminate either at an ear tip or at the chest piece. Give
+> one green cube a small shield badge, and give one amber cube a small hourglass
+> badge to suggest a release deliberately held back. Add two small green check
+> badges on green cubes. Place a small GitHub Octocat mark in a circular badge
+> near the upper-right, connected to the console by a subtle dotted guide line.
+> Suggest any labels only as short abstract dashes and rounded pills, never as
+> readable characters. Palette: slate graphite base, warning amber, health
+> green, one cool blue accent on the lens, generous white space. Rich but
+> uncluttered flat vector detail, clean modern rounded geometry, consistent
+> medium-weight outlines, subtle dashed guide lines, tiny sparkles, crisp
+> professional finish. No extra tubes, no third tube, no floating or
+> disconnected tube segments, no tube that loops around the console, no
+> duplicated stethoscope, no words, no letters, no numerals, no version strings,
+> no fake text, no checklist rows, no pause or play icons, no cartoon mascot or
+> face, no photorealism, no 3D render.

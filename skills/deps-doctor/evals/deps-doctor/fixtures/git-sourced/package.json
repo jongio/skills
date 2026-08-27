@@ -1,0 +1,15 @@
+{
+  "name": "checkout-gateway",
+  "version": "3.2.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "fastify": "4.26.0",
+    "@acme/payments-sdk": "git+https://github.com/acme-forks/payments-sdk.git#4f21c0a",
+    "metrics-agent": "http://packages.internal.example.net/metrics-agent-2.1.0.tgz",
+    "local-schema": "file:../shared/schema"
+  },
+  "devDependencies": {
+    "vitest": "1.4.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "bot-managed-app",
+  "version": "1.4.0",
+  "private": true,
+  "dependencies": {
+    "express": "4.18.2",
+    "lodash": "4.17.20"
+  },
+  "devDependencies": {
+    "vitest": "1.2.0"
+  }
+}

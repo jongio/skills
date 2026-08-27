@@ -1,0 +1,15 @@
+__metadata:
+  version: 8
+  cacheKey: 10c0
+
+"fastify@npm:5.2.1":
+  version: 5.2.1
+  resolution: "fastify@npm:5.2.1"
+
+"orders-api@workspace:.":
+  version: 0.0.0-use.local
+  resolution: "orders-api@workspace:."
+  dependencies:
+    fastify: "npm:5.2.1"
+  languageName: unknown
+  linkType: soft

@@ -124,7 +124,8 @@ jobs:
             {"skill":"skills/naming-is-hard","skill_id":"naming-is-hard","eval_spec":"evals/naming-is-hard/eval.yaml"},
             {"skill":"skills/eli5","skill_id":"eli5","eval_spec":"evals/eli5/eval.yaml"},
             {"skill":"skills/repo-ready","skill_id":"repo-ready","eval_spec":"evals/repo-ready/eval.yaml"},
-            {"skill":"skills/dns-doctor","skill_id":"dns-doctor","eval_spec":"evals/dns-doctor/eval.yaml"}
+            {"skill":"skills/dns-doctor","skill_id":"dns-doctor","eval_spec":"evals/dns-doctor/eval.yaml"},
+            {"skill":"skills/deps-doctor","skill_id":"deps-doctor","eval_spec":"evals/deps-doctor/eval.yaml"}
           ]'
           if [ "$EVENT_NAME" = "pull_request" ]; then
             # Evaluate only the skills this PR actually touches. Keep these
@@ -197,10 +198,12 @@ jobs:
         working-directory: ${{ matrix.skill }}
         run: npm ci
 
-      # Scoped to the skills that ship a test suite plus an eval spec.
-      # `--if-present` lets one step serve both without inventing scripts a
-      # skill does not declare: dns-doctor has a coverage gate, repo-ready
-      # does not.
+      # Belt and braces for the two skills with the strictest gates. Every
+      # skill's `npm test` and `eval:lint` already run on every push in
+      # skill-lint.yml; this repeats them here, immediately before the
+      # expensive agent eval, so a broken skill fails in seconds rather than
+      # after 45 minutes of billed Copilot usage. `--if-present` keeps one step
+      # serving both: dns-doctor has a coverage gate, repo-ready does not.
       - name: Validate skill
         if: matrix.skill_id == 'dns-doctor' || matrix.skill_id == 'repo-ready'
         working-directory: ${{ matrix.skill }}

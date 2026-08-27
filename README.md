@@ -18,6 +18,7 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`naming-is-hard`](skills/naming-is-hard/) | Interactive naming assistant for projects, CLIs, and products. Profiles what you're building, generates diverse candidate names, learns your preferences as you react, and validates finalists against real availability (domains, GitHub, npm/PyPI/crates/RubyGems/NuGet, social handles) plus a trademark and existing-business screen. Every finalist lands a verdict: Deal Breaker, It's Complicated, or Perfect Match. |
 | [`eli5`](skills/eli5/) | Explain the code, error, design, or idea already in context using plain language, a useful analogy, the proper grown-up terms, and an honest note about where the analogy stops working. |
 | [`dns-doctor`](skills/dns-doctor/) | Audit DNS delegation, records, DNSSEC, CAA, web routing, TLS, CDN behavior, mail authentication, takeover exposure, and zone hygiene, then apply exact provider changes only after explicit user approval. |
+| [`deps-doctor`](skills/deps-doctor/) | Audit, update, and secure dependencies across npm, pnpm, Yarn, pip, Poetry, uv, Go, Cargo, Bundler, Composer, NuGet, Maven, Gradle, Swift, pub, and Hex, plus Docker base images, GitHub Actions, Terraform, and dev container features. Ranks vulnerabilities by exploitation evidence, withholds releases too new to have been vetted, fixes breaking changes forward instead of rolling back, and never opens an empty dependency pull request. |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:
@@ -97,17 +98,43 @@ copilot plugin install jongio/skills
 ## Layout
 
 ```text
-marketplace.json             Copilot marketplace manifest (indexes skills as plugins)
+marketplace.json              Copilot marketplace manifest (indexes skills as plugins)
 plugin.json                   Copilot plugin manifest (skills: "skills/")
 skills/
   create-canvas-app/          One self-contained skill
     SKILL.md                  Authoring contract the agent reads
     README.md                 Human docs for the skill
-    kit/  reference/  scripts/  test/  docs/
+    references/               Lookup detail SKILL.md links to, to stay under 500 lines
+    evals/                    Vally eval spec plus its fixtures
+    test/                     Deterministic tests, run in CI for every skill
+    kit/  scripts/  docs/     Skill-specific assets
+lib/                          Shared modules a skill re-exports from its scripts/
+docs/                         Specs, test plans, thumbnail prompts
+site/                         Astro catalog published to GitHub Pages
+.github/workflows/            skill-lint (every push), skill-eval (agent evals)
 ```
 
-Add a new skill by creating `skills/<name>/SKILL.md` (plus any bundled assets in
-the same folder); the `skills` CLI auto-discovers it.
+### Adding a skill
+
+A skill is more than its folder: CI enforces that every skill is registered
+everywhere the catalog advertises it. `skill-lint.yml` runs `vally lint`, the
+strict eval-spec lint, and `npm test` for **every** skill on **every** push, and
+builds the site. Each skill's own test asserts its registration, so missing any
+of these turns the build red.
+
+1. `skills/<name>/` with `SKILL.md` (500-line ceiling; overflow goes to
+   `references/`), `README.md`, `package.json`, `test/`, and `evals/<name>/eval.yaml`.
+2. The skill table in this README.
+3. `marketplace.json` and the `keywords` array in `plugin.json`.
+4. `site/src/content/skills/<name>.md`, with `thumb:` pointing at
+   `images/thumb-<name>.png`.
+5. The `all=` matrix in `.github/workflows/skill-eval.yml`.
+6. A thumbnail saved byte-identically to both `skills/<name>/thumbnail.png` and
+   `site/public/images/thumb-<name>.png`, generated from a prompt recorded in
+   [`docs/thumbnail-prompts.md`](docs/thumbnail-prompts.md), and listed in
+   [`site/public/images/IMAGES.md`](site/public/images/IMAGES.md).
+
+Copy the newest skill rather than the oldest; it reflects the current conventions.
 
 ## License
 

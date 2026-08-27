@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: "8.0.x"
+      - uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: dotnet test
