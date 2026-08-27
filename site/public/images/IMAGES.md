@@ -28,6 +28,7 @@ copy of `skills/<skill>/thumbnail.png`.
 | `thumb-create-gh-pages-site.png` | `create-gh-pages-site` card/detail | Astro site scaffold deploying to GitHub Pages. |
 | `thumb-deps-doctor.png` | `deps-doctor` card/detail | Dependency graph on a slate console, amber packages upgrading left to right into green ones, inspected by a stethoscope lens. Byte parity with the skill copy is asserted by a test. |
 | `thumb-dns-doctor.png` | `dns-doctor` card/detail | DNS diagnostic workstation, record cards, and stethoscope. |
+| `thumb-git-tidy.png` | `git-tidy` card/detail | Git branch tree being tidied, merged branches swept up while protected branches are kept. Byte parity with the skill copy is asserted by a test. |
 | `thumb-eli5.png` | `eli5` card/detail | Byte parity with the skill copy is asserted by a test. |
 | `thumb-naming-is-hard.png` | `naming-is-hard` card/detail | Candidate names screened across registries. |
 | `thumb-repo-ready.png` | `repo-ready` card/detail | Repository health checklist with gap indicators. |
