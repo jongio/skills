@@ -49,6 +49,12 @@
       "source": "./skills/deps-doctor",
       "description": "Audit, update, and secure dependencies across npm, pnpm, Yarn, pip, Pipenv, Poetry, uv, Go, Cargo, Bundler, Composer, NuGet, Maven, Gradle, Swift, pub, and Hex, plus Docker base images, GitHub Actions, Terraform, and dev container features. Finds outdated, unused, and undeclared packages, withholds releases too new to have been vetted, ranks vulnerabilities by exploitation evidence, screens supply-chain risk, and fixes breaking changes forward without ever opening an empty pull request.",
       "version": "1.0.0"
+    },
+    {
+      "name": "git-tidy",
+      "source": "./skills/git-tidy",
+      "description": "Comprehensive git repository hygiene in one pass across local and remote branches, worktrees, stashes, tags, remotes, merge and rebase artifacts, ignored-but-tracked files, large history blobs, and maintenance health. Classifies every finding by confidence (safe, review, keep), keeps protected branches and release tags off the deletion list, holds large-blob findings to report-only, and deletes nothing without explicit user approval.",
+      "version": "1.0.0"
     }
   ]
 }

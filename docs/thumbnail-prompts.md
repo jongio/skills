@@ -111,6 +111,7 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 `eli5` = sky blue + warm amber.
 `dns-doctor` = DNS blue + health green + warning amber.
 `deps-doctor` = slate graphite + warning amber to health green.
+`git-tidy` = git orange + GitHub green + navy.
 
 ## Prompts
 
@@ -258,3 +259,25 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 > duplicated stethoscope, no words, no letters, no numerals, no version strings,
 > no fake text, no checklist rows, no pause or play icons, no cartoon mascot or
 > face, no photorealism, no 3D render.
+
+### git-tidy (exact prompt used)
+
+> Flat vector illustration app thumbnail on a pure white background, 1024x1024,
+> centered composition, matching a polished GitHub developer-tools catalog.
+> Create one cohesive git repository cleanup scene, not a generic icon panel.
+> Center: a clean git branch graph as rounded nodes connected by smooth curved
+> lines growing from a strong navy trunk on the left. The top two branches are
+> tidy and kept, each ending in a small green check badge, and one carries a
+> tiny navy padlock to mean protected. Two lower stale branches are faded gray
+> and dashed, gently detaching from the trunk and being swept up by a friendly
+> rounded broom whose bristles are git orange, with a small dustpan collecting
+> three faded branch nodes and a couple of tiny sparkles for freshness. Include
+> small supporting cards near the bottom edge: a worktree folder card, a stash
+> card, and a tag card, each with a subtle status dot. Place a small GitHub
+> Octocat mark in a circular badge near the upper-right, connected to the scene
+> by a subtle dotted guide line. Palette: deep GitHub navy, git orange, and
+> health green, with soft neutral gray for the stale branches. Rich but
+> uncluttered flat vector detail, clean modern rounded geometry, consistent
+> medium-weight outlines, subtle dashed guide lines, tiny sparkles, generous
+> white space, crisp professional finish. No words, no letters, no fake text,
+> no photorealism, no 3D render.
