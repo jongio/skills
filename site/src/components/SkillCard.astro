@@ -8,23 +8,29 @@ interface Props {
 }
 const { href, skillId, title, tagline, thumb } = Astro.props;
 const base = import.meta.env.BASE_URL;
-// The install command must use the skill id, not the display title. The title
-// is human-readable and may differ from the id it is installed by.
+// The install command uses the skill id, not the display title. The title is
+// human-readable and may differ from the id it is installed by.
 const install = `install ${skillId} from jongio/skills`;
+// Lowercased haystack the client-side search filters against.
+const search = `${title} ${tagline}`.toLowerCase();
 ---
 
-<article class="skill-card">
+<article class="skill-card" data-search={search}>
   <a class="skill-card__link" href={href}>
     <img class="skill-thumb" src={`${base}${thumb}`} alt={`${title} preview`} loading="lazy" />
     <div class="skill-body">
       <h3>{title}</h3>
-      <p class="muted">{tagline}</p>
-      <span class="skill-more">View skill →</span>
+      <p class="skill-tagline muted">{tagline}</p>
     </div>
   </a>
-  <div class="skill-install">
-    <p class="skill-install__label muted">Install in your agent</p>
-    <pre><code>{install}</code></pre>
+  <div class="skill-foot">
+    <a class="skill-more" href={href}>View skill →</a>
+    <button type="button" class="skill-copy" data-install={install} aria-label={`Copy install command for ${title}`}>
+      <svg class="skill-copy__icon" viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">
+        <path d="M10 1.5H6a.5.5 0 0 0-.5.5v1H4A1.5 1.5 0 0 0 2.5 4.5v9A1.5 1.5 0 0 0 4 15h6a1.5 1.5 0 0 0 1.5-1.5v-1h1a1.5 1.5 0 0 0 1.5-1.5v-7A1.5 1.5 0 0 0 12 2.5h-1.5v-1a.5.5 0 0 0-.5-.5Zm0 2v.5a.5.5 0 0 0 .5.5H12v7h-1.5a.5.5 0 0 0-.5.5v1H4v-9h1.5a.5.5 0 0 0 .5-.5V3.5h4Z"/>
+      </svg>
+      <span class="skill-copy__label">Copy install</span>
+    </button>
   </div>
 </article>
 
@@ -42,56 +48,144 @@ const install = `install ${skillId} from jongio/skills`;
     border-color: var(--accent);
     transform: translateY(-2px);
   }
+  /* The base display:flex would otherwise override the UA [hidden] rule, so the
+     search filter (which toggles the hidden attribute) needs this to take. */
+  .skill-card[hidden] {
+    display: none;
+  }
   .skill-card__link {
     text-decoration: none;
     color: inherit;
-    display: block;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
   }
   .skill-thumb {
     width: 100%;
-    aspect-ratio: 16 / 10;
+    height: 128px;
     object-fit: contain;
     background: var(--bg);
     border-bottom: 1px solid var(--border);
     display: block;
-    padding: 0.75rem;
+    padding: 0.6rem;
+    flex: none;
   }
   .skill-body {
-    padding: 1rem 1.1rem 1.2rem;
+    padding: 0.8rem 0.95rem;
+    flex: 1;
+    min-width: 0;
   }
   .skill-body h3 {
-    margin: 0 0 0.4rem;
-    font-size: 1.1rem;
+    margin: 0 0 0.35rem;
+    font-size: 1rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    overflow-wrap: anywhere;
   }
-  .skill-body p {
-    margin: 0 0 0.8rem;
-    font-size: 0.95rem;
+  .skill-tagline {
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .skill-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.6rem 0.95rem;
+    border-top: 1px solid var(--border);
   }
   .skill-more {
     color: var(--accent);
     font-weight: 600;
-    font-size: 0.92rem;
-  }
-  .skill-install {
-    margin-top: auto;
-    padding: 0.9rem 1.1rem 1.1rem;
-    border-top: 1px solid var(--border);
-  }
-  .skill-install__label {
-    margin: 0 0 0.4rem;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 600;
-  }
-  .skill-install pre {
-    margin: 0;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    padding: 0.6rem 0.8rem;
-    overflow-x: auto;
     font-size: 0.88rem;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .skill-copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.35rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--muted);
+    font: 600 0.78rem/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  .skill-copy:hover {
+    color: var(--fg);
+    border-color: var(--accent);
+  }
+  .skill-copy.copied {
+    color: #fff;
+    background: var(--accent-solid);
+    border-color: var(--accent-solid);
+  }
+
+  /* List view: the parent grid sets data-view="list". Reflow each card into a
+     compact horizontal row so many skills fit on screen. */
+  :global([data-view="list"]) .skill-card {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  :global([data-view="list"]) .skill-card__link {
+    flex: 1 1 320px;
+    flex-direction: row;
+    align-items: center;
+    min-width: 0;
+  }
+  :global([data-view="list"]) .skill-thumb {
+    width: 96px;
+    height: 68px;
+    border-bottom: none;
+    border-right: 1px solid var(--border);
+    flex: none;
+  }
+  :global([data-view="list"]) .skill-body {
+    padding: 0.55rem 0.9rem;
+  }
+  :global([data-view="list"]) .skill-tagline {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
+  :global([data-view="list"]) .skill-foot {
+    border-top: none;
+    border-left: 1px solid var(--border);
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.45rem;
+  }
+  /* On narrow viewports the row would cramp, so fall back to a stacked card. */
+  @media (max-width: 560px) {
+    :global([data-view="list"]) .skill-card {
+      flex-direction: column;
+    }
+    :global([data-view="list"]) .skill-card__link {
+      flex-direction: column;
+    }
+    :global([data-view="list"]) .skill-thumb {
+      width: 100%;
+      height: 128px;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+    :global([data-view="list"]) .skill-foot {
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      border-left: none;
+      border-top: 1px solid var(--border);
+    }
   }
 </style>
