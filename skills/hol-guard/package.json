@@ -1,0 +1,20 @@
+{
+  "name": "hol-guard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runtime-safety skill for installing and operating HOL Guard around supported local AI coding harnesses.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "eval:lint": "vally lint --eval-spec evals/hol-guard/eval.yaml --strict",
+    "eval": "vally eval --eval-spec evals/hol-guard/eval.yaml --skill-dir ."
+  },
+  "devDependencies": {
+    "@microsoft/vally-cli": "0.14.0"
+  },
+  "allowScripts": {
+    "@vscode/deviceid": false,
+    "better-sqlite3": false,
+    "koffi": false
+  }
+}

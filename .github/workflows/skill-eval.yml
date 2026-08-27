@@ -125,7 +125,8 @@ jobs:
             {"skill":"skills/eli5","skill_id":"eli5","eval_spec":"evals/eli5/eval.yaml"},
             {"skill":"skills/repo-ready","skill_id":"repo-ready","eval_spec":"evals/repo-ready/eval.yaml"},
             {"skill":"skills/dns-doctor","skill_id":"dns-doctor","eval_spec":"evals/dns-doctor/eval.yaml"},
-            {"skill":"skills/deps-doctor","skill_id":"deps-doctor","eval_spec":"evals/deps-doctor/eval.yaml"}
+            {"skill":"skills/deps-doctor","skill_id":"deps-doctor","eval_spec":"evals/deps-doctor/eval.yaml"},
+            {"skill":"skills/hol-guard","skill_id":"hol-guard","eval_spec":"evals/hol-guard/eval.yaml"}
           ]'
           if [ "$EVENT_NAME" = "pull_request" ]; then
             # Evaluate only the skills this PR actually touches. Keep these
