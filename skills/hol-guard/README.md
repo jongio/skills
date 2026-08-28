@@ -10,4 +10,4 @@ npx skills add jongio/skills --skill hol-guard
 
 Or install it from the `jongio-skills` GitHub Copilot marketplace after registering `jongio/skills` as described in the repository README.
 
-The skill pins the current stable HOL Guard `3.0.9` runtime for reproducible installation, detects the exact supported local harness, verifies protection with Guard-owned dry-run/doctor/status evidence, fails closed on errors or review states, and keeps Guard Cloud opt-in.
+The skill pins HOL Guard `3.0.12`, the verified stable release used by this contribution, for reproducible installation; it detects the exact supported local harness, verifies protection with Guard-owned dry-run/doctor/status evidence, fails closed on errors or review states, and keeps Guard Cloud opt-in.
