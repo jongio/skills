@@ -70,10 +70,12 @@ List and inspect Guard-owned decisions:
 
 ```sh
 hol-guard approvals
-hol-guard approvals open
+hol-guard approvals open <request-id>
 hol-guard receipts
 hol-guard diff <harness>
 ```
+
+Use the pending request ID returned by `hol-guard approvals` when opening a request.
 
 When Guard provides a request ID and a terminal decision is appropriate:
 
