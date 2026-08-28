@@ -1,6 +1,6 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import SkillCard from "../components/SkillCard.astro";
+import SkillGrid from "../components/SkillGrid.astro";
 import { getCollection } from "astro:content";
 
 const base = import.meta.env.BASE_URL;
@@ -9,7 +9,7 @@ const skills = (await getCollection("skills")).sort(
 );
 ---
 
-<Layout>
+<Layout wide>
   <header class="hero">
     <p class="eyebrow">Cross-agent skills · GitHub Copilot · Claude · Codex</p>
     <h1>jongio/skills</h1>
@@ -26,21 +26,14 @@ const skills = (await getCollection("skills")).sort(
   </header>
 
   <section>
-    <h2 class="section-title">Skills</h2>
-    <div class="grid">
-      {skills.map((s) => (
-        <SkillCard
-          href={`${base}catalog/${s.id}/`}
-          skillId={s.id}
-          title={s.data.title}
-          tagline={s.data.tagline}
-          thumb={s.data.thumb}
-        />
-      ))}
+    <div class="section-head">
+      <h2 class="section-title">Skills</h2>
+      <a class="section-link" href={`${base}catalog/`}>Browse all →</a>
     </div>
+    <SkillGrid skills={skills} search={false} />
   </section>
 
-  <section class="card">
+  <section class="card install-card">
     <h2>Install</h2>
     <p class="muted">Pick whichever fits your setup.</p>
     <h3>1 · Ask your agent</h3>
@@ -97,10 +90,13 @@ copilot plugin install create-canvas-app@jongio-skills</code></pre>
     border-radius: 9px; padding: 0.7rem 1rem;
   }
   .section-title { font-size: 1.4rem; margin: 0 0 1rem; }
-  .grid {
-    display: grid; gap: 1rem; margin-bottom: 2rem;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 1rem; margin-bottom: 1rem;
   }
+  .section-head .section-title { margin: 0; }
+  .section-link { font-weight: 600; font-size: 0.92rem; white-space: nowrap; text-decoration: none; }
+  .install-card { max-width: 860px; margin-left: auto; margin-right: auto; }
   .card pre {
     background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
     padding: 0.7rem 0.9rem; overflow-x: auto;
