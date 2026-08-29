@@ -229,16 +229,18 @@ The generator auto-detects the project stack by scanning for these markers:
 | `package.json` | Node.js | `node` | `node.js.yml` |
 | `pnpm-lock.yaml` | Node.js (pnpm) | `node` | `node.js.yml` (pnpm variant) |
 | `yarn.lock` | Node.js (yarn) | `node` | `node.js.yml` (yarn variant) |
+| `bun.lockb`, `bun.lock` | Node.js (bun) | `node` | `node.js.yml` |
 | `tsconfig.json` | TypeScript | `node` | adds tsc build step |
-| `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile` | Python | `python` | `python-package.yml` |
+| `requirements.txt`, `pyproject.toml`, `setup.py`, `setup.cfg`, `Pipfile` | Python | `python` | `python-package.yml` |
 | `go.mod` | Go | `go` | `go.yml` |
 | `Cargo.toml` | Rust | `rust` | `rust.yml` |
-| `*.csproj`, `*.sln` | .NET | `dotnetcore` | `dotnet.yml` |
+| `*.csproj`, `*.fsproj`, `*.sln` | .NET | `dotnetcore` | `dotnet.yml` |
 | `pom.xml` | Java (Maven) | `java` | `java-gradle.yml` |
 | `build.gradle`, `build.gradle.kts` | Java/Kotlin (Gradle) | `java` | `java-gradle.yml` |
 | `Gemfile` | Ruby | `ruby` | `ruby.yml` |
-| `Dockerfile` | Docker | `docker` added | adds docker build |
+| `Dockerfile`, `docker-compose.y*ml`, `compose.y*ml` | Docker | `docker` added | adds docker build |
 | `*.tf` | Terraform | `terraform` | terraform validate |
+| `Chart.yaml` | Helm | none | none |
 | `composer.json` | PHP | `composer` | `php.yml` |
 | `Package.swift` | Swift | `swift` | `swift.yml` |
 | `pubspec.yaml` | Dart/Flutter | `flutter` | flutter test |

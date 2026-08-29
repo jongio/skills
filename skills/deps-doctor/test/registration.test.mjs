@@ -23,6 +23,7 @@ const [
   siteEntry,
   evalWorkflow,
   lintWorkflow,
+  ciToolPackage,
   packageJson,
   lockfile,
   images,
@@ -37,6 +38,7 @@ const [
   read("site", "src", "content", "skills", `${skillId}.md`),
   read(".github", "workflows", "skill-eval.yml"),
   read(".github", "workflows", "skill-lint.yml"),
+  parse(".github", "tools", "vally", "package.json"),
   parse("skills", skillId, "package.json"),
   parse("skills", skillId, "package-lock.json"),
   read("site", "public", "images", "IMAGES.md"),
@@ -85,7 +87,11 @@ assert.equal(
   "marketplace source must point at the skill directory",
 );
 
-assert.equal(plugin.skills, "skills/", "plugin.json skills root changed");
+assert.equal(
+  plugin.$schema,
+  "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "plugin.json must use the portable Agent Plugins schema",
+);
 assert.ok(
   plugin.keywords.includes(skillId),
   "plugin.json keywords must include the skill id",
@@ -178,12 +184,15 @@ for (const script of ["eval", "eval:lint"]) {
 // comparison only holds while package.json pins an exact version.
 const vallyPin = packageJson.devDependencies[vallyPkg];
 assert.match(vallyPin, /^\d+\.\d+\.\d+$/, `${vallyPkg} must be pinned exactly`);
-// skill-lint.yml installs vally globally, so its pin must not drift from the
-// version this skill resolves locally and in the nightly eval.
+assert.equal(
+  ciToolPackage.devDependencies[vallyPkg],
+  vallyPin,
+  "locked CI vally version drifted from the skill pin",
+);
 assert.match(
   lintWorkflow,
-  new RegExp(`${vallyPkg.replace("/", "\\/")}@${vallyPin.replace(/\./g, "\\.")}`),
-  "skill-lint.yml must install the same vally version this skill pins",
+  /npm ci --prefix \.github\/tools\/vally --ignore-scripts/,
+  "skill-lint.yml must install the locked Vally toolchain without scripts",
 );
 assert.equal(
   lockfile.lockfileVersion,

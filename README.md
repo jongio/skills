@@ -96,11 +96,55 @@ at once (uses the root [`plugin.json`](plugin.json)):
 copilot plugin install jongio/skills
 ```
 
+### App and editor support
+
+The repository keeps every skill under `skills/` and wraps that canonical
+directory with the native manifests required by each supported host. No skill
+content is copied between formats.
+
+| Surface | Support | Install or discovery path |
+|---|---|---|
+| GitHub Copilot app | Marketplace and individual or complete plugin install | Open **Customize**, select **Plugins**, add `jongio/skills`, then install one skill or `jongio-skills`. |
+| GitHub Copilot in Visual Studio Code | Agent Plugins 1.0 and marketplace install | Enable `chat.plugins.enabled`, run **Chat: Install Plugin From Source**, and enter `https://github.com/jongio/skills`. |
+| GitHub Copilot CLI | Marketplace and direct plugin install | Run `copilot plugin marketplace add jongio/skills` or `copilot plugin install jongio/skills`. |
+| Copilot coding agent and code review | Agent Skills in the target repository | Install selected skills into the target repository with `npx skills add jongio/skills`. |
+| ChatGPT desktop and Codex CLI | Codex marketplace and skills-only plugin | Add `jongio/skills` as a marketplace. If using sparse paths, include `.agents/plugins`, `.codex-plugin`, and `skills`. |
+| ChatGPT web and mobile | Public directory plugins only | A Git marketplace cannot enable these surfaces. Public availability requires review through the [OpenAI plugin submission portal](https://platform.openai.com/plugins). |
+| Codex IDE extension | Standalone Agent Skills only | The IDE extension does not support plugins. Install selected skills with `npx skills add jongio/skills --agent codex`. |
+| Claude Code, including its Visual Studio Code and JetBrains integrations | Claude marketplace plugin | Run `/plugin marketplace add jongio/skills`, then `/plugin install jongio-skills@jongio-skills`. |
+| Cursor | Agent Plugins 1.0 and Cursor marketplace | Install `https://github.com/jongio/skills` from **Customize**, or import the repository as a marketplace. |
+| Gemini CLI and its editor companion | Gemini extension | Run `gemini extensions install https://github.com/jongio/skills`. Gemini Code Assist is a separate product and does not load Gemini CLI extensions. |
+| Goose Desktop, Windsurf, Cline, Roo Code, and OpenCode | Native Agent Skills | Install selected skills with `npx skills add jongio/skills`; the installer places them in each host's supported skills directory. |
+
+The root `plugin.json` follows
+[Agent Plugins 1.0](https://agent-plugins.org/plugin-authors/manifest), which
+is shared by GitHub Copilot in Visual Studio Code, Cursor, Codex, and other
+compatible hosts. Vendor-specific manifests exist only where a host requires a
+different discovery path:
+
+```text
+plugin.json                         Agent Plugins 1.0 package
+marketplace.json                    GitHub Copilot marketplace
+.agents/plugins/marketplace.json    Codex and ChatGPT desktop marketplace
+.codex-plugin/plugin.json           Codex plugin compatibility manifest
+.claude-plugin/marketplace.json     Claude Code marketplace
+.claude-plugin/plugin.json          Claude Code plugin
+.cursor-plugin/marketplace.json     Cursor marketplace
+gemini-extension.json               Gemini CLI extension
+skills/                             Canonical Agent Skills
+```
+
 ## Layout
 
 ```text
-marketplace.json              Copilot marketplace manifest (indexes skills as plugins)
-plugin.json                   Copilot plugin manifest (skills: "skills/")
+marketplace.json              GitHub Copilot marketplace
+plugin.json                   Agent Plugins 1.0 package manifest
+.agents/plugins/              Codex and ChatGPT desktop marketplace
+.codex-plugin/                Codex compatibility manifest
+.claude-plugin/               Claude Code plugin and marketplace
+.cursor-plugin/               Cursor marketplace
+gemini-extension.json         Gemini CLI extension
+test/                         Cross-harness distribution parity tests
 skills/
   create-canvas-app/          One self-contained skill
     SKILL.md                  Authoring contract the agent reads
@@ -109,7 +153,6 @@ skills/
     evals/                    Vally eval spec plus its fixtures
     test/                     Deterministic tests, run in CI for every skill
     kit/  scripts/  docs/     Skill-specific assets
-lib/                          Shared modules a skill re-exports from its scripts/
 docs/                         Specs, test plans, thumbnail prompts
 site/                         Astro catalog published to GitHub Pages
 .github/workflows/            skill-lint (every push), skill-eval (agent evals)
@@ -118,10 +161,11 @@ site/                         Astro catalog published to GitHub Pages
 ### Adding a skill
 
 A skill is more than its folder: CI enforces that every skill is registered
-everywhere the catalog advertises it. `skill-lint.yml` runs `vally lint`, the
-strict eval-spec lint, and `npm test` for **every** skill on **every** push, and
-builds the site. Each skill's own test asserts its registration, so missing any
-of these turns the build red.
+everywhere the catalog advertises it. The root distribution test covers every
+skill and host manifest. Skills with additional registration contracts enforce
+them in local tests. On pull requests, `skill-lint.yml` runs Vally lint, strict
+eval-spec lint, and deterministic tests for affected skills. Pushes to the
+default branch cover every skill. The workflow always builds the catalog site.
 
 1. `skills/<name>/` with `SKILL.md` (500-line ceiling; overflow goes to
    `references/`), `README.md`, `package.json`, `test/`, and `evals/<name>/eval.yaml`.

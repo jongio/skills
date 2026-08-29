@@ -9,6 +9,7 @@ on:
       - "skills/**/package.json"
       - "skills/**/test/**"
       - "skills/**/*.yaml"
+      - "skills/**/*.yml"
       - "skills/**/eval.yaml"
       # Reference guidance and shipped scripts are part of the skill's
       # behaviour, so a change to either must be linted. Without these, a PR
@@ -21,9 +22,29 @@ on:
       - "site/public/images/**"
       - "site/package.json"
       - "site/package-lock.json"
+      - ".github/tools/vally/**"
       - "README.md"
       - "marketplace.json"
       - "plugin.json"
+      - ".agents/plugins/**"
+      - ".codex-plugin/**"
+      - ".claude-plugin/**"
+      - ".cursor-plugin/**"
+      - "gemini-extension.json"
+      - "test/**"
+      - "mcp.json"
+      - ".mcp.json"
+      - ".lsp.json"
+      - "settings.json"
+      - "hooks/**"
+      - "agents/**"
+      - "commands/**"
+      - "workflows/**"
+      - "output-styles/**"
+      - "themes/**"
+      - "monitors/**"
+      - "bin/**"
+      - "com.github.copilot/**"
       # Without this, edits to this workflow never lint themselves, so a
       # change here can only be verified by a manual workflow_dispatch.
       - ".github/workflows/skill-lint.yml"
@@ -40,24 +61,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Node 24, not 22. Vally declares `npm>=11.11.1`, and Node 22 still
       # bundles npm 10.x, which makes every install log an EBADENGINE warning.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: "**/package-lock.json"
 
-      # Pinned to the same range the skills' package.json files declare. This
-      # job lints every skill, including ones with no package.json of their own,
-      # so it cannot use a local install the way skill-eval.yml does. Keep this
-      # version in step with skills/*/package.json when bumping vally.
+      # Use the locked CI toolchain instead of a floating global install.
       - name: Install Vally CLI
-        run: npm install -g "@microsoft/vally-cli@0.14.0"
+        run: |
+          npm ci --prefix .github/tools/vally --ignore-scripts
+          echo "$PWD/.github/tools/vally/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Validate distribution manifests
+        run: node --test test/*.test.mjs
 
       - name: Determine skills to lint
         id: skills
@@ -72,11 +96,10 @@ jobs:
             # with the `paths` filter above: a path that triggers the workflow
             # but is missing here selects no skill, so the job runs and lints
             # nothing while still reporting success.
-            DIRS=$(git diff --name-only "$BASE_SHA" HEAD \
-              -- 'skills/*/SKILL.md' 'skills/*/package.json' 'skills/*/*.yaml' \
-                 'skills/*/evals/**' 'skills/*/test/**' \
-                 'skills/*/references/**' 'skills/*/scripts/**' \
-              | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u)
+            CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
+            DIRS=$(printf '%s\n' "$CHANGED" \
+              | grep -E '^skills/[^/]+/(SKILL\.md|package\.json|.*\.ya?ml|evals/|test/|references/|scripts/)' \
+              | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u || true)
           else
             # Push to main or manual dispatch: lint all skills
             DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
@@ -135,7 +158,7 @@ jobs:
       # to keep catalog integrity a hard gate rather than a nightly surprise.
       - name: Build catalog site
         run: |
-          npm ci --prefix site
+          npm ci --prefix site --ignore-scripts
           npm run build --prefix site
 
   # The dns-doctor cache engine resolves platform cache paths and refuses

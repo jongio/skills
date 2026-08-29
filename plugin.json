@@ -1,13 +1,13 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "jongio-skills",
   "description": "Jon Gallant's collection of cross-agent skills for AI coding agents — GitHub Copilot, Claude, and Codex. Browse and install individual skills from the skills/ directory.",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "author": {
     "name": "Jon Gallant",
     "url": "https://github.com/jongio"
   },
   "license": "MIT",
   "keywords": ["copilot", "skills", "agent-skills", "canvas", "create-canvas-app", "github-pages", "create-gh-pages-site", "repo-ready", "gitignore", "license", "contributing", "community-health", "naming-is-hard", "naming", "domain-check", "dns-doctor", "dns-audit", "dns-management", "dnssec", "email-authentication", "trademark", "availability", "name-generator", "eli5", "explain-like-im-five", "plain-language", "learning", "deps-doctor", "dependencies", "dependency-updates", "package-manager", "supply-chain-security", "vulnerability-remediation", "git-tidy", "git-hygiene", "branch-cleanup", "worktree-cleanup", "stale-branches", "repo-maintenance"],
-  "repository": "https://github.com/jongio/skills",
-  "skills": "skills/"
+  "repository": "https://github.com/jongio/skills"
 }
