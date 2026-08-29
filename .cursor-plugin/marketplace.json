@@ -1,0 +1,16 @@
+{
+  "name": "jongio-skills",
+  "owner": {
+    "name": "Jon Gallant"
+  },
+  "metadata": {
+    "description": "Jon Gallant's collection of reusable skills for AI coding agents."
+  },
+  "plugins": [
+    {
+      "name": "jongio-skills",
+      "source": "./",
+      "description": "Jon Gallant's collection of reusable skills for AI coding agents."
+    }
+  ]
+}

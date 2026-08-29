@@ -67,6 +67,18 @@ copilot plugin install create-canvas-app@jongio-skills</code></pre>
     </ol>
     <h3>4 · Whole repo as one plugin</h3>
     <pre><code>copilot plugin install jongio/skills</code></pre>
+    <h3>5 · Other apps and editors</h3>
+    <ul class="host-list">
+      <li><strong>VS Code and Cursor:</strong> install <code>https://github.com/jongio/skills</code> as a plugin source.</li>
+      <li><strong>Claude Code:</strong> add <code>jongio/skills</code> as a marketplace, then install <code>jongio-skills@jongio-skills</code>.</li>
+      <li><strong>Codex CLI and ChatGPT desktop:</strong> add <code>jongio/skills</code> as a marketplace.</li>
+      <li><strong>Gemini CLI:</strong> run <code>gemini extensions install https://github.com/jongio/skills</code>.</li>
+      <li><strong>Other Agent Skills hosts:</strong> run <code>npx skills add jongio/skills</code>.</li>
+    </ul>
+    <p class="muted">
+      ChatGPT web and mobile require public directory review. The Codex IDE
+      extension accepts standalone skills but not plugins. See the <a href="https://github.com/jongio/skills#app-and-editor-support">complete support matrix</a>.
+    </p>
     <p class="muted">After any install, reload with <code>/skills reload</code> or start a new session.</p>
   </section>
 </Layout>
@@ -102,6 +114,9 @@ copilot plugin install create-canvas-app@jongio-skills</code></pre>
     padding: 0.7rem 0.9rem; overflow-x: auto;
   }
   .card h3 { font-size: 1rem; margin: 1.1rem 0 0.4rem; }
+  .host-list { margin: 0.4rem 0 0; padding-left: 1.25rem; }
+  .host-list li, .host-list code { overflow-wrap: anywhere; }
+  .host-list li + li { margin-top: 0.35rem; }
   .steps { margin: 0.5rem 0 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 1.1rem; }
   .steps li { color: var(--fg); }
   .steps li > span { display: block; }

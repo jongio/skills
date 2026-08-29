@@ -8,5 +8,10 @@
   },
   "overrides": {
     "@azure/monitor-opentelemetry-exporter": "1.0.0-beta.44"
+  },
+  "allowScripts": {
+    "@vscode/deviceid": false,
+    "better-sqlite3": false,
+    "koffi": false
   }
 }

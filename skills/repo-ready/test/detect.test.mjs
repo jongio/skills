@@ -135,6 +135,30 @@ function touch(name) {
   console.log('PASS: detects .NET via *.csproj glob');
 }
 
+// Test: directories that resemble marker files are ignored
+{
+  setup();
+  mkdirSync(join(tmpDir, 'Fake.csproj'));
+  mkdirSync(join(tmpDir, 'package.json'));
+  const result = detectStack(tmpDir);
+  assert.deepStrictEqual(result.stacks, []);
+  assert.strictEqual(result.pkgManager, null);
+  teardown();
+  console.log('PASS: ignores directories that resemble marker files');
+}
+
+// Test: package-manager marker precedence is deterministic
+{
+  setup();
+  touch('package.json');
+  touch('package-lock.json');
+  touch('pnpm-lock.yaml');
+  const result = detectStack(tmpDir);
+  assert.strictEqual(result.pkgManager, 'pnpm');
+  teardown();
+  console.log('PASS: prefers pnpm when multiple Node lockfiles exist');
+}
+
 // Test: Docker
 {
   setup();
