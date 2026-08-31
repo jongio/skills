@@ -143,10 +143,12 @@ const getStepBlocks = (workflow) => {
       const candidateIndent = line.match(/^(\s*)/)[1].length;
       if (
         line.trim() !== "" &&
-        !line.trimStart().startsWith("#") &&
         (
           candidateIndent < indent ||
-          (candidateIndent === indent && /^\s*-\s+/.test(line))
+          (
+            candidateIndent === indent &&
+            (/^\s*-\s+/.test(line) || line.trimStart().startsWith("#"))
+          )
         )
       ) {
         break;
@@ -177,7 +179,13 @@ const getRunScripts = (workflow) =>
       return [value];
     }
     const indent = runLine.match(/^(\s*)/)[1].length + 2;
-    return [lines.slice(runIndex + 1).map((line) => line.slice(indent)).join("\n")];
+    return [
+      lines
+        .slice(runIndex + 1)
+        .map((line) => line.slice(indent))
+        .join("\n")
+        .trimEnd(),
+    ];
   });
 
 const getWorkflowPermissions = (workflow) => {
@@ -811,6 +819,15 @@ test("workflow inspection recognizes alternate secure YAML forms", () => {
     "          echo ${{ github.ref }}",
   ].join("\n");
   assert.match(getRunScripts(literal)[0], /\$\{\{/);
+  assert.deepEqual(
+    getRunScripts([
+      literal,
+      "      # The next step is not part of the literal.",
+      "      - name: Next",
+      "        run: echo done",
+    ].join("\n")),
+    ["echo ${{ github.ref }}", "echo done"],
+  );
   assert.match(
     getRunScripts("jobs:\n  test:\n    steps:\n      - run: echo ${{ github.ref }}")[0],
     /\$\{\{/,

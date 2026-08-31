@@ -133,11 +133,12 @@ jobs:
       - name: Report Vally version
         env:
           VALLY_BIN: ${{ github.workspace }}/.github/tools/vally/node_modules/.bin/vally
-        run: "$VALLY_BIN" --version
+        run: |-
+          "$VALLY_BIN" --version
 
-      # This step contains one command so the token is available only to the
-      # exact Vally eval process.
       - name: Run eval
+        # This step contains one command so the token is available only to the
+        # exact Vally eval process.
         working-directory: ${{ matrix.skill }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
