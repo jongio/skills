@@ -149,3 +149,70 @@ stimuli:
             and describe the library's API functions (add, multiply, clamp)?
             Score 1.0 if yes with real content, 0.5 if partially specific, 0.0
             if still generic demo content.
+
+  - name: skills-catalog-safe-staging
+    prompt: >-
+      Use the create-gh-pages-site skill and the skills-catalog template to stage
+      a GitHub Pages catalog for "octocat/skill-hub". Use the local template
+      registry at "registry/templates". Stage into "site-staging" with the
+      generator's safe staging and JSON contract. Do not apply or copy the result
+      into the current target repository. Preserve do-not-overwrite.txt.
+    tags:
+      template: skills-catalog
+      contract: staging
+      cost: low
+    rubric:
+      - The agent uses skills-catalog and safe staging instead of applying directly to the target.
+      - The staged project base is /skill-hub/ and no target-owned file is overwritten.
+      - The agent treats the JSON result as the composition handoff.
+    environment:
+      files:
+        - src: fixtures/skills-repo/README.md
+          dest: README.md
+        - src: fixtures/skills-repo/do-not-overwrite.txt
+          dest: do-not-overwrite.txt
+        - src: fixtures/skills-repo/alpha-skill.md
+          dest: skills/alpha/SKILL.md
+        - src: fixtures/skills-catalog/template.json
+          dest: registry/templates/skills-catalog/template.json
+        - src: fixtures/skills-catalog/index.html
+          dest: registry/templates/skills-catalog/index.html
+        - src: fixtures/skills-catalog/deploy.yml
+          dest: registry/templates/skills-catalog/.github/workflows/deploy.yml
+    graders:
+      - type: file-exists
+        name: staged-catalog-exists
+        config:
+          path: "site-staging/index.html"
+      - type: file-exists
+        name: staged-workflow-exists
+        config:
+          path: "site-staging/.github/workflows/deploy.yml"
+      - type: file-contains
+        name: project-base-injected
+        config:
+          path: "site-staging/index.html"
+          value: "/skill-hub/"
+      - type: file-contains
+        name: target-file-preserved
+        config:
+          path: "do-not-overwrite.txt"
+          value: "consumer-owned"
+      - type: file-contains
+        name: workflow-action-is-sha-pinned
+        config:
+          path: "site-staging/.github/workflows/deploy.yml"
+          value: "actions/checkout@0123456789abcdef0123456789abcdef01234567"
+      - type: file-not-contains
+        name: no-leftover-sentinel
+        config:
+          path: "site-staging/index.html"
+          value: "__BASE_PATH__"
+      - type: prompt
+        name: safe-composition-contract
+        config:
+          prompt: >-
+            Did the agent use the skills-catalog template through --staging-dir
+            and --json, leave the current target untouched, and report the staged
+            directory as the composition handoff? Score 1.0 for all conditions,
+            0.5 for partial staging behavior, and 0.0 for direct target apply.

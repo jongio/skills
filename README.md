@@ -14,6 +14,8 @@ general-purpose monorepo: each skill lives in its own folder under
 |---|---|
 | [`create-canvas-app`](skills/create-canvas-app/) | Build GitHub Copilot App canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable storage, Primer theming, official GitHub Lucide icons, deep links into the app, a generator, and an installable skill. |
 | [`create-gh-pages-site`](skills/create-gh-pages-site/) | Scaffold a working GitHub Pages site from a vetted template (static, Astro, React + Vite, Eleventy, or Jekyll) into your current repo by default — injects the correct base path for the target repo, wires the official GitHub Actions Pages deploy workflow, sets the repo's Website link, and shows how to enable Pages. |
+| [`create-skill`](skills/create-skill/) | Create and register a complete portable agent skill with focused instructions, deterministic tests, Vally evals, catalog metadata, and optional validated thumbnail art from a built-in or user-described provider. |
+| [`create-skills-repo`](skills/create-skills-repo/) | Create or safely upgrade a cross-agent skills marketplace repository with every supported manifest, Vally, secure CI, Dependabot, a functional starter skill, and an optional GitHub Pages catalog. |
 | [`repo-ready`](skills/repo-ready/) | Scaffold and maintain the standard community health files every GitHub repository needs (.gitignore, LICENSE, CONTRIBUTING, issue templates, CI workflows, dependabot, and more). Two modes: init (interview + scaffold) and update (scan for gaps). |
 | [`naming-is-hard`](skills/naming-is-hard/) | Interactive naming assistant for projects, CLIs, and products. Profiles what you're building, generates diverse candidate names, learns your preferences as you react, and validates finalists against real availability (domains, GitHub, npm/PyPI/crates/RubyGems/NuGet, social handles) plus a trademark and existing-business screen. Every finalist lands a verdict: Deal Breaker, It's Complicated, or Perfect Match. |
 | [`eli5`](skills/eli5/) | Explain the code, error, design, or idea already in context using plain language, a useful analogy, the proper grown-up terms, and an honest note about where the analogy stops working. |
@@ -169,6 +171,7 @@ default branch cover every skill. The workflow always builds the catalog site.
 
 1. `skills/<name>/` with `SKILL.md` (500-line ceiling; overflow goes to
    `references/`), `README.md`, `package.json`, `test/`, and `evals/<name>/eval.yaml`.
+   Use `/create-skill <name>` to create and register this complete shape.
 2. The skill table in this README.
 3. `marketplace.json` and the `keywords` array in `plugin.json`.
 4. `site/src/content/skills/<name>.md`, with `thumb:` pointing at

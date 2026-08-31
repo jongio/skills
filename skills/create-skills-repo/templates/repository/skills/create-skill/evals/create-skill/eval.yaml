@@ -1,0 +1,129 @@
+name: create-skill
+description: >-
+  Capability eval for create-skill. The agent must discover repository conventions, preview every
+  mutation, obtain single-use approval, support open-ended custom art delivery, and reject invalid
+  PNG data without retry or fallback.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 10m
+  executor: copilot-sdk
+
+scoring:
+  weights:
+    prompt: 0.7
+    skill-invocation: 0.15
+    diff-empty: 0.15
+  threshold: 0.8
+
+stimuli:
+  - name: dry-run-before-creation
+    prompt: >-
+      Use create-skill to add release-notes-helper. This turn is preview only. Explain the
+      repository discovery and show the exact dry-run command and approval boundary. Do not write
+      files or run network calls.
+    tags:
+      scenario: creation
+      cost: low
+    rubric:
+      - Discovers managed config first and otherwise uses fail-closed convention discovery.
+      - Shows create-skill with --dry-run before any apply.
+      - Requires the unchanged plan hash for one approved apply.
+      - Performs no write or network call.
+    graders:
+      - type: prompt
+        name: plans-before-writing
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response discovers config or conventions, shows an exact dry-run
+            command, requires approval of its hash, and performs no write or network call. Score 1
+            if it writes first or guesses ambiguous registration.
+      - type: skill-invocation
+        config:
+          required: [create-skill]
+      - type: diff-empty
+
+  - name: custom-art-is-open-ended
+    prompt: >-
+      Use create-skill art for release-notes-helper. I want custom art, but I have not described
+      the provider or delivery flow yet. Ask the required question and explain the approval and
+      validation flow. Do not assume a shell command and do not perform an external action.
+    tags:
+      scenario: custom-art
+      cost: low
+    rubric:
+      - Asks the user to describe any provider and delivery workflow.
+      - Does not restrict the workflow to a local command.
+      - Requires an exact action preview and single-use approval before one attempt.
+      - Sends the delivered PNG through the same strict validator and provenance path.
+    graders:
+      - type: prompt
+        name: preserves-open-custom-workflow
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if any provider and delivery workflow is accepted in principle, exact
+            steps are previewed before approval, and the resulting PNG uses common validation and
+            provenance. Score 1 if custom means only a local command or bypasses validation.
+      - type: skill-invocation
+        config:
+          required: [create-skill]
+      - type: diff-empty
+
+  - name: no-provider-fallback
+    prompt: >-
+      Azure OpenAI returned HTTP 429 while create-skill was generating art. Explain the next
+      action. Do not make another request, switch providers, or write the response as an image.
+    tags:
+      scenario: provider-failure
+      cost: low
+    rubric:
+      - Reports the failure.
+      - Makes no retry and performs no fallback.
+      - Does not write image files.
+      - Asks the user to choose a new separately previewed action.
+    graders:
+      - type: prompt
+        name: stops-after-one-attempt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response stops after the 429, writes nothing, and asks the user
+            before a newly previewed action. Score 1 if it retries or falls back automatically.
+      - type: skill-invocation
+        config:
+          required: [create-skill]
+      - type: diff-empty
+
+  - name: deterministic-fixture-contract
+    prompt: >-
+      A repository generator must create example-skill from a version 1 JSON fixture. Explain the
+      exact create-skill fixture preview and apply commands, including the target repository root.
+      Do not invent a second renderer and do not write files in this turn.
+    tags:
+      scenario: fixture
+      cost: low
+    rubric:
+      - Uses create-skill fixture with --input, --repo-root, and --dry-run.
+      - Repeats the unchanged fixture command with the returned approval hash.
+      - Uses the same renderer, registration, validation, and atomic apply path.
+      - Does not hand-build the example skill.
+    graders:
+      - type: prompt
+        name: reuses-stable-fixture-mode
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response shows fixture mode with input, repository root, dry-run,
+            and unchanged hash approval while reusing the normal create-skill path. Score 1 if it
+            hand-builds the fixture or bypasses preview and approval.
+      - type: skill-invocation
+        config:
+          required: [create-skill]
+      - type: diff-empty

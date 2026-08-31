@@ -26,6 +26,16 @@ updates:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
+    directory: /skills/create-skill
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: npm
+    directory: /skills/create-skills-repo
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: npm
     directory: /skills/naming-is-hard
     schedule:
       interval: weekly

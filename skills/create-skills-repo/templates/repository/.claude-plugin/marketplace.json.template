@@ -1,0 +1,16 @@
+{
+  "name": __PACKAGE_NAME_JSON__,
+  "description": __DESCRIPTION_JSON__,
+  "owner": {
+    "name": __OWNER_NAME_JSON__,
+    "url": __OWNER_URL_JSON__
+  },
+  "plugins": [
+    {
+      "name": __PACKAGE_NAME_JSON__,
+      "source": "./",
+      "description": __DESCRIPTION_JSON__,
+      "version": __PACKAGE_VERSION_JSON__
+    }
+  ]
+}

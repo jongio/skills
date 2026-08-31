@@ -1,13 +1,15 @@
 # Skill thumbnail prompts
 
 How the `skills/<name>/thumbnail.png` images are generated, and the exact prompts
-used, so every skill's thumbnail follows the same path and house style.
+or deterministic recipes used, so every skill's thumbnail has reproducible
+provenance.
 
-## The path: Azure OpenAI `gpt-image-2`
+## Primary path: Azure OpenAI `gpt-image-2`
 
-All skill thumbnails are generated with the **`gpt-image-2`** deployment on Azure
-OpenAI (the same path used for the first batch of thumbnails in commit
+Most skill thumbnails are generated with the **`gpt-image-2`** deployment on
+Azure OpenAI (the same path used for the first batch of thumbnails in commit
 `e41439f`, "add GPT Image 2 generated thumbnails for all shipped skills").
+Entries marked as deterministic placeholders use the local PNG encoder instead.
 
 | Setting | Value |
 |---|---|
@@ -281,3 +283,29 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 > medium-weight outlines, subtle dashed guide lines, tiny sparkles, generous
 > white space, crisp professional finish. No words, no letters, no fake text,
 > no photorealism, no 3D render.
+
+### create-skill (deterministic placeholder)
+
+No image provider or generative prompt was used. The image was produced by
+`skills/create-skill/scripts/png.mjs` using
+`encodeDeterministicPlaceholderPng()`.
+
+| Setting | Value |
+|---|---|
+| Provider | `placeholder` |
+| Model | `deterministic-local-v1` |
+| Size | `1024x1024` |
+| SHA-256 | `7d6140526ca40be2d5d16947ef02e1169fd1db733f22766d3e2e2f7e8903861a` |
+
+### create-skills-repo (deterministic placeholder)
+
+No image provider or generative prompt was used. The image was produced by
+`skills/create-skill/scripts/png.mjs` using
+`encodeDeterministicPlaceholderPng()`.
+
+| Setting | Value |
+|---|---|
+| Provider | `placeholder` |
+| Model | `deterministic-local-v1` |
+| Size | `1024x1024` |
+| SHA-256 | `7d6140526ca40be2d5d16947ef02e1169fd1db733f22766d3e2e2f7e8903861a` |

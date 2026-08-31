@@ -124,17 +124,15 @@ assert.ok(
   "IMAGES.md must document the skill thumbnail",
 );
 
-// The matrix is hand-written JSON embedded in YAML, so tolerate whitespace
-// rather than failing on a harmless reformat.
 assert.match(
   evalWorkflow,
-  new RegExp(`"skill"\\s*:\\s*"skills/${skillId}"`),
-  "skill-eval.yml matrix must include the skill",
+  /find\s+skills\b[\s\S]*skills\/\*\/evals\/\*\/eval\.yaml/,
+  "skill-eval.yml must discover every canonical eval spec",
 );
 assert.match(
   evalWorkflow,
-  new RegExp(`"eval_spec"\\s*:\\s*"evals/${skillId}/eval\\.yaml"`),
-  "skill-eval.yml matrix must point at the eval spec",
+  /all=\$\(jq\s+-sc/,
+  "skill-eval.yml must build the matrix from discovered eval specs",
 );
 
 assert.equal(packageJson.name, skillId, "package.json name must match the skill id");

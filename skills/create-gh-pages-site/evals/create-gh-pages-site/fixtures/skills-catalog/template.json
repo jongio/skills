@@ -1,0 +1,7 @@
+{
+  "name": "skills-catalog",
+  "title": "Skills Catalog",
+  "tagline": "A browsable catalog for Copilot skills",
+  "needsBuild": false,
+  "order": 1
+}

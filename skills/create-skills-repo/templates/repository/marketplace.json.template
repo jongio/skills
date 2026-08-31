@@ -1,0 +1,11 @@
+{
+  "name": __PACKAGE_NAME_JSON__,
+  "owner": {
+    "name": __OWNER_NAME_JSON__,
+    "url": __OWNER_URL_JSON__
+  },
+  "metadata": {
+    "description": __DESCRIPTION_JSON__
+  },
+  "plugins": __MARKETPLACE_PLUGINS_JSON__
+}

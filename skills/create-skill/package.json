@@ -1,0 +1,31 @@
+{
+  "name": "create-skill",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Development tooling for the create-skill workflow.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage test/*.test.mjs",
+    "check": "node scripts/create-skill.mjs check create-skill",
+    "eval:lint": "vally lint --eval-spec evals/create-skill/eval.yaml --strict",
+    "eval": "vally eval --eval-spec evals/create-skill/eval.yaml --skill-dir ."
+  },
+  "dependencies": {
+    "@azure/identity": "4.13.2",
+    "openai": "7.8.0"
+  },
+  "devDependencies": {
+    "@microsoft/vally-cli": "0.14.0",
+    "skills": "1.5.23"
+  },
+  "allowScripts": {
+    "@vscode/deviceid": false,
+    "better-sqlite3": false,
+    "koffi": false
+  }
+}

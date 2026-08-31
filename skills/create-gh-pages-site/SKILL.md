@@ -42,8 +42,12 @@ and default to `static-html` for the simplest ask.
 | `react-vite` | An interactive single-page app / dashboard with client-side routing. | SPA | `vite build` |
 | `eleventy` | A data/Markdown-driven site (blog, docs) where content is files + structured data. | data SSG | `eleventy` |
 | `jekyll` | The user wants the GitHub-native path, or is migrating an existing Jekyll site. | native | Jekyll |
+| `skills-catalog` | A browsable catalog for a repository of Copilot skills, especially when composing `create-skills-repo`. | catalog | registry-defined |
 
-These five cover the static / SSG / SPA / data / native quadrants. For richer
+The built-in registry pin includes `skills-catalog`. A custom registry requires an
+explicit `--registry-ref`, and a local checkout uses `--templates-dir`.
+
+These six cover the static / SSG / SPA / data / native / catalog quadrants. For richer
 *themes*, point the user at upstream galleries (astro.build/themes,
 jamstackthemes.dev, github.com/topics/github-pages-template) and adapt — don't try
 to hand-build a theme from scratch.
@@ -74,25 +78,21 @@ edit the base) once the repo exists.
 
 ## Deployment model — one consistent flow
 
-Every template deploys via the **GitHub Actions** Pages source (not "deploy from a
-branch"), using the current first-party actions:
-
-```text
-actions/configure-pages@v6  →  build  →  actions/upload-pages-artifact@v5  →  actions/deploy-pages@v5
-```
+Every template deploys via the **GitHub Actions** Pages source, not from a branch.
+Every external action reference must use a full commit SHA.
 
 - `static-html`, `react-vite`, `eleventy` use that chain directly.
 - `astro` uses the official `withastro/action@v6` (it builds + produces the Pages
   artifact) then `actions/deploy-pages@v5`.
 - `jekyll` uses GitHub's official `actions/jekyll-build-pages@v1` then `deploy-pages`.
 
-Every workflow declares `permissions: { contents: read, pages: write,
-id-token: write }`, a single `concurrency: { group: pages }`, and the
-`github-pages` environment. There is **no `gh-pages` branch** to manage.
+Every workflow limits top-level permissions to `contents: read`, grants Pages and
+identity-token access only to the jobs that need them, uses one Pages concurrency
+group, and deploys through the `github-pages` environment. There is **no
+`gh-pages` branch** to manage.
 
-> These action majors deprecate aggressively (the v3/v4 artifact cutover landed
-> Jan 2025). If a user reports a deploy failure mentioning a deprecated action,
-> check the latest majors and bump the `uses:` pins.
+> Action versions deprecate aggressively. Update the template registry to a reviewed
+> action commit, then bump this skill's immutable default registry commit.
 
 ## Interview first — never scaffold on a guess
 
@@ -108,6 +108,7 @@ only for what's missing, one focused question at a time, using the `ask_user` to
      they say Markdown- or data-driven, or `jekyll` if they want the GitHub-native
      path or are migrating an existing Jekyll site)
    - "an app / dashboard / interactive / single-page app" → `react-vite`
+   - "a catalog of Copilot skills / create a skills repo" → `skills-catalog`
 
    If they're unsure, ask the single discriminating question — *content site or
    interactive app?* — and default to `static-html` for the simplest ask.
@@ -154,6 +155,8 @@ site belongs in `/tmp/blog`, a sibling directory, or the skill's own directory.
   process working directory.
 - Use another output directory only when the user explicitly asks for a subfolder
   or a new/different repo.
+- When another generator is composing the result, use `--staging-dir` instead of
+  `--dir`. The staging directory is isolated and the consumer owns the final merge.
 - Before reporting completion, confirm the generated config, content, and
   `.github/workflows` files exist under the original working directory.
 
@@ -209,15 +212,23 @@ node scripts/new-site.mjs <template> --repo <owner/name> [options]
 | `--base </path/>` | Override the base path (e.g. `/` for a user site or local preview). |
 | `--dir <path>` | Output directory (default: `./<repo-name>`). |
 | `--site-name "Title"` | Human title (default: derived from the repo name). |
+| `--description "Text"` | Catalog description (default: derived from the title and repo). |
+| `--author "Name"` | Catalog author (default: repo owner). |
+| `--package-name <id>` | Package identifier (default: repo name). |
+| `--marketplace-id <id>` | Marketplace identifier (default: owner and repo). |
+| `--default-branch <id>` | Repository default branch used by catalog links and deployment triggers (default: `main`). |
 | `--registry <owner/repo>` | Template registry repo to fetch from (default: `jongio/gh-pages-templates`; needs git + network). |
+| `--registry-ref <sha>` | Full 40-character commit SHA. Required with a custom registry. Branches and tags are rejected. |
 | `--templates-dir <path>` | Use a local `templates/` folder instead of fetching (offline). |
+| `--staging-dir <path>` | Write a validated tree to a new path without applying it to a target. |
 | `--force` | Write into a non-empty directory. |
+| `--json` | Emit a machine-readable result for composition. |
 | `--list` | List available templates. |
 
-Templates are **not bundled in the skill** — the generator fetches them from the
-`jongio/gh-pages-templates` registry (a shallow clone) on each run, so there's one
-source of truth. The clone is reused within a run, so `--list` + a stamp clone once.
-Pass `--templates-dir <path>` to scaffold from a local copy offline.
+Templates are **not bundled in the skill**. The generator fetches the built-in
+`jongio/gh-pages-templates` registry at a reviewed, immutable commit. A custom
+registry requires `--registry-ref <full-sha>`. Pass `--templates-dir <path>` to
+scaffold from a local copy offline.
 
 Examples:
 
@@ -235,12 +246,50 @@ node "$SKILL_DIR/scripts/new-site.mjs" react-vite --repo octocat/dashboard --dir
 
 # A user site (served from "/") or a quick local scaffold:
 node "$SKILL_DIR/scripts/new-site.mjs" static-html --base / --dir . --force
+
+# Safely compose a skills catalog without touching the consumer's target:
+node "$SKILL_DIR/scripts/new-site.mjs" skills-catalog \
+  --repo octocat/skills \
+  --templates-dir ../gh-pages-templates/templates \
+  --staging-dir ./.site-staging \
+  --json
 ```
 
-The generator replaces a small set of sentinels (`__BASE_PATH__`, `__BASE_URL__`,
-`__SITE_NAME__`, `__SITE_URL__`, `__SITE_ORIGIN__`, `__REPO_SLUG__`, `__PKG_NAME__`)
-across the template — so injection is deterministic and the result has no
-placeholders left. After stamping you may hand-edit content freely.
+The generator replaces the shared base and repository sentinels plus the catalog
+sentinels `__SITE_DESCRIPTION__`, `__REPO_OWNER__`, `__REPO_NAME__`,
+`__AUTHOR_NAME__`, and `__MARKETPLACE_ID__`. Injection is deterministic and the
+result has no placeholders left. After stamping you may hand-edit content freely.
+Metadata values must be plain context-safe text. Markup, control characters, and
+characters that can break JSON, YAML, JavaScript, or HTML attributes are rejected.
+
+### Safe staging contract
+
+Use `--staging-dir` whenever `create-skills-repo` or another tool will merge the
+site into a larger output. The path must not exist and the option cannot be
+combined with `--dir` or `--force`. The generator performs replacement and all
+validation inside staging, returns only after success, and never touches the final
+target. The consumer must check every destination conflict before copying staged
+files.
+
+Before either staging success or normal apply, the generator:
+
+1. verifies an external registry checkout matches the requested full commit SHA;
+2. proves the resolved template path remains inside the registry templates root;
+3. rejects every symlink in the template tree;
+4. rejects unresolved `__SENTINEL__` placeholders;
+5. scans `.github/workflows/*.yml` and `.yaml` for excess permissions, unsafe
+   triggers, non-SHA action references, persisted checkout credentials,
+   lifecycle-capable installs without script suppression, and direct GitHub
+   context interpolation in shell commands.
+
+Normal `--dir` generation uses a private staging directory and applies only after
+all checks pass. This preserves existing template and `--force` behavior while
+ensuring an invalid template cannot partially modify the target.
+
+The exact pinned built-in snapshot has a compatibility normalization for its five
+legacy templates. It upgrades their known action tags to reviewed commit SHAs,
+disables persisted checkout credentials and lifecycle scripts, and then validates
+the result. Never apply this normalization to a custom registry.
 
 ## Digest the repo, then author it (never ship the template defaults)
 
@@ -392,11 +441,13 @@ templates from the registry at runtime (override with `--registry <owner/repo>`,
 scaffold offline from a local checkout with `--templates-dir <path>`):
 
 ```sh
-node scripts/new-site.mjs astro --repo octocat/blog            # default registry
+node scripts/new-site.mjs astro --repo octocat/blog            # pinned default registry
+node scripts/new-site.mjs skills-catalog --repo octocat/skills \
+  --registry octocat/templates --registry-ref 0123456789abcdef0123456789abcdef01234567
 node scripts/new-site.mjs astro --templates-dir ../gh-pages-templates/templates
 ```
 
-Each template is a folder with a `template.json` manifest, a `deploy.yml`,
+Each template is a folder with a `template.json` manifest, a deploy workflow,
 base-path handling via the sentinels, and a `README.md`. The registry also renders
 the browsable gallery (live previews of every template) at
 **https://jongio.github.io/gh-pages-templates/** — the single home for browsing and
@@ -412,8 +463,9 @@ land in the registry, not here.
    phrases — "Hello", "islands", "lorem", the sample post titles — and for leftover
    `__…__` sentinels). The page kind matches the repo type (CLI ref / API ref /
    feature tour / catalog). Image placeholders exist and `IMAGES.md` is present.
-2. **Build it.** For `astro`/`react-vite`/`eleventy`, run `npm install` then
-   `npm run build` and confirm it exits 0 and emits the output dir
+2. **Build it.** For `astro`/`react-vite`/`eleventy`, run
+   `npm ci --ignore-scripts --no-audit --no-fund` then `npm run build` and confirm
+   both exit 0 and emit the output dir
    (`dist` / `_site`). For `jekyll`, `bundle exec jekyll build` if Ruby is present.
 3. **Check the base path.** Open the built output and confirm asset/link URLs carry
    the project prefix (`/repo/...`) — not bare `/...`. This is the failure mode that
@@ -429,28 +481,19 @@ the `jongio/gh-pages-templates` registry.
 
 ## Footguns
 
-- **Never** ship a project site built for `/` — assets 404. Set the base path (the
-  generator does this; verify it).
-- **Never** put a subpath base on a **user site** (`<user>.github.io`) — it must be
-  `/` (Jekyll: `baseurl: ""`).
+- **Never** ship a project site built for `/` — assets 404. Set the base path (the generator does this; verify it).
+- **Never** put a subpath base on a **user site** (`<user>.github.io`) — it must be `/` (Jekyll: `baseurl: ""`).
 - **Never** use `actions/upload-artifact` for Pages — it's `upload-pages-artifact`.
-- **Never** reach for `peaceiris/actions-gh-pages` or a `gh-pages` branch — use the
-  first-party Actions flow these templates ship.
-- **Never** forget to set **Source → GitHub Actions** in Settings → Pages; the
-  workflow can't publish until Pages is enabled for Actions.
-- **Don't** leave the repo "Website" link blank — set `homepage` to the Pages URL
-  (`gh repo edit --homepage`) so visitors find the site; it's the same as the
-  "Use your GitHub Pages website" checkbox.
-- **Never** claim success because the workflow is green — load the URL and check an
-  asset and an internal link actually resolve.
-- **Never** ship the template's demo content. A stamped template that still says
-  "Hello, Astro" (or lists the sample blog posts) for someone's CLI or library is a
-  failure — digest the repo and author real content of the right kind.
+- **Never** reach for `peaceiris/actions-gh-pages` or a `gh-pages` branch — use the first-party Actions flow these templates ship.
+- **Never** forget to set **Source → GitHub Actions** in Settings → Pages; the workflow can't publish until Pages is enabled for Actions.
+- **Don't** leave the repo "Website" link blank — set `homepage` to the Pages URL (`gh repo edit --homepage`) so visitors find the site; it's the same as the "Use your GitHub Pages website" checkbox.
+- **Never** claim success because the workflow is green — load the URL and check an asset and an internal link actually resolve.
+- **Never** ship the template's demo content. A stamped template that still says "Hello, Astro" (or lists the sample blog posts) for someone's CLI or library is a failure — digest the repo and author real content of the right kind.
 - **Never** fabricate features, commands, or APIs to fill the page. Author only what
   the repo actually shows; leave a visible `TODO` when unsure.
-- **Don't** leave bare image references with nothing behind them — add the
-  placeholders + `IMAGES.md`, or reuse the repo's existing images.
-- **Don't** ship placeholders silently — tell the user which real images the site
-  needs and that they can paste a screenshot into the chat to fill each one.
-- **Don't** hand-roll a base-path setup when the generator + sentinels already do
-  it correctly per framework.
+- **Don't** leave bare image references with nothing behind them — add the placeholders + `IMAGES.md`, or reuse the repo's existing images.
+- **Don't** ship placeholders silently — tell the user which real images the site needs and that they can paste a screenshot into the chat to fill each one.
+- **Don't** hand-roll a base-path setup when the generator + sentinels already do it correctly per framework.
+- **Never** pass a branch or tag as `--registry-ref`. Only a full commit SHA is
+  immutable enough to validate.
+- **Never** compose directly into another generator's target. Stage first, check conflicts, then merge.

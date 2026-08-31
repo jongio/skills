@@ -10,140 +10,72 @@ on:
   schedule:
     # Nightly at 03:00 UTC
     - cron: "0 3 * * *"
-  pull_request:
-    # Only the inputs that can change how an agent behaves. Editing the site,
-    # the README, or another skill must not spend Copilot usage here.
-    paths:
-      - "skills/**/SKILL.md"
-      - "skills/**/references/**"
-      - "skills/**/scripts/**"
-      - "skills/**/evals/**"
-      - "skills/**/package.json"
-      - ".github/workflows/skill-eval.yml"
 
 # copilot-requests lets the built-in GITHUB_TOKEN authenticate the Copilot
 # SDK that vally drives, so no PAT secret is needed. In a personally-owned
 # repo the usage bills to the repo owner's Copilot seat.
 permissions:
   contents: read
-  # Required for Vally's Copilot SDK authentication on trusted-context runs.
-  copilot-requests: write
 
 concurrency:
-  # Include the PR number so pushing twice to one branch cancels the stale run
-  # instead of paying for both. Scheduled and dispatch runs keep the old
-  # behaviour of queueing rather than cancelling.
-  group: skill-eval-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Keep total Copilot usage bounded across manual and scheduled runs.
+  group: skill-eval
+  cancel-in-progress: false
 
 jobs:
-  # Owner-authored pull requests run without ceremony. Anyone else's has to be
-  # approved first, because a single eval is roughly 28 agent sessions billed
-  # to the repo owner's Copilot seat, and a pull request can be pushed to
-  # repeatedly.
-  #
-  # The gate is a near-empty job whose only purpose is to carry the
-  # `skill-eval` environment. Everything expensive waits behind it, so the cost
-  # of the approval step itself is a few seconds of a runner.
-  #
-  # REQUIRED SETUP: the `skill-eval` environment must exist with a required
-  # reviewer before this is relied on. A workflow that names an environment
-  # which does not exist causes GitHub to create it implicitly with NO
-  # protection rules, and the gate then passes straight through without ever
-  # asking anyone. Verify at Settings, Environments, skill-eval, that
-  # "Required reviewers" is set.
-  authorize:
-    # Skipped entirely for the owner, for the nightly, and for a manual
-    # dispatch. Also skipped for a fork, which cannot run the eval at all for
-    # the token reason described on `plan`; asking for approval on a run that
-    # is going to skip anyway just trains people to approve without reading.
-    # Only a non-owner pull request from a branch in this repo waits here.
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.author_association != 'OWNER'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    environment: skill-eval
-    steps:
-      - name: Record approval
-        env:
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          ASSOCIATION: ${{ github.event.pull_request.author_association }}
-        run: |
-          echo "Approved by the repo owner."
-          echo "  pull request author: $PR_AUTHOR"
-          echo "  association:         $ASSOCIATION"
-
-  # Resolves the workflow_dispatch `skill` input into the job matrix. The skill
-  # list lives here only, so adding a skill means editing one place.
+  # Discover eval specifications from the trusted checked-out revision. Pull
+  # request eval remains disabled, so untrusted changes cannot reach Copilot.
   plan:
-    needs: [authorize]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Three conditions, and the ordering of the first two matters.
-    #
-    # `always()` is required because `authorize` is SKIPPED for owner pull
-    # requests, the nightly and dispatch, and a skipped dependency would
-    # otherwise skip this job too. It also means an authorize that was denied
-    # or cancelled reaches here, so the result is checked explicitly rather
-    # than relying on the default success requirement that `always()` removes.
-    #
-    # A pull_request from a fork gets a read-only GITHUB_TOKEN with no
-    # copilot-requests scope, so the SDK cannot authenticate and every matrix
-    # job would fail on something the contributor cannot fix. Skip cleanly
-    # instead, and rely on the nightly run to cover merged fork work.
-    if: >-
-      always() &&
-      (needs.authorize.result == 'success' || needs.authorize.result == 'skipped') &&
-      (
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.head.repo.full_name == github.repository
-      )
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
       count: ${{ steps.select.outputs.count }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          persist-credentials: false
 
       - name: Select skills to evaluate
         id: select
         env:
-          # Passed via env, never interpolated into the script, so a crafted
-          # dispatch input cannot inject shell.
           SKILL: ${{ inputs.skill }}
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          all='[
-            {"skill":"skills/create-gh-pages-site","skill_id":"create-gh-pages-site","eval_spec":"evals/create-gh-pages-site/eval.yaml"},
-            {"skill":"skills/create-canvas-app","skill_id":"create-canvas-app","eval_spec":"evals/create-canvas-app/eval.yaml"},
-            {"skill":"skills/naming-is-hard","skill_id":"naming-is-hard","eval_spec":"evals/naming-is-hard/eval.yaml"},
-            {"skill":"skills/eli5","skill_id":"eli5","eval_spec":"evals/eli5/eval.yaml"},
-            {"skill":"skills/repo-ready","skill_id":"repo-ready","eval_spec":"evals/repo-ready/eval.yaml"},
-            {"skill":"skills/dns-doctor","skill_id":"dns-doctor","eval_spec":"evals/dns-doctor/eval.yaml"},
-            {"skill":"skills/deps-doctor","skill_id":"deps-doctor","eval_spec":"evals/deps-doctor/eval.yaml"},
-            {"skill":"skills/git-tidy","skill_id":"git-tidy","eval_spec":"evals/git-tidy/eval.yaml"}
-          ]'
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            # Evaluate only the skills this PR actually touches. Keep these
-            # paths in step with the `paths` filter above, or the workflow
-            # triggers and then evaluates nothing while reporting success.
-            changed=$(git diff --name-only "$BASE_SHA" HEAD \
-              -- 'skills/*/SKILL.md' 'skills/*/references/**' \
-                 'skills/*/scripts/**' 'skills/*/evals/**' \
-                 'skills/*/package.json' \
-              | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u | jq -R . | jq -sc .)
-            selected=$(jq -c --argjson c "$changed" '[.[] | select(.skill as $s | $c | index($s))]' <<<"$all")
-          elif [ -z "${SKILL:-}" ]; then
+          matrix_file="$RUNNER_TEMP/skill-eval-matrix.jsonl"
+          : > "$matrix_file"
+          while IFS= read -r spec; do
+            skill_dir=${spec%%/evals/*}
+            skill_id=${skill_dir#skills/}
+            expected="$skill_dir/evals/$skill_id/eval.yaml"
+            if [[ ! "$skill_id" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] ||
+               [ "$spec" != "$expected" ] ||
+               [ ! -f "$skill_dir/SKILL.md" ]; then
+              echo "::error::Refusing non-canonical eval specification path."
+              exit 1
+            fi
+            eval_spec=${spec#"$skill_dir/"}
+            jq -cn \
+              --arg skill "$skill_dir" \
+              --arg skill_id "$skill_id" \
+              --arg eval_spec "$eval_spec" \
+              '{skill:$skill, skill_id:$skill_id, eval_spec:$eval_spec}' \
+              >> "$matrix_file"
+          done < <(
+            find skills -mindepth 4 -maxdepth 4 -type f \
+              -path 'skills/*/evals/*/eval.yaml' -print | LC_ALL=C sort
+          )
+          all=$(jq -sc '.' "$matrix_file")
+          if [ "$(jq 'length' <<<"$all")" -eq 0 ]; then
+            echo "::error::No canonical skill eval specifications were found."
+            exit 1
+          fi
+          if [ -z "${SKILL:-}" ]; then
             selected=$(jq -c . <<<"$all")
           else
             selected=$(jq -c --arg s "$SKILL" '[.[] | select(.skill_id == $s or .skill == $s)]' <<<"$all")
             if [ "$(jq 'length' <<<"$selected")" -eq 0 ]; then
-              echo "::error::No skill matches '$SKILL'. Valid ids: $(jq -r '[.[].skill_id] | join(", ")' <<<"$all")"
+              echo "::error::Requested skill was not discovered."
               exit 1
             fi
           fi
@@ -158,26 +90,12 @@ jobs:
 
   eval:
     needs: plan
-    # `always()` for the same reason `plan` needs it. `authorize` is skipped on
-    # an owner pull request, and that skip propagates down the chain: `plan`
-    # opts out with always() and runs, but a plain `if` here would still see a
-    # skipped transitive dependency and skip. Without this the approval gate
-    # silently disables every eval, which is worse than having no gate.
-    #
-    # Removing the implicit success requirement means both conditions below are
-    # load-bearing. `plan` must have actually succeeded, and it must have
-    # selected at least one skill, since an empty matrix is a workflow error
-    # rather than a no-op. That second case happens on a PR matching the paths
-    # filter without touching a skill, such as a change to this workflow alone.
-    if: >-
-      always() &&
-      needs.plan.result == 'success' &&
-      needs.plan.outputs.count != '0'
+    if: needs.plan.outputs.count != '0'
     runs-on: ubuntu-latest
-    # Each matrix job drives a real agent through the Copilot SDK, so an
-    # unbounded hang would burn Actions minutes and Copilot usage up to the
-    # six hour default. Cap it well above a normal full-suite run.
     timeout-minutes: 45
+    permissions:
+      contents: read
+      copilot-requests: write
     strategy:
       # One skill's eval failing must not cancel the other skills' evals.
       fail-fast: false
@@ -186,25 +104,23 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      # Node 24, not 22. Vally declares `npm>=11.11.1`, and Node 22 still
-      # bundles npm 10.x, which makes every install log an EBADENGINE warning.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: "${{ matrix.skill }}/package-lock.json"
+          cache-dependency-path: .github/tools/vally/package-lock.json
 
-      - name: Install dependencies
+      - name: Install Vally CLI
+        run: npm ci --prefix .github/tools/vally --ignore-scripts
+
+      - name: Install validation dependencies
+        if: matrix.skill_id == 'dns-doctor' || matrix.skill_id == 'repo-ready'
         working-directory: ${{ matrix.skill }}
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      # Belt and braces for the two skills with the strictest gates. Every
-      # skill's `npm test` and `eval:lint` already run on every push in
-      # skill-lint.yml; this repeats them here, immediately before the
-      # expensive agent eval, so a broken skill fails in seconds rather than
-      # after 45 minutes of billed Copilot usage. `--if-present` keeps one step
-      # serving both: dns-doctor has a coverage gate, repo-ready does not.
       - name: Validate skill
         if: matrix.skill_id == 'dns-doctor' || matrix.skill_id == 'repo-ready'
         working-directory: ${{ matrix.skill }}
@@ -214,35 +130,26 @@ jobs:
           npm run test:coverage --if-present
           npm run eval:lint --if-present
 
-      # Deliberately NOT a global `npm install -g @microsoft/vally-cli`. The
-      # step above already installs the skill's own devDependencies, so running
-      # the local binary keeps CI on exactly the version the skill's
-      # package.json declares. A global install floats to whatever is newest and
-      # silently diverges from what `npm run eval` uses locally, which is how CI
-      # ended up on 0.11.0 while package.json still pinned ^0.10.0.
+      - name: Report Vally version
+        env:
+          VALLY_BIN: ${{ github.workspace }}/.github/tools/vally/node_modules/.bin/vally
+        run: "$VALLY_BIN" --version
+
+      # This step contains one command so the token is available only to the
+      # exact Vally eval process.
       - name: Run eval
         working-directory: ${{ matrix.skill }}
         env:
-          # Copilot resolves COPILOT_GITHUB_TOKEN ahead of GITHUB_TOKEN, so set
-          # both to the Actions token and let the SDK pick up either one.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # One trial per stimulus on a pull request, five on the nightly.
-          # Both halves of that matter. Cost: a full dns-doctor suite is 28
-          # stimuli, so five trials is 140 agent sessions to gate one PR.
-          # Stability: the assert step below requires EVERY trial to pass
-          # skill-invocation, diff-empty and tool-calls, so raising the trial
-          # count strictly raises the chance one flaky trial blocks a good
-          # change. The nightly keeps five because catching that flakiness is
-          # exactly its job, and nothing is blocked while it does.
-          RUNS: ${{ github.event_name == 'pull_request' && '1' || '5' }}
+          EVAL_SPEC: ${{ matrix.eval_spec }}
+          VALLY_BIN: ${{ github.workspace }}/.github/tools/vally/node_modules/.bin/vally
         run: |
-          ./node_modules/.bin/vally --version
-          ./node_modules/.bin/vally eval \
-            --eval-spec ${{ matrix.eval_spec }} \
+          "$VALLY_BIN" eval \
+            --eval-spec "$EVAL_SPEC" \
             --skill-dir . \
             --output-dir ./vally-results \
-            --runs "$RUNS" \
+            --runs 5 \
             --workers 2 \
             --max-retries 0
 
@@ -260,10 +167,7 @@ jobs:
           # the eval can pass on the mean.
           #
           # skill-invocation, diff-empty, and tool-calls are NOT forgiven. Every
-          # trial of every stimulus must pass all three, so on the nightly a
-          # single flaky trial in five fails the whole job. A pull request runs
-          # one trial per stimulus, which keeps that gate meaningful without
-          # multiplying the chance of a spurious block.
+          # trial of every stimulus must pass all three.
           #
           # The practical consequence: a stimulus whose correct answer can be
           # produced WITHOUT opening the skill (a flat refusal, or a question
@@ -291,12 +195,3 @@ jobs:
               )
             ))
           ' "$summary" > /dev/null
-
-      - name: Upload eval results
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: eval-results-${{ matrix.skill_id }}
-          path: |
-            ${{ matrix.skill }}/vally-results/
-            !${{ matrix.skill }}/vally-results/**/events.jsonl

@@ -1,0 +1,20 @@
+{
+  "name": __PACKAGE_NAME_JSON__,
+  "interface": {
+    "displayName": __DISPLAY_NAME_JSON__
+  },
+  "plugins": [
+    {
+      "name": __PACKAGE_NAME_JSON__,
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

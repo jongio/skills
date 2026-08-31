@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": __PACKAGE_NAME_JSON__,
+  "description": __DESCRIPTION_JSON__,
+  "version": __PACKAGE_VERSION_JSON__,
+  "author": {
+    "name": __OWNER_NAME_JSON__,
+    "url": __OWNER_URL_JSON__
+  },
+  "license": "MIT",
+  "keywords": __SKILL_KEYWORDS_JSON__,
+  "repository": __REPOSITORY_URL_JSON__
+}

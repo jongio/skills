@@ -1,0 +1,98 @@
+name: Skill Lint
+
+on:
+  pull_request:
+    paths:
+      - "skills/**"
+      - "test/**"
+      - ".github/tools/vally/**"
+      - ".github/workflows/**"
+      - "plugin.json"
+      - "marketplace.json"
+      - ".agents/plugins/**"
+      - ".codex-plugin/**"
+      - ".claude-plugin/**"
+      - ".cursor-plugin/**"
+      - "gemini-extension.json"
+  push:
+    branches: [__DEFAULT_BRANCH__]
+    paths:
+      - "skills/**"
+      - "test/**"
+      - ".github/tools/vally/**"
+      - ".github/workflows/**"
+      - "plugin.json"
+      - "marketplace.json"
+      - ".agents/plugins/**"
+      - ".codex-plugin/**"
+      - ".claude-plugin/**"
+      - ".cursor-plugin/**"
+      - "gemini-extension.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ".github/tools/vally/package-lock.json"
+
+      - name: Install locked validation tools
+        run: |
+          set -euo pipefail
+          npm ci --prefix .github/tools/vally --ignore-scripts
+          echo "$PWD/.github/tools/vally/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Validate distribution manifests
+        run: node --test test/*.test.mjs
+
+      - name: Select skill directories
+        id: skills
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            changed=$(git diff --name-only "$BASE_SHA" HEAD)
+            dirs=$(printf '%s\n' "$changed" |
+              grep -E '^skills/[^/]+/' |
+              sed 's|^\(skills/[^/]*\)/.*|\1|' |
+              sort -u || true)
+          else
+            dirs=$(find skills -mindepth 1 -maxdepth 1 -type d | sort)
+          fi
+          {
+            echo "dirs<<EOF"
+            echo "$dirs"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Validate changed skills
+        env:
+          SKILL_DIRS: ${{ steps.skills.outputs.dirs }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r dir; do
+            [ -z "$dir" ] && continue
+            vally lint "$dir"
+            if [ -f "$dir/package.json" ]; then
+              npm ci --prefix "$dir" --ignore-scripts
+              npm test --prefix "$dir"
+            fi
+            while IFS= read -r spec; do
+              vally lint --eval-spec "$spec" --strict
+            done < <(find "$dir/evals" -name eval.yaml -type f 2>/dev/null | sort)
+          done <<< "$SKILL_DIRS"

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "name": "example-skill",
+  "title": "Example Skill",
+  "description": "A functional example that proves this repository can package, test, evaluate, and distribute a portable agent skill.",
+  "routing": {
+    "type": "utility",
+    "useFor": [
+      "run the example skill",
+      "verify the skills repository"
+    ],
+    "doNotUseFor": [
+      "authoring a new skill"
+    ]
+  },
+  "behavior": {
+    "purpose": "Return a short repository health confirmation based only on files that exist.",
+    "commands": [
+      "check"
+    ]
+  },
+  "thumbnail": {
+    "provider": "builtin",
+    "prompt": "A precise green check inside a repository outline on a warm neutral background"
+  }
+}

@@ -145,25 +145,15 @@ assert.ok(
   "IMAGES.md must document the skill thumbnail",
 );
 
-// Parse the embedded matrix rather than regex-matching its fields separately:
-// independent matches can each be satisfied by a different entry, reporting a
-// parity that does not actually exist.
-const matrixSource = evalWorkflow.match(/all='(\[[\s\S]*?\])'/);
-assert.ok(matrixSource, "skill-eval.yml must embed a JSON matrix in `all`");
-const matrix = JSON.parse(matrixSource[1]);
-const matrixIds = matrix.map(({ skill_id }) => skill_id);
-assert.equal(
-  new Set(matrixIds).size,
-  matrixIds.length,
-  "eval matrix entries must have unique skill_id values",
+assert.match(
+  evalWorkflow,
+  /find\s+skills\b[\s\S]*skills\/\*\/evals\/\*\/eval\.yaml/,
+  "skill-eval.yml must discover every canonical eval spec",
 );
-const evalSpecPath = `evals/${skillId}/eval.yaml`;
-const matrixEntries = matrix.filter(({ skill_id }) => skill_id === skillId);
-assert.equal(matrixEntries.length, 1, "eval matrix must contain exactly one entry for this skill");
-assert.deepEqual(
-  matrixEntries[0],
-  { skill: `skills/${skillId}`, skill_id: skillId, eval_spec: evalSpecPath },
-  "eval matrix entry for this skill drifted from the expected shape",
+assert.match(
+  evalWorkflow,
+  /all=\$\(jq\s+-sc/,
+  "skill-eval.yml must build the matrix from discovered eval specs",
 );
 
 assert.match(
@@ -172,6 +162,7 @@ assert.match(
   "eval spec name must match the skill id",
 );
 
+const evalSpecPath = `evals/${skillId}/eval.yaml`;
 assert.equal(packageJson.name, skillId, "package.json name must match the skill id");
 for (const script of ["eval", "eval:lint"]) {
   assert.ok(

@@ -8,9 +8,9 @@ Templates are **not** in this skill. They live in the
 **[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)**
 registry, which also renders the browsable gallery + live previews. To add or fix a
 template (a new framework, a base-path fix, an action-version bump), open a PR there
-and follow that repo's `CONTRIBUTING.md`. The generator fetches templates from the
-registry at runtime, so a merged template is immediately available to the skill — no
-change here required.
+and follow that repo's `CONTRIBUTING.md`. The generator fetches the registry at the
+immutable `DEFAULT_REGISTRY_REF` in `scripts/new-site.mjs`. After a reviewed
+template change merges, update that full commit SHA here and run the offline tests.
 
 ## The skill (this repo)
 
@@ -28,13 +28,30 @@ registry rely on them, so treat the set as a stable contract:
 | `__BASE_PATH__` | `/repo/` (or `/`) — trailing slash | Vite/Astro `base`, Eleventy `pathPrefix`, the workflow's `PATH_PREFIX` |
 | `__BASE_URL__` | `/repo` (or ``) — no trailing slash | Jekyll `baseurl` |
 | `__SITE_NAME__` | the human title | page titles, headings |
+| `__SITE_DESCRIPTION__` | catalog description | page metadata and introductory copy |
 | `__SITE_URL__` | `https://user.github.io/repo/` | meta, README |
 | `__SITE_ORIGIN__` | `https://user.github.io` | Astro `site`, Jekyll `url` |
 | `__REPO_SLUG__` | `owner/repo` | links to the repo |
+| `__REPO_OWNER__` | repository owner | catalog metadata |
+| `__REPO_NAME__` | repository name | catalog metadata |
+| `__AUTHOR_NAME__` | explicit author or repository owner | catalog attribution |
 | `__PKG_NAME__` | npm-safe name | `package.json` `name` |
+| `__MARKETPLACE_ID__` | npm-safe marketplace identifier | catalog install commands |
 
 Values derive from `--repo` (the current repo's `origin` remote when omitted), and
 the generator detects `USER.github.io` user sites (base collapses to `/`).
+
+## Registry and staging security contract
+
+External registries are accepted only at a full 40-character commit SHA. The
+generator verifies checked out HEAD, contains template resolution within the
+registry templates root, rejects symlinks, replaces sentinels, and scans workflows
+before applying anything to a target.
+
+Composition tools such as `create-skills-repo` must use `--staging-dir <new-path>
+--json`. The staging path must not exist and cannot be combined with `--dir` or
+`--force`. The caller owns conflict detection and final copying. This contract
+keeps the generator from overwriting files that belong to its caller.
 
 ## Images & content authoring
 
@@ -55,11 +72,11 @@ base path) live in the registry's `CONTRIBUTING.md`, not here.
 ### Run the tests
 
 ```sh
-npm test   # node test/generator.test.mjs && node test/digest.test.mjs — bare node, fully offline
+npm test   # node test/generator.test.mjs && node test/digest.test.mjs, bare node and fully offline
 ```
 
-The tests cover base-path math, repo-slug parsing, and stamping a local fixture
-template (sentinels replaced, `template.json`/`node_modules` skipped, user-site
-collapse), plus the repo-digest classifier and the placeholder generator. They never
-hit the network — template/workflow validation lives in the registry. If you change
-the substitution contract or the resolver, update the tests.
+The tests cover base-path math, repo-slug parsing, skills-catalog discovery,
+immutable local registry checkout, staging, path and symlink rejection, workflow
+policy, repo digestion, and placeholder generation. They never hit the network.
+If you change the substitution, registry, staging, or workflow contract, update
+the tests.
