@@ -4,7 +4,7 @@ tagline: "Create and register a complete portable agent skill with tests, Vally 
 useWhen: "When you want to add a production-ready skill to a managed skills marketplace repository or an existing skills collection without missing registration, tests, evals, or catalog assets."
 repoPath: skills/create-skill
 thumb: images/thumb-create-skill.png
-order: 8
+order: 3
 install:
   - label: Install for GitHub Copilot
     cmd: npx skills add jongio/skills --skill create-skill -g --agent github-copilot

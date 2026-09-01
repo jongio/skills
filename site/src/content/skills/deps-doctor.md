@@ -4,7 +4,7 @@ tagline: "Audit, update, and secure dependencies across every package manager in
 useWhen: "When dependencies are outdated, a CVE needs remediating, a package graph has unused or undeclared entries, a major bump needs a forward compatibility fix, or a supply-chain review is due before adopting a release."
 repoPath: skills/deps-doctor
 thumb: images/thumb-deps-doctor.png
-order: 6
+order: 9
 install:
   - label: Install for GitHub Copilot
     cmd: npx skills add jongio/skills --skill deps-doctor -g --agent github-copilot

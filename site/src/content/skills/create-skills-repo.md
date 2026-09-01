@@ -4,7 +4,7 @@ tagline: "Create or safely upgrade a complete cross-agent skills marketplace rep
 useWhen: "When you want a new repository for publishing agent skills, or need to bring an existing skills repository up to the same marketplace, CI, eval, and catalog standards."
 repoPath: skills/create-skills-repo
 thumb: images/thumb-create-skills-repo.png
-order: 9
+order: 4
 install:
   - label: Install for GitHub Copilot
     cmd: npx skills add jongio/skills --skill create-skills-repo -g --agent github-copilot

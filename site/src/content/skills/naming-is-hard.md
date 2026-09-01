@@ -4,7 +4,7 @@ tagline: "Interactive naming assistant for projects, CLIs, and products — gene
 useWhen: "When you need to name a project, product, CLI tool, company, or package — or want to check whether a name is available across domains, GitHub, npm, and other channels."
 repoPath: skills/naming-is-hard
 thumb: images/thumb-naming-is-hard.png
-order: 4
+order: 6
 install:
   - label: Install for GitHub Copilot
     cmd: npx skills add jongio/skills --skill naming-is-hard -g --agent github-copilot

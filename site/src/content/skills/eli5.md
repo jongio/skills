@@ -4,7 +4,7 @@ tagline: "Turn the code, error, design, or idea already in context into a clear 
 useWhen: "When you say ELI5, explain this simply, or ask for a beginner-friendly explanation of the current conversation, selection, or attachment."
 repoPath: skills/eli5
 thumb: images/thumb-eli5.png
-order: 5
+order: 8
 install:
   - label: Install for GitHub Copilot
     cmd: npx skills add jongio/skills --skill eli5 -g --agent github-copilot
