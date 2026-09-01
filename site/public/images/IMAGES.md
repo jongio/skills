@@ -26,8 +26,8 @@ byte-identical copy of `skills/<skill>/thumbnail.png`.
 | --- | --- | --- |
 | `thumb-create-canvas-app.png` | `create-canvas-app` card/detail | Canvas extension panel beside the Copilot composer. |
 | `thumb-create-gh-pages-site.png` | `create-gh-pages-site` card/detail | Astro site scaffold deploying to GitHub Pages. |
-| `thumb-create-skill.png` | `create-skill` card/detail | Deterministic local placeholder for complete skill authoring and registration. |
-| `thumb-create-skills-repo.png` | `create-skills-repo` card/detail | Deterministic local placeholder for cross-agent repository setup. |
+| `thumb-create-skill.png` | `create-skill` card/detail | Azure OpenAI generated thumbnail for complete skill authoring and registration. |
+| `thumb-create-skills-repo.png` | `create-skills-repo` card/detail | Azure OpenAI generated thumbnail for cross-agent repository setup. |
 | `thumb-deps-doctor.png` | `deps-doctor` card/detail | Dependency graph on a slate console, amber packages upgrading left to right into green ones, inspected by a stethoscope lens. Byte parity with the skill copy is asserted by a test. |
 | `thumb-dns-doctor.png` | `dns-doctor` card/detail | DNS diagnostic workstation, record cards, and stethoscope. |
 | `thumb-git-tidy.png` | `git-tidy` card/detail | Git branch tree being tidied, merged branches swept up while protected branches are kept. Byte parity with the skill copy is asserted by a test. |

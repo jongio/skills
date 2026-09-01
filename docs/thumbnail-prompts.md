@@ -284,32 +284,6 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 > white space, crisp professional finish. No words, no letters, no fake text,
 > no photorealism, no 3D render.
 
-### create-skill (deterministic placeholder)
-
-No image provider or generative prompt was used. The image was produced by
-`skills/create-skill/scripts/png.mjs` using
-`encodeDeterministicPlaceholderPng()`.
-
-| Setting | Value |
-|---|---|
-| Provider | `placeholder` |
-| Model | `deterministic-local-v1` |
-| Size | `1024x1024` |
-| SHA-256 | `7d6140526ca40be2d5d16947ef02e1169fd1db733f22766d3e2e2f7e8903861a` |
-
-### create-skills-repo (deterministic placeholder)
-
-No image provider or generative prompt was used. The image was produced by
-`skills/create-skill/scripts/png.mjs` using
-`encodeDeterministicPlaceholderPng()`.
-
-| Setting | Value |
-|---|---|
-| Provider | `placeholder` |
-| Model | `deterministic-local-v1` |
-| Size | `1024x1024` |
-| SHA-256 | `7d6140526ca40be2d5d16947ef02e1169fd1db733f22766d3e2e2f7e8903861a` |
-
 ## create-skill (f1eb662a7758)
 
 Prompt: "Create a square 1024x1024 thumbnail for the create-skill agent workflow. Pure white background, centered flat vector illustration, clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, generous white space, crisp professional finish. Use one large cream-white browser panel as the hero surface. On the left, show three loose lavender puzzle tiles and a small amber prompt card. A dotted left-to-right connector feeds them through a coral magic-wand tool into a complete emerald skill package on the right: a tidy folder containing a document, a small test flask, and a green completion badge. Add one restrained coral, lavender, emerald, and charcoal palette. Place a small black GitHub Octocat mark in the upper-right with a dotted tether to the finished package. Diagram treatment only. No words, no letters, no numerals, no fake text, no logos other than the small Octocat, no photorealism, no 3D render, no dark background, no gradients, no extra floating objects."
