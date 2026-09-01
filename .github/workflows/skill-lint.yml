@@ -45,9 +45,9 @@ on:
       - "monitors/**"
       - "bin/**"
       - "com.github.copilot/**"
-      # Without this, edits to this workflow never lint themselves, so a
-      # change here can only be verified by a manual workflow_dispatch.
-      - ".github/workflows/skill-lint.yml"
+      # Workflow policy tests inspect every workflow and must run whenever any
+      # workflow changes.
+      - ".github/workflows/**"
   push:
     branches: [main]
     paths: *skill_lint_paths
@@ -91,6 +91,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
+          set -euo pipefail
           if [ "$EVENT_NAME" = "pull_request" ]; then
             # Lint only skills with changes in this PR. Keep this list in step
             # with the `paths` filter above: a path that triggers the workflow
@@ -104,13 +105,22 @@ jobs:
             # Push to main or manual dispatch: lint all skills
             DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
           fi
+          while IFS= read -r dir; do
+            [ -z "$dir" ] && continue
+            if [[ ! "$dir" =~ ^skills/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              echo "::error::Refusing non-canonical skill directory."
+              exit 1
+            fi
+          done <<< "$DIRS"
           if [ -z "$DIRS" ]; then
-            echo "dirs=" >> "$GITHUB_OUTPUT"
+            printf 'dirs=\n' >> "$GITHUB_OUTPUT"
             echo "No skill directories to lint"
           else
-            echo "dirs<<EOF" >> "$GITHUB_OUTPUT"
-            echo "$DIRS" >> "$GITHUB_OUTPUT"
-            echo "EOF" >> "$GITHUB_OUTPUT"
+            {
+              echo "dirs<<EOF"
+              echo "$DIRS"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
             echo "Will lint: $DIRS"
           fi
 
@@ -135,10 +145,12 @@ jobs:
           SKILL_DIRS: ${{ steps.skills.outputs.dirs }}
         run: |
           while IFS= read -r dir; do
-            for spec in $(find "$dir" -name "eval.yaml" -path "*/evals/*" 2>/dev/null); do
+            while IFS= read -r -d '' spec; do
               echo "Validating $spec"
               vally lint --eval-spec "$spec" --strict
-            done
+            done < <(
+              find "$dir" -name "eval.yaml" -path "*/evals/*" -print0 2>/dev/null
+            )
           done <<< "$SKILL_DIRS"
 
       - name: Run deterministic skill tests
@@ -148,6 +160,7 @@ jobs:
         run: |
           while IFS= read -r dir; do
             if [ -f "$dir/package.json" ] && npm pkg get scripts.test --prefix "$dir" | grep -qv '{}'; then
+              npm ci --prefix "$dir" --ignore-scripts
               npm test --prefix "$dir"
             fi
           done <<< "$SKILL_DIRS"
@@ -173,6 +186,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

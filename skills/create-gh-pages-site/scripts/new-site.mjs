@@ -7,8 +7,8 @@
 // the framework needs it (config, workflow env, links) so the site works at a
 // project URL (https://USER.github.io/REPO/) or a user URL (https://USER.github.io/).
 //
-// Templates are fetched from the jongio/gh-pages-templates registry (a shallow
-// git clone) — that registry is the single source of truth. Pass --templates-dir
+// Templates are fetched from the jongio/gh-pages-templates registry at an
+// immutable commit. That registry is the single source of truth. Pass --templates-dir
 // to scaffold from a local copy offline.
 //
 // Options:
@@ -17,9 +17,15 @@
 //   --base </path/>       Override the base path (e.g. "/my-repo/" or "/").
 //   --dir <path>          Output directory (default: ./<repo-name or template>).
 //   --site-name <title>   Human title (default: derived from the repo name).
-//   --registry <owner/repo>  Use a different template registry repo
-//                            (default: jongio/gh-pages-templates; needs git + network).
+//   --description <text>  Site description (default: catalog description).
+//   --author <name>       Author display name (default: repository owner).
+//   --package-name <id>   Package identifier (default: repository name).
+//   --marketplace-id <id> Marketplace identifier (default: owner-repository).
+//   --default-branch <id>  Repository default branch (default: main).
+//   --registry <owner/repo>  Use a different template registry repo.
+//   --registry-ref <sha>     Full 40-character commit SHA for the registry.
 //   --templates-dir <path>   Use a local templates/ folder instead (offline; no fetch).
+//   --staging-dir <path>     Validate into a new directory without applying to a target.
 //   --force               Write into a non-empty directory.
 //   --list                List available templates and exit.
 //   --help                Show this help.
@@ -27,11 +33,43 @@
 // If neither --repo nor --base is given, the generator assumes the current repo
 // (read from the "origin" remote) so a site is scaffolded for the repo you're in.
 
-import { existsSync, readdirSync, readFileSync, writeFileSync, lstatSync, cpSync, mkdirSync, rmSync } from "node:fs";
-import { join, resolve, dirname, basename } from "node:path";
+import { existsSync, readdirSync, readFileSync, writeFileSync, lstatSync, cpSync, mkdirSync, rmSync, mkdtempSync, renameSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { join, resolve, dirname, basename, parse } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
+import {
+  assertNoSymlinks,
+  normalizePinnedLegacyWorkflows,
+  resolveInside,
+  validateStagedTree,
+  validateTemplateSentinels,
+} from "./template-security.mjs";
+import {
+  DEFAULT_REGISTRY,
+  DEFAULT_REGISTRY_REF,
+  resolveTemplatesSource,
+} from "./template-registry.mjs";
+import { runNewSiteCli } from "./new-site-cli.mjs";
+
+export {
+  assertFullCommitSha,
+  assertNoSymlinks,
+  assertRegistryTreeHasNoSymlinks,
+  normalizePinnedLegacyWorkflows,
+  resolveInside,
+  validateStagedTree,
+  validateTemplateSentinels,
+  validateWorkflowFile,
+} from "./template-security.mjs";
+export {
+  DEFAULT_REGISTRY,
+  DEFAULT_REGISTRY_REF,
+  registryCloneUrl,
+  resolveTemplatesSource,
+  verifyRegistryCommit,
+} from "./template-registry.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = resolve(__dirname, "..", "templates");
@@ -39,15 +77,27 @@ const TEMPLATES_DIR = resolve(__dirname, "..", "templates");
 // The registry is the single source of truth for templates. The skill no longer
 // bundles its own copy; the generator fetches from here unless --templates-dir
 // (or a local templates/ next to the script) provides an offline source.
-const DEFAULT_REGISTRY = "jongio/gh-pages-templates";
-
 // Files/dirs never copied into a stamped site.
 const SKIP_ENTRIES = new Set(["node_modules", "dist", "_site", ".git", ".cache", ".jekyll-cache", "template.json"]);
 
 // Sentinels replaced during stamping. Replacement is a single pass over a
 // combined regex so an injected value (e.g. a --site-name that happens to
 // contain "__BASE_PATH__") is never re-scanned and substituted again.
-const SENTINELS = ["__SITE_NAME__", "__SITE_URL__", "__SITE_ORIGIN__", "__BASE_PATH__", "__BASE_URL__", "__REPO_SLUG__", "__PKG_NAME__"];
+const SENTINELS = [
+  "__SITE_NAME__",
+  "__SITE_DESCRIPTION__",
+  "__SITE_URL__",
+  "__SITE_ORIGIN__",
+  "__BASE_PATH__",
+  "__BASE_URL__",
+  "__REPO_SLUG__",
+  "__REPO_OWNER__",
+  "__REPO_NAME__",
+  "__AUTHOR_NAME__",
+  "__PKG_NAME__",
+  "__MARKETPLACE_ID__",
+  "__DEFAULT_BRANCH__",
+];
 const SENTINEL_RE = new RegExp(SENTINELS.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
 
 // ---------------------------------------------------------------------------
@@ -82,6 +132,38 @@ export function pkgNameOf(slug) {
       .replace(/^[-_.]+/, "")
       .replace(/[-_.]+$/, "") || "my-site"
   );
+}
+
+function safeTemplateText(value, label) {
+  const text = String(value);
+  if (!/^[\p{L}\p{N} .,'()/_+!?-]+$/u.test(text)) {
+    throw new Error(`${label} contains characters that are unsafe for template substitution.`);
+  }
+  return text;
+}
+
+function safeRepoComponent(value, label) {
+  const component = String(value);
+  if (!/^[A-Za-z0-9_.-]+$/.test(component) || component === "." || component === "..") {
+    throw new Error(`${label} is not a valid GitHub repository component.`);
+  }
+
+  return component;
+}
+
+function safeDefaultBranch(value) {
+  const branch = String(value || "main").trim();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(branch)) {
+    throw new Error("--default-branch must be a lowercase GitHub branch identifier.");
+  }
+  return branch;
+}
+
+function validateBasePath(basePath) {
+  if (!/^\/[A-Za-z0-9._~/-]*$/.test(basePath) || basePath.split("/").includes("..")) {
+    throw new Error("--base contains characters or traversal segments that are unsafe for template substitution.");
+  }
+  return basePath;
 }
 
 /**
@@ -131,9 +213,28 @@ export function detectCurrentRepo(cwd = process.cwd()) {
 
 /**
  * Compute every sentinel replacement from the user's inputs.
- * @param {{repo?: string, base?: string, siteName?: string, dir?: string}} opts
+ * @param {{
+ *   repo?: string,
+ *   base?: string,
+ *   siteName?: string,
+ *   description?: string,
+ *   author?: string,
+ *   packageName?: string,
+ *   marketplaceId?: string,
+ *   dir?: string
+ * }} opts
  */
-export function computeReplacements({ repo, base, siteName, dir } = {}) {
+export function computeReplacements({
+  repo,
+  base,
+  siteName,
+  description,
+  author,
+  packageName,
+  marketplaceId,
+  defaultBranch,
+  dir,
+} = {}) {
   let owner = "USERNAME";
   let repoName = dir ? basename(dir) : "my-site";
 
@@ -141,29 +242,42 @@ export function computeReplacements({ repo, base, siteName, dir } = {}) {
     const m = String(repo).trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "");
     const parts = m.split("/").filter(Boolean);
     if (parts.length !== 2) throw new Error(`--repo must be "owner/name", got "${repo}"`);
-    [owner, repoName] = parts;
+    owner = safeRepoComponent(parts[0], "Repository owner");
+    repoName = safeRepoComponent(parts[1], "Repository name");
   }
 
   const isUserSite = repoName.toLowerCase() === `${owner.toLowerCase()}.github.io`;
 
   let basePath;
-  if (base != null && base !== "") basePath = normalizeBase(base);
+  if (base != null && base !== "") basePath = validateBasePath(normalizeBase(base));
   else if (repo) basePath = isUserSite ? "/" : `/${repoName}/`;
   else throw new Error("No target repo found. Run inside a git repo with an 'origin' remote, or pass --repo <owner/name> or --base </path/>.");
 
   const baseUrl = basePath === "/" ? "" : basePath.replace(/\/$/, ""); // "/repo" or ""
   const siteOrigin = `https://${owner.toLowerCase()}.github.io`;
   const siteUrl = basePath === "/" ? `${siteOrigin}/` : `${siteOrigin}${basePath}`;
-  const title = siteName || titleize(repoName);
+  const title = safeTemplateText(siteName || titleize(repoName), "--site-name");
+  const safeDescription = description
+    ? safeTemplateText(description, "--description")
+    : `${title} is a searchable catalog of reusable agent skills from ${owner}/${repoName}.`;
+  const safeAuthor = safeTemplateText(author || owner, "--author");
+  const packageId = pkgNameOf(packageName || repoName);
+  const marketplace = pkgNameOf(marketplaceId || `${owner}-${repoName}`);
 
   return {
     __SITE_NAME__: title,
+    __SITE_DESCRIPTION__: safeDescription,
     __SITE_URL__: siteUrl,
     __SITE_ORIGIN__: siteOrigin,
     __BASE_PATH__: basePath,
     __BASE_URL__: baseUrl,
     __REPO_SLUG__: `${owner}/${repoName}`,
-    __PKG_NAME__: pkgNameOf(repoName),
+    __REPO_OWNER__: owner,
+    __REPO_NAME__: repoName,
+    __AUTHOR_NAME__: safeAuthor,
+    __PKG_NAME__: packageId,
+    __MARKETPLACE_ID__: marketplace,
+    __DEFAULT_BRANCH__: safeDefaultBranch(defaultBranch),
   };
 }
 
@@ -182,8 +296,16 @@ export function applyReplacements(text, replacements) {
 /** List template names in a templates root (folders with a template.json). */
 export function listTemplates(dir = TEMPLATES_DIR) {
   if (!existsSync(dir)) return [];
+  if (lstatSync(dir).isSymbolicLink() || !lstatSync(dir).isDirectory()) {
+    throw new Error(`Templates root ${dir} must be a real directory, not a symbolic link.`);
+  }
   return readdirSync(dir)
-    .filter((name) => existsSync(join(dir, name, "template.json")))
+    .filter((name) => {
+      const templateDir = join(dir, name);
+      const manifest = join(templateDir, "template.json");
+      if (!existsSync(manifest)) return false;
+      return !lstatSync(templateDir).isSymbolicLink() && lstatSync(templateDir).isDirectory() && !lstatSync(manifest).isSymbolicLink();
+    })
     .sort((a, b) => {
       const oa = readManifest(join(dir, a)).order ?? 99;
       const ob = readManifest(join(dir, b)).order ?? 99;
@@ -192,7 +314,32 @@ export function listTemplates(dir = TEMPLATES_DIR) {
 }
 
 export function readManifest(templateDir) {
-  return JSON.parse(readFileSync(join(templateDir, "template.json"), "utf8"));
+  const file = join(templateDir, "template.json");
+  let manifest;
+  try {
+    manifest = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new Error(`Invalid template manifest ${file}: ${error.message}`);
+  }
+  const requiredStrings = ["name", "title", "tagline"];
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    throw new Error(`Invalid template manifest ${file}: expected an object.`);
+  }
+  for (const field of requiredStrings) {
+    if (typeof manifest[field] !== "string" || !manifest[field].trim()) {
+      throw new Error(`Invalid template manifest ${file}: ${field} must be a non-empty string.`);
+    }
+  }
+  if (manifest.name !== basename(templateDir)) {
+    throw new Error(`Invalid template manifest ${file}: name must match its directory.`);
+  }
+  if (typeof manifest.needsBuild !== "boolean") {
+    throw new Error(`Invalid template manifest ${file}: needsBuild must be a boolean.`);
+  }
+  if (manifest.language != null && typeof manifest.language !== "string") {
+    throw new Error(`Invalid template manifest ${file}: language must be a string when present.`);
+  }
+  return manifest;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,20 +347,54 @@ export function readManifest(templateDir) {
 // ---------------------------------------------------------------------------
 
 function copyTemplate(srcDir, destDir) {
+  assertNoSymlinks(srcDir);
   cpSync(srcDir, destDir, {
     recursive: true,
+    force: true,
     filter: (src) => !SKIP_ENTRIES.has(basename(src)),
   });
 }
 
-/** Rewrite sentinels in every regular text file under dir. Symlinks and other
- *  non-regular files are skipped (never followed) so a template — especially one
- *  fetched from a remote registry — can't escape the destination or loop. */
+function publishStage(stage, destDir, force) {
+  const parent = dirname(destDir);
+  mkdirSync(parent, { recursive: true });
+  const publish = mkdtempSync(join(parent, `.${basename(destDir)}.publish-`));
+  const backup = join(parent, `.${basename(destDir)}.backup-${randomUUID()}`);
+  const hadDestination = existsSync(destDir);
+  let backedUp = false;
+  try {
+    if (hadDestination && force) {
+      cpSync(destDir, publish, { recursive: true, force: true });
+    }
+
+    cpSync(stage, publish, { recursive: true, force: true });
+    if (hadDestination) {
+      renameSync(destDir, backup);
+      backedUp = true;
+    }
+    renameSync(publish, destDir);
+    if (backedUp) rmSync(backup, { recursive: true, force: true });
+  } catch (error) {
+    rmSync(publish, { recursive: true, force: true });
+    if (backedUp && !existsSync(destDir)) renameSync(backup, destDir);
+    throw error;
+  }
+}
+
+export function assertSafeDestination(destination) {
+  const resolved = resolve(destination);
+  if (resolved === parse(resolved).root) {
+    throw new Error(`Refusing to publish a site to filesystem root ${resolved}.`);
+  }
+  return resolved;
+}
+
+/** Rewrite sentinels in every regular text file under dir. */
 export function rewriteTree(dir, replacements) {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     const st = lstatSync(full);
-    if (st.isSymbolicLink()) continue;
+    if (st.isSymbolicLink()) throw new Error(`Template contains a symbolic link: ${full}`);
     if (st.isDirectory()) {
       rewriteTree(full, replacements);
     } else if (st.isFile()) {
@@ -226,210 +407,103 @@ export function rewriteTree(dir, replacements) {
   }
 }
 
-/** Build the clone URL for a registry "owner/repo" (or pass a full URL through). */
-export function registryCloneUrl(registry) {
-  return /^https?:\/\//.test(registry) ? registry : `https://github.com/${registry}.git`;
-}
-
-// Cache one shallow clone per registry for the life of the process, so --list and
-// a stamp don't clone twice. Clones are removed on process exit.
-const _registryClones = new Map(); // registry -> { root, cleanup }
-let _exitHookInstalled = false;
-
-function cloneRegistry(registry) {
-  if (_registryClones.has(registry)) return _registryClones.get(registry);
-  const tmp = join(tmpdir(), `ghp-registry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  const url = registryCloneUrl(registry);
-  try {
-    execFileSync("git", ["clone", "--depth", "1", url, tmp], { stdio: "pipe" });
-  } catch (err) {
-    rmSync(tmp, { recursive: true, force: true });
-    const detail = err.stderr ? err.stderr.toString().trim() : err.message;
-    throw new Error(`Failed to clone registry ${registry}: ${detail}\nPass --templates-dir <path> to scaffold from a local copy offline.`);
-  }
-  const entry = { root: tmp, cleanup: () => rmSync(tmp, { recursive: true, force: true }) };
-  _registryClones.set(registry, entry);
-  if (!_exitHookInstalled) {
-    _exitHookInstalled = true;
-    process.on("exit", () => {
-      for (const e of _registryClones.values()) e.cleanup();
-    });
-  }
-  return entry;
-}
-
-/**
- * Resolve the directory that holds template folders, honoring (in order):
- *   1. an explicit local `templatesDir`,
- *   2. an explicit `--registry` repo (cloned),
- *   3. a local `templates/` next to the script (dev convenience), if present,
- *   4. the default registry, jongio/gh-pages-templates (cloned).
- * @returns {string} absolute path to the templates root
- */
-export function resolveTemplatesSource({ registry, templatesDir } = {}) {
-  if (templatesDir) {
-    const d = resolve(templatesDir);
-    if (!existsSync(d)) throw new Error(`--templates-dir ${d} does not exist.`);
-    return d;
-  }
-  if (registry) return join(cloneRegistry(registry).root, "templates");
-  if (existsSync(TEMPLATES_DIR)) return TEMPLATES_DIR;
-  return join(cloneRegistry(DEFAULT_REGISTRY).root, "templates");
-}
-
 /**
  * Stamp a template into a target directory.
- * @returns {{ dir: string, replacements: object, manifest: object }}
+ * Use stagingDir to stop after validation without modifying a destination.
+ * @returns {{ dir: string, replacements: object, manifest: object, staged: boolean }}
  */
-export function stampTemplate({ template, dir, repo, base, siteName, registry, templatesDir, force = false } = {}) {
-  const templatesRoot = resolveTemplatesSource({ registry, templatesDir });
-  const srcDir = join(templatesRoot, template);
+export function stampTemplate({
+  template,
+  dir,
+  stagingDir,
+  repo,
+  base,
+  siteName,
+  description,
+  author,
+  packageName,
+  marketplaceId,
+  defaultBranch,
+  registry,
+  registryRef,
+  templatesDir,
+  force = false,
+} = {}) {
+  if (stagingDir && dir) throw new Error("--staging-dir cannot be combined with --dir.");
+  if (stagingDir && force) throw new Error("--staging-dir cannot be combined with --force.");
+
+  const templatesRoot = resolveTemplatesSource({ registry, registryRef, templatesDir });
+  const srcDir = resolveInside(templatesRoot, template, "Template path");
 
   if (!existsSync(join(srcDir, "template.json"))) {
     const avail = listTemplates(templatesRoot).join(", ") || "(none)";
+    if (template === "skills-catalog") {
+      throw new Error(`Template "skills-catalog" is not present at the selected registry revision. Pass a pinned registry revision that contains it, or use --templates-dir. Available: ${avail}`);
+    }
     throw new Error(`Unknown template "${template}". Available: ${avail}`);
   }
 
+  assertNoSymlinks(srcDir);
   const manifest = readManifest(srcDir);
-  const replacements = computeReplacements({ repo, base, siteName, dir });
-  const destDir = resolve(dir || replacements.__PKG_NAME__);
+  const replacements = computeReplacements({
+    repo,
+    base,
+    siteName,
+    description,
+    author,
+    packageName,
+    marketplaceId,
+    defaultBranch,
+    dir: dir || stagingDir,
+  });
+  const destDir = stagingDir
+    ? null
+    : assertSafeDestination(dir || replacements.__PKG_NAME__);
 
-  if (existsSync(destDir) && readdirSync(destDir).length > 0 && !force) {
+  if (destDir && existsSync(destDir) && readdirSync(destDir).length > 0 && !force) {
     throw new Error(`Target ${destDir} is not empty. Use --force to write into it.`);
   }
-  mkdirSync(destDir, { recursive: true });
 
-  copyTemplate(srcDir, destDir);
-  rewriteTree(destDir, replacements);
-
-  return { dir: destDir, replacements, manifest };
-}
-
-// ---------------------------------------------------------------------------
-// CLI
-// ---------------------------------------------------------------------------
-
-function parseArgs(argv) {
-  const args = { _: [] };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === "--help" || a === "-h") args.help = true;
-    else if (a === "--list") args.list = true;
-    else if (a === "--force") args.force = true;
-    else if (a.startsWith("--")) args[a.slice(2)] = argv[++i];
-    else args._.push(a);
+  const stage = stagingDir ? resolve(stagingDir) : mkdtempSync(join(tmpdir(), "ghp-stage-"));
+  if (stagingDir && existsSync(stage)) {
+    throw new Error(`Staging directory ${stage} already exists. Choose a new path so no staged file can be overwritten.`);
   }
-  return args;
-}
-
-const HELP = `
-create-gh-pages-site — scaffold a GitHub Pages site from a template.
-
-Usage:
-  node scripts/new-site.mjs <template> --repo <owner/name> [options]
-
-Templates are fetched from the jongio/gh-pages-templates registry. Run --list to
-see them (or --templates-dir <path> to use a local copy offline).
-
-Options:
-  --repo <owner/name>      Target GitHub repo (drives base path + URLs)
-                           Defaults to the current repo's "origin" remote
-  --base </path/>          Override base path (e.g. "/my-repo/" or "/")
-  --dir <path>             Output directory (default: ./<repo-name>)
-  --site-name <title>      Human title (default: from repo name)
-  --registry <owner/repo>  Template registry repo (default: jongio/gh-pages-templates)
-  --templates-dir <path>   Local templates/ folder to use instead (offline; no fetch)
-  --force                  Write into a non-empty directory
-  --list                   List templates and exit
-  --help                   Show this help
-
-If neither --repo nor --base is given, the current repo is assumed (read from
-the "origin" remote), so a site is scaffolded for the repo you're in.
-
-Examples:
-  node scripts/new-site.mjs astro                               # current repo
-  node scripts/new-site.mjs astro --repo octocat/my-astro-site
-  node scripts/new-site.mjs react-vite --repo octocat/dashboard --site-name "Dashboard"
-  node scripts/new-site.mjs static-html --base / --dir ./site   # user site / local
-`;
-
-function main() {
-  const args = parseArgs(process.argv.slice(2));
-
-  if (args.help) {
-    console.log(HELP);
-    return;
-  }
-  if (args.list) {
-    let root;
-    try {
-      root = resolveTemplatesSource({ registry: args.registry, templatesDir: args["templates-dir"] });
-    } catch (err) {
-      console.error(`Error: ${err.message}`);
-      process.exit(1);
-    }
-    for (const name of listTemplates(root)) {
-      const m = readManifest(join(root, name));
-      console.log(`  ${name.padEnd(14)} ${m.tagline}`);
-    }
-    return;
+  if (stagingDir) {
+    mkdirSync(dirname(stage), { recursive: true });
+    mkdirSync(stage);
   }
 
-  const template = args._[0];
-  if (!template) {
-    console.error("Error: missing <template>.\n" + HELP);
-    process.exit(1);
-  }
-
-  // Assume the current repo when neither --repo nor --base is provided, so a
-  // site is scaffolded for the repo you're in.
-  let repo = args.repo;
-  if (!repo && !args.base) {
-    const detected = detectCurrentRepo();
-    if (detected) {
-      repo = detected;
-      console.log(`Using current repo from origin remote: ${repo}`);
-    }
-  }
-
+  let succeeded = false;
   try {
-    const { dir, replacements, manifest } = stampTemplate({
-      template,
-      dir: args.dir,
-      repo,
-      base: args.base,
-      siteName: args["site-name"],
-      registry: args.registry,
-      templatesDir: args["templates-dir"],
-      force: args.force,
-    });
+    copyTemplate(srcDir, stage);
+    const usesLegacyDefault = !templatesDir
+      && !registry
+      && (!registryRef || registryRef.toLowerCase() === DEFAULT_REGISTRY_REF);
+    if (usesLegacyDefault) normalizePinnedLegacyWorkflows(stage);
+    validateTemplateSentinels(stage, SENTINELS);
+    rewriteTree(stage, replacements);
+    validateStagedTree(stage);
+    if (stagingDir) {
+      succeeded = true;
+      return { dir: stage, replacements, manifest, staged: true };
+    }
 
-    console.log(`\n✓ Created ${manifest.title} site in ${dir}`);
-    console.log(`  base path: ${replacements.__BASE_PATH__}`);
-    console.log(`  site URL:  ${replacements.__SITE_URL__}\n`);
-    console.log("Next steps:");
-    let step = 1;
-    if (manifest.needsBuild) {
-      if (manifest.language === "Ruby") {
-        console.log(`  ${step++}. cd ${dir} && bundle install   # local preview only — CI builds it for you`);
-      } else {
-        console.log(`  ${step++}. cd ${dir} && npm install && npm run build`);
-      }
-    }
-    console.log(`  ${step++}. Commit and push to the repo's main branch.`);
-    console.log(`  ${step++}. Settings → Pages → Source → "GitHub Actions".`);
-    console.log(`  ${step++}. The deploy workflow publishes on push; the URL appears in the Actions run.`);
-    if (repo) {
-      console.log(`  ${step++}. Set the repo "Website" link to the Pages URL:`);
-      console.log(`       gh repo edit ${replacements.__REPO_SLUG__} --homepage ${replacements.__SITE_URL__}`);
-    }
-    console.log();
-  } catch (err) {
-    console.error(`Error: ${err.message}`);
-    process.exit(1);
+    publishStage(stage, destDir, force);
+    succeeded = true;
+    return { dir: destDir, replacements, manifest, staged: false };
+  } finally {
+    if (!stagingDir || !succeeded) rmSync(stage, { recursive: true, force: true });
   }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  main();
+  runNewSiteCli(process.argv.slice(2), {
+    DEFAULT_REGISTRY,
+    DEFAULT_REGISTRY_REF,
+    detectCurrentRepo,
+    listTemplates,
+    readManifest,
+    resolveTemplatesSource,
+    stampTemplate,
+  });
 }

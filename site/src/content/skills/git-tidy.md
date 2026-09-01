@@ -4,7 +4,7 @@ tagline: "Comprehensive git repo hygiene in one pass: branches, worktrees, stash
 useWhen: "When merged branches pile up, worktrees and stashes go stale, tags or remotes are dead, merge artifacts linger, the repo has grown large, or you want a confidence-rated cleanup audit before deleting anything."
 repoPath: skills/git-tidy
 thumb: images/thumb-git-tidy.png
-order: 7
+order: 10
 install:
   - label: Install for GitHub Copilot
     cmd: npx skills add jongio/skills --skill git-tidy -g --agent github-copilot

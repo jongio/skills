@@ -1,0 +1,8 @@
+node_modules/
+vally-results/
+dist/
+build/
+.DS_Store
+Thumbs.db
+*.log
+.skills-repo/*.tmp

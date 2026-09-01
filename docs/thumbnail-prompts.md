@@ -1,13 +1,15 @@
 # Skill thumbnail prompts
 
 How the `skills/<name>/thumbnail.png` images are generated, and the exact prompts
-used, so every skill's thumbnail follows the same path and house style.
+or deterministic recipes used, so every skill's thumbnail has reproducible
+provenance.
 
-## The path: Azure OpenAI `gpt-image-2`
+## Primary path: Azure OpenAI `gpt-image-2`
 
-All skill thumbnails are generated with the **`gpt-image-2`** deployment on Azure
-OpenAI (the same path used for the first batch of thumbnails in commit
+Most skill thumbnails are generated with the **`gpt-image-2`** deployment on
+Azure OpenAI (the same path used for the first batch of thumbnails in commit
 `e41439f`, "add GPT Image 2 generated thumbnails for all shipped skills").
+Entries marked as deterministic placeholders use the local PNG encoder instead.
 
 | Setting | Value |
 |---|---|
@@ -281,3 +283,25 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 > medium-weight outlines, subtle dashed guide lines, tiny sparkles, generous
 > white space, crisp professional finish. No words, no letters, no fake text,
 > no photorealism, no 3D render.
+
+## create-skill (f1eb662a7758)
+
+Prompt: "Create a square 1024x1024 thumbnail for the create-skill agent workflow. Pure white background, centered flat vector illustration, clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, generous white space, crisp professional finish. Use one large cream-white browser panel as the hero surface. On the left, show three loose lavender puzzle tiles and a small amber prompt card. A dotted left-to-right connector feeds them through a coral magic-wand tool into a complete emerald skill package on the right: a tidy folder containing a document, a small test flask, and a green completion badge. Add one restrained coral, lavender, emerald, and charcoal palette. Place a small black GitHub Octocat mark in the upper-right with a dotted tether to the finished package. Diagram treatment only. No words, no letters, no numerals, no fake text, no logos other than the small Octocat, no photorealism, no 3D render, no dark background, no gradients, no extra floating objects."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: f1eb662a7758b40b53f6ff17c8af7c02d6920217e541cd746b8d7af36e8291a1
+
+## create-skills-repo (8b9f53f50474)
+
+Prompt: "Create a square 1024x1024 thumbnail for the create-skills-repo agent workflow. Pure white background, centered flat vector illustration, clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, generous white space, crisp professional finish. Use one large navy-outlined repository window as the hero surface. On the left, show one complete skill package entering the window. A clear left-to-right assembly path branches into an organized marketplace repository on the right with a central folder tree, five small platform connector badges, a green CI check, and a blue-green browser catalog panel. Use a restrained cobalt blue, teal green, warm amber, and charcoal palette. Place a small black GitHub Octocat mark in the upper-right with a dotted tether to the repository. Diagram treatment only. No words, no letters, no numerals, no fake text, no logos other than the small Octocat, no photorealism, no 3D render, no dark background, no gradients, no clutter."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 8b9f53f5047451c6d08df7282ba6cc605aecf314711667cef918dd2966a3a094

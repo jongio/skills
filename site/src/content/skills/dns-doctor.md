@@ -4,7 +4,7 @@ tagline: "Audit DNS, web routing, TLS, mail authentication, and takeover exposur
 useWhen: "When a domain does not resolve, redirects incorrectly, has mail-authentication gaps, needs DNSSEC or CAA review, requires a full health audit, or needs an approved DNS fix."
 repoPath: skills/dns-doctor
 thumb: images/thumb-dns-doctor.png
-order: 5
+order: 7
 install:
   - label: Install for GitHub Copilot
     cmd: npx skills add jongio/skills --skill dns-doctor -g --agent github-copilot

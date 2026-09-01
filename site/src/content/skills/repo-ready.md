@@ -4,7 +4,7 @@ tagline: "Scaffold and maintain the standard community health files every GitHub
 useWhen: "When you're starting a new repo and need all the standard files, or when you want to audit an existing repo for missing community health files and GitHub settings."
 repoPath: skills/repo-ready
 thumb: images/thumb-repo-ready.png
-order: 3
+order: 5
 install:
   - label: Install for GitHub Copilot
     cmd: npx skills add jongio/skills --skill repo-ready -g --agent github-copilot

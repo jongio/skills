@@ -1,0 +1,8 @@
+{
+  "name": "skills-catalog",
+  "title": "Skills Catalog",
+  "tagline": "A browsable Astro catalog for portable agent skills",
+  "needsBuild": true,
+  "language": "JavaScript",
+  "order": 1
+}

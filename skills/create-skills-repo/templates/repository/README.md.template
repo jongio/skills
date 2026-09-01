@@ -1,0 +1,48 @@
+# __DISPLAY_NAME_TEXT__
+
+__DESCRIPTION_TEXT__
+
+## Skills
+
+| Skill | What it does |
+|---|---|
+__SKILL_TABLE__
+
+## Install
+
+List or install skills with the portable skills installer:
+
+```sh
+npx skills add __REPOSITORY_URL_TEXT__ --list
+npx skills add __REPOSITORY_URL_TEXT__ --all
+```
+
+Install the complete Agent Plugins package:
+
+```sh
+copilot plugin install __REPOSITORY_URL_TEXT__
+```
+
+## Supported agents
+
+The canonical content lives in `skills/`. The repository includes discovery
+manifests for GitHub Copilot, Codex, ChatGPT desktop, Claude Code, Cursor,
+Gemini CLI, and Agent Plugins compatible hosts.
+
+## Validation
+
+```sh
+npm ci --prefix .github/tools/vally --ignore-scripts
+npm test --prefix .github/tools/vally
+```
+
+__CATALOG_SECTION__
+
+## Adding a skill
+
+Use the bundled `create-skill` skill. Individual skill authoring does not
+belong to the repository lifecycle tool.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

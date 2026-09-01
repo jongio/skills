@@ -3,7 +3,7 @@
 Scaffold a working **GitHub Pages** website from a vetted template and wire it to
 deploy automatically — packaged as a GitHub Copilot skill.
 
-Pick a template (static, Astro, React + Vite, Eleventy, or Jekyll); the skill
+Pick a template (static, Astro, React + Vite, Eleventy, Jekyll, or skills catalog); the skill
 injects the correct **base path** for your repo, adds the current official GitHub
 Actions Pages workflow, drops it into your repo (the **current repo by default**, or
 a new one), and tells you how to turn Pages on.
@@ -51,10 +51,16 @@ differently (Astro `base`, Vite `base` + `404.html`, Eleventy `pathPrefix`, Jeky
 | `react-vite` | interactive SPAs / dashboards | `base` + `404.html` fallback | `vite build` |
 | `eleventy` | data/Markdown-driven sites | `pathPrefix` via env + `url` filter | `eleventy` |
 | `jekyll` | GitHub-native / existing Jekyll | `baseurl` in `_config.yml` | Jekyll |
+| `skills-catalog` | browsable catalogs for Copilot skills repositories | template base helper | registry-defined |
 
-All five deploy via the **GitHub Actions** Pages source using the current
-first-party actions (`configure-pages@v5` → `upload-pages-artifact@v3` →
-`deploy-pages@v4`; Astro/Jekyll use their official actions). No `gh-pages` branch.
+The built-in registry pin includes `skills-catalog`. Custom registries require a
+full `--registry-ref`, and local checkouts use `--templates-dir`.
+
+All templates deploy via the **GitHub Actions** Pages source. Every external action
+must be pinned to a full commit SHA, checkout must disable persisted credentials,
+and install steps must disable lifecycle scripts. No `gh-pages` branch is used.
+Workflow scanning accepts a conservative block-style YAML subset and rejects
+quoted keys, tags, anchors, aliases, merge keys, and unsupported flow mappings.
 
 Browse them in the live [gallery with previews](https://jongio.github.io/gh-pages-templates/),
 hosted from the [`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates) registry.
@@ -99,7 +105,13 @@ create or publish a GitHub Pages site.
 
 The generator stamps the same site the skill uses. Templates are fetched from the
 [`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates) registry
-(a shallow clone), so it needs git + network unless you pass `--templates-dir`:
+at an immutable commit, so it needs git + network unless you pass `--templates-dir`.
+The built-in registry uses a reviewed pinned commit. A custom registry requires
+`--registry-ref` with its full 40-character commit SHA:
+
+Free-form metadata is limited to context-safe text because the same sentinel can
+appear in HTML, JSON, YAML, and JavaScript. Markup, control characters, and
+context-breaking quotes are rejected instead of being copied into generated code.
 
 ```sh
 # Scaffold for the CURRENT repo (base path read from its origin remote):
@@ -117,9 +129,51 @@ node scripts/new-site.mjs static-html --base / --dir ./site
 # Offline, from a local registry checkout:
 node scripts/new-site.mjs astro --templates-dir ../gh-pages-templates/templates
 
+# A custom registry is always commit-pinned:
+node scripts/new-site.mjs skills-catalog --repo octocat/skills \
+  --author "Octo Cat" --marketplace-id octocat-skills --default-branch trunk \
+  --registry octocat/templates --registry-ref 0123456789abcdef0123456789abcdef01234567
+
 # List templates:
 node scripts/new-site.mjs --list
 ```
+
+## Safe staging for composition
+
+`create-skills-repo` and other generators should stage the site instead of writing
+into their target:
+
+```sh
+node scripts/new-site.mjs skills-catalog \
+  --repo octocat/skills \
+  --templates-dir ../gh-pages-templates/templates \
+  --staging-dir ./.site-staging \
+  --json
+```
+
+The staging contract is fail-closed:
+
+1. `--staging-dir` must name a path that does not exist.
+2. It cannot be combined with `--dir` or `--force`.
+3. The generator copies and substitutes the template only in that directory.
+4. It validates paths, symlinks, sentinels, and workflows before returning success.
+5. It never reads or writes the consumer's final target. The consumer owns conflict
+   detection and the final merge.
+6. `--json` returns `mode`, `directory`, `template`, registry identity, and
+   replacements so callers do not need to parse console prose.
+
+Normal generation uses the same staging and validation pipeline internally, then
+applies the validated tree to `--dir`. Existing `--force` behavior remains
+available only for this explicit apply mode.
+
+Earlier generator versions skipped symbolic links during rewriting. Current
+versions reject every symbolic link before staging because templates can come from
+an external registry.
+
+The pinned built-in snapshot already uses immutable action commits. Compatibility
+normalization remains restricted to that exact reviewed snapshot, rewrites only
+known legacy forms, and always runs the same validator afterward. Custom registries
+receive no migration and fail closed.
 
 Then push to `main` and set **Settings → Pages → Source → GitHub Actions**. The
 workflow publishes on every push; the live URL appears in the Actions run. Point
@@ -155,9 +209,10 @@ After any install, reload skills with `/skills reload` or a new session.
 
 Templates live **only** in the
 [`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates) registry
-— each a folder with a `template.json` manifest. The generator fetches them from
-there by default (override with `--registry owner/repo`, or scaffold offline with
-`--templates-dir <path>`). The browsable gallery + live previews are hosted from the
+with each template in a folder containing a `template.json` manifest. The generator
+fetches the built-in registry at a pinned commit. Override it with both
+`--registry owner/repo` and `--registry-ref <full-sha>`, or scaffold offline with
+`--templates-dir <path>`. The browsable gallery + live previews are hosted from the
 registry too. Adding or fixing a template is a PR to that repo — see its
 `CONTRIBUTING.md`. This skill owns the generator + the agent workflow, not the
 templates.
@@ -169,18 +224,20 @@ npm test
 # node test/generator.test.mjs && node test/digest.test.mjs
 ```
 
-No dependencies to install — the tests run on bare `node` (18+), fully offline. They
-exercise the generator's base-path math, repo detection, and template stamping
-against a local fixture (sentinels fully replaced, `template.json`/`node_modules`
-skipped, user-site collapse to `/`), plus the repo-digest classifier and the
-placeholder generator. Template + deploy-workflow validation lives in the registry.
+No dependencies are needed. The tests run on bare `node` (18+) and never use the
+network. They exercise base-path math, skills-catalog discovery, immutable local
+registry checkout, staging, traversal and symlink rejection, sentinel validation,
+workflow policy, repo digestion, and placeholder generation.
 
 ## Layout
 
 ```text
 SKILL.md                     The skill (authoring contract + workflow)
 scripts/
-  new-site.mjs               Generator — fetch a template, inject the base path
+  new-site.mjs               Generator: fetch, stage, validate, and apply a template
+  new-site-cli.mjs           Command-line parsing and machine-readable output
+  template-registry.mjs      Immutable registry checkout and verification
+  template-security.mjs      Path, symlink, sentinel, and workflow validation
   digest-repo.mjs            Analyze a repo → JSON signals + type classification
   make-placeholder.mjs       Generate placeholder images + an IMAGES.md checklist
   install-local.ps1          Install this skill into $COPILOT_HOME/skills

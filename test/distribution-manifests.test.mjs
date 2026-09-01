@@ -37,6 +37,7 @@ let cursorMarketplace;
 let geminiExtension;
 let readme;
 let lintWorkflow;
+let workflows;
 let skillNames;
 
 before(async () => {
@@ -50,7 +51,6 @@ before(async () => {
     cursorMarketplace,
     geminiExtension,
     readme,
-    lintWorkflow,
   ] = await Promise.all([
     parse("plugin.json"),
     parse("marketplace.json"),
@@ -61,8 +61,22 @@ before(async () => {
     parse(".cursor-plugin", "marketplace.json"),
     parse("gemini-extension.json"),
     read("README.md"),
-    read(".github", "workflows", "skill-lint.yml"),
   ]);
+
+  const workflowNames = (
+    await readdir(path.join(root, ".github", "workflows"))
+  )
+    .filter((name) => /\.ya?ml$/.test(name))
+    .sort();
+  workflows = Object.fromEntries(
+    await Promise.all(
+      workflowNames.map(async (name) => [
+        name,
+        await read(".github", "workflows", name),
+      ]),
+    ),
+  );
+  lintWorkflow = workflows["skill-lint.yml"];
 
   skillNames = (
     await readdir(path.join(root, "skills"), { withFileTypes: true })
@@ -111,6 +125,130 @@ const assertLocalSource = (value, label) => {
     false,
     `${label} must stay within the marketplace root`,
   );
+};
+
+const getStepBlocks = (workflow) => {
+  const lines = workflow.split(/\r?\n/);
+  const starts = lines
+    .map((line, index) => (
+      /^(\s*)-\s+(?:name|run|uses):/.test(line) ? index : -1
+    ))
+    .filter((index) => index >= 0);
+
+  return starts.map((start) => {
+    const indent = lines[start].match(/^(\s*)/)[1].length;
+    let end = start + 1;
+    while (end < lines.length) {
+      const line = lines[end];
+      const candidateIndent = line.match(/^(\s*)/)[1].length;
+      if (
+        line.trim() !== "" &&
+        (
+          candidateIndent < indent ||
+          (
+            candidateIndent === indent &&
+            (/^\s*-\s+/.test(line) || line.trimStart().startsWith("#"))
+          )
+        )
+      ) {
+        break;
+      }
+      end += 1;
+    }
+    return lines.slice(start, end);
+  });
+};
+
+const getActionSteps = (workflow) =>
+  getStepBlocks(workflow).flatMap((lines) => {
+    const uses = lines.find((line) => /^\s*(?:-\s+)?uses:/.test(line));
+    return uses ? [{ lines, uses }] : [];
+  });
+
+const getRunScripts = (workflow) =>
+  getStepBlocks(workflow).flatMap((lines) => {
+    const runIndex = lines.findIndex((line) =>
+      /^\s*(?:-\s+)?run:/.test(line),
+    );
+    if (runIndex < 0) {
+      return [];
+    }
+    const runLine = lines[runIndex];
+    const value = runLine.replace(/^\s*(?:-\s+)?run:\s*/, "");
+    if (!/^[|>](?:[+-][1-9]?|[1-9][+-]?)?$/.test(value)) {
+      return [value];
+    }
+    const indent = runLine.match(/^(\s*)/)[1].length + 2;
+    return [
+      lines
+        .slice(runIndex + 1)
+        .map((line) => line.slice(indent))
+        .join("\n")
+        .trimEnd(),
+    ];
+  });
+
+const getWorkflowPermissions = (workflow) => {
+  const lines = workflow.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === "permissions:");
+  assert.notEqual(start, -1, "workflow must declare root permissions");
+  const entries = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^\S/.test(line)) {
+      break;
+    }
+    const match = line.match(/^  ([a-z-]+):\s*(\S+)\s*(?:#.*)?$/);
+    if (match) {
+      entries.push([match[1], match[2]]);
+    }
+  }
+  return entries;
+};
+
+const getJobBlocks = (workflow) => {
+  const lines = workflow.split(/\r?\n/);
+  const jobsIndex = lines.findIndex((line) => line === "jobs:");
+  assert.notEqual(jobsIndex, -1, "workflow must declare jobs");
+  const starts = lines
+    .map((line, index) => {
+      const isJob = /^  ["']?[a-zA-Z0-9_-]+["']?:\s*$/.test(line);
+      return index > jobsIndex && isJob ? index : -1;
+    })
+    .filter((index) => index >= 0);
+  return Object.fromEntries(starts.map((start, position) => {
+    const name = lines[start].match(
+      /^  ["']?([a-zA-Z0-9_-]+)["']?:\s*$/,
+    )[1];
+    const end = starts[position + 1] ?? lines.length;
+    return [name, lines.slice(start, end).join("\n")];
+  }));
+};
+
+const hasWorkflowTrigger = (workflow, trigger) => {
+  const escaped = trigger.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const lines = workflow
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  const triggerToken = `["']?${escaped}["']?`;
+  return (
+    new RegExp(`(?:^|[\\s{,])${triggerToken}\\s*:`, "m").test(lines) ||
+    new RegExp(`^on\\s*:\\s*${triggerToken}(?:\\s|$)`, "m").test(lines) ||
+    new RegExp(`^on\\s*:\\s*\\[[^\\]]*${triggerToken}`, "m").test(lines)
+  );
+};
+
+const getWritePermissions = (source) => {
+  const withoutComments = source
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .map((line) => line.replace(/\s+#.*$/, ""))
+    .join("\n");
+  return [
+    ...withoutComments.matchAll(
+      /(?:^|[\s{,])["']?([a-z-]+)["']?\s*:\s*["']?write["']?\b/gm,
+    ),
+  ].map((match) => match[1]).sort();
 };
 
 test("root package uses the portable Agent Plugins manifest", () => {
@@ -499,6 +637,7 @@ test("CI runs distribution parity for every manifest change", () => {
     "monitors/**",
     "bin/**",
     "com.github.copilot/**",
+    ".github/workflows/**",
   ]) {
     assert.ok(
       lintWorkflow.includes(`"${manifestPath}"`),
@@ -513,31 +652,6 @@ test("CI runs distribution parity for every manifest change", () => {
   );
   assert.match(
     lintWorkflow,
-    /actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/,
-    "skill-lint.yml must pin actions/checkout v7.0.1 by commit SHA",
-  );
-  assert.match(
-    lintWorkflow,
-    /persist-credentials: false/,
-    "skill-lint.yml must not persist checkout credentials",
-  );
-  assert.match(
-    lintWorkflow,
-    /npm ci --prefix site --ignore-scripts/,
-    "skill-lint.yml must suppress dependency lifecycle scripts",
-  );
-  assert.match(
-    lintWorkflow,
-    /npm ci --prefix \.github\/tools\/vally --ignore-scripts/,
-    "skill-lint.yml must install the locked Vally toolchain without scripts",
-  );
-  assert.doesNotMatch(
-    lintWorkflow,
-    /actions\/setup-node@v7/,
-    "skill-lint.yml must pin every setup-node action by commit SHA",
-  );
-  assert.match(
-    lintWorkflow,
     /CHANGED=.*git diff --name-only/,
     "skill-lint.yml must inspect all changed paths",
   );
@@ -547,4 +661,325 @@ test("CI runs distribution parity for every manifest change", () => {
     "skill-lint.yml must select nested YAML and YML skill files",
   );
   assert.match(lintWorkflow, /\| sort -u \|\| true\)/);
+});
+
+test("every workflow uses least privilege and bounded jobs", () => {
+  for (const [workflowName, workflow] of Object.entries(workflows)) {
+    assert.deepEqual(
+      getWorkflowPermissions(workflow),
+      [["contents", "read"]],
+      `${workflowName} must grant only contents read at workflow scope`,
+    );
+    assert.doesNotMatch(
+      workflow,
+      /^\s*permissions:\s*write-all\s*$/m,
+      `${workflowName} must not grant write-all`,
+    );
+    for (const [jobName, job] of Object.entries(getJobBlocks(workflow))) {
+      const timeout = job.match(/^\s{4}timeout-minutes:\s*([0-9]+)\s*$/m);
+      assert.ok(timeout, `${workflowName} job ${jobName} must have a timeout`);
+      assert.ok(
+        Number(timeout[1]) >= 1 && Number(timeout[1]) <= 360,
+        `${workflowName} job ${jobName} timeout must be between 1 and 360 minutes`,
+      );
+    }
+  }
+
+  const expectedWrites = {
+    "deploy.yml": { deploy: ["id-token", "pages"] },
+    "deploy-pages.yml": { deploy: ["id-token", "pages"] },
+    "skill-eval.yml": { eval: ["copilot-requests"] },
+    "skill-lint.yml": {},
+  };
+  for (const [workflowName, workflow] of Object.entries(workflows)) {
+    for (const [jobName, job] of Object.entries(getJobBlocks(workflow))) {
+      assert.deepEqual(
+        getWritePermissions(job),
+        expectedWrites[workflowName]?.[jobName] ?? [],
+        `${workflowName} job ${jobName} has unexpected write permissions`,
+      );
+    }
+  }
+});
+
+test("every action occurrence is pinned and every checkout drops credentials", () => {
+  for (const [workflowName, workflow] of Object.entries(workflows)) {
+    const actionSteps = getActionSteps(workflow);
+    const rawUses = workflow.match(/^\s*(?:-\s+)?uses:\s*\S+/gm) ?? [];
+    assert.equal(
+      actionSteps.length,
+      rawUses.length,
+      `${workflowName} must inspect every uses occurrence`,
+    );
+    for (const { lines, uses } of actionSteps) {
+      const match = uses.match(
+        /^\s*(?:-\s+)?uses:\s*([^@\s#]+)@([0-9a-f]{40})\s+#\s+(v[0-9]+\.[0-9]+\.[0-9]+)\s*$/,
+      );
+      assert.ok(
+        match,
+        `${workflowName} action must use a full commit SHA and version comment: ${uses.trim()}`,
+      );
+      if (match[1] === "actions/checkout") {
+        assert.match(
+          lines.join("\n"),
+          /^\s+persist-credentials:\s*false\s*$/m,
+          `${workflowName} checkout must disable persisted credentials`,
+        );
+      }
+    }
+  }
+});
+
+test("every npm clean install suppresses lifecycle scripts", () => {
+  let installs = 0;
+  for (const [workflowName, workflow] of Object.entries(workflows)) {
+    const rawInstalls = workflow.match(/^\s*(?!#).*\bnpm ci\b.*$/gm) ?? [];
+    let inspectedInstalls = 0;
+    for (const script of getRunScripts(workflow)) {
+      assert.doesNotMatch(
+        script,
+        /\bnpm (?:i|install)\b/,
+        `${workflowName} must use npm ci instead of npm install`,
+      );
+      for (const line of script.split("\n").filter((value) => /\bnpm ci\b/.test(value))) {
+        installs += 1;
+        inspectedInstalls += 1;
+        assert.match(
+          line,
+          /\bnpm ci\b.*\s--ignore-scripts(?:\s|$)/,
+          `${workflowName} must suppress scripts for every npm ci: ${line.trim()}`,
+        );
+      }
+    }
+    assert.equal(
+      inspectedInstalls,
+      rawInstalls.length,
+      `${workflowName} must inspect every npm ci occurrence`,
+    );
+  }
+  assert.ok(installs > 0, "workflow npm ci checks must inspect at least one command");
+});
+
+test("run blocks never interpolate GitHub expressions directly", () => {
+  for (const [workflowName, workflow] of Object.entries(workflows)) {
+    const scripts = getRunScripts(workflow);
+    const rawRuns = workflow.match(
+      /^\s*(?:-\s+)?run:\s*(?:[|>](?:[+-][1-9]?|[1-9][+-]?)?|.+)\s*$/gm,
+    ) ?? [];
+    assert.equal(
+      scripts.length,
+      rawRuns.length,
+      `${workflowName} must inspect every run occurrence`,
+    );
+    for (const script of scripts) {
+      assert.doesNotMatch(
+        script,
+        /\$\{\{/,
+        `${workflowName} must route GitHub expressions through step env`,
+      );
+    }
+  }
+});
+
+test("pull request workflows fail closed without elevated credentials", () => {
+  for (const [workflowName, workflow] of Object.entries(workflows)) {
+    assert.equal(
+      hasWorkflowTrigger(workflow, "pull_request_target"),
+      false,
+      `${workflowName} must not use pull_request_target`,
+    );
+    if (!hasWorkflowTrigger(workflow, "pull_request")) {
+      continue;
+    }
+    assert.doesNotMatch(
+      workflow,
+      /\$\{\{\s*secrets\./,
+      `${workflowName} must not expose secrets to pull request jobs`,
+    );
+    assert.doesNotMatch(
+      getWritePermissions(workflow).join("\n"),
+      /.+/,
+      `${workflowName} pull request jobs must not receive write permissions`,
+    );
+    assert.deepEqual(
+      getWorkflowPermissions(workflow),
+      [["contents", "read"]],
+      `${workflowName} pull request jobs must remain read-only`,
+    );
+  }
+});
+
+test("workflow inspection recognizes alternate secure YAML forms", () => {
+  const literal = [
+    "jobs:",
+    "  test:",
+    "    steps:",
+    "      - name: Literal",
+    "        run: |-",
+    "          echo ${{ github.ref }}",
+  ].join("\n");
+  assert.match(getRunScripts(literal)[0], /\$\{\{/);
+  assert.deepEqual(
+    getRunScripts([
+      literal,
+      "      # The next step is not part of the literal.",
+      "      - name: Next",
+      "        run: echo done",
+    ].join("\n")),
+    ["echo ${{ github.ref }}", "echo done"],
+  );
+  assert.match(
+    getRunScripts("jobs:\n  test:\n    steps:\n      - run: echo ${{ github.ref }}")[0],
+    /\$\{\{/,
+  );
+  assert.deepEqual(
+    Object.keys(getJobBlocks("jobs:\n  'quoted-job':\n    timeout-minutes: 1")),
+    ["quoted-job"],
+  );
+  assert.deepEqual(
+    getWritePermissions("permissions: { 'issues': 'write' }"),
+    ["issues"],
+  );
+
+  for (const trigger of [
+    "on: pull_request_target",
+    "on: [push, pull_request_target]",
+    "on: { pull_request_target: {} }",
+    "on:\n  'pull_request_target': {}",
+    "on:\n  pull_request_target : {}",
+  ]) {
+    assert.equal(hasWorkflowTrigger(trigger, "pull_request_target"), true);
+  }
+  assert.equal(
+    hasWorkflowTrigger("on:\n  pull_request: {}", "pull_request"),
+    true,
+  );
+});
+
+test("skill eval is trusted, discovered, bounded, and token scoped", () => {
+  const workflow = workflows["skill-eval.yml"];
+  assert.equal(
+    hasWorkflowTrigger(workflow, "pull_request"),
+    false,
+    "skill eval must remain disabled for pull requests",
+  );
+  assert.match(workflow, /^  workflow_dispatch:\s*$/m);
+  assert.match(workflow, /^  schedule:\s*$/m);
+  assert.match(workflow, /^\s+group:\s*skill-eval\s*$/m);
+  assert.match(workflow, /^\s+max-parallel:\s*2\s*$/m);
+  assert.doesNotMatch(
+    workflow,
+    /\{"skill":"skills\//,
+    "skill eval must not use a hardcoded matrix",
+  );
+  assert.match(
+    workflow,
+    /find skills -mindepth 4 -maxdepth 4 -type f/,
+    "skill eval must discover eval specifications",
+  );
+  assert.match(
+    workflow,
+    /\^\[a-z0-9\]\+\(-\[a-z0-9\]\+\)\*\$/,
+    "skill eval must allow only canonical skill ids",
+  );
+  assert.match(
+    workflow,
+    /\[ "\$spec" != "\$expected" \]/,
+    "skill eval must require the canonical eval path",
+  );
+  assert.match(
+    workflows["skill-lint.yml"],
+    /\^skills\/\[a-z0-9\]\+\(-\[a-z0-9\]\+\)\*\$/,
+    "skill lint must allow only canonical dynamic skill directories",
+  );
+  const versionSteps = getStepBlocks(workflow).filter((lines) =>
+    lines.some((line) => line.includes("- name: Report Vally version")),
+  );
+  assert.equal(versionSteps.length, 1, "skill eval must report its Vally version once");
+  assert.deepEqual(
+    getRunScripts(versionSteps[0].join("\n")),
+    ['"$VALLY_BIN" --version'],
+    "the Vally version step must invoke the configured executable",
+  );
+
+  const tokenSteps = getStepBlocks(workflow).filter((lines) =>
+    lines.some((line) => line.includes("secrets.GITHUB_TOKEN")),
+  );
+  assert.equal(tokenSteps.length, 1, "only one skill eval step may receive a token");
+  const [tokenStep] = tokenSteps;
+  const tokenStepSource = tokenStep.join("\n");
+  assert.match(tokenStepSource, /- name: Run eval/);
+  assert.equal(
+    tokenStep.filter((line) => line.includes("secrets.GITHUB_TOKEN")).length,
+    2,
+    "the eval step must map only the two SDK token variables",
+  );
+  const envIndex = tokenStep.findIndex((line) => /^\s+env:\s*$/.test(line));
+  assert.notEqual(envIndex, -1, "the eval step must declare an env map");
+  const envIndent = tokenStep[envIndex].match(/^(\s*)/)[1].length;
+  const envEntries = [];
+  for (const line of tokenStep.slice(envIndex + 1)) {
+    const indent = line.match(/^(\s*)/)[1].length;
+    if (line.trim() !== "" && indent <= envIndent) {
+      break;
+    }
+    const match = line.match(/^\s+([A-Z_]+):\s*(.+)\s*$/);
+    if (match) {
+      envEntries.push([match[1], match[2]]);
+    }
+  }
+  assert.deepEqual(envEntries, [
+    ["GITHUB_TOKEN", "${{ secrets.GITHUB_TOKEN }}"],
+    ["COPILOT_GITHUB_TOKEN", "${{ secrets.GITHUB_TOKEN }}"],
+    ["EVAL_SPEC", "${{ matrix.eval_spec }}"],
+    [
+      "VALLY_BIN",
+      "${{ github.workspace }}/.github/tools/vally/node_modules/.bin/vally",
+    ],
+  ]);
+  const [evalScript] = getRunScripts(tokenStep.join("\n"));
+  const commandLines = evalScript.trim().split("\n");
+  for (const line of commandLines.slice(0, -1)) {
+    assert.match(
+      line,
+      /\\\s*$/,
+      "each continued Vally command line must end with a backslash",
+    );
+  }
+  assert.doesNotMatch(commandLines.at(-1), /\\\s*$/);
+  const command = commandLines
+    .map((line) => line.replace(/\\\s*$/, "").trim())
+    .join(" ");
+  assert.equal(
+    command,
+    '"$VALLY_BIN" eval --eval-spec "$EVAL_SPEC" --skill-dir . --output-dir ./vally-results --runs 5 --workers 2 --max-retries 0',
+    "the token-bearing step must execute only the Vally eval command",
+  );
+});
+
+test("workflow artifacts are short-lived and exclude sensitive output", () => {
+  for (const [workflowName, workflow] of Object.entries(workflows)) {
+    for (const { lines, uses } of getActionSteps(workflow)) {
+      if (!/actions\/upload-(?:pages-)?artifact@/.test(uses)) {
+        continue;
+      }
+      const step = lines.join("\n");
+      const retention = step.match(/^\s+retention-days:\s*([0-9]+)\s*$/m);
+      assert.ok(retention, `${workflowName} artifact must set retention-days`);
+      assert.ok(
+        Number(retention[1]) <= 3,
+        `${workflowName} artifact retention must not exceed three days`,
+      );
+      assert.doesNotMatch(
+        step,
+        /events\.jsonl|vally-results|transcript|\.env\b|GITHUB_ENV/i,
+        `${workflowName} must not upload transcripts or environment-bearing files`,
+      );
+    }
+  }
+  assert.doesNotMatch(
+    workflows["skill-eval.yml"],
+    /actions\/upload-(?:pages-)?artifact@/,
+    "skill eval must not upload agent output",
+  );
 });

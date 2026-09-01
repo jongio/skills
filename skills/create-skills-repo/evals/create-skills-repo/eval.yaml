@@ -1,0 +1,54 @@
+name: create-skills-repo
+description: >-
+  Capability eval for creating and checking a portable skills repository while
+  preserving the GitHub approval boundary.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 10m
+  executor: copilot-sdk
+
+scoring:
+  weights:
+    file-exists: 0.4
+    file-contains: 0.4
+    prompt: 0.2
+  threshold: 0.8
+
+stimuli:
+  - name: create-without-catalog
+    prompt: >-
+      Use create-skills-repo to create a local repository at ./acme-skills for
+      owner acme. Name the repository acme-skills, disable the optional catalog,
+      and do not execute any git or GitHub operation. Inspect the returned plan
+      and explain why it remains pending approval.
+    rubric:
+      - The repository contains the required cross-agent manifests and example skill.
+      - The response identifies the GitHub plan as pending explicit approval.
+      - No git or GitHub write is executed.
+    graders:
+      - type: file-exists
+        name: config-created
+        config:
+          path: "acme-skills/skills-repo.config.json"
+      - type: file-exists
+        name: example-created
+        config:
+          path: "acme-skills/skills/example-skill/SKILL.md"
+      - type: file-contains
+        name: approval-required
+        config:
+          path: "acme-skills/.skills-repo/state.json"
+          value: "\"schemaVersion\": 1"
+      - type: file-contains
+        name: copilot-manifest
+        config:
+          path: "acme-skills/marketplace.json"
+          value: "\"example-skill\""
+      - type: prompt
+        name: approval-boundary
+        config:
+          prompt: >-
+            Did the response state that the GitHub operations remain pending
+            explicit approval, without claiming to run git or gh?

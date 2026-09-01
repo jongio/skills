@@ -1,0 +1,5 @@
+{
+  "name": __PACKAGE_NAME_JSON__,
+  "version": __PACKAGE_VERSION_JSON__,
+  "description": __DESCRIPTION_JSON__
+}

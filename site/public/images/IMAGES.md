@@ -14,18 +14,20 @@ Keep the filename (or update the reference) and aim for the listed size.
 | `hero.svg` | _(spare)_ | Optional hero banner if you add one. | 1280×640 |
 | `item-thumb.svg` | _(spare)_ | Superseded by generated `thumb-<skill>.png` art. | 640×400 |
 
-## Skill thumbnails (all real)
+## Skill thumbnails
 
 Every skill's card and detail page uses `thumb-<skill>.png`, set by the `thumb:`
-frontmatter field in `site/src/content/skills/<skill>.md`. Each one is generated
-with `gpt-image-2` from the matching prompt in
-[`docs/thumbnail-prompts.md`](../../../docs/thumbnail-prompts.md) and is a byte-identical
-copy of `skills/<skill>/thumbnail.png`.
+frontmatter field in `site/src/content/skills/<skill>.md`. Provider and prompt
+provenance is recorded in
+[`docs/thumbnail-prompts.md`](../../../docs/thumbnail-prompts.md). Each file is a
+byte-identical copy of `skills/<skill>/thumbnail.png`.
 
 | File | Used by | Notes |
 | --- | --- | --- |
 | `thumb-create-canvas-app.png` | `create-canvas-app` card/detail | Canvas extension panel beside the Copilot composer. |
 | `thumb-create-gh-pages-site.png` | `create-gh-pages-site` card/detail | Astro site scaffold deploying to GitHub Pages. |
+| `thumb-create-skill.png` | `create-skill` card/detail | Azure OpenAI generated thumbnail for complete skill authoring and registration. |
+| `thumb-create-skills-repo.png` | `create-skills-repo` card/detail | Azure OpenAI generated thumbnail for cross-agent repository setup. |
 | `thumb-deps-doctor.png` | `deps-doctor` card/detail | Dependency graph on a slate console, amber packages upgrading left to right into green ones, inspected by a stethoscope lens. Byte parity with the skill copy is asserted by a test. |
 | `thumb-dns-doctor.png` | `dns-doctor` card/detail | DNS diagnostic workstation, record cards, and stethoscope. |
 | `thumb-git-tidy.png` | `git-tidy` card/detail | Git branch tree being tidied, merged branches swept up while protected branches are kept. Byte parity with the skill copy is asserted by a test. |
