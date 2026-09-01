@@ -5,7 +5,22 @@ export const PNG_WIDTH = 1024;
 export const PNG_HEIGHT = 1024;
 export const MAX_PNG_BYTES = 12 * 1024 * 1024;
 
-const ALLOWED_CHUNKS = new Set(["IHDR", "PLTE", "IDAT", "IEND"]);
+const ALLOWED_CHUNKS = new Set([
+  "IHDR",
+  "sBIT",
+  "PLTE",
+  "pHYs",
+  "caBX",
+  "IDAT",
+  "IEND",
+]);
+const SIGNIFICANT_BITS_LENGTH = new Map([
+  [0, 1],
+  [2, 3],
+  [3, 3],
+  [4, 2],
+  [6, 4],
+]);
 const COLOR_FORMATS = new Map([
   [0, { channels: 1, depths: new Set([1, 2, 4, 8, 16]) }],
   [2, { channels: 3, depths: new Set([8, 16]) }],
@@ -65,7 +80,10 @@ export function validatePng(input, options = {}) {
   let ihdr = null;
   let sawIdat = false;
   let endedIdat = false;
+  let sawSbit = false;
   let sawPlte = false;
+  let sawPhys = false;
+  let sawCaBx = false;
   let sawIend = false;
 
   while (offset < bytes.length) {
@@ -112,6 +130,18 @@ export function validatePng(input, options = {}) {
       }
     } else if (ihdr === null) {
       throw new Error("IHDR must be the first PNG chunk");
+    } else if (type === "sBIT") {
+      if (sawSbit || sawPlte || sawIdat) {
+        throw new Error("sBIT must appear at most once before PLTE and IDAT");
+      }
+      if (length !== SIGNIFICANT_BITS_LENGTH.get(ihdr.colorType)) {
+        throw new Error("sBIT has an invalid length for the PNG color type");
+      }
+      const maximum = ihdr.colorType === 3 ? 8 : ihdr.bitDepth;
+      if ([...data].some((value) => value === 0 || value > maximum)) {
+        throw new Error("sBIT values must be nonzero and within the source sample depth");
+      }
+      sawSbit = true;
     } else if (type === "PLTE") {
       if (sawPlte || sawIdat) throw new Error("PLTE must appear once before IDAT");
       if (ihdr.colorType === 0 || ihdr.colorType === 4) {
@@ -129,6 +159,16 @@ export function validatePng(input, options = {}) {
       if (ihdr.colorType === 3 && !sawPlte) throw new Error("Indexed PNG requires PLTE before IDAT");
       sawIdat = true;
       idat.push(data);
+    } else if (type === "caBX") {
+      if (sawIdat || sawCaBx || length === 0) {
+        throw new Error("caBX must appear once before IDAT with non-empty content");
+      }
+      sawCaBx = true;
+    } else if (type === "pHYs") {
+      if (sawIdat || sawPhys) throw new Error("pHYs must appear at most once before IDAT");
+      if (length !== 9) throw new Error("pHYs must contain 9 bytes");
+      if (data[8] > 1) throw new Error("pHYs has an invalid unit specifier");
+      sawPhys = true;
     } else if (type === "IEND") {
       if (length !== 0) throw new Error("IEND must be empty");
       if (!sawIdat) throw new Error("PNG requires at least one IDAT chunk");
