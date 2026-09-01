@@ -34,7 +34,9 @@ The validator enforces:
 - Standard compression and filtering with no interlace.
 - A bounded zlib stream with the exact raster length and valid row filters.
 - No trailing bytes.
-- No ancillary or metadata chunks.
+- No ancillary or metadata chunks except one non-empty C2PA Content Credentials
+  `caBX` chunk, one optional valid `pHYs` chunk, and one optional valid `sBIT`
+  chunk before image data.
 
 Any failure rejects the entire result before either thumbnail path changes. There is no image
 repair, conversion, retry, or provider fallback.

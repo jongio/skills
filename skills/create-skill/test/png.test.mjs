@@ -77,6 +77,152 @@ test("validator rejects malformed structure and forbidden chunks", () => {
   assert.throws(() => validatePng(valid, { width: 1, height: 1 }), /1x1/);
 });
 
+test("validator accepts bounded provider provenance and image property chunks", () => {
+  const valid = encodeDeterministicPlaceholderPng();
+  const credentials = makeChunk("caBX", Buffer.from("c2pa"));
+  const physicalDimensions = makeChunk(
+    "pHYs",
+    Buffer.from([0, 0, 14, 196, 0, 0, 14, 196, 1]),
+  );
+  const significantBits = makeChunk("sBIT", Buffer.from([8, 8, 8, 8]));
+  const withProviderChunks = Buffer.concat([
+    valid.subarray(0, 33),
+    significantBits,
+    credentials,
+    physicalDimensions,
+    valid.subarray(33),
+  ]);
+
+  assert.deepEqual(
+    validatePng(withProviderChunks).chunks.map(({ type }) => type),
+    ["IHDR", "sBIT", "caBX", "pHYs", "IDAT", "IEND"],
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, 33),
+          credentials,
+          credentials,
+          valid.subarray(33),
+        ]),
+      ),
+    /caBX must appear once/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, valid.length - 12),
+          credentials,
+          valid.subarray(valid.length - 12),
+        ]),
+      ),
+    /caBX must appear once before IDAT/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, 33),
+          makeChunk("caBX", Buffer.alloc(0)),
+          valid.subarray(33),
+        ]),
+      ),
+    /non-empty content/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, 33),
+          physicalDimensions,
+          physicalDimensions,
+          valid.subarray(33),
+        ]),
+      ),
+    /pHYs must appear at most once before IDAT/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, 33),
+          makeChunk("pHYs", Buffer.alloc(8)),
+          valid.subarray(33),
+        ]),
+      ),
+    /pHYs must contain 9 bytes/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, 33),
+          makeChunk("pHYs", Buffer.from([0, 0, 14, 196, 0, 0, 14, 196, 2])),
+          valid.subarray(33),
+        ]),
+      ),
+    /pHYs has an invalid unit specifier/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, valid.length - 12),
+          physicalDimensions,
+          valid.subarray(valid.length - 12),
+        ]),
+      ),
+    /pHYs must appear at most once before IDAT/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, 33),
+          significantBits,
+          significantBits,
+          valid.subarray(33),
+        ]),
+      ),
+    /sBIT must appear at most once before PLTE and IDAT/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, 33),
+          makeChunk("sBIT", Buffer.from([8, 8, 8])),
+          valid.subarray(33),
+        ]),
+      ),
+    /sBIT has an invalid length/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, 33),
+          makeChunk("sBIT", Buffer.from([8, 8, 8, 0])),
+          valid.subarray(33),
+        ]),
+      ),
+    /sBIT values must be nonzero/,
+  );
+  assert.throws(
+    () =>
+      validatePng(
+        Buffer.concat([
+          valid.subarray(0, valid.length - 12),
+          significantBits,
+          valid.subarray(valid.length - 12),
+        ]),
+      ),
+    /sBIT must appear at most once before PLTE and IDAT/,
+  );
+});
+
 test("validator rejects truncated chunks and invalid raster data", () => {
   const valid = encodeDeterministicPlaceholderPng();
   assert.throws(() => validatePng(valid.subarray(0, 15)), /chunk header/);
