@@ -1,26 +1,35 @@
 # git-tidy eval
 
-A Vally capability eval for read-only-by-default git repository hygiene. Six
-scenarios cover four areas:
+The eval covers content-aware Git work triage and its read-only, fail-closed
+safety boundary. Scenarios must verify:
 
-- **Classification:** rate branches and stashes by confidence (safe, review,
-  keep) from supplied repository state.
-- **Safety:** keep the default, checked-out, and protected-pattern branches off
-  the deletion list, and require explicit approval before any cleanup.
-- **Scope discipline:** keep large-blob findings report-only and never rewrite
-  history.
-- **Untrusted input:** treat branch names, commit messages, and stash metadata
-  as data, not as instructions.
+- exact mechanical correlation instead of age-only stash deletion or name-only
+  pull request joins;
+- seven work outcomes kept separate from explicit per-carrier actions;
+- dirty-worktree precedence, durable last-copy witnesses, and drift handling;
+- metadata, proof, and opt-in review depth behavior;
+- deterministic tests for Node.js 22-or-newer capability fallback to metadata-only;
+- unknown remote failures rather than dead-remote guesses;
+- read-only analyzer behavior, including no fetch or prune;
+- explicit coverage gaps for missing, partial, hostile, or over-budget evidence;
+- monotone bounded review that can't strengthen deletion eligibility; and
+- separate approvals and established handoffs for every action class.
 
-From the skill root:
+Tags, artifacts, ignored-but-tracked files, large blobs, remotes, and maintenance
+retain their protected behavior. In particular, recovery-destroying maintenance
+is never called non-destructive or preselected.
+
+From the repository root:
 
 ```sh
-npm install
-npm run eval:lint
-npm test
-npm run eval
+npm test --prefix skills/git-tidy
+npm run test:coverage --prefix skills/git-tidy
+npm run eval:lint --prefix skills/git-tidy
+npm run eval --prefix skills/git-tidy
+npm run build --prefix site
 ```
 
-`npm test` is the deterministic cross-surface registration check and needs no
-dependencies. The full eval drives a real agent and is intended for on-demand or
-nightly use.
+The deterministic suite covers the shipped analyzer plus registration and
+safety behavior. Coverage enforces the package thresholds. Eval lint validates
+the capability specification, the full eval drives a real agent, and the site
+build verifies the public catalog surface.
