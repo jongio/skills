@@ -76,8 +76,11 @@ stimuli:
 
   - name: no-provider-fallback
     prompt: >-
-      Azure OpenAI returned HTTP 429 while create-skill was generating art. Explain the next
-      action. Do not make another request, switch providers, or write the response as an image.
+      Invoke create-skill and apply its built-in image-provider failure contract to this exact
+      case: Azure OpenAI returned HTTP 429 while generating art. Explain the one-attempt rule,
+      what happens to the failed action's approval hash, and the exact preview and approval
+      boundary required before any different next action. Do not make another request, switch
+      providers, or write the response as an image.
     tags:
       scenario: provider-failure
       cost: low

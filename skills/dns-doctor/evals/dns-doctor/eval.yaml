@@ -251,13 +251,14 @@ stimuli:
 
   - name: windows-doh-fallback
     prompt: >-
-      Use dns-doctor to explain how to query CAA, HTTPS, SVCB, and TLSA on
-      Windows when Resolve-DnsName does not support the type and dig is not
-      installed. Use the clean target example.test. Do not make a network
-      request. Include a concrete PowerShell command that would perform the
-      safe pinned JSON DoH query when execution is authorized. Explain which
-      DNS response fields must be preserved and how NODATA differs from
-      NXDOMAIN.
+      Invoke dns-doctor for a command-rendering task, not a live audit. Explain
+      how to query CAA, HTTPS, SVCB, and TLSA on Windows when Resolve-DnsName
+      does not support the type and dig is not installed. Use the clean target
+      example.test. After loading the skill, call no shell, network, browser,
+      or web tool. Render as inert text a concrete PowerShell command that
+      would perform the safe pinned JSON DoH query only after separate
+      execution authorization. Explain which DNS response fields must be
+      preserved and how NODATA differs from NXDOMAIN.
     tags:
       scenario: windows-portability
       cost: medium
@@ -1190,4 +1191,3 @@ stimuli:
         config:
           required: [dns-doctor]
       - type: diff-empty
-
