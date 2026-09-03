@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import {
   lstat,
   mkdir,
@@ -113,6 +114,7 @@ export async function createRepoFixture(label) {
   const root = path.join(processFixtureRoot, label);
   await rm(root, { recursive: true, force: true });
   await mkdir(root, { recursive: true });
+  const canonicalRoot = realpathSync.native(root);
 
   const init = run(gitPath, [
     'init', '--quiet', '--initial-branch=main', '--object-format=sha1', root,
@@ -161,7 +163,7 @@ export async function createRepoFixture(label) {
       const topLevel = run(gitPath, ['rev-parse', '--show-toplevel'], {
         cwd: root,
       }).stdout.toString('utf8').trim();
-      if (path.resolve(topLevel) !== path.resolve(root)) {
+      if (realpathSync.native(topLevel) !== canonicalRoot) {
         throw new Error('fixture repository identity changed before commit');
       }
       run(gitPath, ['add', '--all'], { cwd: root });

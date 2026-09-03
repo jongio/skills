@@ -24,7 +24,6 @@ const [
   deployWorkflow,
   evalWorkflow,
   lintWorkflow,
-  ciToolPackage,
   packageJson,
   lockfile,
   images,
@@ -45,7 +44,6 @@ const [
   read(".github", "workflows", "deploy.yml"),
   read(".github", "workflows", "skill-eval.yml"),
   read(".github", "workflows", "skill-lint.yml"),
-  parse(".github", "tools", "vally", "package.json"),
   parse("skills", skillId, "package.json"),
   parse("skills", skillId, "package-lock.json"),
   read("site", "public", "images", "IMAGES.md"),
@@ -184,7 +182,6 @@ test("package scripts, runtime, lockfile, and Vally pin stay aligned", () => {
   assert.equal(lockfile.packages[""].engines.node, packageJson.engines.node);
   assert.equal(lockfile.packages[""].devDependencies[vallyPkg], vallyPin);
   assert.equal(lockfile.packages[`node_modules/${vallyPkg}`].version, vallyPin);
-  assert.equal(ciToolPackage.devDependencies[vallyPkg], vallyPin);
 });
 
 test("workflow matrix and docs routing target git-tidy exactly", () => {
