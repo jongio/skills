@@ -1,0 +1,8 @@
+{
+  "name": "__PKG_NAME__",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node -e \"console.log('built')\""
+  }
+}

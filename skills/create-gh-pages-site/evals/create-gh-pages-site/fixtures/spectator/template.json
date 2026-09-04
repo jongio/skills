@@ -1,0 +1,7 @@
+{
+  "name": "spectator",
+  "title": "Spectator",
+  "tagline": "Specifications built for review.",
+  "needsBuild": true,
+  "order": 1
+}

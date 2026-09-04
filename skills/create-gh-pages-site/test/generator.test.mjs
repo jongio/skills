@@ -24,6 +24,7 @@ import {
   assertNoSymlinks,
   assertSafeDestination,
   normalizePinnedLegacyWorkflows,
+  DEFAULT_REGISTRY_REF,
   validateWorkflowFile,
   validateStagedTree,
   registryCloneUrl,
@@ -254,6 +255,13 @@ test("registry revisions must be full immutable commit SHAs", () => {
   assert.throws(() => assertFullCommitSha("abc123"), /40-character commit SHA/);
 });
 
+test("default registry pin includes the reviewed Spectator release", () => {
+  assert.equal(
+    DEFAULT_REGISTRY_REF,
+    "101139f9c8bb872b13ad84e18d90435e7a15f107",
+  );
+});
+
 test("resolveInside rejects template path traversal", () => {
   const root = join(tmpdir(), "registry", "templates");
   assert.equal(resolveInside(root, "skills-catalog"), join(root, "skills-catalog"));
@@ -320,6 +328,7 @@ function mkTemplate(root, name, manifestExtra = {}) {
   writeFileSync(join(d, "_config.yml"), `baseurl: "__BASE_URL__"`);
   writeFileSync(join(d, ".github", "workflows", "deploy.yml"), safeWorkflow());
   writeFileSync(join(d, "node_modules", "junk.js"), "__SITE_NAME__ should never be copied");
+  writeFileSync(join(d, "spec.md"), "Registry development specification");
   return d;
 }
 
@@ -427,9 +436,10 @@ try {
     assert.match(html, /https:\/\/octocat\.github\.io\/demo-site\//);
   });
 
-  test("stamp: does not copy template.json or node_modules into the site", () => {
+  test("stamp: excludes registry-only and dependency files", () => {
     assert.ok(!existsSync(join(dir, "template.json")));
     assert.ok(!existsSync(join(dir, "node_modules")));
+    assert.ok(!existsSync(join(dir, "spec.md")));
   });
 
   test("stamp: ships the deploy workflow", () => {
