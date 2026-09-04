@@ -13,7 +13,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const LOCAL_TEMPLATES_DIR = resolve(SCRIPT_DIR, "..", "templates");
 
 export const DEFAULT_REGISTRY = "jongio/gh-pages-templates";
-export const DEFAULT_REGISTRY_REF = "974e0c30821bdecc77845fcb3bb862482bac952d";
+export const DEFAULT_REGISTRY_REF = "101139f9c8bb872b13ad84e18d90435e7a15f107";
 
 const registryClones = new Map();
 let exitHookInstalled = false;
