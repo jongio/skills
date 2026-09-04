@@ -2032,17 +2032,19 @@ test("comparison and collection budgets are behaviorally enforced", async () => 
     fixture.git(["update-ref", "refs/remotes/origin/topic", fixture.oid()]);
     const hangingReader = async (args, { signal }) =>
       new Promise((resolve, reject) => {
-        signal.addEventListener("abort", () => {
+        const cancel = () => {
           const error = new Error("cancelled");
           error.code = "CANCELLED";
           reject(error);
-        }, { once: true });
+        };
+        if (signal.aborted) cancel();
+        else signal.addEventListener("abort", cancel, { once: true });
       });
     await assert.rejects(
       collectEvidence(fixture.root, {
         scope: "remote",
         githubReader: hangingReader,
-        limits: { collectionTimeoutMs: 25 },
+        limits: { collectionTimeoutMs: 0 },
       }),
       (error) => error.code === "COLLECTION_TIMEOUT",
     );
