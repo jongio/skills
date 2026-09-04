@@ -2,16 +2,20 @@
   "name": "git-tidy",
   "version": "1.0.0",
   "private": true,
-  "description": "Dev tooling for the git-tidy skill (registration test + Vally eval). The shipped skill carries no package.json; this is for the skill repo only.",
+  "description": "Deterministic analyzer, tests, and Vally eval tooling for content-aware Git work triage.",
   "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "test": "node test/registration.test.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=80 --test-coverage-functions=80 --test-coverage-branches=80 test/*.test.mjs",
     "eval:lint": "vally lint --eval-spec evals/git-tidy/eval.yaml --strict",
     "eval": "vally eval --eval-spec evals/git-tidy/eval.yaml --skill-dir ."
   },
   "devDependencies": {
-    "@microsoft/vally-cli": "0.14.0"
+    "@microsoft/vally-cli": "0.15.0"
   },
   "allowScripts": {
     "@vscode/deviceid": false,

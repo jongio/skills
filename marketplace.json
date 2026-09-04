@@ -71,7 +71,7 @@
     {
       "name": "git-tidy",
       "source": "./skills/git-tidy",
-      "description": "Comprehensive git repository hygiene in one pass across local and remote branches, worktrees, stashes, tags, remotes, merge and rebase artifacts, ignored-but-tracked files, large history blobs, and maintenance health. Classifies every finding by confidence (safe, review, keep), keeps protected branches and release tags off the deletion list, holds large-blob findings to report-only, and deletes nothing without explicit user approval.",
+      "description": "Content-aware Git work triage across local and remote branches, worktrees, stashes, remote refs, tags, remotes, merge and rebase artifacts, ignored-but-tracked files, large history blobs, and maintenance. Leads with plain decisions and concrete actions while exact proof stays available on demand; analysis and revalidation are read-only, coverage gaps fail closed, and every action requires separate explicit approval or an established handoff.",
       "version": "1.0.0"
     }
   ]

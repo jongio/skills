@@ -18,6 +18,7 @@ on:
       # cross-link or a deleted reference reaches main unchecked.
       - "skills/**/references/**"
       - "skills/**/scripts/**"
+      - "docs/specs/git-tidy/**"
       - "site/src/content/skills/**"
       - "site/public/images/**"
       - "site/package.json"
@@ -98,9 +99,18 @@ jobs:
             # but is missing here selects no skill, so the job runs and lints
             # nothing while still reporting success.
             CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
-            DIRS=$(printf '%s\n' "$CHANGED" \
-              | grep -E '^skills/[^/]+/(SKILL\.md|package\.json|.*\.ya?ml|evals/|test/|references/|scripts/)' \
-              | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u || true)
+            if printf '%s\n' "$CHANGED" \
+              | grep -Eq '^(README\.md|marketplace\.json|plugin\.json)$'; then
+              DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
+            else
+              DIRS=$(printf '%s\n' "$CHANGED" \
+                | grep -E '^skills/[^/]+/(SKILL\.md|package\.json|.*\.ya?ml|evals/|test/|references/|scripts/)' \
+                | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u || true)
+              if printf '%s\n' "$CHANGED" | grep -Eq '^docs/specs/git-tidy/'; then
+                DIRS=$(printf '%s\n%s\n' "$DIRS" "skills/git-tidy" \
+                  | sed '/^$/d' | sort -u)
+              fi
+            fi
           else
             # Push to main or manual dispatch: lint all skills
             DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
@@ -160,7 +170,9 @@ jobs:
         run: |
           while IFS= read -r dir; do
             if [ -f "$dir/package.json" ] && npm pkg get scripts.test --prefix "$dir" | grep -qv '{}'; then
-              npm ci --prefix "$dir" --ignore-scripts
+              if [ "$(npm pkg get dependencies --prefix "$dir")" != '{}' ]; then
+                npm ci --prefix "$dir" --omit=dev --ignore-scripts --no-audit --no-fund
+              fi
               npm test --prefix "$dir"
             fi
           done <<< "$SKILL_DIRS"
@@ -201,4 +213,27 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Run tests and enforce coverage
         working-directory: skills/dns-doctor
+        run: npm run test:coverage
+
+  git-tidy-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: skills/git-tidy/package-lock.json
+      - name: Install dependencies
+        working-directory: skills/git-tidy
+        run: npm ci --ignore-scripts
+      - name: Run tests and enforce coverage
+        working-directory: skills/git-tidy
         run: npm run test:coverage
