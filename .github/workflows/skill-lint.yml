@@ -60,7 +60,7 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -170,7 +170,9 @@ jobs:
         run: |
           while IFS= read -r dir; do
             if [ -f "$dir/package.json" ] && npm pkg get scripts.test --prefix "$dir" | grep -qv '{}'; then
-              npm ci --prefix "$dir" --ignore-scripts
+              if [ "$(npm pkg get dependencies --prefix "$dir")" != '{}' ]; then
+                npm ci --prefix "$dir" --omit=dev --ignore-scripts --no-audit --no-fund
+              fi
               npm test --prefix "$dir"
             fi
           done <<< "$SKILL_DIRS"
