@@ -258,7 +258,7 @@ test("registry revisions must be full immutable commit SHAs", () => {
 test("default registry pin includes the reviewed Spectator release", () => {
   assert.equal(
     DEFAULT_REGISTRY_REF,
-    "9fa4690e2724da271129f4fff308cc5c5a00a2f5",
+    "974e0c30821bdecc77845fcb3bb862482bac952d",
   );
 });
 
