@@ -384,35 +384,13 @@ dimensions. Then:
 - **Leave `IMAGES.md` in the images dir** as the hand-off, and tell the user it's
   there. A placeholder still deploys fine; it just visibly says "replace me".
 
-### Ask the user for the real images
+### Ask for real images
 
-Placeholders unblock the deploy, but a finished site needs real art. After you've
-authored the pages and know exactly which images the site references, **prompt the
-user for them** with a short, specific checklist — don't make them guess. For each
-image give the role, the filename it should land at, and the recommended size, e.g.:
-
-> This site needs a few images. You can **paste a screenshot straight into the chat**
-> and I'll drop it in, or point me at a file/URL:
-> 1. **Social card** → `og.png`, 1200×630 (used for link previews)
-> 2. **Hero** → `hero.png`, 1280×640
-> 3. **Skill thumbnail** → `thumb-create-gh-pages-site.png`, 640×400
->
-> Send any you have; I'll keep placeholders for the rest.
-
-Then, as the user supplies them:
-
-- **Accept pasted screenshots.** Images pasted into the conversation are available
-  to you directly — save each to the right path (matching the reference or
-  `IMAGES.md`), no upload step needed. A local file path or URL works too.
-- **Don't block on it.** Anything the user doesn't provide keeps its placeholder;
-  the site still builds and deploys. Update `IMAGES.md` to tick off what's now real.
-- **Only ask for what the site actually uses.** Don't request a logo or a hero the
-  page never references (drop unused placeholders instead of asking for art for them).
-
-### Helper scripts (alongside `new-site.mjs`)
-
-- `scripts/digest-repo.mjs` — analyze a repo → JSON signals + a type classification.
-- `scripts/make-placeholder.mjs` — generate placeholder images + an `IMAGES.md`.
+After authoring, ask only for images the site references. Give each role, filename,
+and recommended dimensions; accept pasted images, file paths, or URLs. Keep
+unprovided placeholders, update `IMAGES.md`, and do not block deployment.
+`digest-repo.mjs` discovers source material; `make-placeholder.mjs` creates the
+placeholder set and handoff manifest.
 
 ## Per-template notes
 
