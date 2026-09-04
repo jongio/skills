@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -368,9 +369,10 @@ function policyEvidence(carriers, relationships = []) {
 
 test("worktree branch identities preserve UTF-8 bytes", () => {
   const branch = "refs/heads/tópico";
+  const worktreePath = path.resolve(path.parse(process.cwd()).root, "repo");
   const [entry] = parseWorktrees(
     Buffer.from(
-      `worktree C:\\repo\0HEAD ${oid("a")}\0branch ${branch}\0\0`,
+      `worktree ${worktreePath}\0HEAD ${oid("a")}\0branch ${branch}\0\0`,
       "utf8",
     ),
     "sha1",

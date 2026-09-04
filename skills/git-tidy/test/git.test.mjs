@@ -7,6 +7,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -200,7 +201,7 @@ test('repository boundary discovery protects sibling paths from nested invocatio
       alias,
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    assert.equal(findUntrustedRepositoryRoot(alias), root);
+    assert.equal(findUntrustedRepositoryRoot(alias), await realpath(root));
     assert.throws(
       () => new GitBoundary(alias, { gitPath: executable }),
       (error) => error.code === 'UNTRUSTED_EXECUTABLE',
