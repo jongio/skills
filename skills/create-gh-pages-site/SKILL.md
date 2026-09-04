@@ -3,8 +3,9 @@ name: create-gh-pages-site
 description: >-
   Scaffold a working GitHub Pages website from a vetted template and wire it to
   deploy automatically. Use when the user wants to create, scaffold, or publish a
-  site on GitHub Pages: a static page, an Astro or Eleventy site, a React (Vite)
-  SPA, or a Jekyll site. Picks the right template, injects the correct base path
+  site on GitHub Pages: a reviewable VitePress specification, a static page, an
+  Astro or Eleventy site, a React (Vite) SPA, or a Jekyll site. Picks the right
+  template, injects the correct base path
   for the target repo (the #1 thing people get wrong), adds the official GitHub
   Actions Pages deploy workflow, and sets it up in the user's current repo by
   default or a new one if asked. Does not stop at demo content: it digests the
@@ -43,11 +44,14 @@ and default to `static-html` for the simplest ask.
 | `eleventy` | A data/Markdown-driven site (blog, docs) where content is files + structured data. | data SSG | `eleventy` |
 | `jekyll` | The user wants the GitHub-native path, or is migrating an existing Jekyll site. | native | Jekyll |
 | `skills-catalog` | A browsable catalog for a repository of Copilot skills, especially when composing `create-skills-repo`. | catalog | registry-defined |
+| `spectator` | A technical specification, RFC, architecture proposal, design proposal, engineering decision, or policy proposal built for structured review. | SSG | `vitepress build docs` |
 
-The built-in registry pin includes `skills-catalog`. A custom registry requires an
-explicit `--registry-ref`, and a local checkout uses `--templates-dir`.
+The built-in registry pin must include the selected template. A custom registry
+requires an explicit `--registry-ref`, and a local checkout uses
+`--templates-dir`.
 
-These six cover the static / SSG / SPA / data / native / catalog quadrants. For richer
+These seven cover the static / SSG / SPA / data / native / catalog / specification
+quadrants. For richer
 *themes*, point the user at upstream galleries (astro.build/themes,
 jamstackthemes.dev, github.com/topics/github-pages-template) and adapt — don't try
 to hand-build a theme from scratch.
@@ -70,6 +74,7 @@ repo name; you rarely set it by hand:
 | `react-vite` | `base` in `vite.config.js` + `basename` + `404.html` | `/repo/` | `/` |
 | `eleventy` | `pathPrefix` via `PATH_PREFIX` env + `url` filter | `/repo/` | `/` |
 | `jekyll` | `baseurl` in `_config.yml` + `relative_url` | `/repo` (no slash) | `""` (empty) |
+| `spectator` | `base` in `spectator.config.ts` and VitePress config | `/repo/` | `/` |
 
 **The generator detects the `<user>.github.io` user-site pattern and uses `/`
 automatically.** If the user hasn't named the repo yet, scaffold with the repo
@@ -109,6 +114,9 @@ only for what's missing, one focused question at a time, using the `ask_user` to
      path or are migrating an existing Jekyll site)
    - "an app / dashboard / interactive / single-page app" → `react-vite`
    - "a catalog of Copilot skills / create a skills repo" → `skills-catalog`
+   - "a specification / RFC / architecture or design proposal / engineering
+     decision / policy proposal / site like the Eval Authoring Guide" →
+     `spectator`
 
    If they're unsure, ask the single discriminating question — *content site or
    interactive app?* — and default to `static-html` for the simplest ask.
@@ -341,6 +349,13 @@ yourself too — the digest points you at them; it doesn't replace judgment.
   base-path-aware internal links the template already wires — never hand-write
   absolute `/...` links (use the template's base helper, or it breaks on a project
   site).
+- **Keep Spectator free-form.** Do not force a standard specification outline.
+  Derive pages, headings, and navigation from the supplied context. Preserve the
+  Spectator reading and feedback system, but remove every Project Northstar sample
+  page, label, requirement, source, and image reference.
+- **Label uncertainty in Spectator.** Distinguish verified current behavior,
+  user-approved decisions, proposals, assumptions, risks, and open questions.
+  Do not invent owners, dates, requirements, interfaces, or security claims.
 
 ### 4. Add image placeholders the user can supply
 
@@ -362,6 +377,7 @@ dimensions. Then:
   (e.g. a `docs/*.png`), use it instead of a placeholder.
 - **Put images where the template serves static files:**
   - `astro`, `react-vite` → `public/images/` (served at `${BASE_URL}images/…`)
+  - `spectator` → `docs/public/images/` (VitePress applies its configured base)
   - `static-html` → `assets/images/` (relative `./assets/images/…`)
   - `eleventy` → `src/assets/images/` (through the `url` filter)
   - `jekyll` → `assets/images/` (via `relative_url`)
@@ -414,6 +430,11 @@ Then, as the user supplies them:
 - **jekyll** — `baseurl` (no trailing slash) in `_config.yml`; links use
   `relative_url`. Built in CI by `jekyll-build-pages` (honors the `Gemfile`). Local
   dev needs Ruby + Bundler; CI does not.
+- **spectator**: VitePress reads `base` from `spectator.config.ts`. Content is
+  free-form Markdown under `docs/`; navigation is explicit in the shared config.
+  Preserve local search, page outlines, light/dark appearance, plain-language
+  callouts, page feedback, selected-text feedback, and GitHub edit links. Run
+  `npm test`, `npm run build`, and `npm run test:e2e`.
 
 ## Current repo vs. new repo
 
@@ -463,7 +484,7 @@ land in the registry, not here.
    phrases — "Hello", "islands", "lorem", the sample post titles — and for leftover
    `__…__` sentinels). The page kind matches the repo type (CLI ref / API ref /
    feature tour / catalog). Image placeholders exist and `IMAGES.md` is present.
-2. **Build it.** For `astro`/`react-vite`/`eleventy`, run
+2. **Build it.** For `astro`/`react-vite`/`eleventy`/`spectator`, run
    `npm ci --ignore-scripts --no-audit --no-fund` then `npm run build` and confirm
    both exit 0 and emit the output dir
    (`dist` / `_site`). For `jekyll`, `bundle exec jekyll build` if Ruby is present.
@@ -488,7 +509,9 @@ the `jongio/gh-pages-templates` registry.
 - **Never** forget to set **Source → GitHub Actions** in Settings → Pages; the workflow can't publish until Pages is enabled for Actions.
 - **Don't** leave the repo "Website" link blank — set `homepage` to the Pages URL (`gh repo edit --homepage`) so visitors find the site; it's the same as the "Use your GitHub Pages website" checkbox.
 - **Never** claim success because the workflow is green — load the URL and check an asset and an internal link actually resolve.
-- **Never** ship the template's demo content. A stamped template that still says "Hello, Astro" (or lists the sample blog posts) for someone's CLI or library is a failure — digest the repo and author real content of the right kind.
+- **Never** ship the template's demo content. A stamped template that still says
+  "Hello, Astro", lists sample blog posts, or contains Project Northstar is a
+  failure. Digest the repo and author real content of the right kind.
 - **Never** fabricate features, commands, or APIs to fill the page. Author only what
   the repo actually shows; leave a visible `TODO` when unsure.
 - **Don't** leave bare image references with nothing behind them — add the placeholders + `IMAGES.md`, or reuse the repo's existing images.

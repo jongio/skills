@@ -150,6 +150,241 @@ stimuli:
             Score 1.0 if yes with real content, 0.5 if partially specific, 0.0
             if still generic demo content.
 
+  - name: explicit-spectator-specification
+    prompt: >-
+      Use the create-gh-pages-site skill and the spectator template to publish a
+      reviewable GitHub Pages specification for "octocat/reviewable-cache-rfc".
+      Use the local template registry at "registry/templates". The current
+      directory contains the repository README and proposal-notes.md. Keep the
+      content structure free-form, preserve the GitHub feedback and edit
+      workflow, and replace all Project Northstar sample content.
+    tags:
+      template: spectator
+      cost: high
+    rubric:
+      - The generated site accurately describes the offline cache proposal, including read-only behavior, the 24-hour maximum age, and the unresolved storage-location decision.
+      - The site uses a free-form specification structure and does not retain Project Northstar sample content.
+      - The Spectator review configuration and GitHub Pages base path remain intact.
+    environment:
+      files:
+        - src: fixtures/spectator-repo/README.md
+          dest: README.md
+        - src: fixtures/spectator-repo/proposal-notes.md
+          dest: proposal-notes.md
+        - src: fixtures/spectator/template.json
+          dest: registry/templates/spectator/template.json
+        - src: fixtures/spectator/package.json
+          dest: registry/templates/spectator/package.json
+        - src: fixtures/spectator/spectator.config.ts
+          dest: registry/templates/spectator/spectator.config.ts
+        - src: fixtures/spectator/docs/index.md
+          dest: registry/templates/spectator/docs/index.md
+        - src: fixtures/spectator/docs/proposal.md
+          dest: registry/templates/spectator/docs/proposal.md
+        - src: fixtures/spectator/docs/system-shape.md
+          dest: registry/templates/spectator/docs/system-shape.md
+        - src: fixtures/spectator/docs/.vitepress/config.mts
+          dest: registry/templates/spectator/docs/.vitepress/config.mts
+        - src: fixtures/spectator/docs/.vitepress/theme/index.ts
+          dest: registry/templates/spectator/docs/.vitepress/theme/index.ts
+        - src: fixtures/spectator/docs/.vitepress/theme/FeedbackPrompt.vue
+          dest: registry/templates/spectator/docs/.vitepress/theme/FeedbackPrompt.vue
+        - src: fixtures/spectator/docs/.vitepress/theme/SelectionActions.vue
+          dest: registry/templates/spectator/docs/.vitepress/theme/SelectionActions.vue
+        - src: fixtures/spectator/.github/workflows/deploy.yml
+          dest: registry/templates/spectator/.github/workflows/deploy.yml
+    graders:
+      - type: file-exists
+        name: spectator-config-created
+        config:
+          path: "spectator.config.ts"
+      - type: file-exists
+        name: spectator-content-created
+        config:
+          path: "docs/index.md"
+      - type: file-exists
+        name: deploy-workflow-created
+        config:
+          path: ".github/workflows/deploy.yml"
+      - type: file-contains
+        name: project-base-injected
+        config:
+          path: "spectator.config.ts"
+          value: "/reviewable-cache-rfc/"
+      - type: file-contains
+        name: proposal-content-authored
+        config:
+          path: "docs/index.md"
+          value: "offline"
+      - type: file-contains
+        name: workflow-uploads-pages-artifact
+        config:
+          path: ".github/workflows/deploy.yml"
+          value: "actions/upload-pages-artifact"
+      - type: file-contains
+        name: workflow-orders-deploy-after-build
+        config:
+          path: ".github/workflows/deploy.yml"
+          value: "needs: build"
+      - type: file-contains
+        name: page-feedback-preserved
+        config:
+          path: "docs/.vitepress/theme/FeedbackPrompt.vue"
+          value: "issues/new"
+      - type: file-contains
+        name: selected-text-feedback-preserved
+        config:
+          path: "docs/.vitepress/theme/SelectionActions.vue"
+          value: "window.getSelection"
+      - type: file-contains
+        name: edit-page-action-preserved
+        config:
+          path: "docs/.vitepress/theme/SelectionActions.vue"
+          value: "Edit page"
+      - type: file-contains
+        name: page-feedback-mounted
+        config:
+          path: "docs/.vitepress/theme/index.ts"
+          value: "doc-footer-before"
+      - type: file-contains
+        name: selection-feedback-mounted
+        config:
+          path: "docs/.vitepress/theme/index.ts"
+          value: "layout-bottom"
+      - type: file-not-contains
+        name: sample-content-removed
+        config:
+          path: "docs/index.md"
+          value: "Project Northstar"
+      - type: file-not-contains
+        name: proposal-sample-content-removed
+        config:
+          path: "docs/proposal.md"
+          value: "Project Northstar"
+      - type: file-not-contains
+        name: system-sample-content-removed
+        config:
+          path: "docs/system-shape.md"
+          value: "Project Northstar"
+      - type: prompt
+        name: spectator-content-quality
+        config:
+          prompt: >-
+            Review the generated Spectator site. Does it accurately cover the
+            offline read-only cache, 24-hour maximum age, cache-only mode,
+            security boundary, and open storage-location decision without
+            forcing a generic outline? Score 1.0 if yes, 0.5 if partially, and
+            0.0 if the content is generic or still uses Project Northstar.
+
+  - name: inferred-spectator-specification
+    prompt: >-
+      Publish the offline cache proposal in this repository as a GitHub Pages
+      website like the Eval Authoring Guide. It should be easy to search and
+      navigate, let reviewers comment on a page or selected text through GitHub,
+      and let them propose edits. Use the local template registry at
+      "registry/templates". Choose the right template from the skill and replace
+      all fictional sample content.
+    tags:
+      template: spectator
+      selection: inferred
+      cost: high
+    rubric:
+      - The agent infers that Spectator is the right template for a reviewable technical specification.
+      - The generated site accurately reflects the repository proposal notes and keeps content organization free-form.
+      - Page, selected-text, and GitHub edit review affordances remain configured.
+    environment:
+      files:
+        - src: fixtures/spectator-repo/README.md
+          dest: README.md
+        - src: fixtures/spectator-repo/proposal-notes.md
+          dest: proposal-notes.md
+        - src: fixtures/spectator/template.json
+          dest: registry/templates/spectator/template.json
+        - src: fixtures/spectator/package.json
+          dest: registry/templates/spectator/package.json
+        - src: fixtures/spectator/spectator.config.ts
+          dest: registry/templates/spectator/spectator.config.ts
+        - src: fixtures/spectator/docs/index.md
+          dest: registry/templates/spectator/docs/index.md
+        - src: fixtures/spectator/docs/proposal.md
+          dest: registry/templates/spectator/docs/proposal.md
+        - src: fixtures/spectator/docs/system-shape.md
+          dest: registry/templates/spectator/docs/system-shape.md
+        - src: fixtures/spectator/docs/.vitepress/config.mts
+          dest: registry/templates/spectator/docs/.vitepress/config.mts
+        - src: fixtures/spectator/docs/.vitepress/theme/index.ts
+          dest: registry/templates/spectator/docs/.vitepress/theme/index.ts
+        - src: fixtures/spectator/docs/.vitepress/theme/FeedbackPrompt.vue
+          dest: registry/templates/spectator/docs/.vitepress/theme/FeedbackPrompt.vue
+        - src: fixtures/spectator/docs/.vitepress/theme/SelectionActions.vue
+          dest: registry/templates/spectator/docs/.vitepress/theme/SelectionActions.vue
+        - src: fixtures/spectator/.github/workflows/deploy.yml
+          dest: registry/templates/spectator/.github/workflows/deploy.yml
+    graders:
+      - type: file-exists
+        name: spectator-selected
+        config:
+          path: "spectator.config.ts"
+      - type: file-contains
+        name: inferred-project-base
+        config:
+          path: "spectator.config.ts"
+          value: "/reviewable-cache-rfc/"
+      - type: file-contains
+        name: inferred-content-authored
+        config:
+          path: "docs/index.md"
+          value: "offline"
+      - type: file-contains
+        name: inferred-page-feedback-preserved
+        config:
+          path: "docs/.vitepress/theme/FeedbackPrompt.vue"
+          value: "issues/new"
+      - type: file-contains
+        name: inferred-selection-feedback-preserved
+        config:
+          path: "docs/.vitepress/theme/SelectionActions.vue"
+          value: "window.getSelection"
+      - type: file-contains
+        name: inferred-workflow-uploads-pages-artifact
+        config:
+          path: ".github/workflows/deploy.yml"
+          value: "actions/upload-pages-artifact"
+      - type: file-contains
+        name: inferred-page-feedback-mounted
+        config:
+          path: "docs/.vitepress/theme/index.ts"
+          value: "doc-footer-before"
+      - type: file-contains
+        name: inferred-selection-feedback-mounted
+        config:
+          path: "docs/.vitepress/theme/index.ts"
+          value: "layout-bottom"
+      - type: file-not-contains
+        name: inferred-sample-content-removed
+        config:
+          path: "docs/index.md"
+          value: "Project Northstar"
+      - type: file-not-contains
+        name: inferred-proposal-sample-content-removed
+        config:
+          path: "docs/proposal.md"
+          value: "Project Northstar"
+      - type: file-not-contains
+        name: inferred-system-sample-content-removed
+        config:
+          path: "docs/system-shape.md"
+          value: "Project Northstar"
+      - type: prompt
+        name: inferred-template-quality
+        config:
+          prompt: >-
+            Did the agent select Spectator without being told its name, preserve
+            the GitHub review workflow, and author a specific offline cache
+            proposal from the repository context? Score 1.0 for all conditions,
+            0.5 for partial compliance, and 0.0 for another template or generic
+            content.
+
   - name: skills-catalog-safe-staging
     prompt: >-
       Use the create-gh-pages-site skill and the skills-catalog template to stage
