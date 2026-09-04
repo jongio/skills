@@ -415,7 +415,6 @@ placeholder set and handoff manifest.
   `npm test`, `npm run build`, and `npm run test:e2e`.
 
 ## Current repo vs. new repo
-
 - **Current repo (the default)**: assume the site is for the repo in context. The
   generator infers the base path from its `origin` remote when you omit `--repo`.
   Put the site at the root for a whole-repo site, or in a subfolder and point the
@@ -426,13 +425,11 @@ placeholder set and handoff manifest.
   is `/` — the generator handles the base when you pass that repo name.
 
 ## Custom domains (documented, not automated)
-
 For a custom domain: add a `CNAME` file (for static/Jekyll, at the served root;
 for Astro, `public/CNAME`), set DNS at the registrar, and in Astro set `site` to
 the domain and drop `base`. Don't automate DNS — explain the steps.
 
 ## Template registry & contributing
-
 Templates live in **one** place: the
 **[`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages-templates)**
 registry. The skill does **not** bundle its own copy — the generator fetches
@@ -479,7 +476,6 @@ placeholder checks, offline via a fixture). Template/workflow validation lives i
 the `jongio/gh-pages-templates` registry.
 
 ## Footguns
-
 - **Never** ship a project site built for `/` — assets 404. Set the base path (the generator does this; verify it).
 - **Never** put a subpath base on a **user site** (`<user>.github.io`) — it must be `/` (Jekyll: `baseurl: ""`).
 - **Never** use `actions/upload-artifact` for Pages — it's `upload-pages-artifact`.
