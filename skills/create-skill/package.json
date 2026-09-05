@@ -20,7 +20,7 @@
     "openai": "7.8.0"
   },
   "devDependencies": {
-    "@microsoft/vally-cli": "0.14.0",
+    "@microsoft/vally-cli": "0.15.0",
     "skills": "1.5.23"
   },
   "allowScripts": {
