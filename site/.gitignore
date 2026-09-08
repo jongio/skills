@@ -10,6 +10,7 @@ node_modules/
 *.log*
 # environment
 .env
+.env.local
 .env.production
 # macOS
 .DS_Store

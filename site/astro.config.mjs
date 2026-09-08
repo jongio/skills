@@ -10,4 +10,7 @@ export default defineConfig({
   site: "https://jongio.github.io",
   base: "/skills/",
   integrations: [preact()],
+  vite: {
+    envPrefix: ["PUBLIC_", "NEXT_PUBLIC_"],
+  },
 });
