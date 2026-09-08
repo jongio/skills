@@ -31,6 +31,20 @@ npm run build    # outputs to dist/
 npm run preview  # serve the production build at the /skills/ base
 ```
 
+## Supabase todos
+
+The home page loads rows from the public `todos` table in the browser. Copy
+`.env.example` to `.env.local` and provide the Supabase project URL and
+publishable key before running the site locally:
+
+```sh
+cp .env.example .env.local
+```
+
+The site remains statically deployed to GitHub Pages. It does not use
+server-side Supabase helpers or middleware; the browser client manages its
+session automatically.
+
 ## Base path
 
 `site` and `base` in `astro.config.mjs` are set for this project site
