@@ -116,8 +116,12 @@ function validatePullRequest(value, path, objectFormat, check) {
     "mergedAt", "url", "mergeStateStatus", "reviewDecision", "checks", "hasFailingChecks", "hasPendingChecks", "exactHeadMatch"];
   if (!check(exactKeys(value, keys), "invalid-pull-request", path)) return;
   check(nonempty(value.id) && nonnegative(value.number) && value.number > 0, "invalid-pull-request-id", path);
-  const repositoryFields = [value.headRepositoryId, value.headRepositoryName, value.headRepositoryNameWithOwner];
-  check(repositoryFields.every((entry) => entry === null) || repositoryFields.every(nonempty), "invalid-pull-request-repository", path);
+  const repositoryUnknown = value.headRepositoryId === null && value.headRepositoryName === null && value.headRepositoryNameWithOwner === null;
+  const repositoryKnown = nonempty(value.headRepositoryId) && nonempty(value.headRepositoryName)
+    && typeof value.headRepositoryNameWithOwner === "string";
+  // GitHub may omit this display label as an empty string. Exact PR identity
+  // still depends on the repository ID, head ref, and head OID.
+  check(repositoryUnknown || repositoryKnown, "invalid-pull-request-repository", path);
   check(nonempty(value.headRefName) && nonempty(value.baseRefName), "invalid-pull-request-ref", path);
   validateOid(value.headOid, `${path}.headOid`, objectFormat, check); validateOid(value.baseOid, `${path}.baseOid`, objectFormat, check);
   check(oneOf(value.state, ["OPEN", "CLOSED", "MERGED"]), "invalid-pull-request-state", `${path}.state`); check(typeof value.isDraft === "boolean" && value.exactHeadMatch === true, "invalid-pull-request-flags", path);

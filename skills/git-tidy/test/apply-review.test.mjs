@@ -395,6 +395,21 @@ test("strict result validation diagnoses malformed inventory lists", () => {
   }
 });
 
+test("strict result validation accepts an empty GitHub PR repository display label", () => {
+  const result = mechanicalResult();
+  result.workItems[0].carriers[0].observed.pullRequests = [pullRequest({
+    headRepositoryNameWithOwner: "",
+  })];
+  result.runId = digestResult(result);
+  assert.equal(validateMechanicalResult(result).valid, true);
+
+  result.workItems[0].carriers[0].observed.pullRequests[0].headRepositoryId = "";
+  result.runId = digestResult(result);
+  const invalid = validateMechanicalResult(result);
+  assert.equal(invalid.valid, false);
+  assert.ok(invalid.diagnostics.some(({ code }) => code === "invalid-pull-request-repository"));
+});
+
 test("strict result validation rejects divergent cross-item change unit identities", () => {
   const result = mechanicalResult();
   const second = structuredClone(result.workItems[0]);
