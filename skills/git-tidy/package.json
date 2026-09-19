@@ -15,7 +15,7 @@
     "eval": "vally eval --eval-spec evals/git-tidy/eval.yaml --skill-dir ."
   },
   "devDependencies": {
-    "@microsoft/vally-cli": "0.15.0"
+    "@microsoft/vally-cli": "0.16.0"
   },
   "allowScripts": {
     "@vscode/deviceid": false,
