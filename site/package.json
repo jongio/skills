@@ -12,7 +12,7 @@
   "dependencies": {
     "@astrojs/preact": "6.0.5",
     "astro": "7.3.5",
-    "preact": "^10.29.8"
+    "preact": "^11.0.0"
   },
   "allowScripts": {
     "esbuild@0.28.1": true
