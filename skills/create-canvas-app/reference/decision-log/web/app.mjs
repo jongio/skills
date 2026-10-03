@@ -12,8 +12,10 @@ import {
   html,
   mountCanvas,
   useState,
-  Icon,
   relativeTime,
+} from "/kit/core-client.mjs";
+import { Icon } from "/kit/icons.mjs";
+import {
   buildSessionDeepLink,
   buildSessionDetailDeepLink,
   buildSessionRestartDeepLink,
@@ -24,7 +26,7 @@ import {
   hostedLauncherUrl,
   quoteUntrusted,
   isRepoFullName,
-} from "/kit/client.mjs";
+} from "/kit/deeplinks.mjs";
 
 const FILTERS = ["all", "open", "decided", "parked"];
 

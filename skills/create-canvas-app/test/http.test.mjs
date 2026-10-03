@@ -108,12 +108,16 @@ async function main() {
     assert.match(text, /id="app"/);
   });
 
-  await test("GET /kit/client.mjs serves the kit runtime", async () => {
-    const res = await fetch(new URL("/kit/client.mjs", open.url));
-    const text = await res.text();
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("content-type"), /javascript/);
-    assert.match(text, /mountCanvas/);
+  await test("GET /kit/client.mjs serves the compatibility barrel and core runtime", async () => {
+    const [barrel, core] = await Promise.all([
+      fetch(new URL("/kit/client.mjs", open.url)),
+      fetch(new URL("/kit/core-client.mjs", open.url)),
+    ]);
+    assert.equal(barrel.status, 200);
+    assert.equal(core.status, 200);
+    assert.match(barrel.headers.get("content-type"), /javascript/);
+    assert.match(await barrel.text(), /export \* from "\.\/core-client\.mjs"/);
+    assert.match(await core.text(), /mountCanvas/);
   });
 
   await test("GET /kit/vendor/preact-htm-standalone.mjs serves vendored preact+htm", async () => {

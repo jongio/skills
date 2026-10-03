@@ -399,8 +399,7 @@ async function main() {
     assert.equal(hostedLauncherUrl(null), null);
   });
 
-  // ---- client.mjs re-export (views import from one site) -------------------
-  await test("client.mjs re-exports the deep-link helpers", async () => {
+  await test("client.mjs retains deep-link exports for legacy full-kit consumers", async () => {
     const client = await import("../kit/client.mjs");
     for (const name of [
       "APP_DEEP_LINK_SCHEME",
@@ -417,12 +416,9 @@ async function main() {
       "buildIssueDeepLink",
       "buildPullRequestDeepLink",
     ]) {
-      assert.ok(name in client, `client.mjs must re-export ${name}`);
+      assert.equal(name in client, true, `client.mjs must re-export ${name}`);
     }
-    assert.equal(
-      client.buildSessionDeepLink({ repo: "a/b" }),
-      "ghapp://session/new?repo=a%2Fb",
-    );
+    assert.equal(client.buildSessionDeepLink({ repo: "a/b" }), "ghapp://session/new?repo=a%2Fb");
   });
 
   console.log(`\n${passed} checks passed`);
