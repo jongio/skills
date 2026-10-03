@@ -86,6 +86,32 @@ await test('add stores candidates with features', () => {
   }
 });
 
+await test('add blocks collisions before cards even when availability is deferred', () => {
+  const dir = tmp();
+  try {
+    runInit({ dir });
+    const result = runAdd({
+      dir,
+      items: [
+        { name: 'Brightloom' },
+        { name: 'Synapse' },
+        { name: ' SPOT IFY ' },
+      ],
+    });
+    assert.deepEqual(result.added.map((candidate) => candidate.name), ['Brightloom']);
+    assert.equal(result.blocked.length, 2);
+    assert.match(result.blocked.find((item) => item.mark === 'Synapse').reason, /prominent technology/);
+    assert.equal(result.total, 1);
+
+    const next = runNext({ dir, count: 5 });
+    assert.deepEqual(next.cards.map((card) => card.name), ['Brightloom']);
+    assert.equal(next.remaining, 0);
+    assert.equal(Object.keys(runState({ dir }).results).length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // T40: swipe then next reflects learning
 await test('swipe then next reflects learning', () => {
   const dir = tmp();
@@ -193,7 +219,6 @@ await test('runBrief, runSuggest, and report edge branches', async () => {
     assert.ok(empty.text.includes('No finalists'));
 
     // all Deal Breakers -> no crowned winner
-    runAdd({ dir, items: [{ name: 'Spotify' }, { name: 'Nike' }] });
     const mock = async () => res(404); // channels free, but famous marks force Deal Breaker
     await runCheck({ dir, names: 'Spotify,Nike', resolveNs: nsAbsent, fetchImpl: mock });
     const report = runReport({ dir, names: 'Spotify,Nike' });
