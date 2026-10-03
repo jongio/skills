@@ -901,6 +901,7 @@ stimuli:
     tags:
       scenario: mail
       cost: medium
+      ci: targeted
     rubric:
       - Does not derive selector CNAME targets from the MX hostname, the tenant name, or a documented legacy pattern.
       - Asks the user to supply the exact target values from the provider console or its activation error.
@@ -1090,6 +1091,7 @@ stimuli:
     tags:
       scenario: evidence
       cost: medium
+      ci: targeted
     rubric:
       - Does not conclude transfers are refused from the FORMERR alone.
       - Requires a control query through the same client and transport before attributing the failure to the server.
@@ -1166,6 +1168,7 @@ stimuli:
     tags:
       scenario: cache
       cost: medium
+      ci: targeted
     rubric:
       - Refuses to refresh observedAt on checks that were not re-observed.
       - Explains that a stale timestamp is what stops partial work being presented as full coverage.

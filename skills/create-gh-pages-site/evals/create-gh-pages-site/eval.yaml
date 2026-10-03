@@ -288,6 +288,7 @@ stimuli:
       template: spectator
       selection: inferred
       cost: high
+      ci: targeted
     rubric:
       - The agent infers that Spectator is the right template for a reviewable technical specification.
       - The generated site accurately reflects the repository proposal notes and keeps content organization free-form.
@@ -396,6 +397,7 @@ stimuli:
       template: skills-catalog
       contract: staging
       cost: low
+      ci: targeted
     rubric:
       - The agent uses skills-catalog and safe staging instead of applying directly to the target.
       - The staged project base is /skill-hub/ and no target-owned file is overwritten.

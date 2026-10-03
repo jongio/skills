@@ -54,6 +54,7 @@ stimuli:
     tags:
       scenario: custom-art
       cost: low
+      ci: targeted
     rubric:
       - Asks the user to describe any provider and delivery workflow.
       - Does not restrict the workflow to a local command.

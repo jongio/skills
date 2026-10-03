@@ -4,9 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       skill:
-        description: "Skill to evaluate, by id or path (e.g. create-canvas-app). Leave empty to run every skill."
+        description: "Skills to evaluate, by comma-separated ids or paths. Leave empty to run every skill."
         required: false
         type: string
+      filter_tag:
+        description: "Optional Vally tag filter, such as ci=targeted. Requires an explicit skill selection."
+        required: false
+        type: string
+      verbose:
+        description: "Show agent answers for a filtered manual investigation. No transcripts are uploaded."
+        required: false
+        default: false
+        type: boolean
   schedule:
     # Nightly at 03:00 UTC
     - cron: "0 3 * * *"
@@ -40,8 +49,21 @@ jobs:
         id: select
         env:
           SKILL: ${{ inputs.skill }}
+          FILTER_TAG: ${{ inputs.filter_tag }}
+          VERBOSE: ${{ inputs.verbose && '1' || '' }}
         run: |
           set -euo pipefail
+          if [ -n "${FILTER_TAG:-}" ]; then
+            if [ -z "${SKILL:-}" ] ||
+               [[ ! "$FILTER_TAG" =~ ^[a-z][a-z0-9_-]*!?=[a-z0-9_-]+(,[a-z0-9_-]+)*$ ]]; then
+              echo "::error::A tag filter requires explicit skills and one valid key=values expression."
+              exit 1
+            fi
+          fi
+          if [ -n "${VERBOSE:-}" ] && [ -z "${FILTER_TAG:-}" ]; then
+            echo "::error::Verbose investigation requires an explicitly filtered skill selection."
+            exit 1
+          fi
           matrix_file="$RUNNER_TEMP/skill-eval-matrix.jsonl"
           : > "$matrix_file"
           while IFS= read -r spec; do
@@ -73,9 +95,13 @@ jobs:
           if [ -z "${SKILL:-}" ]; then
             selected=$(jq -c . <<<"$all")
           else
-            selected=$(jq -c --arg s "$SKILL" '[.[] | select(.skill_id == $s or .skill == $s)]' <<<"$all")
-            if [ "$(jq 'length' <<<"$selected")" -eq 0 ]; then
-              echo "::error::Requested skill was not discovered."
+            requested=$(jq -cn --arg s "$SKILL" '$s | split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+            selected=$(jq -c --argjson requested "$requested" '
+              [.[] | select(.skill_id as $id | .skill as $path |
+                any($requested[]; . == $id or . == $path))]
+            ' <<<"$all")
+            if [ "$(jq 'length' <<<"$selected")" -ne "$(jq 'length' <<<"$requested")" ]; then
+              echo "::error::Requested skills contain an unknown or duplicate selection."
               exit 1
             fi
           fi
@@ -145,6 +171,8 @@ jobs:
           COPILOT_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVAL_SPEC: ${{ matrix.eval_spec }}
           VALLY_BIN: ${{ github.workspace }}/.github/tools/vally/node_modules/.bin/vally
+          EVAL_FILTER: ${{ inputs.filter_tag }}
+          EVAL_VERBOSE: ${{ inputs.verbose && '1' || '' }}
         run: |
           "$VALLY_BIN" eval \
             --eval-spec "$EVAL_SPEC" \
@@ -152,7 +180,35 @@ jobs:
             --output-dir ./vally-results \
             --runs 5 \
             --workers 2 \
-            --max-retries 0
+            --max-retries 0 \
+            ${EVAL_FILTER:+--tag="$EVAL_FILTER"} \
+            ${EVAL_VERBOSE:+--verbose}
+
+      - name: Report eval diagnostics
+        if: always()
+        working-directory: ${{ matrix.skill }}
+        run: |
+          set -euo pipefail
+          if [ ! -d vally-results ]; then
+            echo "::error::Vally produced no result directory; inspect the eval process failure."
+            exit 1
+          fi
+          summary=$(find vally-results -name results.jsonl -type f -print -quit)
+          if [ -z "$summary" ]; then
+            echo "::error::Vally produced no result records; this is not evidence of a passing eval."
+            exit 1
+          fi
+          # Do not print agent answers, tool arguments, transcripts, or environment.
+          jq -c '
+            if .type == "run-summary" then
+              {type, passed, hadExecutionErrors, evals: [.evals[] |
+                {name, passed, scoringApplied, overallScore, threshold}]}
+            elif .type == "trial-result" and
+              any(.gradeResult.details[]; .passed != true) then
+              {type, stimulus, graders: [.gradeResult.details[] |
+                select(.passed != true) | {name, passed, score}]}
+            else empty end
+          ' "$summary"
 
       - name: Assert eval passed
         working-directory: ${{ matrix.skill }}
