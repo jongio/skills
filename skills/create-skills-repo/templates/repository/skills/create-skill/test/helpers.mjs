@@ -17,11 +17,11 @@ export function minimalVallyLock() {
       "": {
         name: "vally-tool",
         version: "1.0.0",
-        devDependencies: { "@microsoft/vally-cli": "0.14.0" },
+        devDependencies: { "@microsoft/vally-cli": "0.17.0" },
       },
       "node_modules/@microsoft/vally-cli": {
-        version: "0.14.0",
-        resolved: "https://registry.npmjs.org/@microsoft/vally-cli/-/vally-cli-0.14.0.tgz",
+        version: "0.17.0",
+        resolved: "https://registry.npmjs.org/@microsoft/vally-cli/-/vally-cli-0.17.0.tgz",
         integrity: "sha512-test",
         dev: true,
       },

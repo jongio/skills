@@ -249,6 +249,7 @@ const stimuli = stimuliSection
     return {
       name: block.slice(0, block.indexOf("\n")).trim(),
       graders: [...gradersBlock.matchAll(/^ {6}- type: (\S+)$/gm)].map(([, type]) => type),
+      graderNames: [...gradersBlock.matchAll(/^ {8}name: (\S+)$/gm)].map(([, name]) => name),
       hasRubric: /^ {4}rubric:$/m.test(block),
     };
   });
@@ -293,8 +294,15 @@ const requiredStimuli = [
 const missingStimuli = requiredStimuli.filter((name) => !stimulusNames.includes(name));
 assert.deepEqual(missingStimuli, [], `eval spec dropped stimuli: ${missingStimuli.join(", ")}`);
 
-for (const { name, graders, hasRubric } of stimuli) {
+const graderNames = stimuli.flatMap(({ graderNames }) => graderNames);
+assert.equal(new Set(graderNames).size, graderNames.length, "grader names must be globally unique");
+
+for (const { name, graders, graderNames, hasRubric } of stimuli) {
   assert.ok(graders.length > 0, `stimulus ${name} must declare at least one grader`);
+  assert.equal(graderNames.length, graders.length, `stimulus ${name} must name every grader`);
+  for (const graderName of graderNames) {
+    assert.match(graderName, /^[a-z0-9][a-z0-9-]{0,59}$/, "grader names must satisfy Vally's 60-character limit");
+  }
   assert.ok(hasRubric, `stimulus ${name} must declare a rubric`);
 }
 

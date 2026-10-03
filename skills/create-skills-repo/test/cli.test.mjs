@@ -264,6 +264,15 @@ test("create builds a complete managed repository and an inert GitHub plan", asy
     marketplace.plugins.slice(1).map((entry) => entry.name),
     ["create-skill", "example-skill"],
   );
+  const vallyPackage = JSON.parse(
+    await readFile(path.join(fx.target, ".github", "tools", "vally", "package.json"), "utf8"),
+  );
+  const vallyLock = JSON.parse(
+    await readFile(path.join(fx.target, ".github", "tools", "vally", "package-lock.json"), "utf8"),
+  );
+  assert.equal(vallyPackage.devDependencies["@microsoft/vally-cli"], "0.17.0");
+  assert.equal(vallyLock.packages[""].devDependencies["@microsoft/vally-cli"], "0.17.0");
+  assert.equal(vallyLock.packages["node_modules/@microsoft/vally-cli"].version, "0.17.0");
   assert.equal(
     existsSync(
       path.join(

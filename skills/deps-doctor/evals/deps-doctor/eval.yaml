@@ -148,7 +148,7 @@ stimuli:
           dest: .github/workflows/ci.yml
     graders:
       - type: diff-empty
-        name: inspects-without-modifying
+        name: covers-broad-ecosystem-surface-inspects-without-modifying
       - type: prompt
         name: finds-non-package-manager-surfaces
         config:
@@ -396,7 +396,7 @@ stimuli:
       cost: low
     graders:
       - type: diff-empty
-        name: plans-without-modifying
+        name: graph-review-plans-without-modifying
       - type: tool-calls
         name: runs-no-install-while-planning
         config:
@@ -440,7 +440,7 @@ stimuli:
       cost: low
     graders:
       - type: skill-invocation
-        name: uses-deps-doctor
+        name: withholds-a-freshly-published-release-uses-deps-doctor
         config:
           required:
             - deps-doctor
@@ -480,7 +480,7 @@ stimuli:
       cost: low
     graders:
       - type: diff-empty
-        name: plans-without-modifying
+        name: prioritizes-exploited-vulnerability-plans-without-modifying
       - type: prompt
         name: prioritizes-risk-and-verifies-result
         config:
@@ -568,7 +568,7 @@ stimuli:
           dest: README.md
     graders:
       - type: diff-empty
-        name: reports-without-modifying
+        name: non-registry-source-reports-without-modifying
       - type: prompt
         name: flags-all-three-non-registry-sources
         config:
@@ -602,7 +602,7 @@ stimuli:
       cost: low
     graders:
       - type: diff-empty
-        name: plans-without-modifying
+        name: fixes-forward-after-breaking-update-plans-without-modifying
       - type: prompt
         name: migrates-without-downgrading
         config:
@@ -639,7 +639,7 @@ stimuli:
             - name: "^(bash|shell|powershell)$"
               command: "(?i)(--force\\b|--legacy-peer-deps\\b|npm_config_legacy_peer_deps)"
       - type: diff-empty
-        name: describes-without-modifying
+        name: peer-conflict-describes-without-modifying
       - type: prompt
         name: finds-compatible-set-or-holds-back
         config:
@@ -674,7 +674,7 @@ stimuli:
       cost: low
     graders:
       - type: diff-empty
-        name: plans-without-modifying
+        name: preserves-ci-lockfile-integrity-plans-without-modifying
       - type: prompt
         name: checks-and-locks-uv-environment
         config:
@@ -982,7 +982,7 @@ stimuli:
       cost: low
     graders:
       - type: diff-empty
-        name: plans-without-modifying
+        name: patches-a-transitive-vulnerability-plans-without-modifying
       - type: prompt
         name: uses-temporary-override-with-removal-plan
         config:
@@ -1016,7 +1016,7 @@ stimuli:
       cost: low
     graders:
       - type: diff-empty
-        name: describes-without-modifying
+        name: selected-version-describes-without-modifying
       - type: tool-calls
         name: runs-nothing-while-describing
         config:
@@ -1097,7 +1097,7 @@ stimuli:
           dest: .github/workflows/ci.yml
     graders:
       - type: diff-empty
-        name: reports-without-modifying
+        name: pins-mutable-references-reports-without-modifying
       - type: prompt
         name: recommends-immutable-pins
         config:
@@ -1183,7 +1183,7 @@ stimuli:
       cost: low
     graders:
       - type: diff-empty
-        name: describes-without-modifying
+        name: lockfile-conflict-describes-without-modifying
       - type: prompt
         name: regenerates-rather-than-hand-merges
         config:

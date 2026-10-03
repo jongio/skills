@@ -8,7 +8,7 @@
     "test": "node --test ../../../test/*.test.mjs"
   },
   "devDependencies": {
-    "@microsoft/vally-cli": "0.14.0"
+    "@microsoft/vally-cli": "0.17.0"
   },
   "allowScripts": {
     "@vscode/deviceid": false,
