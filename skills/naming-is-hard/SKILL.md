@@ -81,7 +81,7 @@ security-sensitive, and stateful work. Stay on your side of this line.
 | Generate creative candidate names + a one-line pitch each | Learn taste from swipes (score / rank / pick next) |
 | Present swipe cards via `ask_user` | Explain the learned "type" in plain language |
 | Decide when to refill the deck and generate more | Check availability (SSRF-safe, mocked in tests) |
-| Run a live `web_search` per finalist for trademarks/businesses | Screen against the famous-marks list, compute verdict tiers |
+| Run a live `web_search` per finalist for trademarks/businesses | Block obvious offline collisions before cards; compute finalist verdict tiers |
 | Narrate the matches and next actions | Persist all state across swipe turns |
 
 **Never** hand-roll availability checks with raw `curl`, and never invent a swipe
@@ -98,7 +98,7 @@ where the run's state is persisted (use the session workspace, for example
 |---|---|
 | `init --dir D [--brief-json '{...}']` | Create (or open) state; optionally set the brief |
 | `brief --dir D --json '{...}'` | Set/replace the Naming Brief |
-| `add --dir D --json '[{"name":..,"strategy":..,"tags":[..]}]'` | Add candidates (features extracted, ids assigned). Also reads the JSON array from stdin. |
+| `add --dir D --json '[{"name":..,"strategy":..,"tags":[..]}]'` | Add candidates (features extracted, ids assigned). Reports offline collisions in `blocked`; those names never enter the deck. Also reads the JSON array from stdin. |
 | `next --dir D [--count N]` | Return the next card(s) to show, best first |
 | `swipe --dir D --id ID --label like\|pass\|superlike\|skip` | Record a swipe and update the model |
 | `rank --dir D [--limit N]` | Candidates ranked by learned fit |
@@ -194,6 +194,13 @@ node scripts/naming.mjs add --dir D --json '[
   {"name":"Verdant","strategy":"real-word","tags":["nature","growth"]}
 ]'
 ```
+
+Candidate ingestion always runs a deterministic offline collision screen. It blocks
+confident matches to the bundled famous marks and prominent product/project names,
+returns a useful reason in `blocked`, and excludes them from `total`, `next`, and
+remaining-card counts. This happens even when domain, GitHub, registry, or social
+availability is intentionally deferred. Treat a non-empty `blocked` result as a
+request to replace those names, not as candidates to present manually.
 
 Quality bar: on-brief, pronounceable, and genuinely varied. Skip anything that is a
 near-duplicate of another candidate or an obvious throwaway.
@@ -402,7 +409,8 @@ sessions. To resume, point the same `--dir` at the existing state and continue w
 
 1. Intake the context; read the repo or fetch the URL if given one.
 2. Write the Naming Brief; `init --brief-json` (or `brief`).
-3. Generate ~20 to 30 diverse, on-brief candidates; `add` them.
+3. Generate ~20 to 30 diverse, on-brief candidates; `add` them and replace anything
+   reported in `blocked`.
 4. Swipe loop: `next` -> `ask_user` card -> `swipe`; refill the deck as needed;
    share `profile` occasionally.
 5. On Done: `check` the finalists; run a `web_search` per finalist for trademarks

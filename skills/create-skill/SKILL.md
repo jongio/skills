@@ -89,7 +89,7 @@ Creation includes:
 - `SKILL.md` with only `name` and `description` frontmatter keys.
 - `README.md`, `LICENSE`, `package.json`, and `package-lock.json`.
 - `.vally.yaml`, deterministic tests, and `evals/<name>/eval.yaml`.
-- `thumbnail.png` and a byte-identical catalog copy when the repository has a catalog.
+- `thumbnail.png` as the tracked source for catalog synchronization when a catalog is present.
 - Marketplace, plugin, README, eval workflow, Dependabot, and catalog registration when present.
 - Prompt and non-secret provenance in `docs/thumbnail-prompts.md` when present.
 
@@ -207,7 +207,7 @@ authoring skill through the same atomic path without rewriting its skill files.
 3. Provider requests make one attempt with no retry, redirect, or fallback.
 4. Custom workflows require an exact preview and approval before any external action.
 5. Provider output is untrusted until the complete PNG validator accepts it.
-6. Skill and catalog thumbnails are written from the same validated buffer and verified equal.
+6. The validated skill thumbnail is the tracked source; catalog builds generate public copies.
 7. Secrets never enter prompts, previews, logs, generated files, or provenance.
 8. Existing files are preserved when planning fails. Apply uses staged sibling files and rollback.
 9. No git staging, commit, push, issue, pull request, or repository setting change is part of this
@@ -217,7 +217,7 @@ authoring skill through the same atomic path without rewriting its skill files.
 
 - The skill has every required file and only portable SKILL.md frontmatter keys.
 - Every discovered or configured registration surface includes the skill.
-- Skill and catalog thumbnails are byte-identical and pass strict PNG validation.
+- The tracked skill thumbnail passes strict PNG validation; catalog builds generate the public copy.
 - Prompt and non-secret provenance are recorded when that repository surface exists.
 - Deterministic tests and Vally lint pass.
 - The final report lists exact changed files, commands, results, and any blocked work.

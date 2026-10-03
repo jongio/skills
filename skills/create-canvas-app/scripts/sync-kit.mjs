@@ -1,10 +1,10 @@
 // scripts/sync-kit.mjs — copy the canonical kit/ into a consumer extension as
 // canvas-kit/, and stamp which kit version was written.
 //
-// A shipped/generated extension vendors the kit verbatim (no npm, no build), so
-// once it's copied there's nothing that tells you whether the copy is current.
-// Run this after bumping kit/version.mjs (or any kit file) to refresh a vendored
-// copy, then `node scripts/check-kit-freshness.mjs <dir>` in CI catches drift.
+// Generated extensions carry .kit-features.json, so synchronization preserves
+// their selected canonical files and exact icon subset. Older consumers without
+// that manifest remain full-kit mirrors. The freshness command validates either
+// shape offline.
 //
 // Usage:
 //   node scripts/sync-kit.mjs <extension-dir>
@@ -17,10 +17,17 @@
 //   node scripts/sync-kit.mjs .github/extensions/market-feed
 //   node scripts/sync-kit.mjs reference/decision-log
 
-import { cp, mkdir, writeFile, readdir, rm, rmdir } from "node:fs/promises";
-import { join, resolve, isAbsolute, basename, relative } from "node:path";
+import { copyFile, mkdir, writeFile, readdir, rm, rmdir } from "node:fs/promises";
+import { dirname, join, resolve, isAbsolute, basename, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { KIT_VERSION } from "../kit/version.mjs";
+import {
+  FEATURE_MANIFEST,
+  createFeatureManifest,
+  readFeatureManifest,
+  renderFeatureManifest,
+  renderIconSubset,
+} from "./kit-features.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const KIT = join(ROOT, "kit");
@@ -57,8 +64,8 @@ async function relFiles(dir) {
 // that isn't in the canonical kit, then drop the now-empty directories. Without
 // this, a file removed upstream would linger in a re-synced copy and trip the
 // freshness check with no way to repair it via sync.
-async function pruneToKit(dest) {
-  const keep = new Set(await relFiles(KIT));
+async function pruneToFiles(dest, files) {
+  const keep = new Set(files);
   const emptyDirs = [];
   async function walk(d) {
     for (const ent of await readdir(d, { withFileTypes: true })) {
@@ -68,7 +75,9 @@ async function pruneToKit(dest) {
         emptyDirs.push(abs); // deepest-first (children pushed before parents)
       } else {
         const rel = relative(dest, abs).replace(/\\/g, "/");
-        if (rel !== VERSION_MARKER && !keep.has(rel)) await rm(abs, { force: true });
+        if (rel !== VERSION_MARKER && rel !== FEATURE_MANIFEST && !keep.has(rel)) {
+          await rm(abs, { force: true });
+        }
       }
     }
   }
@@ -78,13 +87,38 @@ async function pruneToKit(dest) {
   }
 }
 
-export async function syncKit(dir) {
+async function copySelectedFiles(dest, files, icons) {
+  for (const rel of files) {
+    const output = join(dest, rel);
+    await mkdir(dirname(output), { recursive: true });
+    if (rel === "vendor/lucide.mjs" && icons !== null) {
+      await writeFile(output, renderIconSubset(icons), "utf8");
+    } else {
+      await copyFile(join(KIT, rel), output);
+    }
+  }
+}
+
+export async function syncKit(dir, selection = null) {
   const dest = resolveDest(dir);
-  // Copy every canonical kit file over (vendor/ included), then prune stale extras
-  // so the vendored copy is an exact mirror of kit/ plus the version marker.
   await mkdir(dest, { recursive: true });
-  await cp(KIT, dest, { recursive: true, force: true });
-  await pruneToKit(dest);
+  const existingManifest = selection
+    ? null
+    : await readFeatureManifest(dest, { allowVersionMismatch: true });
+  const manifest = selection
+    ? createFeatureManifest(selection)
+    : existingManifest
+      ? createFeatureManifest(existingManifest)
+      : null;
+  const files = manifest ? manifest.files : await relFiles(KIT);
+
+  await copySelectedFiles(dest, files, manifest?.icons ?? null);
+  await pruneToFiles(dest, files);
+  if (manifest) {
+    await writeFile(join(dest, FEATURE_MANIFEST), renderFeatureManifest(manifest), "utf8");
+  } else {
+    await rm(join(dest, FEATURE_MANIFEST), { force: true });
+  }
 
   const marker = {
     version: KIT_VERSION,
@@ -92,7 +126,7 @@ export async function syncKit(dir) {
     source: "create-canvas-app/kit",
   };
   await writeFile(join(dest, VERSION_MARKER), JSON.stringify(marker, null, 2) + "\n", "utf8");
-  return { dest, version: KIT_VERSION };
+  return { dest, version: KIT_VERSION, manifest };
 }
 
 async function main() {

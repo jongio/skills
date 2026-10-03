@@ -36,6 +36,12 @@ instead — not a canvas.
 | **Static HTML string** | Read-only or near-static content; no inputs to protect | The runtime's vanilla scaffold (`extensions_manage scaffold kind:canvas`). |
 | **Preact + htm + this kit** | Anything interactive: inputs, live updates, lists, forms, shared state | This kit. **Default choice for real canvases.** |
 
+For the static tier, use the vanilla scaffold as generated and keep the HTML in
+its single extension module. Do not copy `canvas-kit/` into that extension. Move
+to a generated Preact template as soon as the canvas needs inputs, shared state,
+agent actions, or live updates. A one-file interactive counter is not the upgrade
+path because it duplicates action logic and keeps state per panel.
+
 The single most important reason to use the kit: **Preact diffs the DOM**, so a
 live state push from the agent does **not** clobber focus, caret position, or
 half-typed text in an input. The `innerHTML = ...` pattern most early canvases
@@ -46,7 +52,7 @@ use repaints the whole tree and loses keystrokes on every push. Don't do that.
 ```text
 extension.mjs   ── the ONLY file that imports the Copilot SDK (thin adapter; also wires host AI)
 canvas.mjs      ── your canvas: id, schema, state load/save, action handlers (SDK-free)
-canvas-kit/     ── the kit (copied in verbatim; do not edit)
+canvas-kit/     ── the template's feature-scoped kit (do not edit)
 web/index.html  ── shell: loads /kit/theme.css and ./app.mjs
 web/app.mjs     ── your Preact view
 ```
@@ -128,7 +134,7 @@ The kit vendors the **exact Lucide set github-app ships** (`lucide-react@1.23.0`
 byte-identical). Use it for *every* icon; do not hand-write SVGs or pull a CDN.
 
 ```js
-import { Icon } from "/kit/client.mjs";
+import { Icon } from "/kit/icons.mjs";
 html`<${Icon} name="circle-check" size=${16} />`
 ```
 
@@ -304,20 +310,20 @@ verbatim and adapt `canvas.mjs` + `web/` from the reference.
 
 ## Keeping your vendored kit in sync
 
-A shipped extension vendors the kit **verbatim** as `canvas-kit/` — there's no npm
-package or build step, so nothing tells you whether the copy you shipped matches
-the current `kit/`. The kit is version-stamped to close that gap: `kit/version.mjs`
-exports `KIT_VERSION` (re-exported from `/kit/client.mjs`), and two scripts keep
-vendored copies honest.
+A generated extension vendors only the canonical files and icons required by its
+built-in template. `canvas-kit/.kit-features.json` records that exact selection.
+Older extensions without the manifest remain full-kit consumers. The kit version is still exported by `kit/version.mjs`, `/kit/core-client.mjs`,
+and the backward-compatible full-kit `/kit/client.mjs` barrel.
 
 - **Re-sync after a kit change.** Bump `KIT_VERSION` when you change any kit file,
   then refresh each vendored copy:
   ```sh
   node scripts/sync-kit.mjs <extension-dir>
   ```
-  This makes `<extension-dir>/canvas-kit/` an exact mirror of `kit/` —
-  overwriting changed files **and pruning stale ones** (a file removed upstream
-  won't linger) — and records the version into
+  For a generated scoped kit, this regenerates the files and icon names recorded
+  in `.kit-features.json`, overwrites changes, and prunes stale files. For an
+  older extension without that manifest, it preserves compatibility by writing
+  the complete kit. Both paths record the version in
   `<extension-dir>/canvas-kit/.kit-version.json`.
 
 - **Gate drift in CI (offline).** Fail the build if any vendored kit has drifted
@@ -329,9 +335,14 @@ vendored copies honest.
   extension dir, or a `canvas-kit/` dir. Exit 0 = all fresh; exit 1 = drift, with
   the offending files listed. It runs no network and needs no dependencies.
 
-The `.kit-version.json` marker is metadata, **not** a kit file — the byte-parity
-test (`test/kit-parity.test.mjs`) and the freshness check both treat it as
-out-of-band, so it never counts against `kit/` ↔ `canvas-kit/` parity.
+Both `.kit-version.json` and `.kit-features.json` are metadata, not canonical kit
+files. The feature manifest is deterministic and fully lists the selected
+canonical files and icons.
+
+To reduce an older full-kit canvas, regenerate the matching built-in template
+and port the app-specific `canvas.mjs` and `web/` changes into it. Do not create a
+feature manifest by hand because a missing dependency could make the extension
+fail only at runtime.
 
 - **Re-vendor the Lucide glyphs (rare).** `kit/vendor/lucide.mjs` is
   AUTO-GENERATED to match the exact `lucide-react` release the Copilot host app
@@ -407,7 +418,7 @@ A canvas isn't done because the server boots. Verify the UI:
   — ≤128 chars, an alphanumeric first character, then only `A-Za-z0-9._-`. A malformed
   handle (leading `-`/`_`, spaces, over-long) is rejected by the runtime with
   `Invalid canvas instance ID` before your canvas ever opens.
-- **Never** hand-roll or CDN-load icons — use `/kit/client.mjs`'s `Icon`.
+- **Never** hand-roll or CDN-load icons. Import `Icon` from `/kit/icons.mjs`.
 - **Never** put SDK imports outside `extension.mjs`.
 - **Never** pass `strokeWidth` to `Icon` or invent pixel sizes off the scale.
 - **Never** `fetch()` in the view — network I/O belongs in an action handler,

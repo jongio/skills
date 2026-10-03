@@ -94,7 +94,13 @@ async function stashChangeUnits(boundary, entry, context) {
 }
 
 export async function collectStashes(boundary, request, context) {
-  if (!["all", "stashes"].includes(request.scope)) {
+  if (![
+    "all",
+    "branches",
+    "remote",
+    "worktrees",
+    "stashes",
+  ].includes(request.scope)) {
     return [];
   }
 

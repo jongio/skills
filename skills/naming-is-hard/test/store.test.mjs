@@ -110,6 +110,19 @@ test('persists the brief and dedups candidates', () => {
   }
 });
 
+test('blocks offline collisions without persisting or counting them', () => {
+  const result = store.addCandidates(store.defaultState(), [
+    { name: 'Brightloom' },
+    { name: 'Synapse' },
+    { name: ' SPOT IFY ' },
+  ]);
+  assert.deepEqual(result.added.map((candidate) => candidate.name), ['Brightloom']);
+  assert.equal(result.blocked.length, 2);
+  assert.ok(result.blocked.every((collision) => collision.reason));
+  assert.equal(result.state.candidates.length, 1);
+  assert.equal(store.unseenCandidates(result.state).length, 1);
+});
+
 // Re-swiping must be idempotent: no double-counting, and changing a swipe
 // reflects only the new label.
 test('re-swiping is idempotent', () => {

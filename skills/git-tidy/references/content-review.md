@@ -111,7 +111,7 @@ It accepts no CLI arguments. Pass exactly one UTF-8 JSON object capped at
 
 ```text
 {
-  "result": <closed analyze 1.1.0 result with actionPlan: null>,
+  "result": <closed analyze 1.2.0 result with actionPlan: null>,
   "review": <strict review object defined above>
 }
 ```

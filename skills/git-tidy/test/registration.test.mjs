@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { discoverThumbnailMappings } from "../../../site/scripts/sync-thumbnails.mjs";
 
 const skillDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const root = path.resolve(skillDir, "..", "..");
@@ -106,24 +106,23 @@ test("catalog surfaces register git-tidy exactly once", () => {
   assert.match(siteEntry, new RegExp(`--skill ${skillId}`));
 });
 
-test("catalog thumbnail matches the installable thumbnail", async () => {
+test("catalog thumbnail maps to the installable source", async () => {
   const thumb = siteEntry.match(/^thumb:\s*(\S+)\s*$/m);
   assert.ok(thumb, "site catalog entry must declare a thumb");
   const installedPath = path.join(skillDir, "thumbnail.png");
-  const catalogPath = path.join(root, "site", "public", thumb[1]);
   assert.ok(existsSync(installedPath), "installable skill thumbnail is missing");
-  assert.ok(existsSync(catalogPath), "catalog thumbnail is missing");
+  const mapping = discoverThumbnailMappings({ repoRoot: root })
+    .find(({ entryId }) => entryId === skillId);
+  assert.ok(mapping, "catalog thumbnail mapping is missing");
+  assert.equal(mapping.repoPath, `skills/${skillId}`);
+  assert.equal(mapping.thumb, `images/thumb-${skillId}.png`);
+  assert.equal(mapping.source, installedPath);
 
-  const [installed, catalog] = await Promise.all([
-    readFile(installedPath),
-    readFile(catalogPath),
-  ]);
-  const digest = (buffer) => createHash("sha256").update(buffer).digest("hex");
-  assert.equal(digest(catalog), digest(installed));
+  const installed = await readFile(installedPath);
   assert.equal(installed.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
   assert.equal(installed.readUInt32BE(16), 1024);
   assert.equal(installed.readUInt32BE(20), 1024);
-  assert.ok(images.includes(path.basename(thumb[1])));
+  assert.ok(images.includes(path.basename(mapping.thumb)));
 });
 
 test("focused references are present and routed from the contract and skill", () => {
@@ -141,7 +140,7 @@ test("focused references are present and routed from the contract and skill", ()
       `contract does not route to ${reference}`,
     );
   }
-  assert.match(evidenceModel, /contract `1\.1\.0`/);
+  assert.match(evidenceModel, /contract `1\.2\.0`/);
   assert.match(contentReview, /applyReview/);
   assert.match(approvalFlow, /## Revalidation/);
   assert.match(commandRecipes, /## Forbidden analysis commands/);
@@ -269,7 +268,7 @@ test("contract schema vocabulary is closed and stable", () => {
     '"evidence": "complete" | "partial" | "blocked"',
     '"confidence": "proven" | "strong" | "indicative" | "unknown"',
     '"action": "keep" | "delete-ref" | "drop-stash" |',
-    '"schemaVersion": "1.1.0"',
+    '"schemaVersion": "1.2.0"',
   ]) {
     assert.ok(contract.includes(value), `contract dropped schema vocabulary: ${value}`);
   }
@@ -328,11 +327,11 @@ test("eval catalog covers every content-aware triage scenario", () => {
   assert.match(skillDoc, /Review[\s\n]+medium items` from the report/);
   assert.match(
     skillDoc,
-    /run read-only `revalidate` to produce the inert guarded[\s\n]+action plan[\s\S]*show its exact commands/i,
+    /group selected carriers by mutation class[\s\S]*run read-only[\s\n]+`revalidate`[\s\S]*inert guarded[\s\n]+action plan[\s\S]*show its exact commands/i,
   );
   assert.match(
     skillDoc,
-    /Immediately after each approval, revalidate again[\s\S]*remain identical and stable/i,
+    /Immediately after each approval[\s\S]*`planId`[\s\S]*`approvalRevalidated` is true[\s\S]*remain identical/i,
   );
   assert.match(skillDoc, /Mechanically proven cleanup does not require semantic content review/);
   assert.match(skillDoc, /Review active work only when requested/);
@@ -349,7 +348,7 @@ test("eval catalog covers every content-aware triage scenario", () => {
   assert.match(skillDoc, /Returning a prose-only analysis[\s\n]+is incomplete/);
   assert.match(
     skillDoc,
-    /request final approval for one mutation class at a time\.[\s\S]*Immediately[\s\n]+after each approval, revalidate/i,
+    /request final approval for one mutation class at a time\.[\s\S]*Immediately after each approval[\s\S]*revalidate the remote\/default\/OID baseline again/i,
   );
   assert.match(skillDoc, /git-tidy-<generatedAt-compact>-<runId-first-12>\.json/);
   assert.match(skillDoc, /Never overwrite a prior run/);

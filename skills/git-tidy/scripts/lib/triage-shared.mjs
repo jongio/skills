@@ -5,7 +5,7 @@ import {
   stableId,
 } from "./mechanical-core.mjs";
 
-export const SCHEMA_VERSION = "1.1.0";
+export const SCHEMA_VERSION = "1.2.0";
 export const SCOPES = Object.freeze([
   "all",
   "branches",
@@ -21,6 +21,8 @@ export const DEPTHS = Object.freeze(["metadata", "proof", "review"]);
 export const RESULT_KEYS = Object.freeze([
   "schemaVersion",
   "operation",
+  "executionMode",
+  "remoteBaseline",
   "runId",
   "generatedAt",
   "repository",
@@ -95,6 +97,8 @@ export function runDigest(
   carriers,
   changeUnits,
   inventory,
+  executionMode,
+  remoteBaseline,
 ) {
   const mechanicalIdentities = {
     carriers: carriers.map(mechanicalCarrier)
@@ -105,6 +109,8 @@ export function runDigest(
   };
   return createHash("sha256").update(canonicalJson({
     schemaVersion: SCHEMA_VERSION,
+    executionMode,
+    remoteBaseline,
     repository,
     request,
     mechanicalIdentities,
@@ -124,6 +130,8 @@ export function digestResult(result) {
     allCarriers(result.workItems),
     [...units.values()].sort((left, right) => compare(left.id, right.id)),
     result.inventory,
+    result.executionMode,
+    result.remoteBaseline,
   );
 }
 
@@ -250,6 +258,7 @@ export function planStep(carrier) {
   } else {
     throw new TypeError("selected carrier has no guardable local action");
   }
+
   return {
     id: stableId("action-step", {
       carrierId: carrier.id,
@@ -264,6 +273,20 @@ export function planStep(carrier) {
     prerequisiteIds: [...carrier.prerequisiteIds].sort(compare),
     approvalClass,
   };
+}
+
+export function actionPlanId({
+  basedOnRunId,
+  approvalClass,
+  selectedCarrierIds,
+  steps,
+}) {
+  return createHash("sha256").update(canonicalJson({
+    basedOnRunId,
+    approvalClass,
+    selectedCarrierIds,
+    steps,
+  }), "utf8").digest("hex");
 }
 
 export function sortSteps(left, right) {

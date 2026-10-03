@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { discoverThumbnailMappings } from "../../../site/scripts/sync-thumbnails.mjs";
 
 const skillDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const root = path.resolve(skillDir, "..", "..");
@@ -82,32 +82,21 @@ assert.match(
   "site catalog entry must document the install command",
 );
 
-// The Astro schema types `thumb` as a plain string, so a missing image still
-// builds green. Resolve the declared path and prove the file is really there.
 const thumb = siteEntry.match(/^thumb:\s*(\S+)\s*$/m);
 assert.ok(thumb, "site catalog entry must declare a thumb");
-assert.ok(
-  existsSync(path.join(root, "site", "public", thumb[1])),
-  `site thumbnail ${thumb[1]} is declared but missing`,
-);
 const installedThumb = path.join(root, "skills", skillId, "thumbnail.png");
 assert.ok(
   existsSync(installedThumb),
   "installable skill is missing its thumbnail.png",
 );
+const mapping = discoverThumbnailMappings({ repoRoot: root })
+  .find(({ entryId }) => entryId === skillId);
+assert.ok(mapping, "catalog thumbnail mapping is missing");
+assert.equal(mapping.repoPath, `skills/${skillId}`);
+assert.equal(mapping.thumb, `images/thumb-${skillId}.png`);
+assert.equal(mapping.source, installedThumb);
 
-// The catalog image is a copy of the installed one. It is binary, so compare
-// bytes rather than text.
-const [installedArt, catalogArt] = await Promise.all([
-  readFile(installedThumb),
-  readFile(path.join(root, "site", "public", thumb[1])),
-]);
-const digest = (buffer) => createHash("sha256").update(buffer).digest("hex");
-assert.equal(
-  digest(catalogArt),
-  digest(installedArt),
-  "catalog thumbnail drifted from the installed skill thumbnail",
-);
+const installedArt = await readFile(installedThumb);
 
 // House style: every skill thumbnail is a 1024x1024 PNG. Width and height live
 // in the IHDR chunk at fixed offsets, so this needs no image library.
@@ -120,7 +109,7 @@ assert.equal(installedArt.readUInt32BE(16), 1024, "thumbnail width must be 1024"
 assert.equal(installedArt.readUInt32BE(20), 1024, "thumbnail height must be 1024");
 
 assert.ok(
-  images.includes(path.basename(thumb[1])),
+  images.includes(path.basename(mapping.thumb)),
   "IMAGES.md must document the skill thumbnail",
 );
 

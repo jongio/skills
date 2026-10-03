@@ -42,9 +42,10 @@ print("saved", os.environ["OUT"])
 '@ | python -
 ```
 
-The catalog site also keeps a PNG or SVG asset at
-`site/public/images/thumb-<skill>.<ext>`, referenced from
-`site/src/content/skills/<skill>.md` frontmatter.
+The catalog site maps `skills/<skill>/thumbnail.png` to
+`site/public/images/thumb-<skill>.png` through
+`site/src/content/skills/<skill>.md` frontmatter. Public copies are generated
+before local development and production builds.
 
 ## House style
 

@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import {
   matchFamousMark,
+  screenPresentationCollision,
   withinEditDistance1,
   markCount,
 } from '../scripts/marks.mjs';
@@ -69,6 +70,20 @@ test('reports why it matched', () => {
   // empty / unusable input never hits
   assert.equal(matchFamousMark('').hit, false);
   assert.equal(matchFamousMark('   ').hit, false);
+});
+
+test('blocks normalized famous and prominent collisions before presentation', () => {
+  for (const name of ['Spotify', ' SPOT IFY ', 'Synapse', ' syn apse ']) {
+    const collision = screenPresentationCollision(name);
+    assert.equal(collision.blocked, true, `should block ${name}`);
+    assert.ok(collision.reason);
+  }
+  assert.match(screenPresentationCollision('Synapse').reason, /Azure Synapse Analytics/);
+});
+
+test('allows safe names and conservative near-misses into the deck', () => {
+  assert.deepEqual(screenPresentationCollision('Brightloom'), { blocked: false });
+  assert.deepEqual(screenPresentationCollision('Strive'), { blocked: false });
 });
 
 test('withinEditDistance1 basics', () => {

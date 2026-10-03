@@ -288,14 +288,13 @@ export function buildRegistrationUpdates(profile, manifest, art) {
     );
   }
   if (profile.catalogEnabled) {
-    if (!profile.paths.catalogEntries || !profile.paths.catalogImages) {
-      throw new Error("Catalog registration requires both entry and image paths");
+    if (!profile.paths.catalogEntries) {
+      throw new Error("Catalog registration requires an entry path");
     }
     values.set(
       join(profile.paths.catalogEntries, `${manifest.name}.md`),
       renderCatalogEntry(manifest, profile.identity?.repository),
     );
-    values.set(join(profile.paths.catalogImages, `thumb-${manifest.name}.png`), art.bytes);
   }
   if (profile.paths.thumbnailPrompts) {
     const current = readText(profile.paths.thumbnailPrompts);
@@ -354,10 +353,6 @@ export function buildArtPlan(profile, manifest, art) {
   const installed = join(profile.paths.skills, manifest.name, "thumbnail.png");
   if (!existsSync(dirname(installed))) throw new Error(`Skill ${manifest.name} does not exist`);
   values.set(installed, bytes);
-  if (profile.catalogEnabled) {
-    if (!profile.paths.catalogImages) throw new Error("Catalog image path is unavailable");
-    values.set(join(profile.paths.catalogImages, `thumb-${manifest.name}.png`), bytes);
-  }
   if (profile.paths.thumbnailPrompts) {
     const digest = createHash("sha256").update(bytes).digest("hex");
     const current = readText(profile.paths.thumbnailPrompts);
@@ -565,12 +560,22 @@ export function checkSkill(profile, name) {
       failures.push(`thumbnail.png: ${error.message}`);
     }
   }
-  if (profile.catalogEnabled && profile.paths.catalogImages) {
-    const installed = join(dir, "thumbnail.png");
-    const catalog = join(profile.paths.catalogImages, `thumb-${name}.png`);
-    if (!existsSync(catalog)) failures.push("missing catalog thumbnail");
-    else if (existsSync(installed) && !readFileSync(installed).equals(readFileSync(catalog))) {
-      failures.push("catalog thumbnail differs from skill thumbnail");
+  if (profile.catalogEnabled) {
+    if (!profile.paths.catalogEntries) {
+      failures.push("catalog entry path is unavailable");
+    } else {
+      const entryPath = join(profile.paths.catalogEntries, `${name}.md`);
+      if (!existsSync(entryPath)) {
+        failures.push("missing catalog entry");
+      } else {
+        const entry = readText(entryPath);
+        if (!new RegExp(`^repoPath:\\s*skills/${name}\\s*$`, "m").test(entry)) {
+          failures.push(`catalog repoPath must be skills/${name}`);
+        }
+        if (!new RegExp(`^thumb:\\s*images/thumb-${name}\\.png\\s*$`, "m").test(entry)) {
+          failures.push(`catalog thumb must be images/thumb-${name}.png`);
+        }
+      }
     }
   }
   if (existsSync(dir)) {

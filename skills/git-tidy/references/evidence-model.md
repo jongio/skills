@@ -1,6 +1,6 @@
 # Evidence Model
 
-This reference defines the proof rules behind contract `1.1.0`. The normative
+This reference defines the proof rules behind contract `1.2.0`. The normative
 result shape and compatibility policy are in
 [the specification](../../../docs/specs/git-tidy/spec.md).
 

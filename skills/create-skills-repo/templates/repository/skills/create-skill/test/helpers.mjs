@@ -69,7 +69,6 @@ export function createRepositoryFixture(root, options = {}) {
     `${JSON.stringify(minimalVallyLock(), null, 2)}\n`,
   );
   mkdirSync(join(root, "site", "src", "content", "skills"), { recursive: true });
-  mkdirSync(join(root, "site", "public", "images"), { recursive: true });
   write(join(root, "docs", "thumbnail-prompts.md"), "# Skill thumbnail prompts\n");
   if (options.managed) {
     write(

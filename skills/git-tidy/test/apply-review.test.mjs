@@ -150,8 +150,19 @@ function mechanicalResult() {
     ],
   };
   const result = {
-    schemaVersion: "1.1.0",
+    schemaVersion: "1.2.0",
     operation: "analyze",
+    executionMode: "offline",
+    remoteBaseline: {
+      state: "offline",
+      remoteId: null,
+      defaultRef: null,
+      defaultOid: null,
+      heads: [],
+      verifiedAt: null,
+      validUntil: null,
+      failureCode: "remote-verification-not-requested",
+    },
     runId: "0".repeat(64),
     generatedAt: "2026-08-28T00:00:00Z",
     repository: {
