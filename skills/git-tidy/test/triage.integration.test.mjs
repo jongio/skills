@@ -981,24 +981,10 @@ test("extended proof paths fail closed and guarded plans stay inert", async () =
       analyzed,
       [topic.id, linked.id],
     );
-    assert.equal(stable.actionPlan.authorized, false);
-    assert.deepEqual(stable.actionPlan.steps.map(({ action }) => action), [
-      "remove-worktree", "delete-ref",
-    ]);
-    assert.deepEqual(
-      stable.actionPlan.steps.map(({ approvalClass }) => approvalClass),
-      ["worktree-removal", "local-branch-deletion"],
-    );
-    assert.equal(
-      stable.actionPlan.steps[0].argv[3],
-      Buffer.from(linked.identity.path.rawBase64, "base64").toString("utf8"),
-    );
-    assert.deepEqual(stable.actionPlan.steps[1].argv, [
-      "update-ref",
-      "-d",
-      Buffer.from(topic.identity.refRawBase64, "base64").toString("utf8"),
-      topic.identity.tipOid,
-    ]);
+    assert.equal(stable.actionPlan, null);
+    assert.ok(stable.drift.some(
+      ({ code }) => code === "remote-baseline-not-fresh",
+    ));
 
     const runtimeBlocked = await analyzeRepository(fixture.root, {
       scope: "branches",

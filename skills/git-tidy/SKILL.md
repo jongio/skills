@@ -16,10 +16,8 @@ description: >-
 # Git Tidy
 
 Triage work before tidying its carriers. Correlate exact changes across branches,
-worktrees, stashes, and remote refs, then recommend what should happen to the
-work. Keep carrier cleanup separate, proved, revalidated, and individually
-approved.
-
+worktrees, stashes, and remote refs, then recommend what should happen. Keep
+carrier cleanup separate, proved, revalidated, and individually approved.
 ## Syntax
 
 ```text
