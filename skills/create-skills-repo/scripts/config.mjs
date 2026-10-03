@@ -6,7 +6,7 @@ export const CONFIG_SCHEMA_VERSION = 1;
 export const TEMPLATE_VERSION = 1;
 
 const IDENTIFIER = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+const GITHUB_LOGIN = /^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9_])?$/;
 const REPOSITORY = /^[A-Za-z0-9_.](?:[A-Za-z0-9_.-]{0,98}[A-Za-z0-9_.-])?$/;
 const RESERVED_WINDOWS_NAMES = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 const VISIBILITIES = new Set(["public", "private", "internal"]);
@@ -186,7 +186,8 @@ export function createConfig(options) {
     100,
     REPOSITORY,
   );
-  const packageName = options.packageName ?? `${ownerLogin.toLowerCase()}-skills`;
+  const packageName =
+    options.packageName ?? `${ownerLogin.toLowerCase().replaceAll("_", "-")}-skills`;
   const displayName =
     options.displayName ?? `${titleize(ownerLogin)} Skills`;
   const description =

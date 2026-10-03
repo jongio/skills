@@ -30,6 +30,18 @@ test("configuration derives exact trusted GitHub URLs", () => {
   assert.equal(config.catalog.template, "skills-catalog");
 });
 
+test("configuration supports enterprise managed user logins", () => {
+  const config = createConfig({
+    ownerLogin: "stefstr_microsoft",
+    ownerName: "Stefan Stranger",
+    repositoryName: "skills",
+  });
+  assert.equal(config.owner.login, "stefstr_microsoft");
+  assert.equal(config.owner.url, "https://github.com/stefstr_microsoft");
+  assert.equal(config.repository.url, "https://github.com/stefstr_microsoft/skills");
+  assert.equal(config.package.name, "stefstr-microsoft-skills");
+});
+
 test("configuration rejects unknown fields and forged URLs", () => {
   const config = createConfig({
     ownerLogin: "octocat",
