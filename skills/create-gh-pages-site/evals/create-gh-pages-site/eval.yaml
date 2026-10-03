@@ -124,7 +124,7 @@ stimuli:
           dest: package.json
     graders:
       - type: file-exists
-        name: deploy-workflow-created
+        name: static-html-for-library-deploy-workflow-created
         config:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}.github/workflows/*.yml"
       - type: file-exists
@@ -132,17 +132,17 @@ stimuli:
         config:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}index.html"
       - type: file-contains
-        name: workflow-uses-deploy-pages
+        name: static-html-for-library-workflow-uses-deploy-pages
         config:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}.github/workflows/*.yml"
           value: "actions/deploy-pages"
       - type: file-not-contains
-        name: no-leftover-sentinels
+        name: static-html-for-library-no-leftover-sentinels
         config:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,!(node_modules)/}index.html"
           value: "__SITE_NAME__"
       - type: prompt
-        name: content-reflects-repo
+        name: static-html-for-library-content-reflects-repo
         config:
           prompt: >-
             Review the generated static HTML site. Does it mention "math-utils"
@@ -203,7 +203,7 @@ stimuli:
         config:
           path: "docs/index.md"
       - type: file-exists
-        name: deploy-workflow-created
+        name: explicit-spectator-specification-deploy-workflow-created
         config:
           path: ".github/workflows/deploy.yml"
       - type: file-contains
@@ -424,7 +424,7 @@ stimuli:
         config:
           path: "site-staging/.github/workflows/deploy.yml"
       - type: file-contains
-        name: project-base-injected
+        name: skills-catalog-safe-staging-project-base-injected
         config:
           path: "site-staging/index.html"
           value: "/skill-hub/"

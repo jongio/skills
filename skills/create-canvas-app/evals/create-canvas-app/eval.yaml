@@ -183,11 +183,11 @@ stimuli:
       cost: high
     graders:
       - type: file-exists
-        name: canvas-scaffolded
+        name: data-canvas-autorefresh-canvas-scaffolded
         config:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,.github/extensions/,.copilot/extensions/}{,!(node_modules)/}canvas.mjs"
       - type: file-exists
-        name: view-scaffolded
+        name: data-canvas-autorefresh-view-scaffolded
         config:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,.github/extensions/,.copilot/extensions/}{,!(node_modules)/}web/app.mjs"
       - type: file-contains
@@ -206,7 +206,7 @@ stimuli:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,.github/extensions/,.copilot/extensions/}{,!(node_modules)/}web/app.mjs"
           value: "fetch("
       - type: file-not-contains
-        name: no-sdk-in-view
+        name: data-canvas-autorefresh-no-sdk-in-view
         config:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,.github/extensions/,.copilot/extensions/}{,!(node_modules)/}web/app.mjs"
           value: "@github/copilot-sdk"
@@ -215,7 +215,7 @@ stimuli:
         config:
           pattern: "[Rr]efresh|[Aa]uto-?[Rr]efresh|[Pp]oll"
       - type: run-command
-        name: generated-sources-parse
+        name: data-canvas-autorefresh-generated-sources-parse
         config:
           command: node
           timeout: 120s
@@ -250,7 +250,7 @@ stimuli:
               for (const f of found) execFileSync(process.execPath, ["--check", f], { stdio: "inherit" });
               console.log("node --check passed for " + found.length + " source file(s)");
       - type: prompt
-        name: contract-rubric
+        name: data-canvas-autorefresh-contract-rubric
         config:
           scoring: scale_1_5
           threshold: 0.7

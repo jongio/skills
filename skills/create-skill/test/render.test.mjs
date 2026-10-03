@@ -28,7 +28,7 @@ test("skill names and manifests are strict", () => {
     assert.throws(() => validateSkillName(value));
   }
   assert.equal(VALLY_PACKAGE, "@microsoft/vally-cli");
-  assert.equal(VALLY_VERSION, "0.14.0");
+  assert.equal(VALLY_VERSION, "0.17.0");
   assert.match(manifest.description, /USE FOR:/);
   assert.match(manifest.description, /DO NOT USE FOR:/);
   assert.throws(() => createSkillManifest({ name: "ok", summary: "short" }), /Summary/);
@@ -71,7 +71,7 @@ test("package lock is adapted from the repository Vally lock", () => {
   assert.equal(lock.name, manifest.name);
   assert.equal(lock.packages[""].devDependencies[VALLY_PACKAGE], VALLY_VERSION);
   const wrong = minimalVallyLock();
-  wrong.packages[`node_modules/${VALLY_PACKAGE}`].version = "0.13.0";
+  wrong.packages[`node_modules/${VALLY_PACKAGE}`].version = "0.14.0";
   assert.throws(() => renderPackageLock(manifest.name, wrong), /must pin/);
   assert.throws(() => renderPackageLock(manifest.name, {}), /lockfileVersion 3/);
 });
@@ -95,6 +95,14 @@ test("renderer creates the complete portable skill shape", () => {
   const keys = [...skill.matchAll(/^([a-z][a-z-]*):/gm)].map((match) => match[1]);
   assert.deepEqual(keys.slice(0, 2), ["name", "description"]);
   assert.ok(Buffer.isBuffer(files.get("thumbnail.png")));
+  assert.equal(
+    JSON.parse(files.get("package.json")).devDependencies[VALLY_PACKAGE],
+    "0.17.0",
+  );
+  assert.equal(
+    JSON.parse(files.get("package-lock.json")).packages[`node_modules/${VALLY_PACKAGE}`].version,
+    "0.17.0",
+  );
   assert.equal(renderSkillFiles(manifest).has("package-lock.json"), false);
   const withRepository = renderSkillFiles(manifest, { repository: "octocat/skills" });
   assert.match(withRepository.get("README.md"), /npx skills add octocat\/skills/);
