@@ -177,10 +177,11 @@ default branch cover every skill. The workflow always builds the catalog site.
 4. `site/src/content/skills/<name>.md`, with `thumb:` pointing at
    `images/thumb-<name>.png`.
 5. The `all=` matrix in `.github/workflows/skill-eval.yml`.
-6. A thumbnail saved byte-identically to both `skills/<name>/thumbnail.png` and
-   `site/public/images/thumb-<name>.png`, generated from a prompt recorded in
-   [`docs/thumbnail-prompts.md`](docs/thumbnail-prompts.md), and listed in
-   [`site/public/images/IMAGES.md`](site/public/images/IMAGES.md).
+6. A tracked thumbnail at `skills/<name>/thumbnail.png`, generated from a
+   prompt recorded in [`docs/thumbnail-prompts.md`](docs/thumbnail-prompts.md)
+   and listed in [`site/public/images/IMAGES.md`](site/public/images/IMAGES.md).
+   The site validates catalog mappings and generates ignored public copies
+   before development and production builds.
 
 Copy the newest skill rather than the oldest; it reflects the current conventions.
 

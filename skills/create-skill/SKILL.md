@@ -217,7 +217,7 @@ authoring skill through the same atomic path without rewriting its skill files.
 
 - The skill has every required file and only portable SKILL.md frontmatter keys.
 - Every discovered or configured registration surface includes the skill.
-- Skill and catalog thumbnails are byte-identical and pass strict PNG validation.
+- The tracked skill thumbnail passes strict PNG validation; catalog builds generate the public copy.
 - Prompt and non-secret provenance are recorded when that repository surface exists.
 - Deterministic tests and Vally lint pass.
 - The final report lists exact changed files, commands, results, and any blocked work.

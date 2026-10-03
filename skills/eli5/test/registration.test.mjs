@@ -4,11 +4,14 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { synchronizeThumbnails } from "../../../site/scripts/sync-thumbnails.mjs";
 
 const skillDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const root = path.resolve(skillDir, "..", "..");
 const skillId = "eli5";
 const vallyPkg = "@microsoft/vally-cli";
+
+synchronizeThumbnails({ repoRoot: root });
 
 const read = (...parts) => readFile(path.join(root, ...parts), "utf8");
 const parse = async (...parts) => JSON.parse(await read(...parts));
@@ -82,8 +85,7 @@ assert.match(
   "site catalog entry must document the install command",
 );
 
-// The Astro schema types `thumb` as a plain string, so a missing image still
-// builds green. Resolve the declared path and prove the file is really there.
+// Synchronization validates the declared mapping before generating public art.
 const thumb = siteEntry.match(/^thumb:\s*(\S+)\s*$/m);
 assert.ok(thumb, "site catalog entry must declare a thumb");
 assert.ok(
@@ -96,8 +98,7 @@ assert.ok(
   "installable skill is missing its thumbnail.png",
 );
 
-// The catalog image is a copy of the installed one. It is binary, so compare
-// bytes rather than text.
+// Generated catalog art must remain byte-identical to the installed source.
 const [installedArt, catalogArt] = await Promise.all([
   readFile(installedThumb),
   readFile(path.join(root, "site", "public", thumb[1])),
