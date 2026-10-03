@@ -1128,7 +1128,7 @@ No phase may loosen the last-copy invariant or approval separation.
 - Runtime impact is limited to the `git-tidy` analyzer, review adapter, and
   their Git and GitHub read boundaries.
 - Contract impact covers schema `1.2.0`, skill orchestration, focused
-  references, deterministic tests, capability evals, and catalog copy.
+  references, deterministic tests, capability evals, and catalog mapping.
 - Repository quality impact covers the shared Vally dependency, lint workflow,
   and catalog accessibility surfaces exercised by this change.
 - There is no database, deployment, authentication, or public service API

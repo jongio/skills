@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { discoverThumbnailMappings } from "../../../site/scripts/sync-thumbnails.mjs";
 
 const skillDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const root = path.resolve(skillDir, "..", "..");
@@ -106,24 +106,23 @@ test("catalog surfaces register git-tidy exactly once", () => {
   assert.match(siteEntry, new RegExp(`--skill ${skillId}`));
 });
 
-test("catalog thumbnail matches the installable thumbnail", async () => {
+test("catalog thumbnail maps to the installable source", async () => {
   const thumb = siteEntry.match(/^thumb:\s*(\S+)\s*$/m);
   assert.ok(thumb, "site catalog entry must declare a thumb");
   const installedPath = path.join(skillDir, "thumbnail.png");
-  const catalogPath = path.join(root, "site", "public", thumb[1]);
   assert.ok(existsSync(installedPath), "installable skill thumbnail is missing");
-  assert.ok(existsSync(catalogPath), "catalog thumbnail is missing");
+  const mapping = discoverThumbnailMappings({ repoRoot: root })
+    .find(({ entryId }) => entryId === skillId);
+  assert.ok(mapping, "catalog thumbnail mapping is missing");
+  assert.equal(mapping.repoPath, `skills/${skillId}`);
+  assert.equal(mapping.thumb, `images/thumb-${skillId}.png`);
+  assert.equal(mapping.source, installedPath);
 
-  const [installed, catalog] = await Promise.all([
-    readFile(installedPath),
-    readFile(catalogPath),
-  ]);
-  const digest = (buffer) => createHash("sha256").update(buffer).digest("hex");
-  assert.equal(digest(catalog), digest(installed));
+  const installed = await readFile(installedPath);
   assert.equal(installed.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
   assert.equal(installed.readUInt32BE(16), 1024);
   assert.equal(installed.readUInt32BE(20), 1024);
-  assert.ok(images.includes(path.basename(thumb[1])));
+  assert.ok(images.includes(path.basename(mapping.thumb)));
 });
 
 test("focused references are present and routed from the contract and skill", () => {

@@ -176,10 +176,6 @@ async function fixture() {
           existsSync(path.join(options.repoRoot, "site", "src", "content", "skills")),
           true,
         );
-        assert.equal(
-          existsSync(path.join(options.repoRoot, "site", "public", "images")),
-          true,
-        );
       }
       writeExample(options);
     },

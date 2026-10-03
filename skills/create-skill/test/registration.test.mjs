@@ -54,9 +54,15 @@ test("create plan covers skill files and every discovered registration surface",
         `repoPath: skills/${manifest.name}[\\s\\S]*thumb: images/thumb-${manifest.name}\\.png`,
       ),
     );
+    assert.equal(
+      [...updates.keys()].some((updatePath) =>
+        updatePath.includes(join("site", "public", "images"))
+      ),
+      false,
+    );
 
     const plan = buildCreatePlan(profile, manifest, { art: placeholderArt() });
-    assert.ok(plan.mutations.length >= 17);
+    assert.ok(plan.mutations.length >= 16);
     assert.equal(plan.hash, hashPlan(plan.mutations));
     assert.equal(hashPlan([...plan.mutations].reverse()), plan.hash);
     const preview = applyPlan(plan, { dryRun: true });
@@ -121,7 +127,7 @@ test("Dependabot registration distinguishes skill-name prefixes", () => {
   }
 });
 
-test("approved apply is complete, byte-identical, and checkable", () => {
+test("approved apply is complete, source-authored, and checkable", () => {
   const root = mkdtempSync(join(tmpdir(), "create-skill-apply-"));
   try {
     createRepositoryFixture(root);
@@ -132,10 +138,11 @@ test("approved apply is complete, byte-identical, and checkable", () => {
     assert.deepEqual(result.cleanupFailures, []);
 
     const installed = readFileSync(join(root, "skills", manifest.name, "thumbnail.png"));
-    const catalog = readFileSync(
-      join(root, "site", "public", "images", `thumb-${manifest.name}.png`),
+    assert.ok(installed.equals(placeholderArt().bytes));
+    assert.equal(
+      existsSync(join(root, "site", "public", "images", `thumb-${manifest.name}.png`)),
+      false,
     );
-    assert.ok(installed.equals(catalog));
     assert.match(readFileSync(join(root, "README.md"), "utf8"), /release-notes-helper/);
     assert.match(readFileSync(join(root, "plugin.json"), "utf8"), /release-notes-helper/);
     assert.match(readFileSync(join(root, ".github", "workflows", "skill-eval.yml"), "utf8"), /release-notes-helper/);
@@ -149,6 +156,27 @@ test("approved apply is complete, byte-identical, and checkable", () => {
       /npx skills add octocat\/skills/,
     );
     assert.deepEqual(checkSkill(profile, manifest.name), { ok: true, failures: [] });
+    const catalogEntry = join(
+      root,
+      "site",
+      "src",
+      "content",
+      "skills",
+      `${manifest.name}.md`,
+    );
+    const validEntry = readFileSync(catalogEntry, "utf8");
+    writeFileSync(
+      catalogEntry,
+      validEntry.replace(
+        `thumb: images/thumb-${manifest.name}.png`,
+        "thumb: images/thumb-wrong.png",
+      ),
+    );
+    assert.deepEqual(
+      checkSkill(profile, manifest.name).failures,
+      [`catalog thumb must be images/thumb-${manifest.name}.png`],
+    );
+    writeFileSync(catalogEntry, validEntry);
 
     const artPlan = buildArtPlan(profile, manifest, placeholderArt());
     assert.equal(artPlan.mutations.length, 0);

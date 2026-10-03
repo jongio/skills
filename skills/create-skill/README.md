@@ -35,7 +35,7 @@ Fixture mode is noninteractive and accepts the documented version 1 payload in
 - Azure OpenAI and OpenAI use exact origins, disabled redirects, and zero retries.
 - Custom art may use any approved provider and delivery workflow.
 - Every image passes complete PNG, CRC, raster, metadata, dimension, and size validation.
-- Skill and catalog thumbnails are atomically written from identical bytes.
+- Skill thumbnails are the tracked source; catalog builds generate public copies from frontmatter.
 - Prompt and non-secret provenance are recorded when the repository supports that surface.
 
 ## Development
