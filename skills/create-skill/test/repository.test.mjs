@@ -37,6 +37,22 @@ test("managed config mirrors the canonical strict schema and paths", () => {
     assert.equal(profile.paths.skills, join(root, "skills"));
     assert.equal(profile.identity.ownerName, "Octo Cat");
     assert.equal(profile.identity.repository, "octocat/skills");
+    const managedUserConfig = {
+      ...config,
+      owner: {
+        ...config.owner,
+        login: "octocat_microsoft",
+        url: "https://github.com/octocat_microsoft",
+      },
+      repository: {
+        ...config.repository,
+        url: "https://github.com/octocat_microsoft/skills",
+      },
+    };
+    assert.equal(
+      validateManagedConfig(managedUserConfig, root).identity.repository,
+      "octocat_microsoft/skills",
+    );
     assert.equal(normalizeRepositoryPath(root, "safe/path", "test"), join(root, "safe", "path"));
     assert.throws(() => validateManagedConfig({ ...config, paths: {} }, root), /unsupported fields/);
     assert.throws(() => validateManagedConfig({ ...config, templateVersion: 2 }, root), /must be 1/);
