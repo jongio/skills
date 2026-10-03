@@ -16,12 +16,12 @@
     "eval": "vally eval --eval-spec evals/create-skill/eval.yaml --skill-dir ."
   },
   "dependencies": {
-    "@azure/identity": "4.13.2",
-    "openai": "7.8.0"
+    "@azure/identity": "4.13.3",
+    "openai": "7.27.0"
   },
   "devDependencies": {
     "@microsoft/vally-cli": "0.17.0",
-    "skills": "1.5.23"
+    "skills": "1.7.0"
   },
   "allowScripts": {
     "@vscode/deviceid": false,
