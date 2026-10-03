@@ -278,12 +278,16 @@ stimuli:
 
   - name: inferred-spectator-specification
     prompt: >-
-      Publish the offline cache proposal in this repository as a GitHub Pages
-      website like the Eval Authoring Guide. It should be easy to search and
+      Locally scaffold the offline cache proposal in this workspace as a GitHub
+      Pages website like the Eval Authoring Guide. The target deployment identity
+      is octocat/reviewable-cache-rfc; this is an existing local project and the
+      workspace has no Git remote to infer
+      it from. It should be easy to search and
       navigate, let reviewers comment on a page or selected text through GitHub,
       and let them propose edits. Use the local template registry at
       "registry/templates". Choose the right template from the skill and replace
-      all fictional sample content.
+      all fictional sample content. Local generation is approved; do not create,
+      push or publish a GitHub repository or change Pages settings.
     tags:
       template: spectator
       selection: inferred
