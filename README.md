@@ -184,6 +184,32 @@ default branch cover every skill. The workflow always builds the catalog site.
 
 Copy the newest skill rather than the oldest; it reflects the current conventions.
 
+### Investigating nightly eval failures
+
+Skill Eval remains limited to trusted scheduled and manual runs; pull requests
+run model-free lint and deterministic tests. Model-backed runs use the owner's
+Copilot allowance and require an approved scope before dispatch.
+
+For a bounded manual investigation, select explicit skill ids or paths separated
+by commas and a Vally `filter_tag`. The neutral `ci=targeted` tag selects the
+six current regression scenarios rather than their complete suites:
+
+```sh
+gh workflow run skill-eval.yml --repo jongio/skills --ref <reviewed-ref> \
+  -f skill=create-skill,dns-doctor,create-gh-pages-site \
+  -f filter_tag=ci=targeted -f verbose=true
+```
+
+Runs retain five trials per stimulus, two workers and zero retries. `verbose`
+defaults off and requires an explicitly filtered skill selection; opt in only
+for reviewed, non-sensitive fixtures because agent answers appear in the job
+log. No transcripts or environment-bearing artifacts are uploaded.
+
+Every run prints normalized summary and failed-grader diagnostics, even when
+the eval command fails. The pass gate still rejects execution errors and any
+failed skill-invocation, diff-empty or tool-calls check; a high average prompt
+score does not waive those checks.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

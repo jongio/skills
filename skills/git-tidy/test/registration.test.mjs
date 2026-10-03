@@ -195,8 +195,10 @@ test("workflow matrix and docs routing target git-tidy exactly", () => {
   );
   assert.match(
     evalWorkflow,
-    /select\(\.skill_id == \$s or \.skill == \$s\)/,
+    /select\(\.skill_id as \$id \| \.skill as \$path \|\s*any\(\$requested\[\]; \. == \$id or \. == \$path\)\)/,
   );
+  assert.match(evalWorkflow, /requested=\$\(jq -cn --arg s "\$SKILL".*split\(","\)/);
+  assert.match(evalWorkflow, /Requested skills contain an unknown or duplicate selection/);
   assert.match(lintWorkflow, /"docs\/specs\/git-tidy\/\*\*"/);
   assert.match(
     lintWorkflow,

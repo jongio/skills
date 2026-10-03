@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
   cp,
@@ -936,6 +937,8 @@ test("skill eval is trusted, discovered, bounded, and token scoped", () => {
       "VALLY_BIN",
       "${{ github.workspace }}/.github/tools/vally/node_modules/.bin/vally",
     ],
+    ["EVAL_FILTER", "${{ inputs.filter_tag }}"],
+    ["EVAL_VERBOSE", "${{ inputs.verbose && '1' || '' }}"],
   ]);
   const [evalScript] = getRunScripts(tokenStep.join("\n"));
   const commandLines = evalScript.trim().split("\n");
@@ -952,9 +955,66 @@ test("skill eval is trusted, discovered, bounded, and token scoped", () => {
     .join(" ");
   assert.equal(
     command,
-    '"$VALLY_BIN" eval --eval-spec "$EVAL_SPEC" --skill-dir . --output-dir ./vally-results --runs 5 --workers 2 --max-retries 0',
+    '"$VALLY_BIN" eval --eval-spec "$EVAL_SPEC" --skill-dir . --output-dir ./vally-results --runs 5 --workers 2 --max-retries 0 ${EVAL_FILTER:+--tag="$EVAL_FILTER"} ${EVAL_VERBOSE:+--verbose}',
     "the token-bearing step must execute only the Vally eval command",
   );
+});
+
+test("filtered eval flags remain literal arguments with unchanged run bounds", {
+  skip: process.platform !== "linux" && "the workflow's Bash command runs on Linux",
+}, async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "skill-eval-argv-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const executable = path.join(directory, "vally stub");
+  await writeFile(executable,
+    "#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)));\n",
+    { mode: 0o755 },
+  );
+  const step = getStepBlocks(workflows["skill-eval.yml"]).find((lines) =>
+    lines.some((line) => line.includes("- name: Run eval")),
+  );
+  const [script] = getRunScripts(step.join("\n"));
+  const expected = [
+    "eval", "--eval-spec", "evals/example/eval.yaml", "--skill-dir", ".",
+    "--output-dir", "./vally-results", "--runs", "5", "--workers", "2",
+    "--max-retries", "0",
+  ];
+  for (const [filter, verbose, extra] of [
+    ["", "", []],
+    ["ci=targeted", "1", ["--tag=ci=targeted", "--verbose"]],
+    ["ci=$(echo not-executed)", "", ["--tag=ci=$(echo not-executed)"]],
+  ]) {
+    const result = spawnSync("bash", ["-euo", "pipefail", "-c", script], {
+      cwd: directory,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        VALLY_BIN: executable,
+        EVAL_SPEC: "evals/example/eval.yaml",
+        EVAL_FILTER: filter,
+        EVAL_VERBOSE: verbose,
+      },
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), [...expected, ...extra]);
+  }
+});
+
+test("manual eval investigations reject unbounded verbose output and retain diagnostics", () => {
+  const workflow = workflows["skill-eval.yml"];
+  assert.match(workflow, /filter_tag:\s*\n/);
+  assert.match(workflow, /verbose:\s*\n[\s\S]*default: false/);
+  assert.match(workflow, /Verbose investigation requires an explicitly filtered skill selection/);
+  assert.match(workflow, /unknown or duplicate selection/);
+  const diagnostics = getStepBlocks(workflow).find((lines) =>
+    lines.some((line) => line.includes("- name: Report eval diagnostics")),
+  ).join("\n");
+  assert.match(diagnostics, /if: always\(\)/);
+  assert.doesNotMatch(diagnostics, /secrets\.|agentOutput|toolCalls|trajectory/);
+  assert.match(diagnostics, /select\(\.passed != true\)/);
+  assert.match(workflow, /\(\$run\.hadExecutionErrors == false\)/);
+  assert.match(workflow, /then \.passed == true/);
 });
 
 test("workflow artifacts are short-lived and exclude sensitive output", () => {
