@@ -141,7 +141,7 @@ test("focused references are present and routed from the contract and skill", ()
       `contract does not route to ${reference}`,
     );
   }
-  assert.match(evidenceModel, /contract `1\.1\.0`/);
+  assert.match(evidenceModel, /contract `1\.2\.0`/);
   assert.match(contentReview, /applyReview/);
   assert.match(approvalFlow, /## Revalidation/);
   assert.match(commandRecipes, /## Forbidden analysis commands/);
@@ -269,7 +269,7 @@ test("contract schema vocabulary is closed and stable", () => {
     '"evidence": "complete" | "partial" | "blocked"',
     '"confidence": "proven" | "strong" | "indicative" | "unknown"',
     '"action": "keep" | "delete-ref" | "drop-stash" |',
-    '"schemaVersion": "1.1.0"',
+    '"schemaVersion": "1.2.0"',
   ]) {
     assert.ok(contract.includes(value), `contract dropped schema vocabulary: ${value}`);
   }
@@ -328,11 +328,11 @@ test("eval catalog covers every content-aware triage scenario", () => {
   assert.match(skillDoc, /Review[\s\n]+medium items` from the report/);
   assert.match(
     skillDoc,
-    /run read-only `revalidate` to produce the inert guarded[\s\n]+action plan[\s\S]*show its exact commands/i,
+    /group selected carriers by mutation class[\s\S]*run read-only[\s\n]+`revalidate`[\s\S]*inert guarded[\s\n]+action plan[\s\S]*show its exact commands/i,
   );
   assert.match(
     skillDoc,
-    /Immediately after each approval, revalidate again[\s\S]*remain identical and stable/i,
+    /Immediately after each approval[\s\S]*`planId`[\s\S]*`approvalRevalidated` is true[\s\S]*remain identical/i,
   );
   assert.match(skillDoc, /Mechanically proven cleanup does not require semantic content review/);
   assert.match(skillDoc, /Review active work only when requested/);
@@ -349,7 +349,7 @@ test("eval catalog covers every content-aware triage scenario", () => {
   assert.match(skillDoc, /Returning a prose-only analysis[\s\n]+is incomplete/);
   assert.match(
     skillDoc,
-    /request final approval for one mutation class at a time\.[\s\S]*Immediately[\s\n]+after each approval, revalidate/i,
+    /request final approval for one mutation class at a time\.[\s\S]*Immediately after each approval[\s\S]*revalidate the remote\/default\/OID baseline again/i,
   );
   assert.match(skillDoc, /git-tidy-<generatedAt-compact>-<runId-first-12>\.json/);
   assert.match(skillDoc, /Never overwrite a prior run/);

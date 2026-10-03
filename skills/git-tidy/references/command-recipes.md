@@ -68,6 +68,8 @@ node scripts/triage.mjs analyze [scope] --depth proof
 node scripts/triage.mjs analyze [scope] --depth review
 node scripts/triage.mjs analyze [scope] --depth <metadata|proof|review> \
   [--include-ignored] [--dry-run]
+node scripts/verify-remote.mjs
+node scripts/triage.mjs analyze-verified [scope] --depth <metadata|proof|review>
 node scripts/triage.mjs revalidate
 node scripts/apply-review.mjs
 ```
@@ -81,19 +83,33 @@ counts; a separate approved workflow must perform any content read or hash.
 scope or options into shell source. `analyze` emits a closed result with
 `operation: "analyze"` and `actionPlan: null`.
 
+Pass `{"remoteUrl":"<exact-approved-url>"}` to `verify-remote` over stdin.
+Pass its closed result as `{"remoteBaseline":<result>}` to `analyze-verified`.
+The verifier uses a disposable bare repository, explicit `--no-prune`, disabled
+hooks and credential helpers, and no target-repository configuration.
+
 For `revalidate`, pass exactly one bounded UTF-8 JSON object over stdin:
 
 ```text
 {
-  "result": <prior closed analyze 1.1.0 result>,
-  "selectedCarrierIds": ["<stable-carrier-id>", "..."]
+  "result": <prior closed analyze 1.2.0 verified-mode result>,
+  "selectedCarrierIds": ["<stable-carrier-id>", "..."],
+  "approvalClass": "<one-mutation-class>",
+  "approvedPlan": null | {
+    "planId": "<displayed-plan-id>",
+    "approvalClass": "<same-mutation-class>"
+  },
+  "remoteUrl": "<exact-approved-url>"
 }
 ```
 
 Do not construct stdin with shell quoting or a pipeline. `selectedCarrierIds`
-must be a nonempty unique array of IDs from the prior result. A stable
-revalidation may emit an inert guarded plan with `authorized: false`; any
-drift emits `actionPlan: null`. Neither result authorizes or executes a command.
+must be a nonempty unique array of IDs from one mutation class in the prior
+result. A stable preview emits an inert guarded plan with `authorized: false`
+and `approvalRevalidated: false`. Immediately after approval, pass the exact
+displayed plan identity. Only an identical fresh result returns
+`approvalRevalidated: true`. Any drift emits `actionPlan: null`. No result
+authorizes or executes a command.
 
 The review adapter accepts no arguments. Pass exactly
 `{"result":<closed-analyze-result>,"review":<strict-review>}` on UTF-8 stdin

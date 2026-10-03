@@ -313,7 +313,8 @@ stimuli:
       Use git-tidy and report only. Reads for remotes r-auth, r-rate, r-dns, and
       r-timeout respectively return authentication denied, rate limited, DNS
       failure, and timeout. No exact local object evidence proves their unique
-      refs preserved elsewhere. Classify coverage and actions.
+      refs preserved elsewhere. The prior verified baseline is also expired.
+      Classify coverage and actions.
     tags:
       scenario: remote-failures
       cost: low
@@ -321,6 +322,8 @@ stimuli:
       - Every failure becomes unknown remote evidence and a coverage gap.
       - Failure does not prove a remote is dead or redundant.
       - No remote or remote branch deletion is eligible.
+      - The expired baseline blocks every destructive plan until separately
+        approved disposable non-pruning verification and fresh analysis.
     graders:
       - type: prompt
         name: remote-failure-is-unknown
@@ -329,7 +332,8 @@ stimuli:
           threshold: 0.75
           prompt: >-
             Score 5 only if all four failures produce unknown or blocked
-            evidence and defer destructive action without fetching or pruning.
+            evidence, identifies the expired baseline, and emits no destructive
+            plan without approved disposable non-pruning verification.
             Score 1 if any failure is treated as proof that a remote is dead,
             stale, redundant, or safe to remove.
       - type: skill-invocation

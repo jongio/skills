@@ -11,7 +11,7 @@ owner: "@jongio"
 
 ## Status and scope
 
-This document freezes contract version `1.1.0`. It governs content-aware
+This document freezes contract version `1.2.0`. It governs content-aware
 triage of stashes, local and remote branches, and all registered worktrees.
 Tags, artifacts, ignored-but-tracked files, large blobs, remotes, and
 maintenance retain their existing scopes but must obey the mutation and
@@ -74,13 +74,15 @@ explicit compatibility mode, and `review` remains opt-in.
 
 ## Result schema
 
-The analyzer emits one UTF-8 JSON object. Contract version `1.1.0` has this
+The analyzer emits one UTF-8 JSON object. Contract version `1.2.0` has this
 closed top-level shape:
 
 ```text
 {
-  "schemaVersion": "1.1.0",
+  "schemaVersion": "1.2.0",
   "operation": "analyze" | "revalidate",
+  "executionMode": "offline" | "verified",
+  "remoteBaseline": RemoteBaseline,
   "runId": string,
   "generatedAt": RFC-3339 string,
   "repository": RepositoryIdentity,
@@ -102,8 +104,8 @@ a major version. Field order is not significant; array order is stable and
 documented below.
 
 `runId` is the lowercase hexadecimal SHA-256 digest of the UTF-8 canonical JSON
-serialization of exactly `schemaVersion`, `repository`, `request`, and the
-observed mechanical identities. Canonical JSON sorts object keys
+serialization of exactly `schemaVersion`, `executionMode`, `remoteBaseline`,
+`repository`, `request`, and the observed mechanical identities. Canonical JSON sorts object keys
 lexicographically, uses the stable array ordering defined by this contract, and
 contains no insignificant whitespace. Observed mechanical identities include
 carrier identities and OIDs, change-unit raw paths/modes/OIDs, worktree status
@@ -145,6 +147,16 @@ EncodedPath = { "rawBase64": string, "display": string }
 RemoteIdentity = {
   "id": string, "host": string, "repositoryId": string | null,
   "displayUrl": string, "transport": "file" | "https" | "ssh"
+}
+RemoteBaseline = {
+  "state": "offline" | "failed" | "verified",
+  "remoteId": string | null,
+  "defaultRef": string | null,
+  "defaultOid": string | null,
+  "heads": { "ref": string, "oid": string }[],
+  "verifiedAt": RFC-3339 string | null,
+  "validUntil": RFC-3339 string | null,
+  "failureCode": string | null
 }
 RepositoryIdentity = {
   "objectFormat": "sha1" | "sha256",
@@ -730,8 +742,10 @@ return:
 
 ```text
 ActionPlan = {
-  "basedOnRunId": string, "selectedCarrierIds": string[],
+  "basedOnRunId": string, "planId": string, "approvalClass": string,
+  "selectedCarrierIds": string[],
   "revalidatedAt": RFC-3339 string, "authorized": false,
+  "approvalRevalidated": boolean,
   "steps": [{
     "id": string, "carrierId": string, "action": <carrier action>,
     "executable": "git" | "gh" | "filesystem",
@@ -773,13 +787,13 @@ head. Commits added after that head remain unique work.
 
 ### Default branch identity
 
-Branch collection resolves the default exclusively from the locally observed
-`refs/remotes/origin/HEAD` symbolic ref using
-`git symbolic-ref --quiet refs/remotes/origin/HEAD`. The LF-terminated target
-must be valid UTF-8, remain below `refs/remotes/origin/`, name a branch other
-than `HEAD`, and match an exact inventoried remote target object. Its suffix is
-mapped to `refs/heads/<name>` only for local default-branch protection. Its
-remote target OID is the comparison base.
+Verified mode resolves the default exclusively from the approved remote
+advertisement. The advertised `HEAD` symref must name an exact advertised
+`refs/heads/*` OID, and the full advertised head set must match local
+`refs/remotes/origin/*` exactly. Its suffix maps to `refs/heads/<name>` only
+for local default-branch protection. Its advertised OID is the comparison
+base. Offline mode may observe `refs/remotes/origin/HEAD` for advisory
+classification, but that observation cannot authorize a destructive plan.
 
 No `main`, `master`, other-remote, local-branch, or display-name fallback is
 allowed. Missing, malformed, non-origin, non-UTF-8, or dangling identity adds
@@ -969,7 +983,7 @@ shape:
 
 ```text
 ReviewApplicationInput = {
-  "result": <closed analyze 1.1.0 result with actionPlan: null>,
+  "result": <closed analyze 1.2.0 result with actionPlan: null>,
   "review": <strict review object>
 }
 ReviewDiagnostic =
@@ -1019,10 +1033,12 @@ unchanged. They do not fetch, prune, checkout, switch, apply, pop, clean,
 reset, create or update refs, rebase, merge, push, add/remove worktrees,
 expire reflogs, run garbage collection, or invoke GitHub writes.
 
-Remote refresh or acquisition is never an analyzer action. A separately
-approved external workflow may refresh or acquire remote evidence, after which
-the analyzer must start a new run; no prior result or approval survives that
-state change. Ignored-content reading and an isolated merge-simulation helper
+Remote verification is a separate approved action. `verify-remote.mjs` uses a
+disposable bare repository, an exact caller-supplied URL, `--no-prune`, disabled
+hooks and credential helpers, and an isolated environment with no system,
+global, or target-repository configuration. Its closed baseline expires after
+five minutes. Offline, failed, unknown, expired, or changed baselines emit
+explicit drift and no action plan. Ignored-content reading and an isolated merge-simulation helper
 are optional orchestration actions outside the analyzer boundary. Each requires
 exact, separate approval and an identified location before any write. The
 simulation helper must use an isolated temporary Git directory and isolated
@@ -1033,8 +1049,10 @@ guaranteed, authoritative simulation is unavailable and the outcome is
 
 ## Revalidation and approval
 
-`revalidate` receives a prior `1.x` result and selected carrier IDs through
-stdin. It re-reads every selected and witness identity, local and remote OID,
+`revalidate` receives a prior `1.2.0` verified-mode result, one mutation class,
+selected carrier IDs, the exact approved remote URL, and optional approved
+`planId` through stdin. It freshly verifies the remote/default/head OID
+baseline, then re-reads every selected and witness identity, local and remote OID,
 stash selector-to-OID mapping, worktree status fingerprint, protection state,
 pull request state, prerequisite result, and last-copy proof.
 
@@ -1109,7 +1127,7 @@ No phase may loosen the last-copy invariant or approval separation.
 
 - Runtime impact is limited to the `git-tidy` analyzer, review adapter, and
   their Git and GitHub read boundaries.
-- Contract impact covers schema `1.1.0`, skill orchestration, focused
+- Contract impact covers schema `1.2.0`, skill orchestration, focused
   references, deterministic tests, capability evals, and catalog copy.
 - Repository quality impact covers the shared Vally dependency, lint workflow,
   and catalog accessibility surfaces exercised by this change.

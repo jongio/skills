@@ -108,8 +108,19 @@ function workItem(id = "work-1", overrides = {}) {
 
 function mechanicalResult(items = [workItem()]) {
   return {
-    schemaVersion: "1.1.0",
+    schemaVersion: "1.2.0",
     operation: "analyze",
+    executionMode: "offline",
+    remoteBaseline: {
+      state: "offline",
+      remoteId: null,
+      defaultRef: null,
+      defaultOid: null,
+      heads: [],
+      verifiedAt: null,
+      validUntil: null,
+      failureCode: "remote-verification-not-requested",
+    },
     runId: stableId("run", { fixture: true }),
     generatedAt: "2026-08-28T00:00:00Z",
     repository: {

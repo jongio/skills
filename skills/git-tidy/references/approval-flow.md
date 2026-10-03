@@ -9,9 +9,11 @@ effect; it does not carry across drift or action classes.
 1. Preflight Node.js `>=22`. If unavailable, failed, malformed, or older, stop
    at metadata-only orchestration and offer no work-bearing destructive action.
 2. Run read-only inventory and proof.
-3. For remote refresh or acquisition, request separate approval and hand off
-   to an external workflow. The analyzer never performs it. Start a fresh
-   analysis after that workflow returns. Optionally request separate approval
+3. For remote verification, request separate approval for the exact URL and run
+   `verify-remote.mjs`. It uses a disposable bare repository, `--no-prune`,
+   disabled hooks and credential helpers, and an isolated environment that
+   ignores repository-controlled Git configuration. Feed the closed baseline
+   to `analyze-verified`. Optionally request separate approval
    for ignored-content review or isolated merge simulation.
 4. Present the Git Clean style categorized report inside the
    `ask_user.question` field with numbered **Safe to Remove**, **Needs Review**,
@@ -22,15 +24,17 @@ effect; it does not carry across drift or action classes.
    items, keep everything, or show full evidence. Record the corresponding
    internal outcomes without exposing analyzer vocabulary by default.
 6. Build explicit per-carrier actions without inferring any action from the
-   outcome, including `delete`; then run read-only `revalidate` to validate the
-   selected set's last-copy witnesses and produce an inert guarded plan.
+   outcome, including `delete`; group them by mutation class; then run read-only
+   `revalidate` for one class to validate the selected set's last-copy witnesses
+   and produce an inert guarded plan.
 7. On drift, emit no plan and return to fresh analysis.
 8. Without adding another per-carrier decision round, show the stable plan's
    exact argv, refs, paths, expected OIDs, ordering, effects, recovery, and
    approval class.
 9. Obtain approval for that action class only.
-10. Immediately run read-only `revalidate` again. Continue only when the
-    relevant plan steps remain identical and stable.
+10. Immediately run read-only `revalidate` again with the approved `planId`.
+    Continue only when the remote baseline is freshly verified,
+    `approvalRevalidated` is true, and the relevant steps remain identical.
 11. Execute only the revalidated, approved action through its established
     workflow; report each result.
 
@@ -66,9 +70,8 @@ for recovery does not imply deletion. Refresh does not imply cleanup. PR
 creation and PR merge always use the established GitHub-write flow, and merge
 requires fresh per-PR approval.
 
-Remote refresh approval authorizes only the external refresh workflow. It never
-authorizes the analyzer to fetch or prune, and the refreshed state requires a
-new analyzer run and new downstream approvals.
+Remote verification approval authorizes only the disposable non-pruning
+verification workflow. It never authorizes a target-repository fetch or prune.
 
 Force deletion, dirty worktree force-removal, or explicit discard of unique or
 unmerged work requires an additional warning and approval. Mechanical review
@@ -100,8 +103,9 @@ destructive action.
 
 ## Revalidation
 
-Pass the prior exact `1.1.0` result and selected carrier IDs to `revalidate` through
-stdin. Re-read:
+Pass the prior exact `1.2.0` verified-mode result, one mutation class, selected
+carrier IDs, the exact approved remote URL, and optional approved plan identity
+to `revalidate` through stdin. Re-read:
 
 - repository and remote identity;
 - selected and witness OIDs and change-unit identity;
@@ -113,9 +117,11 @@ stdin. Re-read:
 - prerequisite output; and
 - the complete selected-set witness proof.
 
-A stable result returns an inert guarded plan with exact argument arrays,
-expected values, witnesses, dependencies, and approval classes. It never
-fetches or executes.
+A stable result returns an inert guarded plan with one approval class, `planId`,
+exact argument arrays, expected values, witnesses, and dependencies. It never
+executes. Before approval, `approvalRevalidated` is false. The immediate
+post-approval call must return the same `planId` and
+`approvalRevalidated: true`.
 
 Any changed, missing, newly protected, partial, blocked, or unavailable value
 is drift. Emit no plan, name each changed field without exposing secrets, and
