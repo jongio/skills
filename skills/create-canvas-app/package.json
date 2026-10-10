@@ -10,7 +10,7 @@
     "eval": "vally eval --eval-spec evals/create-canvas-app/eval.yaml --skill-dir ."
   },
   "devDependencies": {
-    "@microsoft/vally": "0.17.0",
+    "@microsoft/vally": "0.18.0",
     "@microsoft/vally-cli": "0.17.0"
   },
   "allowScripts": {
