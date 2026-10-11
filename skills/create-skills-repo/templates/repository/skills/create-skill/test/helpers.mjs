@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { VALLY_VERSION } from "../scripts/render.mjs";
 
 export function write(path, content) {
   mkdirSync(join(path, ".."), { recursive: true });
@@ -17,11 +18,11 @@ export function minimalVallyLock() {
       "": {
         name: "vally-tool",
         version: "1.0.0",
-        devDependencies: { "@microsoft/vally-cli": "0.17.0" },
+        devDependencies: { "@microsoft/vally-cli": VALLY_VERSION },
       },
       "node_modules/@microsoft/vally-cli": {
-        version: "0.17.0",
-        resolved: "https://registry.npmjs.org/@microsoft/vally-cli/-/vally-cli-0.17.0.tgz",
+        version: VALLY_VERSION,
+        resolved: `https://registry.npmjs.org/@microsoft/vally-cli/-/vally-cli-${VALLY_VERSION}.tgz`,
         integrity: "sha512-test",
         dev: true,
       },

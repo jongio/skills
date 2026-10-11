@@ -55,7 +55,7 @@ stimuli:
     rubric:
       - The generated content names hello-cli and accurately describes it as a CLI tool.
       - The site content is specific to the target repository rather than template placeholder text.
-    environment:
+    agent_environment:
       files:
         - src: fixtures/astro-cli/README.md
           dest: README.md
@@ -116,7 +116,7 @@ stimuli:
     rubric:
       - The generated content names math-utils and describes its add, multiply, and clamp functions.
       - The site contains repository-specific content rather than generic template text.
-    environment:
+    agent_environment:
       files:
         - src: fixtures/static-library/README.md
           dest: README.md
@@ -165,7 +165,7 @@ stimuli:
       - The generated site accurately describes the offline cache proposal, including read-only behavior, the 24-hour maximum age, and the unresolved storage-location decision.
       - The site uses a free-form specification structure and does not retain Project Northstar sample content.
       - The Spectator review configuration and GitHub Pages base path remain intact.
-    environment:
+    agent_environment:
       files:
         - src: fixtures/spectator-repo/README.md
           dest: README.md
@@ -297,7 +297,7 @@ stimuli:
       - The agent infers that Spectator is the right template for a reviewable technical specification.
       - The generated site accurately reflects the repository proposal notes and keeps content organization free-form.
       - Page, selected-text, and GitHub edit review affordances remain configured.
-    environment:
+    agent_environment:
       files:
         - src: fixtures/spectator-repo/README.md
           dest: README.md
@@ -406,7 +406,7 @@ stimuli:
       - The agent uses skills-catalog and safe staging instead of applying directly to the target.
       - The staged project base is /skill-hub/ and no target-owned file is overwritten.
       - The agent treats the JSON result as the composition handoff.
-    environment:
+    agent_environment:
       files:
         - src: fixtures/skills-repo/README.md
           dest: README.md

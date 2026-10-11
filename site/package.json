@@ -18,6 +18,15 @@
     "astro": "7.3.5",
     "preact": "^10.29.8"
   },
+  "overrides": {
+    "astro": {
+      "http-cache-semantics": "4.3.0",
+      "sharp": "0.35.5"
+    },
+    "unifont": {
+      "undici": "8.10.2"
+    }
+  },
   "allowScripts": {
     "esbuild@0.28.1": true
   }

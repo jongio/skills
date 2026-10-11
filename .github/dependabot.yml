@@ -7,61 +7,85 @@ updates:
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /site
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /.github/tools/vally
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/create-canvas-app
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/create-gh-pages-site
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/create-skill
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/create-skills-repo
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/naming-is-hard
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/dns-doctor
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/deps-doctor
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/eli5
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/git-tidy
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/repo-ready
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2

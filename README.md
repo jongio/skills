@@ -136,6 +136,35 @@ gemini-extension.json               Gemini CLI extension
 skills/                             Canonical Agent Skills
 ```
 
+## Dependency maintenance
+
+Active development tooling uses Vally **0.18.0**, pinned in the shared CI tools
+and each skill's manifest and lockfile. The active `create-skill` generator uses
+the same pin. The `create-skills-repo` bundled authoring snapshot and its shared
+Vally tooling also use 0.18.0 to preserve byte-for-byte authoring parity and
+generated-skill compatibility. Intentional evaluation fixtures and unrelated
+template dependencies retain their independent version snapshots.
+
+Each independent npm root enforces `min-release-age=7` in its `.npmrc`;
+Dependabot's npm entries use a seven-day cooldown. Use a supported npm release
+that implements this setting. The Vally 0.18.0 migration was explicitly approved
+as a one-time exception; no permanent release-age exclusions are configured.
+
+Vally 0.18's preferred `agent_environment` key replaces the deprecated
+`environment` alias in active eval specs. Fixture staging, scoring thresholds,
+and CI's trial-level safety guards remain unchanged.
+
+The site temporarily pins three compatible transitive security fixes through
+scoped overrides: `astro`'s `http-cache-semantics` 4.3.0
+([GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp)) and
+`sharp` 0.35.5
+([GHSA-wq5f-xc86-pv6w](https://github.com/advisories/GHSA-wq5f-xc86-pv6w)),
+and `unifont`'s `undici` 8.10.2
+([GHSA-w293-vg96-wgc3](https://github.com/advisories/GHSA-w293-vg96-wgc3)
+and the related undici advisories). Remove each override when a parent upgrade's
+resolved graph supplies a compatible patched version, then regenerate and audit
+the lockfile. These overrides do not authorize unrelated bot-owned updates.
+
 ## Layout
 
 ```text
