@@ -17,6 +17,12 @@ import {
 import { buildWorkItems } from "./lib/triage-policy.mjs";
 import { validateMechanicalResult } from "./lib/result-schema.mjs";
 import {
+  offlineRemoteBaseline,
+  remoteBaselineFresh,
+  verifyRemoteBaseline,
+} from "./lib/remote-verification.mjs";
+import {
+  actionPlanId,
   allCarriers,
   carrierSnapshot,
   compare,
@@ -57,7 +63,11 @@ export function parseArguments(argv) {
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "analyze" || arg === "revalidate") {
+    if (
+      arg === "analyze" ||
+      arg === "analyze-verified" ||
+      arg === "revalidate"
+    ) {
       if (operationSeen || index !== 0) {
         throw new TypeError("operation must appear once and first");
       }
@@ -140,6 +150,8 @@ function createAnalyzeResult(evidence, workItems, runId) {
   return {
     schemaVersion: SCHEMA_VERSION,
     operation: "analyze",
+    executionMode: evidence.executionMode,
+    remoteBaseline: evidence.remoteBaseline,
     runId,
     generatedAt: new Date().toISOString(),
     repository: evidence.repository,
@@ -161,10 +173,28 @@ export async function analyzeRepository(repoPath, options = {}) {
   });
   const requestedDepth = options.depth ?? "proof";
   const depth = nodeCapability.available ? requestedDepth : "metadata";
+  const executionMode = options.executionMode ?? "offline";
+  if (!["offline", "verified"].includes(executionMode)) {
+    throw new TypeError("executionMode must be offline or verified");
+  }
+  const remoteBaseline = executionMode === "verified"
+    ? options.remoteBaseline
+    : offlineRemoteBaseline();
+  if (
+    executionMode === "verified" &&
+    !remoteBaselineFresh(remoteBaseline, options.now)
+  ) {
+    throw new TypeError(
+      "verified analysis requires a fresh verified remote baseline",
+    );
+  }
   const evidence = await collectEvidence(repoPath, {
     ...options,
     depth,
+    remoteBaseline,
   });
+  evidence.executionMode = executionMode;
+  evidence.remoteBaseline = remoteBaseline;
   addNodeCapability(evidence, nodeCapability);
 
   const workItems = buildWorkItems(evidence);
@@ -174,6 +204,8 @@ export async function analyzeRepository(repoPath, options = {}) {
     allCarriers(workItems),
     evidence.changeUnits,
     evidence.inventory,
+    executionMode,
+    remoteBaseline,
   );
   const result = createAnalyzeResult(evidence, workItems, runId);
   if (depth === "review") {
@@ -259,6 +291,32 @@ function compareRepository(prior, current, driftRecords) {
       drift("repository", "identity", prior, current),
     );
   }
+
+}
+
+function baselineIdentity(baseline) {
+  return {
+    state: baseline.state,
+    remoteId: baseline.remoteId,
+    defaultRef: baseline.defaultRef,
+    defaultOid: baseline.defaultOid,
+    heads: baseline.heads,
+  };
+}
+
+function compareRemoteBaseline(prior, current, driftRecords) {
+  if (
+    canonicalJson(baselineIdentity(prior)) !==
+    canonicalJson(baselineIdentity(current))
+  ) {
+    driftRecords.push(drift(
+      "remote-baseline",
+      "identity",
+      baselineIdentity(prior),
+      baselineIdentity(current),
+      "remote-baseline-drift",
+    ));
+  }
 }
 
 function compareCarriers(
@@ -342,12 +400,63 @@ export async function revalidateRepository(
   validatePrior(prior, selectedCarrierIds);
   const expectedPriorDigest = digestResult(prior);
   const priorDigestValid = prior.runId === expectedPriorDigest;
+  const driftRecords = [];
+  if (
+    prior.executionMode !== "verified" ||
+    !remoteBaselineFresh(prior.remoteBaseline, options.now)
+  ) {
+    driftRecords.push(drift(
+      "remote-baseline",
+      "state",
+      "fresh-verified",
+      prior.executionMode === "verified"
+        ? "stale"
+        : prior.executionMode,
+      "remote-baseline-not-fresh",
+    ));
+  }
+  let refreshedBaseline = prior.remoteBaseline;
+  if (driftRecords.length === 0) {
+    if (typeof options.verifyRemote === "function") {
+      refreshedBaseline = await options.verifyRemote();
+    } else if (typeof options.remoteUrl === "string") {
+      refreshedBaseline = await verifyRemoteBaseline(
+        options.remoteUrl,
+        options,
+      );
+    } else {
+      driftRecords.push(drift(
+        "remote-baseline",
+        "verification",
+        "immediate-refresh",
+        "missing",
+        "remote-revalidation-missing",
+      ));
+    }
+  }
+  if (!remoteBaselineFresh(refreshedBaseline, options.now)) {
+    driftRecords.push(drift(
+      "remote-baseline",
+      "state",
+      "verified",
+      refreshedBaseline?.state ?? null,
+      "remote-revalidation-failed",
+    ));
+  }
+  const refreshedBaselineFresh = remoteBaselineFresh(
+    refreshedBaseline,
+    options.now,
+  );
   const current = await analyzeRepository(repoPath, {
+    ...options,
     scope: prior.request.scope,
     depth: prior.request.depth,
     includeIgnored: prior.request.includeIgnored,
     limits: prior.request.limits,
-    ...options,
+    executionMode: refreshedBaselineFresh
+      ? "verified"
+      : "offline",
+    remoteBaseline: refreshedBaseline,
   });
   const priorCarriers = new Map(
     allCarriers(prior.workItems).map((carrier) => [carrier.id, carrier]),
@@ -361,7 +470,6 @@ export async function revalidateRepository(
     selected,
     priorDigestValid,
   );
-  const driftRecords = [];
   if (!priorDigestValid) {
     driftRecords.push(drift(
       "analysis",
@@ -374,6 +482,11 @@ export async function revalidateRepository(
   compareRepository(
     prior.repository,
     current.repository,
+    driftRecords,
+  );
+  compareRemoteBaseline(
+    prior.remoteBaseline,
+    current.remoteBaseline,
     driftRecords,
   );
   compareCarriers(
@@ -389,15 +502,73 @@ export async function revalidateRepository(
       compare(left.field, right.field),
   );
 
+  const steps = driftRecords.length === 0
+    ? selected.map(
+      (id) => planStep(currentCarriers.get(id)),
+    ).sort(sortSteps)
+    : [];
+  const approvalClasses = new Set(
+    steps.map(({ approvalClass }) => approvalClass),
+  );
+  const approvalClass = options.approvalClass ??
+    (approvalClasses.size === 1 ? steps[0]?.approvalClass : null);
+  if (
+    driftRecords.length === 0 &&
+    (
+      approvalClass === null ||
+      approvalClasses.size !== 1 ||
+      !approvalClasses.has(approvalClass)
+    )
+  ) {
+    driftRecords.push(drift(
+      "selection",
+      "approvalClass",
+      approvalClass,
+      [...approvalClasses].sort(compare),
+      "mutation-class-mixed",
+    ));
+  }
+  const planIdentity = driftRecords.length === 0
+    ? actionPlanId({
+    basedOnRunId: prior.runId,
+    approvalClass,
+    selectedCarrierIds: selected,
+    steps,
+    })
+    : null;
+  const approvedPlan = options.approvedPlan ?? null;
+  if (
+    driftRecords.length === 0 &&
+    approvedPlan !== null &&
+    (
+      !exactKeys(approvedPlan, ["planId", "approvalClass"]) ||
+      approvedPlan.planId !== planIdentity ||
+      approvedPlan.approvalClass !== approvalClass
+    )
+  ) {
+    driftRecords.push(drift(
+      "approval",
+      "planId",
+      planIdentity,
+      approvedPlan?.planId,
+      "approval-plan-drift",
+    ));
+  }
+  driftRecords.sort(
+    (left, right) =>
+      compare(left.subjectId, right.subjectId) ||
+      compare(left.field, right.field),
+  );
   const actionPlan = driftRecords.length === 0
     ? {
       basedOnRunId: prior.runId,
+      planId: planIdentity,
+      approvalClass,
       selectedCarrierIds: selected,
       revalidatedAt: new Date().toISOString(),
       authorized: false,
-      steps: selected.map(
-        (id) => planStep(currentCarriers.get(id)),
-      ).sort(sortSteps),
+      approvalRevalidated: approvedPlan !== null,
+      steps,
     }
     : null;
   return {
@@ -434,17 +605,40 @@ export async function main(
   let result;
   if (parsed.operation === "analyze") {
     result = await analyzeRepository(cwd, parsed);
+  } else if (parsed.operation === "analyze-verified") {
+    const input = await readBoundedStdin();
+    if (!exactKeys(input, ["remoteBaseline"])) {
+      throw new TypeError(
+        "analyze-verified stdin must contain only remoteBaseline",
+      );
+    }
+    result = await analyzeRepository(cwd, {
+      ...parsed,
+      executionMode: "verified",
+      remoteBaseline: input.remoteBaseline,
+    });
   } else {
     const input = await readBoundedStdin();
-    if (!exactKeys(input, ["result", "selectedCarrierIds"])) {
+    if (!exactKeys(input, [
+      "result",
+      "selectedCarrierIds",
+      "approvalClass",
+      "approvedPlan",
+      "remoteUrl",
+    ])) {
       throw new TypeError(
-        "revalidate stdin must contain only result and selectedCarrierIds",
+        "revalidate stdin has an invalid closed shape",
       );
     }
     result = await revalidateRepository(
       cwd,
       input.result,
       input.selectedCarrierIds,
+      {
+        approvalClass: input.approvalClass,
+        approvedPlan: input.approvedPlan,
+        remoteUrl: input.remoteUrl,
+      },
     );
   }
   process.stdout.write(`${JSON.stringify(result)}\n`);

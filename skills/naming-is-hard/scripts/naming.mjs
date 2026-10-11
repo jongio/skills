@@ -99,9 +99,14 @@ export function runAdd(opts) {
   const dir = requireDir(opts);
   const items = opts.items || parseJson(opts.json, null) || readStdinJson();
   if (!Array.isArray(items)) throw new Error('add: expected a JSON array of {name,strategy?,tags?}');
-  const { state, added } = store.addCandidates(store.load(dir), items);
+  const { state, added, blocked } = store.addCandidates(store.load(dir), items);
   store.save(dir, state);
-  return { ok: true, added: added.map((c) => ({ id: c.id, name: c.name })), total: state.candidates.length };
+  return {
+    ok: true,
+    added: added.map((c) => ({ id: c.id, name: c.name })),
+    blocked,
+    total: state.candidates.length,
+  };
 }
 
 export function runNext(opts) {

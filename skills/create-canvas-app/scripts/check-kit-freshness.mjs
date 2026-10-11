@@ -1,8 +1,8 @@
 // scripts/check-kit-freshness.mjs — OFFLINE parity/freshness gate for vendored
 // kits. Point it at a directory that holds one or more extensions (or a single
-// extension / canvas-kit dir) and it fails if any vendored canvas-kit/ has
-// drifted from the canonical kit/ — by file set, by file contents, or by the
-// recorded version.
+// extension / canvas-kit dir) and it fails if any full or feature-scoped
+// canvas-kit/ has drifted by file set, file contents, selected icons, manifest,
+// or recorded version.
 //
 // Intended for CI: a consumer repo vendors the kit, then runs
 //   node scripts/check-kit-freshness.mjs .github/extensions
@@ -18,6 +18,12 @@ import { join, resolve, isAbsolute, basename, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { KIT_VERSION } from "../kit/version.mjs";
 import { VERSION_MARKER } from "./sync-kit.mjs";
+import {
+  FEATURE_MANIFEST,
+  readFeatureManifest,
+  renderFeatureManifest,
+  renderIconSubset,
+} from "./kit-features.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const KIT = join(ROOT, "kit");
@@ -67,8 +73,16 @@ async function findVendoredKits(root) {
 export async function checkOne(canvasKitDir, kitDir = KIT) {
   const problems = [];
 
-  const kitFiles = await relFiles(kitDir);
-  const vendoredFiles = (await relFiles(canvasKitDir)).filter((f) => f !== VERSION_MARKER);
+  let manifest = null;
+  try {
+    manifest = await readFeatureManifest(canvasKitDir);
+  } catch (error) {
+    problems.push(error.message);
+  }
+  const kitFiles = manifest ? manifest.files : await relFiles(kitDir);
+  const vendoredFiles = (await relFiles(canvasKitDir)).filter(
+    (f) => f !== VERSION_MARKER && f !== FEATURE_MANIFEST
+  );
 
   const kitSet = new Set(kitFiles);
   const vendoredSet = new Set(vendoredFiles);
@@ -78,14 +92,21 @@ export async function checkOne(canvasKitDir, kitDir = KIT) {
       problems.push(`missing file: ${f}`);
       continue;
     }
-    const [a, b] = await Promise.all([
-      readFile(join(kitDir, f)),
-      readFile(join(canvasKitDir, f)),
-    ]);
-    if (!a.equals(b)) problems.push(`content differs: ${f}`);
+    const expected =
+      manifest && f === "vendor/lucide.mjs"
+        ? Buffer.from(renderIconSubset(manifest.icons))
+        : await readFile(join(kitDir, f));
+    const actual = await readFile(join(canvasKitDir, f));
+    if (!expected.equals(actual)) problems.push(`content differs: ${f}`);
   }
   for (const f of vendoredFiles) {
     if (!kitSet.has(f)) problems.push(`unexpected extra file: ${f}`);
+  }
+  if (manifest) {
+    const actualManifest = await readFile(join(canvasKitDir, FEATURE_MANIFEST), "utf8");
+    if (actualManifest !== renderFeatureManifest(manifest)) {
+      problems.push(`content differs: ${FEATURE_MANIFEST}`);
+    }
   }
 
   // Version marker — distinguish a genuinely absent file from a corrupt one.

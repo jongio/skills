@@ -42,8 +42,37 @@ function protectedByPolicy(refBytes) {
     /^refs\/heads\/(?:production|staging|develop)$/u.test(ref);
 }
 
-async function resolveDefaultBranch(boundary, allRefs, context) {
+async function resolveDefaultBranch(
+  boundary,
+  allRefs,
+  context,
+  remoteBaseline,
+) {
   try {
+    if (remoteBaseline?.state === "verified") {
+      const branchName = remoteBaseline.defaultRef.slice(
+        "refs/heads/".length,
+      );
+      const rawTarget = Buffer.from(
+        `refs/remotes/origin/${branchName}`,
+        "utf8",
+      );
+      const remote = allRefs.find((entry) =>
+        entry.refRaw.equals(rawTarget) &&
+        entry.oid === remoteBaseline.defaultOid);
+      if (!remote) {
+        throw new TypeError(
+          "verified default branch does not match local remote-tracking state",
+        );
+      }
+      return {
+        localRef: Buffer.from(`refs/heads/${branchName}`, "utf8"),
+        primary: remote,
+        reason: null,
+        resolved: true,
+        verified: true,
+      };
+    }
     const result = await boundary.run([
       "symbolic-ref",
       "--quiet",
@@ -83,6 +112,7 @@ async function resolveDefaultBranch(boundary, allRefs, context) {
       primary: remote,
       reason: null,
       resolved: true,
+      verified: false,
     };
   } catch (error) {
     return {
@@ -93,11 +123,17 @@ async function resolveDefaultBranch(boundary, allRefs, context) {
         error.message ??
         "default branch identity unavailable",
       resolved: false,
+      verified: false,
     };
   }
 }
 
-export async function collectBranches(boundary, request, context) {
+export async function collectBranches(
+  boundary,
+  request,
+  context,
+  remoteBaseline = null,
+) {
   const result = await boundary.run([
     "for-each-ref",
     "--sort=refname",
@@ -118,6 +154,24 @@ export async function collectBranches(boundary, request, context) {
 
   const local = refs.filter(isLocal);
   const remote = refs.filter(isRemote);
+  const verifiedHeads = remoteBaseline?.state === "verified"
+    ? new Map(remoteBaseline.heads.map(({ ref, oid }) => [
+      `refs/remotes/origin/${ref.slice("refs/heads/".length)}`,
+      oid,
+    ]))
+    : null;
+  const observedOrigin = new Map(
+    remote
+      .filter(({ refRaw }) =>
+        refRaw.toString("utf8").startsWith("refs/remotes/origin/"))
+      .map((entry) => [entry.refRaw.toString("utf8"), entry.oid]),
+  );
+  const baselineConsistent = verifiedHeads === null || (
+    verifiedHeads.size === observedOrigin.size &&
+    [...verifiedHeads].every(
+      ([ref, oid]) => observedOrigin.get(ref) === oid,
+    )
+  );
   context.counts.localBranches = local.length;
   context.counts.remoteBranches = remote.length;
   context.skipped.localBranches =
@@ -129,6 +183,7 @@ export async function collectBranches(boundary, request, context) {
     boundary,
     allRefs,
     context,
+    remoteBaseline,
   );
   const primary = defaultBranch.primary;
   const carriers = [];
@@ -142,7 +197,7 @@ export async function collectBranches(boundary, request, context) {
       "worktrees",
       "stashes",
     ].includes(request.scope);
-    if (!supportedScope || (request.scope === "remote" && !remoteEntry)) {
+    if (!supportedScope) {
       continue;
     }
 
@@ -192,8 +247,11 @@ export async function collectBranches(boundary, request, context) {
     if (!proof.complete) {
       blockers.push("branch-proof-incomplete");
     }
-    if (remoteEntry) {
+    if (remoteEntry && remoteBaseline?.state !== "verified") {
       blockers.push("remote-state-not-refreshed", "remote-protection-unknown");
+    }
+    if (!baselineConsistent) {
+      blockers.push("remote-baseline-local-drift");
     }
     if (!remoteEntry && !defaultBranch.resolved) {
       blockers.push("default-branch-identity-unknown");
@@ -236,7 +294,7 @@ export async function collectBranches(boundary, request, context) {
     carriers.push(carrier);
   }
 
-  if (remote.length > 0) {
+  if (remote.length > 0 && remoteBaseline?.state !== "verified") {
     const remoteIds = carriers
       .filter(({ type }) => type === "remote-branch")
       .map(({ id }) => id);
@@ -251,6 +309,14 @@ export async function collectBranches(boundary, request, context) {
       "remote-identity-unavailable",
       remoteIds,
       "remote URL and immutable repository identity were not read",
+    );
+  }
+  if (!baselineConsistent) {
+    addGap(
+      context,
+      "remote-baseline-local-drift",
+      carriers.map(({ id }) => id),
+      "local origin remote-tracking refs do not match the verified baseline",
     );
   }
   if (!defaultBranch.resolved) {

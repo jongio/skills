@@ -74,13 +74,17 @@ GitHub handle is checked reliably via the GitHub channel above.)
 
 Three honest layers, framed as a screening signal and never as legal advice:
 
-1. **Famous-marks screen** (`scripts/marks.mjs` + `famous-marks.json`): a curated
-   list of well-known global brands and companies, matched exact, dehyphenated,
+1. **Offline collision screen** (`scripts/marks.mjs` + `famous-marks.json`): a curated
+   list of well-known global brands plus a small set of prominent products and
+   projects, matched exact, dehyphenated,
    whole-word, and one-character-off. An exact / dehyphenated / whole-word hit is a
    confident collision and forces the **Deal Breaker** verdict with zero network (this is
    what reliably catches "you cannot name it Spotify"). A one-character near-miss is a
    soft **caution**, never a Deal Breaker: many distinct real words sit one edit from a
    brand ("Strive" vs "Stripe"), so it only surfaces a note for manual review.
+   The same confident-match rule runs during candidate ingestion, before swipe-card
+   presentation. It cannot be bypassed by deferring domain, GitHub, registry, or
+   social checks. Blocked names are returned with reasons and do not enter card counts.
 2. **Link-outs**: every scorecard includes pre-filled searches for USPTO Trademark
    Search, EUIPO TMview, WIPO Global Brand Database, and OpenCorporates.
 3. **Live web search** (done by the agent, not the engine): a `web_search` per
@@ -88,7 +92,8 @@ Three honest layers, framed as a screening signal and never as legal advice:
    bundled list.
 
 A clean screen means "no obvious collision", never "clear to use". The bundled list
-is data; extend `famous-marks.json` freely.
+is intentionally small, reviewable data; extend `famous-marks.json` only for obvious,
+prominent collisions.
 
 ## The verdict roll-up
 

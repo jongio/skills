@@ -1,7 +1,7 @@
 // scripts/new-canvas.mjs — stamp a new, working canvas extension from the kit.
 //
-// Copies the canonical kit/ into <target>/canvas-kit/ and writes a minimal but
-// fully working canvas plus a per-canvas smoke test. Three templates:
+// Copies each template's required canonical kit files and exact icon subset into
+// <target>/canvas-kit/, then writes a working canvas and per-canvas smoke test.
 //
 //   list (default)  one shared list (add/toggle/remove), Preact + htm, SSE live
 //                   state, durable per-user storage. Edit from there.
@@ -23,9 +23,10 @@
 //   node scripts/new-canvas.mjs market-feed --template data --title "Market Feed" \
 //        --dir .github/extensions/market-feed
 
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { join, resolve, isAbsolute } from "node:path";
 import { syncKit } from "./sync-kit.mjs";
+import { assertSizeBudget } from "./kit-features.mjs";
 
 function parseArgs(argv) {
   const args = { _: [] };
@@ -149,14 +150,14 @@ const README_MD = `# {{titleText}}
 A GitHub Copilot App **canvas extension** generated with the \`create-canvas-app\`
 skill ({{templateLabel}} template). The agent and the user share the same live
 state through the same action handlers; the view renders with Preact + htm and a
-vendored kit — no build step, no \`package.json\`.
+vendored feature-scoped kit. There is no build step or \`package.json\`.
 
 ## Layout
 
 \`\`\`
 extension.mjs   the ONLY file that imports the Copilot SDK (thin adapter)
 canvas.mjs      canvas config: state load/save + action handlers (SDK-free)
-canvas-kit/     vendored kit (copied verbatim; do not edit)
+canvas-kit/     feature-scoped vendored kit (do not edit)
 web/index.html  shell that loads /kit/theme.css and ./app.mjs
 web/app.mjs     your Preact view
 test/smoke.test.mjs  boots the runtime over HTTP and exercises the actions
@@ -180,9 +181,15 @@ with \`open_canvas\` (\`canvasId: "{{name}}"\`).
 
 ## Keeping the kit current
 
-\`canvas-kit/\` is a vendored snapshot of the create-canvas-app \`kit/\`. Re-sync it
-with the skill's \`scripts/sync-kit.mjs\`, and gate drift in CI with
-\`scripts/check-kit-freshness.mjs\`.
+\`canvas-kit/.kit-features.json\` records the exact canonical files and icon names
+selected for this template. Re-sync with the skill's \`scripts/sync-kit.mjs\`;
+it preserves that selection and regenerates the exact icon subset. Gate drift in
+CI with \`scripts/check-kit-freshness.mjs\`.
+
+Older generated canvases have no feature manifest. They intentionally remain
+full-kit consumers when synchronized, so upgrading cannot silently remove a
+module they may use. To opt an older canvas into a smaller scoped kit, regenerate
+the matching built-in template and port the app-specific files into it.
 `;
 
 // Template-specific note injected into the stamped README.
@@ -314,7 +321,8 @@ const LIST_APP_MJS = `// web/app.mjs — Preact view for the {{titleText}} canva
 // LOCAL UI state (the draft input) lives in useState. Because Preact DIFFS the
 // DOM (no innerHTML repaint), live pushes never clobber what you're typing.
 
-import { html, mountCanvas, useState, Icon } from "/kit/client.mjs";
+import { html, mountCanvas, useState } from "/kit/core-client.mjs";
+import { Icon } from "/kit/icons.mjs";
 
 const TITLE = {{titleJs}};
 
@@ -569,7 +577,8 @@ const DATA_APP_MJS = `// web/app.mjs — Preact view for the {{titleText}} data 
 // only TRIGGERS refresh — on a button and on a visibility-gated timer via the
 // kit's pollWhileVisible helper, with the interval bound to durable state.
 
-import { html, mountCanvas, useState, useEffect, useRef, Icon, pollWhileVisible, relativeTime } from "/kit/client.mjs";
+import { html, mountCanvas, useState, useEffect, useRef, pollWhileVisible, relativeTime } from "/kit/core-client.mjs";
+import { Icon } from "/kit/icons.mjs";
 
 const TITLE = {{titleJs}};
 
@@ -860,7 +869,8 @@ const AI_APP_MJS = `// web/app.mjs — Preact view for the {{titleText}} ai canv
 // TRIGGERS those actions and renders the shared log that arrives over /events.
 // LOCAL UI state (the draft prompt, the busy flag) lives in useState.
 
-import { html, mountCanvas, useState, Icon } from "/kit/client.mjs";
+import { html, mountCanvas, useState } from "/kit/core-client.mjs";
+import { Icon } from "/kit/icons.mjs";
 
 const TITLE = {{titleJs}};
 
@@ -1166,10 +1176,53 @@ const AI_SMOKE_BODY = `  await test("GET /state starts empty", async () => {
     assert.equal(s.error, null);
   });`;
 
+const CORE_KIT_FILES = [
+  "core-client.mjs",
+  "format.mjs",
+  "icons.mjs",
+  "server.mjs",
+  "storage.mjs",
+  "theme.css",
+  "validate.mjs",
+  "vendor/lucide.mjs",
+  "vendor/preact-htm-standalone.mjs",
+  "version.mjs",
+];
+
 const TEMPLATES = {
-  list: { canvas: LIST_CANVAS_MJS, app: LIST_APP_MJS, smokeBody: LIST_SMOKE_BODY },
-  data: { canvas: DATA_CANVAS_MJS, app: DATA_APP_MJS, smokeBody: DATA_SMOKE_BODY },
-  ai: { canvas: AI_CANVAS_MJS, app: AI_APP_MJS, smokeBody: AI_SMOKE_BODY },
+  list: {
+    canvas: LIST_CANVAS_MJS,
+    app: LIST_APP_MJS,
+    smokeBody: LIST_SMOKE_BODY,
+    maxBytes: 130_000,
+    kit: {
+      features: ["core", "icons:list", "storage"],
+      files: CORE_KIT_FILES,
+      icons: ["circle", "circle-check", "inbox", "layout-list", "plus", "trash-2"],
+    },
+  },
+  data: {
+    canvas: DATA_CANVAS_MJS,
+    app: DATA_APP_MJS,
+    smokeBody: DATA_SMOKE_BODY,
+    maxBytes: 145_000,
+    kit: {
+      features: ["core", "icons:data", "network", "storage"],
+      files: [...CORE_KIT_FILES, "net.mjs"],
+      icons: ["circle-x", "inbox", "loader-circle", "refresh-cw", "rss"],
+    },
+  },
+  ai: {
+    canvas: AI_CANVAS_MJS,
+    app: AI_APP_MJS,
+    smokeBody: AI_SMOKE_BODY,
+    maxBytes: 140_000,
+    kit: {
+      features: ["core", "host-ai", "icons:ai", "storage"],
+      files: CORE_KIT_FILES,
+      icons: ["circle-x", "loader-circle", "messages-square", "send", "sparkles", "trash-2", "wand-sparkles"],
+    },
+  },
 };
 
 async function isNonEmptyDir(dir) {
@@ -1179,6 +1232,19 @@ async function isNonEmptyDir(dir) {
   } catch {
     return false;
   }
+}
+
+async function generatedBytes(dir) {
+  let total = 0;
+  async function walk(current) {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else total += (await stat(path)).size;
+    }
+  }
+  await walk(dir);
+  return total;
 }
 
 async function main() {
@@ -1224,7 +1290,7 @@ async function main() {
   await mkdir(join(target, "test"), { recursive: true });
   // Vendor the kit AND stamp .kit-version.json, so the generated canvas passes
   // scripts/check-kit-freshness.mjs out of the box.
-  await syncKit(target);
+  await syncKit(target, t.kit);
 
   await writeFile(join(target, "extension.mjs"), EXTENSION_MJS);
   await writeFile(join(target, "canvas.mjs"), tpl(t.canvas, vars));
@@ -1234,7 +1300,11 @@ async function main() {
   await writeFile(join(target, "web", "app.mjs"), tpl(t.app, vars));
   await writeFile(join(target, "test", "smoke.test.mjs"), smokeFile(name, t.smokeBody));
 
+  const actualBytes = await generatedBytes(target);
+  assertSizeBudget(template, actualBytes, t.maxBytes);
+
   console.log(`Created ${template} canvas "${name}" at: ${target}`);
+  console.log(`Size: ${actualBytes} bytes (budget ${t.maxBytes} bytes)`);
   console.log("Files:");
   for (const f of [
     "extension.mjs",

@@ -36,7 +36,7 @@ Windows, macOS, and Linux.
 
 | ID | Contract behavior | Level | Planned test |
 |---|---|---|---|
-| T01 | Emits the closed `1.1.0` result schema, stable ordering, and rejects unknown versions | unit | `test/triage.integration.test.mjs` -> result schema |
+| T01 | Emits the closed `1.2.0` result schema with execution mode and verified baseline identity, stable ordering, and rejects unknown versions | unit | `test/hardening.test.mjs` and result schema tests |
 | T02 | Keeps all seven user-requestable dispositions as work outcomes; destructive operations exist only as explicit per-carrier actions and are never inferred from `delete` | unit | `test/classify.test.mjs` -> disposition/action separation |
 | T03 | Enforces categorical confidence caps and never uses age as preservation proof | unit | `test/classify.test.mjs` -> confidence lattice |
 | T04 | Rejects a selected set that removes the final durable witness | unit/integration | `test/classify.test.mjs` -> selection-set last copy |
@@ -62,7 +62,7 @@ Windows, macOS, and Linux.
 | T24 | Strictly rejects review commands, paths, refs, URLs, carrier IDs, unknown IDs, unknown fields, and oversized values | unit | constrained review schema |
 | T25 | Proves `applyReview` can only preserve or reduce destructive eligibility, evidence, and confidence | property/unit | monotonic transition matrix |
 | T26 | Leaves refs, reflogs, index, config, object IDs/count, worktrees, and status unchanged at every depth | safety integration | before/after repository snapshot |
-| T27 | `revalidate` emits a guarded plan only when all selected and witness identities remain stable | integration | stable revalidation fixture |
+| T27 | `revalidate` emits a one-class guarded plan only when the remote baseline, selected and witness identities, and optional approved plan identity remain stable | integration | `test/hardening.test.mjs` stale OID and approval drift fixtures |
 | T28 | Any OID, selector, path, status, protection, PR, prerequisite, or witness drift emits no plan | integration/eval | drift matrix |
 | T29 | Selection, optional analysis, recovery, and each mutation/GitHub-write class require separate approval | capability eval | approval separation stimuli |
 | T30 | PR creation/merge and rebase/worktree operations hand off to established workflows | capability eval | specialist handoff stimuli |

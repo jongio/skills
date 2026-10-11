@@ -234,13 +234,8 @@ export async function composeCatalog(catalogRoot, repositoryRoot) {
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, content, { flag: "wx" });
   }
-  await Promise.all([
-    mkdir(path.join(repositoryRoot, "site", "src", "content", "skills"), {
-      recursive: true,
-    }),
-    mkdir(path.join(repositoryRoot, "site", "public", "images"), {
-      recursive: true,
-    }),
-  ]);
+  await mkdir(path.join(repositoryRoot, "site", "src", "content", "skills"), {
+    recursive: true,
+  });
   return output.sort();
 }

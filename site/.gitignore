@@ -4,6 +4,8 @@ dist/
 .astro/
 # dependencies
 node_modules/
+# generated catalog thumbnails
+/public/images/thumb-*.png
 # keep the lockfile tracked for reproducible CI builds (repo root ignores it globally)
 !package-lock.json
 # logs

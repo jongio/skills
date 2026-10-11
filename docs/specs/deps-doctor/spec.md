@@ -163,7 +163,7 @@ the prompt.
 | ID | Criterion |
 |----|-----------|
 | AC-1 | Detects every dependency ecosystem present in a workspace, including surfaces no language package manager owns, and reports a manager whose executable is missing as blocked rather than omitting it. |
-| AC-2 | Defers to an active Dependabot or Renovate configuration, confirms the bot is really opening pull requests, enumerates what the bot has in flight so a package with an open bot pull request is not bumped in parallel, names any bot pull request this run supersedes, and states which scope it took and which it left. |
+| AC-2 | Defers to an active Dependabot or Renovate configuration, confirms the bot is really opening pull requests, reads every open bot pull request in full and matches it to the plan by package, ecosystem, and directory, asks the user before applying anything to subsume and close or leave each overlapping pull request with the bot, keeps commit, push, and closure approvals separate, reports a closure only when the API confirms it, and states which scope it took and which it left. |
 | AC-3 | Reconciles declared packages against real imports, and keeps a dependency that is referenced only through configuration or runtime loading. |
 | AC-4 | Resolves updates with lifecycle scripts disabled, reviews every package whose version or resolved source changed, then installs normally. |
 | AC-5 | Withholds releases inside the minimum release age window, prefers a package-manager-enforced setting over a manual date check, and weighs any vulnerability-driven exception on exploitation evidence, reachability, and exposure rather than bypassing the window automatically. |

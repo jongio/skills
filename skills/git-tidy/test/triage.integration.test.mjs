@@ -73,9 +73,9 @@ const revalidateRepository = (
   },
 );
 const resultKeys = [
-  "schemaVersion", "operation", "runId", "generatedAt", "repository",
-  "request", "workItems", "coverage", "reviewBundle", "actionPlan", "drift",
-  "compatibility", "inventory",
+  "schemaVersion", "operation", "executionMode", "remoteBaseline", "runId",
+  "generatedAt", "repository", "request", "workItems", "coverage",
+  "reviewBundle", "actionPlan", "drift", "compatibility", "inventory",
 ].sort();
 const carrierKeys = [
   "id", "type", "displayName", "identity", "observed", "changeUnitIds",
@@ -280,7 +280,7 @@ test("exact duplicate stash is eligible only while a durable copy remains", asyn
         selected,
         [stash.id, branch.id],
       ),
-      /closed analyze 1\.1\.0 result/u,
+      /closed analyze 1\.2\.0 result/u,
     );
   } finally {
     await fixture.cleanup();
@@ -744,7 +744,7 @@ test("review depth builds a bounded bundle without invoking a model", async () =
   }
 });
 
-test("stable revalidation emits an inert plan and drift suppresses it", async () => {
+test("offline revalidation blocks plans and still reports material drift", async () => {
   const fixture = await duplicateStashFixture("triage-revalidate");
   try {
     const before = await fixture.snapshot();
@@ -757,13 +757,10 @@ test("stable revalidation emits an inert plan and drift suppresses it", async ()
     assert.ok(stash);
     const stable = await revalidateRepository(fixture.root, analyzed, [stash.id]);
     assert.equal(stable.operation, "revalidate");
-    assert.deepEqual(stable.drift, []);
-    assert.equal(stable.actionPlan.authorized, false);
-    assert.equal(stable.actionPlan.basedOnRunId, analyzed.runId);
-    assert.deepEqual(stable.actionPlan.selectedCarrierIds, [stash.id]);
-    assert.deepEqual(stable.actionPlan.steps[0].argv, [
-      "stash", "drop", stash.identity.observedSelector,
-    ]);
+    assert.equal(stable.actionPlan, null);
+    assert.ok(stable.drift.some(
+      ({ code }) => code === "remote-baseline-not-fresh",
+    ));
     assert.deepEqual(await fixture.snapshot(), before);
 
     const proofTampered = structuredClone(analyzed);
@@ -819,7 +816,7 @@ test("stable revalidation emits an inert plan and drift suppresses it", async ()
         proofTampered,
         [stash.id],
       ),
-      /closed analyze 1\.1\.0 result/u,
+      /closed analyze 1\.2\.0 result/u,
     );
 
     await fixture.write("drift.txt", "new stash\n");
@@ -846,7 +843,7 @@ test("stable revalidation emits an inert plan and drift suppresses it", async ()
       mutate(tampered);
       await assert.rejects(
         revalidateRepository(fixture.root, tampered, [stash.id]),
-        /closed analyze 1\.1\.0 result/u,
+        /closed analyze 1\.2\.0 result/u,
       );
     }
 
@@ -984,24 +981,10 @@ test("extended proof paths fail closed and guarded plans stay inert", async () =
       analyzed,
       [topic.id, linked.id],
     );
-    assert.equal(stable.actionPlan.authorized, false);
-    assert.deepEqual(stable.actionPlan.steps.map(({ action }) => action), [
-      "remove-worktree", "delete-ref",
-    ]);
-    assert.deepEqual(
-      stable.actionPlan.steps.map(({ approvalClass }) => approvalClass),
-      ["worktree-removal", "local-branch-deletion"],
-    );
-    assert.equal(
-      stable.actionPlan.steps[0].argv[3],
-      Buffer.from(linked.identity.path.rawBase64, "base64").toString("utf8"),
-    );
-    assert.deepEqual(stable.actionPlan.steps[1].argv, [
-      "update-ref",
-      "-d",
-      Buffer.from(topic.identity.refRawBase64, "base64").toString("utf8"),
-      topic.identity.tipOid,
-    ]);
+    assert.equal(stable.actionPlan, null);
+    assert.ok(stable.drift.some(
+      ({ code }) => code === "remote-baseline-not-fresh",
+    ));
 
     const runtimeBlocked = await analyzeRepository(fixture.root, {
       scope: "branches",
@@ -1060,7 +1043,7 @@ test("legacy inventories are typed, bounded, and read-only", async () => {
           scope: "tags",
           depth: "proof",
         });
-        assert.equal(tags.schemaVersion, "1.1.0");
+        assert.equal(tags.schemaVersion, "1.2.0");
         assert.equal(tags.inventory.tags.length, 2);
         assert.equal(tags.inventory.tags.some(({ peeledOid }) => peeledOid), true);
         assert.deepEqual(tags.inventory.artifacts, []);
@@ -1179,7 +1162,7 @@ test("branch scope collects hidden worktree safety evidence", async () => {
       scope: "branches",
       depth: "proof",
     });
-    assert.equal(carriers(result).some(({ type }) => type === "worktree"), false);
+    assert.equal(carriers(result).some(({ type }) => type === "worktree"), true);
     assert.equal(result.coverage.observedCounts.worktrees, 2);
     const topic = findCarrier(result, "local-branch", ({ displayName }) =>
       displayName === "refs/heads/checked-out-topic");

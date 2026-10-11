@@ -51,6 +51,9 @@ everything, or inspect full evidence. No redundant per-carrier card follows a
 numbered safe selection. Batches contain at most ten destructive actions.
 Selection is not authorization. Selected carriers are revalidated before exact
 commands and separate mutation-class approvals are shown.
+Schema 1.2 binds offline or verified execution mode and the verified
+remote/default-branch/OID baseline into `runId`. Offline, failed, unknown, or
+expired baselines remain advisory and cannot emit a destructive plan.
 
 Active-work decisions use a three-line card: `Decision`, `Why`, and `Next
 action`. Every card names the branch, stash, or worktree it concerns. Before a
@@ -83,6 +86,7 @@ Reload with `/skills reload`, then invoke:
 /git-tidy stashes --depth review
 /git-tidy --dry-run
 node scripts/apply-review.mjs
+node scripts/verify-remote.mjs
 ```
 
 ## Scopes and depth
@@ -112,15 +116,19 @@ falls back to metadata-only and offers no destructive work-bearing action.
 
 ## Safety
 
-Analysis and revalidation are read-only. Fetch and prune are mutations, so
-remote refresh is a separately approved external workflow followed by a fresh
-analysis. Unknown remote access never proves a remote dead. Dirty, conflicted,
+Analysis and revalidation are read-only in the target repository. After
+separate approval, `verify-remote.mjs` fetches the exact approved URL only into
+a disposable bare repository with `--no-prune`, isolated configuration, no
+hooks, no credential helper, and no repository-controlled Git configuration.
+The resulting baseline expires after five minutes and is re-fetched immediately
+after each mutation-class approval. Unknown remote access never proves a remote
+dead. Dirty, conflicted,
 locked, missing, or unknown worktrees aren't removal candidates.
 
-Default-branch protection comes only from a valid local
-`refs/remotes/origin/HEAD` target and its inventoried remote object. The analyzer
-never guesses `main` or `master`; unresolved identity blocks destructive local
-branch actions while retaining explicit policy protection.
+Verified mode takes default-branch identity only from the approved remote
+advertisement and requires its OID and complete head set to match local
+`refs/remotes/origin/*`. Offline mode may report the local symbolic ref but
+cannot emit a destructive plan. The analyzer never guesses `main` or `master`.
 
 Age only prioritizes review. A stash or branch is removable only when exact
 mechanical proof shows every change unit survives on an unselected durable

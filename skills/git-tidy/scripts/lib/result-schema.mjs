@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { compatibilityCategory } from "./mechanical-core.mjs";
 import { validateInventory } from "./inventory-schema.mjs";
-const RESULT_KEYS = ["schemaVersion", "operation", "runId", "generatedAt", "repository", "request", "workItems", "inventory", "coverage", "reviewBundle", "actionPlan", "drift", "compatibility"];
+const RESULT_KEYS = ["schemaVersion", "operation", "executionMode", "remoteBaseline", "runId", "generatedAt", "repository", "request", "workItems", "inventory", "coverage", "reviewBundle", "actionPlan", "drift", "compatibility"];
 const LIMIT_KEYS = ["maxRefs", "maxTags", "maxStashes", "maxWorktrees", "maxPullRequests", "maxArtifacts", "maxBlobs", "maxStdoutBytes", "maxStderrBytes", "maxComparisons", "maxChangeUnits", "maxUntrackedFiles",
   "maxUntrackedBytesPerFile", "maxUntrackedBytesTotal", "maxReviewWorkItems", "maxReviewFilesPerItem", "maxReviewChangedLinesPerItem", "maxReviewBytesPerFile",
   "maxReviewBytesTotal", "commandTimeoutMs", "collectionTimeoutMs"];
@@ -61,7 +61,10 @@ function isJson(value, seen = new Set()) {
     inventory: result.inventory,
   };
   return createHash("sha256").update(canonicalJson({
-    schemaVersion: result.schemaVersion, repository: result.repository,
+    schemaVersion: result.schemaVersion,
+    executionMode: result.executionMode,
+    remoteBaseline: result.remoteBaseline,
+    repository: result.repository,
     request: result.request, mechanicalIdentities,
   }), "utf8").digest("hex");
 } const exactKeys = (value, keys) => isObject(value) && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
@@ -108,6 +111,37 @@ function validateEncodedPath(value, path, check, allowEmpty = false) {
   check(nonnegative(value.ahead) && nonnegative(value.behind), "invalid-ancestry-count", path);
   check(oneOf(value.state, ["identical", "ahead", "behind", "diverged"]), "invalid-ancestry-state", `${path}.state`);
   check(typeof value.mergedIntoDefault === "boolean" && typeof value.reachableFromDefault === "boolean", "invalid-ancestry-flags", path);
+}
+function validateRemoteBaseline(value, path, objectFormat, check) {
+  const keys = ["state", "remoteId", "defaultRef", "defaultOid", "heads", "verifiedAt", "validUntil", "failureCode"];
+  if (!check(exactKeys(value, keys), "invalid-remote-baseline", path)) return;
+  check(oneOf(value.state, ["offline", "failed", "verified"]), "invalid-remote-baseline-state", `${path}.state`);
+  if (value.state !== "verified") {
+    check(value.remoteId === null && value.defaultRef === null && value.defaultOid === null &&
+      Array.isArray(value.heads) && value.heads.length === 0 && value.verifiedAt === null &&
+      value.validUntil === null && nonempty(value.failureCode), "invalid-inactive-remote-baseline", path);
+    return;
+  }
+  check(/^[0-9a-f]{64}$/u.test(value.remoteId), "invalid-remote-baseline-id", `${path}.remoteId`);
+  check(typeof value.defaultRef === "string" && /^refs\/heads\/[^\s]+$/u.test(value.defaultRef), "invalid-remote-default-ref", `${path}.defaultRef`);
+  validateOid(value.defaultOid, `${path}.defaultOid`, objectFormat, check);
+  check(timestamp(value.verifiedAt) && timestamp(value.validUntil) &&
+    Date.parse(value.validUntil) > Date.parse(value.verifiedAt), "invalid-remote-baseline-time", path);
+  check(value.failureCode === null, "invalid-remote-baseline-failure", `${path}.failureCode`);
+  if (!check(Array.isArray(value.heads) && value.heads.length > 0, "invalid-remote-heads", `${path}.heads`)) return;
+  const refs = new Set();
+  value.heads.forEach((head, index) => {
+    const headPath = `${path}.heads[${index}]`;
+    if (!check(exactKeys(head, ["ref", "oid"]), "invalid-remote-head", headPath)) return;
+    check(/^refs\/heads\/[^\s]+$/u.test(head.ref) && !refs.has(head.ref), "invalid-remote-head-ref", `${headPath}.ref`);
+    refs.add(head.ref);
+    validateOid(head.oid, `${headPath}.oid`, objectFormat, check);
+  });
+  check(value.heads.every((head, index) => index === 0 ||
+    value.heads[index - 1].ref.localeCompare(head.ref, "en") < 0),
+  "remote-heads-not-sorted", `${path}.heads`);
+  check(value.heads.some((head) => head.ref === value.defaultRef && head.oid === value.defaultOid),
+    "remote-default-not-in-heads", path);
 }
 function validateOid(value, path, objectFormat, check, nullableOid = false) { check(nullableOid && value === null ||
   typeof value === "string" && new RegExp(`^[0-9a-f]{${objectFormat === "sha256" ? 64 : 40}}$`, "u").test(value), "invalid-oid", path); }
@@ -481,11 +515,15 @@ function validateWorkItems(result, objectFormat, check) {
 export function validateMechanicalResult(result) {
   const { diagnostics, check } = validator();
   if (!check(exactKeys(result, RESULT_KEYS), "invalid-result-root-shape", "$.result")) return Object.freeze({ valid: false, diagnostics: Object.freeze(diagnostics) });
-  check(result.schemaVersion === "1.1.0", "unsupported-result-schema-version", "$.result.schemaVersion");
+  check(result.schemaVersion === "1.2.0", "unsupported-result-schema-version", "$.result.schemaVersion");
   check(result.operation === "analyze", "invalid-result-operation", "$.result.operation");
+  check(oneOf(result.executionMode, ["offline", "verified"]), "invalid-execution-mode", "$.result.executionMode");
   check(/^[0-9a-f]{64}$/u.test(result.runId), "invalid-result-run-id", "$.result.runId");
   check(timestamp(result.generatedAt), "invalid-result-generated-at", "$.result.generatedAt");
   const objectFormat = validateRepository(result.repository, "$.result.repository", check);
+  validateRemoteBaseline(result.remoteBaseline, "$.result.remoteBaseline", objectFormat, check);
+  check((result.executionMode === "verified") === (result.remoteBaseline?.state === "verified"),
+    "inconsistent-execution-mode", "$.result.executionMode");
   validateRequest(result.request, "$.result.request", check);
   const { carriers, workItems } = validateWorkItems(result, objectFormat, check);
   validateCoverage(result.coverage, "$.result.coverage", check);

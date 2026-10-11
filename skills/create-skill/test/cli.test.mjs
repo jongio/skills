@@ -142,6 +142,10 @@ test("CLI previews, applies, checks, and previews art without network", async ()
     assert.equal(artPreview.provider, "openai");
     assert.equal(artPreview.attempts, 1);
     assert.ok(artPreview.approvalHash);
+    assert.deepEqual(
+      artPreview.targets.filter((target) => target.endsWith("thumbnail.png")),
+      ["skills/release-notes-helper/thumbnail.png"],
+    );
 
     const customOutput = capture();
     assert.equal(

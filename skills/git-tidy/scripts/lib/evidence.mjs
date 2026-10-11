@@ -146,7 +146,12 @@ async function collectEvidenceCore(repoPath, options, signal) {
     "stashes",
   ].includes(request.scope);
   const { carriers: branchCarriers, primary } = collectsWorkCarriers
-    ? await collectBranches(boundary, request, context)
+    ? await collectBranches(
+      boundary,
+      request,
+      context,
+      options.remoteBaseline,
+    )
     : { carriers: [], primary: null };
   const worktrees = collectsWorkCarriers
     ? await collectWorktrees(
@@ -158,9 +163,6 @@ async function collectEvidenceCore(repoPath, options, signal) {
     : [];
   const stashes = collectsWorkCarriers
     ? await collectStashes(boundary, request, context)
-    : [];
-  const shownWorktrees = ["all", "worktrees"].includes(request.scope)
-    ? worktrees
     : [];
   const githubRepository = collectsWorkCarriers
     ? await collectPullRequests(
@@ -181,7 +183,7 @@ async function collectEvidenceCore(repoPath, options, signal) {
   );
   const carriers = [
     ...branchCarriers,
-    ...shownWorktrees,
+    ...worktrees,
     ...stashes,
   ].sort((left, right) => compare(left.id, right.id));
   const changeUnits = capChangeUnits(carriers, limits, context);

@@ -18,7 +18,6 @@ repositories use these canonical paths:
 | `evalWorkflow` | `.github/workflows/skill-eval.yml` |
 | `dependabot` | `.github/dependabot.yml` |
 | `catalogEntries` | `site/src/content/skills` |
-| `catalogImages` | `site/public/images` |
 | `thumbnailPrompts` | `docs/thumbnail-prompts.md` |
 
 Example:

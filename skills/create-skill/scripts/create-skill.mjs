@@ -199,9 +199,6 @@ export function manifestFromExistingSkill(profile, name) {
 function targetPaths(profile, name) {
   const targets = [
     join(profile.paths.skills, name, "thumbnail.png"),
-    profile.catalogEnabled && profile.paths.catalogImages
-      ? join(profile.paths.catalogImages, `thumb-${name}.png`)
-      : null,
     profile.paths.thumbnailPrompts,
   ].filter(Boolean);
   return targets.map((path) => relative(profile.root, path).split(sep).join("/"));

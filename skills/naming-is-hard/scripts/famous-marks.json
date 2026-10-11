@@ -1,5 +1,5 @@
 {
-  "_comment": "Curated list of well-known global brands and companies. A candidate that matches one of these is flagged as a Deal Breaker (a name you almost certainly cannot use). This is a screening fast-path, not an exhaustive trademark register. Extend freely: it is plain data. category is informational only.",
+  "_comment": "Curated list of well-known global brands, companies, and obvious prominent product or project collisions. A candidate that matches one of these is flagged as a Deal Breaker (a name you almost certainly cannot use). This is a screening fast-path, not an exhaustive trademark register. Keep additions small and well justified. category is informational only.",
   "marks": [
     { "name": "Google", "category": "tech" },
     { "name": "Alphabet", "category": "tech" },
@@ -63,6 +63,11 @@
     { "name": "Okta", "category": "tech" },
     { "name": "Datadog", "category": "tech" },
     { "name": "Snowflake", "category": "tech" },
+    {
+      "name": "Synapse",
+      "category": "tech",
+      "reason": "\"Synapse\" is already used by prominent technology products and projects, including Azure Synapse Analytics, Apache Synapse, and the Matrix Synapse server."
+    },
     { "name": "Databricks", "category": "tech" },
     { "name": "Palantir", "category": "tech" },
     { "name": "OpenAI", "category": "tech" },

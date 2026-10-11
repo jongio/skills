@@ -78,7 +78,6 @@ test("managed config mirrors the canonical strict schema and paths", () => {
     );
     assert.equal(withoutCatalog.catalogEnabled, false);
     assert.equal(withoutCatalog.paths.catalogEntries, null);
-    assert.equal(withoutCatalog.paths.catalogImages, null);
     assert.equal(withoutCatalog.paths.thumbnailPrompts, null);
     assert.throws(() => normalizeRepositoryPath(root, "", "test"), /non-empty/);
   } finally {
@@ -115,7 +114,7 @@ test("discovery fails closed for malformed, missing, or ambiguous repositories",
 
     rmSync(join(ambiguous, "nested"), { recursive: true, force: true });
     rmSync(join(ambiguous, "site", "public"), { recursive: true, force: true });
-    assert.throws(() => discoverConventions(ambiguous), /Ambiguous registration/);
+    assert.equal(discoverConventions(ambiguous).catalogEnabled, true);
 
     createRepositoryFixture(empty);
     writeFileSync(

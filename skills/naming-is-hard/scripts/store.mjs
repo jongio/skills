@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { extractFeatures } from './features.mjs';
 import { update as updateWeights, revert as revertWeights } from './model.mjs';
 import { slugify } from './net.mjs';
+import { screenPresentationCollision } from './marks.mjs';
 
 export const STATE_VERSION = 1;
 const STATE_FILE = 'naming-state.json';
@@ -94,16 +95,22 @@ function uniqueId(state, name) {
 /**
  * Add candidates (each `{ name, strategy?, tags? }`), extracting features and
  * assigning stable ids. Skips names already present (by slug). Returns
- * `{ state, added }`.
+ * `{ state, added, blocked }`.
  */
 export function addCandidates(state, items) {
   let next = { ...state, candidates: [...state.candidates] };
   const existingSlugs = new Set(next.candidates.map((c) => slugify(c.name)));
   const added = [];
+  const blocked = [];
   for (const item of items || []) {
     const name = typeof item === 'string' ? item : item?.name;
     if (!name || !slugify(name)) continue;
     if (existingSlugs.has(slugify(name))) continue;
+    const collision = screenPresentationCollision(name);
+    if (collision.blocked) {
+      blocked.push(collision);
+      continue;
+    }
     const meta = typeof item === 'object' ? item : {};
     const f = extractFeatures(name, { strategy: meta.strategy, tags: meta.tags });
     const candidate = {
@@ -119,7 +126,7 @@ export function addCandidates(state, items) {
     existingSlugs.add(slugify(name));
     added.push(candidate);
   }
-  return { state: next, added };
+  return { state: next, added, blocked };
 }
 
 /**

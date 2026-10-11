@@ -4,7 +4,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "sync:thumbnails": "node scripts/sync-thumbnails.mjs",
+    "test": "node --test test/*.test.mjs",
+    "predev": "npm run sync:thumbnails",
     "dev": "astro dev",
+    "prebuild": "npm run sync:thumbnails",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"

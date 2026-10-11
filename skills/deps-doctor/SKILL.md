@@ -144,11 +144,11 @@ gh pr list --author "app/dependabot" --state open --limit 50 --json number,title
 ```
 
 The first proves the bot is alive: read the dates, not just the count, since a
-stale history proves the opposite. The second is the one that changes the plan,
-because every open bot pull request is a package already claimed. Repeat both
-for `app/renovate`. See
-[security and supply-chain checks](references/security-checks.md) for
-reconciling Dependabot alerts and for the bot control comments.
+stale history proves the opposite. The second lists every package already
+claimed; read each in full with `gh pr view <number> --json body,files`, since a
+title omits grouped packages and extra directories. Repeat for `app/renovate`.
+See [security and supply-chain checks](references/security-checks.md) for
+reconciling alerts, bot control comments, and closing a subsumed pull request.
 
 Compare that activity against the bot's configured schedule and its exact
 ecosystem and directory entries. Deferring an ecosystem needs evidence the bot
@@ -158,17 +158,18 @@ ecosystem in scope rather than dropping it on an assumption.
 
 When a bot is active, do not re-run the work it already covers. Direct this run
 at what its configuration excludes: ecosystems or directories missing from its
-`updates` entries, major bumps it is holding back because they need code
-changes, and vulnerabilities with no open bot pull request. Match at package
-granularity, not only ecosystem: a bot opens one pull request per package, so
-bumping a package that already has one open collides in the same manifest even
-when the ecosystem is otherwise yours to take.
+`updates` entries, major bumps it holds back because they need code changes,
+and vulnerabilities with no open bot pull request. Match bot pull requests to
+the plan by package, ecosystem, and directory, not by ecosystem alone.
 
-Where this run does move a package a bot has an open pull request for, that pull
-request is superseded. Name it by number in the summary and offer either to
-close it or to ask the bot to rebase it. Both are repository writes needing the
-same approval as any other, so never close one silently, and never leave it
-conflicting without saying so.
+Before step 5 applies anything, show each overlapping pull request's number,
+URL, packages, directory, and both the bot's and this run's from→to, then ask
+per pull request: subsume and close it (this run applies all its packages) or
+leave it with the bot (its packages stay untouched). No answer means leave it.
+Subsuming approves only the update: git writes keep their approval, and closing
+needs separate confirmation naming the pull request and replacement URL once it
+holds the update. Never close an unselected pull request or report a failed
+close as done. Urgent security fixes may go first but still get this choice.
 
 When no automation exists, run the full workflow, then offer to add a
 configuration so routine updates stop needing a manual pass.
@@ -446,7 +447,7 @@ Keep any pull request description short and factual:
   age. Do not list them individually or restate the policy.
 - Note only genuine blockers, unaudited ecosystems, or intentionally deferred
   packages.
-- Name any bot pull request this run supersedes, by number, and any Dependabot
+- Name any bot pull request this run subsumes, by number, and any Dependabot
   alert it resolves.
 - State the validation that passed, in one line.
 

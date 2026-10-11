@@ -16,7 +16,7 @@ const {
 } = await import(pathToFileURL(require.resolve("@microsoft/vally")).href);
 
 test("migrated agent environments still stage every fixture block", async () => {
-  for (const [skill, count] of [["create-gh-pages-site", 5], ["deps-doctor", 10]]) {
+  for (const [skill, count] of [["create-gh-pages-site", 5], ["deps-doctor", 11]]) {
     const path = new URL(`../skills/${skill}/evals/${skill}/eval.yaml`, import.meta.url);
     const source = await readFile(path, "utf8");
     assert.doesNotMatch(source, /^\s+environment:/m, skill);

@@ -3,11 +3,11 @@
 // primitives. No deps; Node 18+.  Run: node test/generator.test.mjs
 
 import assert from "node:assert/strict";
-import { mkdtemp, rm, readFile, stat } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GEN = join(ROOT, "scripts", "new-canvas.mjs");
@@ -33,6 +33,25 @@ async function exists(p) {
   try { await stat(p); return true; } catch { return false; }
 }
 const read = (p) => readFile(p, "utf8");
+
+async function relFiles(dir) {
+  const files = [];
+  async function walk(current) {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) await walk(path);
+      else files.push(path.slice(dir.length + 1).replace(/\\/g, "/"));
+    }
+  }
+  await walk(dir);
+  return files.sort();
+}
+
+async function totalBytes(dir) {
+  let total = 0;
+  for (const file of await relFiles(dir)) total += (await stat(join(dir, file))).size;
+  return total;
+}
 
 async function main() {
   console.log("create-canvas-app generator + kit API tests");
@@ -127,15 +146,22 @@ async function main() {
     assert.equal(typeof client.pollWhileVisible, "function");
     assert.equal(typeof client.mountCanvas, "function");
     assert.equal(typeof client.connectCanvas, "function", "the DOM-free transport is exported");
-    const src = await read(join(ROOT, "kit", "client.mjs"));
+    const src = await read(join(ROOT, "kit", "core-client.mjs"));
     assert.match(src, /export function pollWhileVisible/);
     assert.match(src, /document\.visibilityState/);
     assert.match(src, /nid, relativeTime, compactNumber, percent/);
     assert.match(src, /poll\b/); // mountCanvas accepts a poll option
   });
 
-  await test("client.mjs re-exports the deep-link builders (one import site for views)", async () => {
-    const client = await import("../kit/client.mjs");
+  await test("optional icons and deep links use direct modules instead of the core client graph", async () => {
+    const [client, icons, deeplinks] = await Promise.all([
+      import("../kit/core-client.mjs"),
+      import("../kit/icons.mjs"),
+      import("../kit/deeplinks.mjs"),
+    ]);
+    assert.equal(client.Icon, undefined);
+    assert.equal(client.buildSessionDeepLink, undefined);
+    assert.equal(typeof icons.Icon, "function");
     for (const name of [
       "APP_DEEP_LINK_SCHEME",
       "isRepoFullName",
@@ -150,11 +176,10 @@ async function main() {
       "buildIssueDeepLink",
       "buildPullRequestDeepLink",
     ]) {
-      assert.equal(typeof client[name], name === "APP_DEEP_LINK_SCHEME" ? "string" : "function", `client.mjs must re-export ${name}`);
+      assert.equal(typeof deeplinks[name], name === "APP_DEEP_LINK_SCHEME" ? "string" : "function", `deeplinks.mjs must export ${name}`);
     }
-    // A built link is validated + encoded (untrusted "/" in repo is escaped).
-    assert.equal(client.buildSessionDeepLink({ repo: "a/b" }), "ghapp://session/new?repo=a%2Fb");
-    assert.equal(client.buildSessionDeepLink({ repo: "bad" }), null);
+    assert.equal(deeplinks.buildSessionDeepLink({ repo: "a/b" }), "ghapp://session/new?repo=a%2Fb");
+    assert.equal(deeplinks.buildSessionDeepLink({ repo: "bad" }), null);
   });
 
   // ---- host-model capability (ai / askAgent) -------------------------------
@@ -238,9 +263,27 @@ async function main() {
   const work = await mkdtemp(join(tmpdir(), "ck-gen-test-"));
   try {
     const cases = [
-      { name: "gen-list", template: "list", dir: join(work, "gen-list") },
-      { name: "gen-feed", template: "data", dir: join(work, "gen-feed") },
-      { name: "gen-ai", template: "ai", dir: join(work, "gen-ai") },
+      {
+        name: "gen-list",
+        template: "list",
+        dir: join(work, "gen-list"),
+        maxBytes: 130_000,
+        icons: ["circle", "circle-check", "inbox", "layout-list", "plus", "trash-2"],
+      },
+      {
+        name: "gen-feed",
+        template: "data",
+        dir: join(work, "gen-feed"),
+        maxBytes: 145_000,
+        icons: ["circle-x", "inbox", "loader-circle", "refresh-cw", "rss"],
+      },
+      {
+        name: "gen-ai",
+        template: "ai",
+        dir: join(work, "gen-ai"),
+        maxBytes: 140_000,
+        icons: ["circle-x", "loader-circle", "messages-square", "send", "sparkles", "trash-2", "wand-sparkles"],
+      },
     ];
 
     for (const c of cases) {
@@ -256,6 +299,27 @@ async function main() {
         for (const f of ["canvas.mjs", "extension.mjs", "copilot-extension.json", "README.md", "web/app.mjs", "web/index.html", "test/smoke.test.mjs"]) {
           assert.ok(await exists(join(c.dir, f)), `missing ${f}`);
         }
+      });
+
+      await test(`${c.template}: manifest exactly describes the scoped kit and icons`, async () => {
+        const kitDir = join(c.dir, "canvas-kit");
+        const manifest = JSON.parse(await read(join(kitDir, ".kit-features.json")));
+        assert.deepEqual(manifest.icons, c.icons);
+        assert.deepEqual([...manifest.features].sort(), manifest.features);
+        assert.deepEqual([...manifest.files].sort(), manifest.files);
+        const actualKitFiles = (await relFiles(kitDir))
+          .filter((file) => ![".kit-features.json", ".kit-version.json"].includes(file));
+        assert.deepEqual(actualKitFiles, manifest.files);
+
+        const subset = await import(pathToFileURL(join(kitDir, "vendor", "lucide.mjs")).href);
+        assert.deepEqual(Object.keys(subset.default).sort(), c.icons);
+        assert.deepEqual(subset.aliases, {});
+      });
+
+      await test(`${c.template}: complete generated output stays within its byte budget`, async () => {
+        const actual = await totalBytes(c.dir);
+        assert.ok(actual <= c.maxBytes, `actual ${actual} bytes exceeds ${c.maxBytes}`);
+        assert.match(gen.stdout, new RegExp(`Size: ${actual} bytes \\(budget ${c.maxBytes} bytes\\)`));
       });
 
       await test(`${c.template}: stamped README documents the canvas`, async () => {
@@ -300,6 +364,13 @@ async function main() {
       assert.match(canvas, /from "\.\/canvas-kit\/net\.mjs"/);
       assert.match(canvas, /await safeFetch\(/);
       assert.match(canvas, /refresh:\s*\{/);
+    });
+
+    await test("list output excludes optional network, deep-link, and GitHub storage modules", async () => {
+      const kitDir = join(work, "gen-list", "canvas-kit");
+      for (const file of ["net.mjs", "deeplinks.mjs", "github-store.mjs"]) {
+        assert.equal(await exists(join(kitDir, file)), false, `${file} should not be generated`);
+      }
     });
 
     await test("kit net.mjs guards the server-side fetch against SSRF (vendored into the canvas)", async () => {

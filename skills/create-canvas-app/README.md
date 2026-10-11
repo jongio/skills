@@ -125,6 +125,15 @@ by default).
 
 After any install, reload skills with `/skills reload` or a new session.
 
+## Static minimal path
+
+For read-only or near-static content, use the runtime's vanilla canvas scaffold
+(`extensions_manage scaffold kind:canvas`) and keep its HTML in the single
+extension module. Do not add `canvas-kit/`. If the canvas later needs inputs,
+shared state, agent actions, or live updates, regenerate it from one of the
+interactive Preact templates below and port the static markup into `web/app.mjs`.
+Do not grow the one-file scaffold into a hand-rolled interactive runtime.
+
 ## Build without the agent
 
 Prefer to drive it yourself? The generator stamps the same working canvas the
@@ -146,6 +155,11 @@ the box: add, toggle, and remove items, live, shared between you and the agent.
 Each stamped canvas ships a `test/smoke.test.mjs` — run `node test/smoke.test.mjs`
 from the canvas folder to prove its actions over real HTTP.
 
+Generated templates contain only their required kit modules and exact icon
+subset. The complete generated output is budgeted at 130,000 bytes for `list`,
+145,000 bytes for `data`, and 140,000 bytes for `ai`; generation fails with the
+actual and allowed byte counts if a template grows past its budget.
+
 Target any extension scope with `--dir`: `.github/extensions/<name>` (in-repo,
 committed), `$COPILOT_HOME/extensions/<name>` (personal, local to you), or
 `$COPILOT_HOME/session-state/<sessionId>/extensions/<name>` (current session only —
@@ -163,6 +177,18 @@ Then make it yours:
 See **`SKILL.md`** for the full authoring contract and **`reference/decision-log/`**
 for a complete worked example.
 
+### Kit synchronization and upgrades
+
+`canvas-kit/.kit-features.json` deterministically lists the selected canonical
+files and icon names. Running `node scripts/sync-kit.mjs <extension-dir>` reads
+that manifest, regenerates the exact subset, and prunes stale files.
+`check-kit-freshness.mjs` validates the same selection offline.
+
+Older generated canvases have no feature manifest. Synchronizing them continues
+to copy the full kit so an upgrade cannot silently remove a module they use. To
+adopt a smaller scoped kit, generate the matching built-in template and port the
+app-specific `canvas.mjs` and `web/` changes into the new extension.
+
 ## Ship it
 
 Built a canvas you want to keep and reuse? Drop the folder into
@@ -176,7 +202,8 @@ from jongio/copilot-extensions/extensions/stock-ticker."* No clone, no build.
 ```text
 SKILL.md                      The Copilot skill (authoring contract + workflow)
 kit/                          The canonical kit — copy into your extension as canvas-kit/
-  client.mjs                  Browser runtime: html, mountCanvas, pollWhileVisible, hooks, Icon, formatters, deep-link builders
+  core-client.mjs             Core browser runtime used by scoped templates
+  client.mjs                  Backward-compatible full-kit barrel with optional exports
   server.mjs                  SDK-free runtime: /state, /events (SSE), /action, static, inputSchema/stateSchema validation, optional shared-state sync
   storage.mjs                 Durable JSON store — userStore / sessionStore / workspaceStore (atomic, concurrency-safe writes)
   github-store.mjs            Shared repo-backed store — githubStore (multi-writer via the GitHub Contents API; poll + optimistic-lock)
@@ -194,8 +221,9 @@ reference/decision-log/       Complete working canvas in the real installed shap
 reference/deeplinks.md        Deep-link schema reference (routes, params, validation)
 scripts/
   new-canvas.mjs              Generator — stamp a new canvas (--template list|data|ai)
-  sync-kit.mjs                Copy kit/ into an extension as canvas-kit/ + stamp the version
-  check-kit-freshness.mjs     Offline drift gate — fail if a vendored kit copy is stale
+  kit-features.mjs            Strict feature manifest, icon subset, and size-budget helpers
+  sync-kit.mjs                Sync a manifest subset or a legacy full kit, then stamp the version
+  check-kit-freshness.mjs     Offline drift gate for scoped and full vendored kits
   vendor-lucide.mjs           Rebuild kit/vendor/lucide.mjs from a pinned lucide-react release
   install-local.ps1           Install this skill into $COPILOT_HOME/skills
 test/

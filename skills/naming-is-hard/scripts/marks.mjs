@@ -108,7 +108,7 @@ export function matchFamousMark(name) {
       mark: m.name,
       category: m.category,
       matchType: 'exact',
-      reason: `"${name}" is an exact match for the ${m.category} brand ${m.name}.`,
+      reason: m.reason || `"${name}" is an exact match for the ${m.category} brand ${m.name}.`,
     };
   }
 
@@ -124,7 +124,7 @@ export function matchFamousMark(name) {
       mark: m.name,
       category: m.category,
       matchType: 'exact',
-      reason: `"${name}" matches the ${m.category} brand ${m.name}.`,
+      reason: m.reason || `"${name}" matches the ${m.category} brand ${m.name}.`,
     };
   }
 
@@ -139,7 +139,7 @@ export function matchFamousMark(name) {
           mark: m.name,
           category: m.category,
           matchType: 'word',
-          reason: `"${name}" contains the ${m.category} brand ${m.name} as a word.`,
+          reason: m.reason || `"${name}" contains the ${m.category} brand ${m.name} as a word.`,
         };
       }
     }
@@ -165,4 +165,17 @@ export function matchFamousMark(name) {
   }
 
   return { hit: false };
+}
+
+/** Block only confident offline collisions before a candidate enters the swipe deck. */
+export function screenPresentationCollision(name) {
+  const match = matchFamousMark(name);
+  if (!match.hit || match.matchType === 'near-miss') return { blocked: false };
+  return {
+    blocked: true,
+    name,
+    mark: match.mark,
+    matchType: match.matchType,
+    reason: match.reason,
+  };
 }

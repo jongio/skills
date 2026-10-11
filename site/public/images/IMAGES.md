@@ -19,8 +19,9 @@ Keep the filename (or update the reference) and aim for the listed size.
 Every skill's card and detail page uses `thumb-<skill>.png`, set by the `thumb:`
 frontmatter field in `site/src/content/skills/<skill>.md`. Provider and prompt
 provenance is recorded in
-[`docs/thumbnail-prompts.md`](../../../docs/thumbnail-prompts.md). Each file is a
-byte-identical copy of `skills/<skill>/thumbnail.png`.
+[`docs/thumbnail-prompts.md`](../../../docs/thumbnail-prompts.md). The tracked
+source is `skills/<skill>/thumbnail.png`; `npm run dev` and `npm run build`
+validate all catalog mappings and generate byte-identical public copies.
 
 | File | Used by | Notes |
 | --- | --- | --- |
@@ -51,7 +52,7 @@ Tips:
 - PNG for screenshots/photos, SVG for logos/diagrams.
 - A placeholder left in place still deploys fine; it just visibly says "replace me".
 - Adding a skill? Write a prompt in [`docs/thumbnail-prompts.md`](../../../docs/thumbnail-prompts.md)
-  following the house style documented there, generate the art, then save it as
-  BOTH `skills/<skill>/thumbnail.png` and `site/public/images/thumb-<skill>.png`.
-  The two copies must be byte-identical, and the skill's own test asserts it.
-  Point `thumb:` at it in `src/content/skills/<skill>.md`.
+  following the house style documented there, generate the art, save it as
+  `skills/<skill>/thumbnail.png`, and point `thumb:` at
+  `images/thumb-<skill>.png` in `src/content/skills/<skill>.md`. Run
+  `npm run sync:thumbnails`; generated public copies are ignored by Git.

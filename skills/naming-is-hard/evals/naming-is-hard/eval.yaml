@@ -82,3 +82,34 @@ stimuli:
             rather than reporting it as available? Score 1.0 if it clearly flags the
             collision as a Deal Breaker, 0.5 if it notes it is taken without the
             trademark framing, 0.0 if it treats the name as usable.
+
+  - name: block-codename-with-deferred-availability
+    prompt: >-
+      Use the naming-is-hard skill to create a swipe deck for an internal developer
+      tool. I already have three codenames: Synapse, Brightloom, and Willowforge.
+      Use ./naming-run as the state dir. Defer all domain, GitHub, registry, social,
+      and live trademark checks until after swiping. Add the codenames, show me the
+      next swipe card, and report any name the offline screen rejected.
+    tags:
+      scenario: offline-pre-presentation-screen
+      cost: low
+    rubric:
+      - Synapse is rejected before any swipe card is presented.
+      - The rejection includes a useful prominent product or project collision reason.
+      - Brightloom or Willowforge remains available as a swipe card.
+      - No live availability check is required for the offline rejection.
+    graders:
+      - type: file-exists
+        name: deferred-screen-state-file-created
+        config:
+          path: "**/naming-run/naming-state.json"
+      - type: prompt
+        name: blocks-synapse-before-swipe
+        config:
+          prompt: >-
+            Did the agent use the deterministic offline screen to reject Synapse
+            before presenting a swipe card, explain the prominent existing
+            product/project collision, and present Brightloom or Willowforge
+            instead while honoring the request to defer live availability checks?
+            Score 1.0 if all conditions hold, 0.5 if Synapse is rejected without a
+            useful reason or timing clarity, and 0.0 if Synapse is shown as a card.

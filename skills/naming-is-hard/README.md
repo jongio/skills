@@ -11,7 +11,9 @@ and existing-business screen.
 1. **Profiles the thing.** Reads your context (a description, a repo path, or a URL)
    and writes a Naming Brief: what it is, who it is for, the tone, the constraints.
 2. **Generates a deck.** Produces a diverse, on-brief pool of candidate names across
-   many naming strategies.
+   many naming strategies. A deterministic offline screen rejects obvious famous
+   marks and prominent product or project collisions before they become swipe cards,
+   even when domain, GitHub, and other channel checks are deferred.
 3. **Learns your taste.** You swipe one card at a time (Like / Pass / Super-like). A
    transparent preference model learns your type and shows more of what you like,
    with enough variety that it never tunnels. It can tell you your type in words.
@@ -68,7 +70,7 @@ tested Node engine (`scripts/`), which the agent calls between turns.
 | `scripts/net.mjs` | SSRF-safe fetch: slug sanitisation, host allowlist, timeout, guarded redirects |
 | `scripts/features.mjs` | Deterministic feature extraction from a name |
 | `scripts/model.mjs` | The preference model: score, learn, rank, pick next, explain, suggest |
-| `scripts/marks.mjs` + `famous-marks.json` | Famous-brand screen (the Deal Breaker source) |
+| `scripts/marks.mjs` + `famous-marks.json` | Offline famous-brand and prominent product/project collision screen |
 | `scripts/similarity.mjs` | Confusability: edit-distance / reorder / phonetic vs a supplied corpus |
 | `scripts/availability.mjs` | Channel checks (DNS-NS domains, GitHub, registries, social, trademark) |
 | `scripts/verdict.mjs` | The three-tier roll-up |
@@ -113,6 +115,11 @@ node scripts/naming.mjs duel   --dir ./run --winner brightloom --loser flowly
 node scripts/naming.mjs state  --dir ./run                # dump current state
 node scripts/naming.mjs reset  --dir ./run                # clear state
 ```
+
+`add` returns a `blocked` array with a reason for each offline collision. Blocked
+names are not persisted as candidates and never count as remaining swipe cards.
+Channel checks remain available through `check` and `screen` for finalists and
+availability-first workflows.
 
 `check`, `screen`, and `variants` are the commands that use the network. A real-network sanity check:
 

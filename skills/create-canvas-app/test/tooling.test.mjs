@@ -53,6 +53,14 @@ async function main() {
 
   const { KIT_VERSION } = await import("../kit/version.mjs");
   const { VERSION_MARKER, syncKit } = await import("../scripts/sync-kit.mjs");
+  const {
+    FEATURE_MANIFEST,
+    assertFeatureManifest,
+    assertSizeBudget,
+    createFeatureManifest,
+    renderFeatureManifest,
+    renderIconSubset,
+  } = await import("../scripts/kit-features.mjs");
 
   await test("version.mjs exports a non-empty KIT_VERSION", () => {
     assert.equal(typeof KIT_VERSION, "string");
@@ -62,6 +70,48 @@ async function main() {
   await test("client.mjs re-exports KIT_VERSION", async () => {
     const client = await import("../kit/client.mjs");
     assert.equal(client.KIT_VERSION, KIT_VERSION);
+  });
+
+  await test("feature manifests are sorted, deterministic, and strict", () => {
+    const manifest = createFeatureManifest({
+      features: ["storage", "core", "core"],
+      files: ["vendor/lucide.mjs", "core-client.mjs"],
+      icons: ["plus", "circle", "plus"],
+    });
+    assert.deepEqual(manifest.features, ["core", "storage"]);
+    assert.deepEqual(manifest.files, ["core-client.mjs", "vendor/lucide.mjs"]);
+    assert.deepEqual(manifest.icons, ["circle", "plus"]);
+    assert.equal(renderFeatureManifest(manifest), renderFeatureManifest(manifest));
+    assert.throws(
+      () => assertFeatureManifest({ ...manifest, extra: true }),
+      /must contain exactly/
+    );
+    assert.throws(
+      () => assertFeatureManifest({ ...manifest, files: ["../outside.mjs", "vendor/lucide.mjs"] }),
+      /unsafe file path/
+    );
+  });
+
+  await test("icon subsets are exact and deterministic", async () => {
+    const source = renderIconSubset(["trash-2", "plus", "trash-2"]);
+    assert.equal(source, renderIconSubset(["plus", "trash-2"]));
+    const file = join(await mkdtemp(join(tmpdir(), "ck-icons-")), "lucide.mjs");
+    try {
+      await writeFile(file, source, "utf8");
+      const subset = await import(new URL(`file:///${file.replace(/\\/g, "/")}`).href);
+      assert.deepEqual(Object.keys(subset.default), ["plus", "trash-2"]);
+      assert.deepEqual(subset.aliases, {});
+    } finally {
+      await rm(file.substring(0, file.lastIndexOf("\\")), { recursive: true, force: true });
+    }
+  });
+
+  await test("size budgets pass at the limit and report actual and allowed bytes on failure", () => {
+    assert.doesNotThrow(() => assertSizeBudget("list", 100, 100));
+    assert.throws(
+      () => assertSizeBudget("list", 101, 100),
+      /list template size budget exceeded: actual 101 bytes, allowed 100 bytes/
+    );
   });
 
   const work = await mkdtemp(join(tmpdir(), "ck-tooling-"));
@@ -84,6 +134,10 @@ async function main() {
       const marker = JSON.parse(await readFile(join(dest, VERSION_MARKER), "utf8"));
       assert.equal(marker.version, KIT_VERSION);
       assert.ok(marker.syncedAt, "marker should record syncedAt");
+      assert.equal(await exists(join(dest, FEATURE_MANIFEST)), false);
+      for (const optional of ["deeplinks.mjs", "github-store.mjs", "net.mjs"]) {
+        assert.equal(await exists(join(dest, optional)), true, `legacy full sync must retain ${optional}`);
+      }
     });
 
     // ---- freshness: fresh = pass ------------------------------------------
@@ -165,6 +219,60 @@ async function main() {
       assert.equal(res.version, KIT_VERSION);
       assert.ok(await exists(join(ext2, "canvas-kit", "server.mjs")));
       assert.ok(await exists(join(ext2, "canvas-kit", VERSION_MARKER)));
+    });
+
+    await test("scoped sync writes exact files and icons, then deterministically repairs drift", async () => {
+      const ext3 = join(work, "ext3");
+      const selection = {
+        features: ["core", "icons:test"],
+        files: ["core-client.mjs", "icons.mjs", "vendor/lucide.mjs", "vendor/preact-htm-standalone.mjs"],
+        icons: ["circle", "plus"],
+      };
+      await syncKit(ext3, selection);
+      const kitDir = join(ext3, "canvas-kit");
+      assert.deepEqual(
+        (await relFiles(kitDir)).filter((file) => file !== VERSION_MARKER && file !== FEATURE_MANIFEST),
+        selection.files
+      );
+      assert.equal(await exists(join(kitDir, "net.mjs")), false);
+      const firstManifest = await readFile(join(kitDir, FEATURE_MANIFEST), "utf8");
+
+      await writeFile(join(kitDir, "vendor", "lucide.mjs"), "// drift\n", "utf8");
+      let out = run([FRESH, ext3], work);
+      assert.equal(out.status, 1);
+      assert.match(out.stderr, /content differs: vendor\/lucide\.mjs/);
+
+      await syncKit(ext3);
+      assert.equal(await readFile(join(kitDir, FEATURE_MANIFEST), "utf8"), firstManifest);
+      out = run([FRESH, ext3], work);
+      assert.equal(out.status, 0, out.stderr || out.stdout);
+    });
+
+    await test("scoped sync upgrades a stale manifest version without expanding its selection", async () => {
+      const ext4 = join(work, "ext4");
+      const selection = {
+        features: ["core", "icons:test"],
+        files: ["core-client.mjs", "icons.mjs", "vendor/lucide.mjs", "vendor/preact-htm-standalone.mjs"],
+        icons: ["circle"],
+      };
+      await syncKit(ext4, selection);
+      const kitDir = join(ext4, "canvas-kit");
+      const manifestPath = join(kitDir, FEATURE_MANIFEST);
+      const stale = JSON.parse(await readFile(manifestPath, "utf8"));
+      stale.kitVersion = "stale-version";
+      await writeFile(manifestPath, JSON.stringify(stale, null, 2) + "\n", "utf8");
+
+      let out = run([FRESH, ext4], work);
+      assert.equal(out.status, 1);
+      assert.match(out.stderr, /kitVersion/);
+
+      await syncKit(ext4);
+      const upgraded = JSON.parse(await readFile(manifestPath, "utf8"));
+      assert.equal(upgraded.kitVersion, KIT_VERSION);
+      assert.deepEqual(upgraded.files, selection.files);
+      assert.deepEqual(upgraded.icons, selection.icons);
+      out = run([FRESH, ext4], work);
+      assert.equal(out.status, 0, out.stderr || out.stdout);
     });
   } finally {
     await rm(work, { recursive: true, force: true });

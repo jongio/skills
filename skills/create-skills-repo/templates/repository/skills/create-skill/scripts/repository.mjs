@@ -12,7 +12,6 @@ const DEFAULT_PATHS = Object.freeze({
   evalWorkflow: ".github/workflows/skill-eval.yml",
   dependabot: ".github/dependabot.yml",
   catalogEntries: "site/src/content/skills",
-  catalogImages: "site/public/images",
   thumbnailPrompts: "docs/thumbnail-prompts.md",
 });
 
@@ -142,10 +141,9 @@ export function validateManagedConfig(config, root) {
   }
   if (!config.catalog.enabled) {
     paths.catalogEntries = null;
-    paths.catalogImages = null;
     paths.thumbnailPrompts = null;
-  } else if (!existsSync(paths.catalogEntries) || !existsSync(paths.catalogImages)) {
-    throw new Error("Managed catalog is enabled but its entry or image directory is missing");
+  } else if (!existsSync(paths.catalogEntries)) {
+    throw new Error("Managed catalog is enabled but its entry directory is missing");
   }
   if (paths.thumbnailPrompts && !existsSync(paths.thumbnailPrompts)) {
     paths.thumbnailPrompts = null;
@@ -206,13 +204,10 @@ export function discoverConventions(root) {
     paths[key] = existsSync(candidate) ? candidate : null;
   }
 
-  const ambiguous = [];
   const marketplaceCandidates = findNamedDirectories(root, "plugins", 3);
+  const ambiguous = [];
   if (!paths.marketplace && marketplaceCandidates.length > 1) {
     ambiguous.push("marketplace registration");
-  }
-  if ((paths.catalogEntries && !paths.catalogImages) || (!paths.catalogEntries && paths.catalogImages)) {
-    ambiguous.push("catalog entry and image directories");
   }
   if (ambiguous.length > 0) {
     throw new Error(`Ambiguous registration surfaces: ${ambiguous.join(", ")}`);

@@ -50,7 +50,7 @@ mechanisms (Vally lint, the site build, and the deterministic parity test).
 | F5 | Safety, privacy, and professional boundaries preserved during simplification | skills/eli5/SKILL.md | T4, T11 | covered |
 | F6 | Installable skill package and Vally capability-eval configuration | skills/eli5/package.json; skills/eli5/evals/ | T6 | covered |
 | F7 | Root marketplace, plugin, README, and nightly eval registration | marketplace.json; plugin.json; README.md; .github/workflows/skill-eval.yml | T5, T6, T12 | covered |
-| F8 | Astro catalog entry and house-style generated thumbnail | site/src/content/skills/eli5.md; site/public/images/thumb-eli5.png | T5, T7 | covered |
+| F8 | Astro catalog mapping and house-style source thumbnail | site/src/content/skills/eli5.md; skills/eli5/thumbnail.png | T5, T7 | covered |
 | F9 | Reproducible locked CI installation for the new evaluated skill | .gitignore; skills/eli5/package-lock.json; .github/workflows/skill-eval.yml | T6, T12 | covered |
 
 ## Gaps & Additions
