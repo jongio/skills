@@ -84,11 +84,13 @@ open bot pull request is a package already claimed:
 ```sh
 gh pr list --author "app/dependabot" --state open --limit 50 --json number,title,url
 gh pr list --author "app/renovate"   --state open --limit 50 --json number,title,url
+gh pr view <number> --json number,url,title,body,files,headRefName
 ```
 
 Dependabot titles carry the package and both versions, as in
-`Bump lodash from 4.17.20 to 4.17.21`, so the package can be matched against the
-update plan without opening each pull request.
+`Bump lodash from 4.17.20 to 4.17.21`, but a grouped or multi-directory pull
+request lists more in its body and changed files. Match from the full pull
+request, not the title.
 
 Reconcile security alerts the run resolves. An alert stays open until the fix
 lands, so a run that patches one should say which:
@@ -105,8 +107,9 @@ alerts.
 | Situation | Action |
 |---|---|
 | Bot has an open pull request for a package this run does not touch | Leave it alone. Say it stays with the bot. |
-| Bot has an open pull request for a package this run needs to move | Do not bump it in parallel. Either take the bot's pull request as the delivery for that package, or supersede it deliberately and say so. |
-| This run supersedes a bot pull request | Name it by number in the summary, then with approval either close it with a comment pointing at the replacement, or post `@dependabot recreate` so the bot rebuilds it against the new base. |
+| Bot has an open pull request for a package this run needs to move | Do not bump it in parallel. Ask the subsume-or-leave choice from step 2 of `SKILL.md` before applying it. |
+| The user chose to subsume a bot pull request | After the replacement pull request is open and its diff contains every package of the bot pull request, and with separate confirmation naming both, run `gh pr close <number> --comment "Superseded by <replacement URL>"` for that number only. Report it closed only when `gh pr view <number> --json state` reads `CLOSED`; on any error, report the error and that it is still open. |
+| The user chose to leave a bot pull request with the bot | Remove its packages from the plan and leave their manifest and lockfile entries untouched. |
 | Bot pull requests go stale after this run merges | `@dependabot rebase` asks for a rebase in place. Renovate's equivalent is ticking the rebase checkbox in its pull request body. |
 | Bot is configured but has never opened a pull request | Treat the ecosystem as unowned and keep it in scope. |
 

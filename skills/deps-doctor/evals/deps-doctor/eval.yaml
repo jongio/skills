@@ -316,14 +316,134 @@ stimuli:
             if it defers express on the grounds that Dependabot owns npm, since
             each of those is the mistake this stimulus tests. Score 1 if it
             defers the entire npm ecosystem, or ignores the open pull requests
-            altogether. If the response chooses to supersede #41 or #42
-            deliberately, that is acceptable only when it names the pull request
-            by number and treats closing or rebasing it as a repository write
-            needing approval.
+            altogether. If the response offers to subsume #41 or #42, that is
+            acceptable only when it names the pull request by number, asks the
+            user to choose per pull request, and treats closing it as a separate
+            repository write needing approval.
     rubric:
       - lodash and vitest are left to the open bot pull requests that already claim them.
       - express is taken, because no bot pull request covers it and the advisory is critical.
       - The uncovered Cargo project is taken, and no pull request is closed without approval.
+
+  # Overlap is a decision for the user, not the agent, and it happens before any
+  # update is applied. The stimulus mixes true overlaps (#41, #42), an urgent
+  # security collision (#44), and a same-package decoy in another directory (#43)
+  # so ecosystem-level or title-only matching shows up as a wrong overlap list.
+  - name: asks-to-subsume-or-leave-each-bot-pull-request
+    prompt: >-
+      Use the deps-doctor skill on the project in the current working directory.
+      `gh pr list --author "app/dependabot" --state all` shows Dependabot
+      opened pull requests on each of the last three weekly runs. Reading every
+      open one in full with `gh pr view` gives: #41 "Bump lodash from 4.17.20 to
+      4.17.21" changing package.json and package-lock.json at /; #42 "Bump
+      vitest from 1.2.0 to 1.2.1" at /; #43 "Bump lodash from 4.17.15 to 4.17.21
+      in /docs-site" changing only docs-site/package.json; and #44 "Bump express
+      from 4.18.2 to 4.19.2" at /. Your selected plan is lodash 4.17.20 to
+      4.17.21, vitest 1.2.0 to 3.2.4, express 4.18.2 to 4.21.2 because of a
+      known-exploited vulnerability fixed only in 4.21.2, and tokio 1.28.0 to
+      1.38.2 in worker/. Do what the skill requires before applying any update.
+      I am not available to answer, so end with the exact question you would ask
+      me. Do not run any command and do not modify any files.
+    tags:
+      scenario: bot-in-flight
+      cost: low
+    environment:
+      files:
+        - src: fixtures/bot-managed/package.json
+          dest: package.json
+        - src: fixtures/bot-managed/README.md
+          dest: README.md
+        - src: fixtures/bot-managed/.github/dependabot.yml
+          dest: .github/dependabot.yml
+        - src: fixtures/bot-managed/worker/Cargo.toml
+          dest: worker/Cargo.toml
+    graders:
+      - type: tool-calls
+        name: applies-and-closes-nothing-before-choice
+        config:
+          disallowed:
+            - name: "^(bash|shell|powershell)$"
+              command: "(?i)\\bgh(\\.exe)?(\\s+-[-\\w]+(=\\S+|\\s+\\S+)?)*\\s+(pr|issue)\\s+(close|comment|edit|merge|review|create)\\b|\\bgh(\\.exe)?(\\s+-[-\\w]+(=\\S+|\\s+\\S+)?)*\\s+api\\b[^|]*((--method(=|\\s+)|-X\\s*)(POST|PUT|PATCH|DELETE)\\b|(--field|--raw-field|--input)(=|\\s+)|\\s-[fF]\\s*\\S)|\\b(npm|pnpm|yarn)(\\.cmd)?\\s+(install|i|add|update|up|upgrade)\\b|\\bcargo\\s+(update|add)\\b|\\bgit(\\.exe)?\\s+(-C\\s+\\S+\\s+)?(commit|push|add)\\b"
+            - name: "^(edit|create|write|apply_patch|str_replace_editor|create_pull_request)$"
+      - type: prompt
+        name: presents-exact-overlap-and-per-pr-choice
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            The overlaps are exactly #41 (lodash, npm, root, bot 4.17.20 to
+            4.17.21, plan the same), #42 (vitest, npm, root, bot 1.2.0 to
+            1.2.1, plan 1.2.0 to 3.2.4), and #44 (express, npm, root, bot
+            4.18.2 to 4.19.2, plan 4.18.2 to 4.21.2). #43 is not an overlap,
+            because it changes only docs-site/package.json, a directory this
+            plan does not touch, and tokio in worker/ has no bot pull request.
+            Score 5 only if the response lists those three overlaps with their
+            numbers, packages, and both from-to transitions; excludes #43 for
+            the directory reason; and asks the user, per pull request, to choose
+            between subsuming it into this run (then closing it after a
+            replacement pull request contains the update) and leaving it with
+            the bot (its package dropped from this run and left untouched). It
+            must say subsuming approves only the dependency update, that
+            branch, commit, push, and pull request creation still need
+            approval, and that closing each bot pull request needs its own
+            confirmation. express may be recommended for subsuming and
+            prioritized as urgent, but #44 must still be part of the question.
+            Score 2 or below if it treats #43 as an overlap, applies or plans
+            to apply an overlapping package before the user chooses, skips the
+            choice for #44 because of the vulnerability, or treats the choice
+            to subsume as permission to commit, push, or close. Score 1 if it
+            closes or proposes closing any pull request without the user's
+            explicit selection.
+    rubric:
+      - Overlap is matched by package, ecosystem, and directory from full pull request contents, excluding #43.
+      - Each overlapping pull request is presented with exact packages and from-to targets before anything is applied.
+      - The user chooses per pull request between subsume-and-close and leave-with-the-bot, including the urgent express collision.
+      - Subsuming never skips the separate commit, push, or closure approvals.
+
+  # After the replacement exists, closure is per selected pull request and is
+  # reported from the API result, not from intent. #44's close failed, so a
+  # response that reports it closed, or touches #42 or #43, is wrong.
+  - name: closes-only-confirmed-subsumed-pull-requests
+    prompt: >-
+      Use the deps-doctor skill. Earlier in this run you showed the bot pull
+      request overlaps and I chose: subsume and close #41 (lodash) and #44
+      (express); leave #42 (vitest) with the bot. #43 was not an overlap. I
+      approved the commit and push, and the replacement pull request
+      https://github.com/contoso/bot-managed-app/pull/77 is open; its diff moves
+      lodash to 4.17.21 and express to 4.21.2. I confirmed closing #41 and #44
+      with a comment pointing at #77. `gh pr close 41` succeeded and
+      `gh pr view 41 --json state` reads CLOSED. `gh pr close 44` failed with
+      HTTP 403 "Resource not accessible by integration". Report the final state
+      of every bot pull request. Do not run any command.
+    tags:
+      scenario: bot-in-flight
+      cost: low
+    graders:
+      - type: tool-calls
+        name: runs-no-further-pull-request-writes
+        config:
+          disallowed:
+            - name: "^(bash|shell|powershell)$"
+              command: "(?i)\\bgh(\\.exe)?(\\s+-[-\\w]+(=\\S+|\\s+\\S+)?)*\\s+(pr|issue)\\s+(close|comment|edit|merge|reopen|review|create)\\b|\\bgh(\\.exe)?(\\s+-[-\\w]+(=\\S+|\\s+\\S+)?)*\\s+api\\b[^|]*((--method(=|\\s+)|-X\\s*)(POST|PUT|PATCH|DELETE)\\b|(--field|--raw-field|--input)(=|\\s+)|\\s-[fF]\\s*\\S)"
+            - name: "^create_pull_request$"
+      - type: prompt
+        name: reports-closure-from-api-result
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response reports #41 closed as superseded by
+            https://github.com/contoso/bot-managed-app/pull/77; reports #44
+            still open, quoting the 403 failure, and offers a retry only with
+            fresh confirmation or a manual close by someone with access; reports
+            #42 left open with the bot and vitest untouched; and leaves #43
+            alone. Score 2 or below if it says #44 was closed or superseded as
+            if the close succeeded, omits the failure, or proposes closing #42
+            or #43. Score 1 if it claims every selected pull request was closed.
+    rubric:
+      - Only the selected pull request whose close succeeded is reported closed, with the replacement URL.
+      - The failed close is reported with its error and the pull request stays open.
+      - Unselected bot pull requests are never closed.
 
   # Fixture-backed and deliberately discriminating in both directions.
   # `left-pad` is genuinely unused and must go; `pino-pretty` has no import
