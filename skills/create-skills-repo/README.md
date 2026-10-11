@@ -36,11 +36,13 @@ The generated repository seeds the bundled canonical `create-skill` snapshot
 and uses its noninteractive fixture mode to create `example-skill`. This skill
 keeps individual authoring in the standalone tool.
 
-Repository tooling, the bundled authoring skill, and newly generated skills pin
-`@microsoft/vally-cli` to `0.17.0`. Upgrade an existing managed repository before
-authoring new skills so its Vally tool lockfile matches this version.
+Development tooling, the bundled authoring snapshot, and newly generated skills
+pin `@microsoft/vally-cli` to `0.18.0`. The bundled shared tooling lockfile matches
+the authoring skill's pin so noninteractive repository creation works without
+installing dependencies. Intentional eval fixtures and unrelated template
+dependency snapshots remain unchanged.
 
-Vally 0.17.0 requires grader names to be unique across each eval file and at most
+Vally requires grader names to be unique across each eval file and at most
 60 characters long. Strict-lint existing eval specs before running them.
 
 ## Safety model

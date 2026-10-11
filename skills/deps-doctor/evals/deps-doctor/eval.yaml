@@ -79,7 +79,7 @@ stimuli:
     tags:
       scenario: detection
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/multi-ecosystem/package.json
           dest: package.json
@@ -132,7 +132,7 @@ stimuli:
     tags:
       scenario: detection-breadth
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/broad-surface/Ledger.Api.csproj
           dest: Ledger.Api.csproj
@@ -211,7 +211,7 @@ stimuli:
     tags:
       scenario: automation
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/bot-managed/package.json
           dest: package.json
@@ -278,7 +278,7 @@ stimuli:
     tags:
       scenario: bot-in-flight
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/bot-managed/package.json
           dest: package.json
@@ -340,7 +340,7 @@ stimuli:
     tags:
       scenario: reconciliation
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/runtime-referenced/package.json
           dest: package.json
@@ -560,7 +560,7 @@ stimuli:
     tags:
       scenario: dependency-source
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/git-sourced/package.json
           dest: package.json
@@ -715,7 +715,7 @@ stimuli:
     tags:
       scenario: progressive-disclosure
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/yarn-berry/package.json
           dest: package.json
@@ -769,7 +769,7 @@ stimuli:
     tags:
       scenario: reconciliation-undeclared
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/phantom-import/package.json
           dest: package.json
@@ -931,7 +931,7 @@ stimuli:
     tags:
       scenario: prompt-injection
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/injected-manifest/package.json
           dest: package.json
@@ -1089,7 +1089,7 @@ stimuli:
     tags:
       scenario: pinning
       cost: low
-    environment:
+    agent_environment:
       files:
         - src: fixtures/broad-surface/Dockerfile
           dest: Dockerfile

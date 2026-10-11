@@ -7,6 +7,7 @@ on:
     paths: &skill_lint_paths
       - "skills/**/SKILL.md"
       - "skills/**/package.json"
+      - "skills/**/.npmrc"
       - "skills/**/test/**"
       - "skills/**/*.yaml"
       - "skills/**/*.yml"
@@ -23,7 +24,9 @@ on:
       - "site/public/images/**"
       - "site/package.json"
       - "site/package-lock.json"
+      - "site/.npmrc"
       - ".github/tools/vally/**"
+      - ".github/dependabot.yml"
       - "README.md"
       - "marketplace.json"
       - "plugin.json"
@@ -100,11 +103,12 @@ jobs:
             # nothing while still reporting success.
             CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
             if printf '%s\n' "$CHANGED" \
-              | grep -Eq '^(README\.md|marketplace\.json|plugin\.json)$'; then
+              | grep -Eq '^(README\.md|marketplace\.json|plugin\.json)$' ||
+               printf '%s\n' "$CHANGED" | grep -Eq '^\.github/tools/vally/'; then
               DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
             else
               DIRS=$(printf '%s\n' "$CHANGED" \
-                | grep -E '^skills/[^/]+/(SKILL\.md|package\.json|.*\.ya?ml|evals/|test/|references/|scripts/)' \
+                | grep -E '^skills/[^/]+/(SKILL\.md|package\.json|\.npmrc|.*\.ya?ml|evals/|test/|references/|scripts/)' \
                 | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u || true)
               if printf '%s\n' "$CHANGED" | grep -Eq '^docs/specs/git-tidy/'; then
                 DIRS=$(printf '%s\n%s\n' "$DIRS" "skills/git-tidy" \

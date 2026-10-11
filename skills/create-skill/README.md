@@ -49,7 +49,7 @@ npm run eval:lint
 Tests are deterministic. They use temporary repositories, injected clients, and local PNG buffers.
 They never perform a real network request or billed image generation.
 
-Generated skills pin `@microsoft/vally-cli` to `0.17.0` and reuse a matching
+Generated skills pin `@microsoft/vally-cli` to `0.18.0` and reuse a matching
 repository Vally tool lockfile. Update older repository tooling before authoring.
 
 ## License

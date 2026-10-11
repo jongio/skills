@@ -270,9 +270,9 @@ test("create builds a complete managed repository and an inert GitHub plan", asy
   const vallyLock = JSON.parse(
     await readFile(path.join(fx.target, ".github", "tools", "vally", "package-lock.json"), "utf8"),
   );
-  assert.equal(vallyPackage.devDependencies["@microsoft/vally-cli"], "0.17.0");
-  assert.equal(vallyLock.packages[""].devDependencies["@microsoft/vally-cli"], "0.17.0");
-  assert.equal(vallyLock.packages["node_modules/@microsoft/vally-cli"].version, "0.17.0");
+  assert.equal(vallyPackage.devDependencies["@microsoft/vally-cli"], "0.18.0");
+  assert.equal(vallyLock.packages[""].devDependencies["@microsoft/vally-cli"], "0.18.0");
+  assert.equal(vallyLock.packages["node_modules/@microsoft/vally-cli"].version, "0.18.0");
   assert.equal(
     existsSync(
       path.join(
@@ -347,6 +347,37 @@ test("a second identical create is idempotent", async (t) => {
   assert.equal(result.written, 0);
   assert.equal(result.githubPlan, null);
   assert.equal(after, before);
+});
+
+test("bundled authoring creates a functional repository with aligned Vally 0.18 locks", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "create-skills-repo-vally-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const target = path.join(root, "generated");
+  const result = await execute(createArgs(target, ["--no-catalog"]));
+  assert.equal(result.status, "created");
+  assert.deepEqual(result.skills, ["create-skill", "example-skill"]);
+  assert.equal(result.githubPlan.approved, false);
+
+  for (const relative of [".github/tools/vally", "skills/create-skill", "skills/example-skill"]) {
+    const directory = path.join(target, relative);
+    const manifest = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8"));
+    const lock = JSON.parse(await readFile(path.join(directory, "package-lock.json"), "utf8"));
+    assert.equal(manifest.devDependencies["@microsoft/vally-cli"], "0.18.0", relative);
+    assert.equal(lock.packages[""].devDependencies["@microsoft/vally-cli"], "0.18.0", relative);
+    assert.equal(lock.packages["node_modules/@microsoft/vally-cli"].version, "0.18.0", relative);
+    assert.equal(lock.packages["node_modules/@microsoft/vally"].version, "0.18.0", relative);
+  }
+
+  const example = path.join(target, "skills", "example-skill");
+  const validation = spawnSync(process.execPath, ["--test", "test/skill.test.mjs"], {
+    cwd: example,
+    encoding: "utf8",
+    env: standaloneTestEnvironment(),
+    shell: false,
+  });
+  assert.equal(validation.status, 0, validation.stderr || validation.stdout);
+  const checked = await execute(["check", target]);
+  assert.equal(checked.status, "clean");
 });
 
 test("custom default branch reaches generated workflows and GitHub plans", async (t) => {
