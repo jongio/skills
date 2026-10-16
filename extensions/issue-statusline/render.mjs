@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { ICONS, syncSession } from "./tracker.mjs";
+import { shouldUseNerdFont, toUnicodeIcons } from "./compose.mjs";
 
 const clean = (text) => String(text).replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
 
@@ -62,7 +63,7 @@ function issueAttentionLevel(rawStatus) {
 	return "attention";
 }
 
-function formatIssueItem(issue, _currentRepo, { links, color }) {
+function formatIssueItem(issue, _currentRepo, { links, color, nerdFont = true }) {
 	const displayLabel = issue.label;
 	let raw = issue.status ? clean(issue.status).trim() : "";
 	const level = issueAttentionLevel(raw);
@@ -80,7 +81,8 @@ function formatIssueItem(issue, _currentRepo, { links, color }) {
 			? `\x1b]8;;${issue.url}\x07${displayLabel}\x1b]8;;\x07${PALETTE.reset}${theme.mid}`
 			: `\x1b]8;;${issue.url}\x07${displayLabel}\x1b]8;;\x07`)
 		: `${displayLabel} (${issue.url})`;
-	const content = raw ? `${leadIcon}${labelText} ${raw}` : `${leadIcon}${labelText}`;
+	const rawContent = raw ? `${leadIcon}${labelText} ${raw}` : `${leadIcon}${labelText}`;
+	const content = nerdFont ? rawContent : toUnicodeIcons(rawContent);
 	return makePill(content, level, { color });
 }
 
@@ -89,14 +91,16 @@ export function render(payload, {
 	now = Date.now(),
 	links = true,
 	color = links,
+	nerdFont = undefined,
 	fetchIssueStatus,
 	issueCacheTtlMs,
 } = {}) {
 	if (!payload?.session_id) return "";
 	const { state } = syncSession(payload, { home, now, fetchIssueStatus, issueCacheTtlMs });
 	if (!state || !state.issues.length) return "";
+	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: false });
 	const currentRepo = state.repository || null;
-	const allPills = state.issues.map((item) => formatIssueItem(item, currentRepo, { links, color }));
+	const allPills = state.issues.map((item) => formatIssueItem(item, currentRepo, { links, color, nerdFont: useNerdFont }));
 	if (!color) {
 		return allPills.map((p) => p.mid).join(" · ");
 	}
@@ -117,7 +121,7 @@ async function main() {
 		}
 		const plain = process.argv.includes("--plain");
 		const color = !plain && !process.argv.includes("--no-color") && !process.env.NO_COLOR;
-		const output = render(payload, { links: !plain, color });
+		const output = render(payload, { links: !plain, color, nerdFont: shouldUseNerdFont({ autoDetect: true }) });
 		if (output) console.log(output);
 	} catch (error) {
 		console.error(`[issue-statusline] ${error.message}`);

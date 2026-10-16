@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { ICONS, syncSession } from "./tracker.mjs";
+import { shouldUseNerdFont, toUnicodeIcons } from "./compose.mjs";
 
 const PALETTE = {
 	critical: {
@@ -67,7 +68,7 @@ export function subagentHoverUrl(sessionId, counts = null, repository = null, ho
 	return `${base}#${parts.join("__")}`;
 }
 
-export function render(payload, { home, color = true } = {}) {
+export function render(payload, { home, color = true, nerdFont = undefined } = {}) {
 	if (!payload?.session_id) return "";
 	const { tracker } = syncSession(payload, { home });
 	if (!tracker || tracker.dismissed) return "";
@@ -85,7 +86,9 @@ export function render(payload, { home, color = true } = {}) {
 		? "critical"
 		: (c.starting > 0 || c.inPr > 0 ? "attention" : (c.merged > 0 ? "merged" : "passing"));
 	const statusText = statusParts.join(" ");
-	const content = `${ICONS.agent} ${statusText}`;
+	const rawContent = `${ICONS.agent} ${statusText}`;
+	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: false });
+	const content = useNerdFont ? rawContent : toUnicodeIcons(rawContent);
 	const pill = makePill(content, level, { color });
 	if (!color) return pill.mid;
 	return `${pill.top}\n${pill.mid}\n${pill.bot}`;
@@ -102,7 +105,7 @@ async function main() {
 		}
 		const plain = process.argv.includes("--plain");
 		const color = !plain && !process.argv.includes("--no-color") && !process.env.NO_COLOR;
-		const output = render(payload, { links: !plain, color });
+		const output = render(payload, { links: !plain, color, nerdFont: shouldUseNerdFont({ autoDetect: true }) });
 		if (output) console.log(output);
 	} catch (error) {
 		console.error(`[subagent-statusline] ${error.message}`);

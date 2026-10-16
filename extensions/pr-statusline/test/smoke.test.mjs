@@ -205,6 +205,16 @@ try {
 		{ home, links: false, now: 1000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
 	assert.ok(firstRender.includes("\uE726 acme/app#42 (https://github.com/acme/app/pull/42) \uF058 1/1 \uF164 2/2 \uF075 4/4"));
+	const unicodeRender = render(
+		{
+			session_id: "transcript-session",
+			transcript_path: transcriptDir,
+			remote: { connected: true, repository: "acme/remote", pull_request_number: 88 },
+		},
+		{ home, links: false, nerdFont: false, now: 1000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
+	);
+	assert.ok(unicodeRender.includes("\uE0A0 acme/app#42 (https://github.com/acme/app/pull/42) \u2713 1/1 \u2605 2/2 \u2709 4/4"));
+	assert.doesNotMatch(unicodeRender, /[\uE700-\uF8FF]/);
 	assert.ok(firstRender.includes("\uE726 acme/app#55 (https://github.com/acme/app/pull/55) \uF252 1/2 \uF164 1/2 \uF075 2/3"));
 	assert.ok(firstRender.includes("\uF4DD acme/remote#88 (https://github.com/acme/remote/pull/88) \uF057 0/1 \uF071 \uF164 0/2 \uF075 0/2"));
 	const coloredFirstRender = render(

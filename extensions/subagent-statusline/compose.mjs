@@ -7,6 +7,159 @@ export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".co
 
 const PREFERRED_ORDER = ["pr-statusline", "issue-statusline", "subagent-statusline"];
 
+const NERD_FONT_TO_UNICODE = new Map([
+	["\uE726", "\uE0A0"],
+	["\uE727", "\uE0A0"],
+	["\uF419", "\uE0A0"],
+	["\uF4DD", "\u25C7"],
+	["\uF058", "\u2713"],
+	["\uF252", "\u25F7"],
+	["\uF057", "\u2717"],
+	["\uF071", "\u26A0"],
+	["\uF440", "\u2691"],
+	["\uF164", "\u2605"],
+	["\uF075", "\u2709"],
+	["\uF41B", "\u25CE"],
+	["\uF41D", "\u2713"],
+	["\uF188", "\u2731"],
+	["\uF415", ""],
+	["\uF4B8", "\u25C8"],
+]);
+
+const NERD_FONT_REGEX = /[\uE726\uE727\uF419\uF4DD\uF058\uF252\uF057\uF071\uF440\uF164\uF075\uF41B\uF41D\uF188\uF415\uF4B8]/g;
+
+export function toUnicodeIcons(text) {
+	return String(text ?? "").replace(NERD_FONT_REGEX, (ch) => NERD_FONT_TO_UNICODE.get(ch) ?? ch);
+}
+
+export function isNerdFontName(fontName) {
+	const raw = String(fontName ?? "").trim();
+	if (!raw) return false;
+	if (/\bfor\s+powerline\b|\bcascadia\s+(?:code|mono)\s+pl\b/i.test(raw)) return false;
+	return /\b(?:nerd\s*font|caskaydia|meslolg[sml]?\s*nf|fira\s*code\s*nf|jetbrains\s*mono\s*nf|hack\s*nf|0xproto\s*nf|[a-z0-9_-]+\s+nf(?:\s+mono|\s+propo)?)\b/i.test(raw);
+}
+
+function stripJsonComments(raw) {
+	return String(raw ?? "")
+		.replace(/\/\*[\s\S]*?\*\//g, "")
+		.replace(/^\s*\/\/.*$/gm, "")
+		.replace(/,(\s*[}\]])/g, "$1");
+}
+
+function isWslEnvironment(procVersionPath = "/proc/version") {
+	if (process.platform !== "linux") return false;
+	if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) return true;
+	try {
+		return /microsoft|wsl/i.test(readFileSync(procVersionPath, "utf8"));
+	} catch {
+		return false;
+	}
+}
+
+function candidateWindowsTerminalSettingsPaths() {
+	const paths = [];
+	if (process.platform === "win32" && process.env.LOCALAPPDATA) {
+		const local = process.env.LOCALAPPDATA;
+		paths.push(
+			join(local, "Packages", "Microsoft.WindowsTerminal_8wekyb3d8bbwe", "LocalState", "settings.json"),
+			join(local, "Packages", "Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe", "LocalState", "settings.json"),
+			join(local, "Microsoft", "Windows Terminal", "settings.json"),
+		);
+	} else if (process.platform === "linux" && existsSync("/mnt/c/Users")) {
+		try {
+			const skip = new Set(["Public", "Default", "Default User", "All Users"]);
+			for (const entry of readdirSync("/mnt/c/Users", { withFileTypes: true })) {
+				if (!entry.isDirectory() || skip.has(entry.name)) continue;
+				const local = join("/mnt/c/Users", entry.name, "AppData", "Local");
+				paths.push(
+					join(local, "Packages", "Microsoft.WindowsTerminal_8wekyb3d8bbwe", "LocalState", "settings.json"),
+					join(local, "Packages", "Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe", "LocalState", "settings.json"),
+					join(local, "Microsoft", "Windows Terminal", "settings.json"),
+				);
+			}
+		} catch {
+			// Ignore unreadable /mnt/c/Users.
+		}
+	}
+	return paths;
+}
+
+export function detectNerdFontFromWindowsTerminalSettings(settingsObj, {
+	wtProfileId = process.env.WT_PROFILE_ID,
+	wslDistroName = process.env.WSL_DISTRO_NAME,
+	isWsl = process.platform === "linux",
+} = {}) {
+	if (!settingsObj || typeof settingsObj !== "object") return null;
+	const list = Array.isArray(settingsObj?.profiles?.list) ? settingsObj.profiles.list : [];
+	const defaultFace = settingsObj?.profiles?.defaults?.font?.face ?? "";
+	let matchedProfile = null;
+	if (wtProfileId) {
+		matchedProfile = list.find((p) => String(p?.guid ?? "").toLowerCase() === String(wtProfileId).toLowerCase()) ?? null;
+	}
+	if (!matchedProfile && isWsl) {
+		if (wslDistroName) {
+			const target = wslDistroName.toLowerCase();
+			matchedProfile = list.find((p) =>
+				String(p?.name ?? "").toLowerCase() === target ||
+				(String(p?.source ?? "").toLowerCase().includes("wsl") && String(p?.name ?? "").toLowerCase().includes(target)),
+			) ?? null;
+		}
+		if (!matchedProfile) {
+			matchedProfile = list.find((p) => String(p?.source ?? "").toLowerCase().includes("wsl")) ?? null;
+		}
+	}
+	const effectiveFace = matchedProfile?.font?.face || defaultFace || "";
+	return isNerdFontName(effectiveFace);
+}
+
+export function detectNerdFontSupport({
+	wtSettingsPaths = null,
+	wtProfileId = process.env.WT_PROFILE_ID,
+	wslDistroName = process.env.WSL_DISTRO_NAME,
+} = {}) {
+	const envChoice = String(process.env.COPILOT_STATUSLINE_ICONS ?? "").trim().toLowerCase();
+	if (["nerdfont", "nerd", "nf", "true", "1"].includes(envChoice)) return true;
+	if (["unicode", "ascii", "plain", "false", "0"].includes(envChoice)) return false;
+
+	const wsl = isWslEnvironment();
+	const paths = wtSettingsPaths ?? candidateWindowsTerminalSettingsPaths();
+	for (const p of paths) {
+		if (!existsSync(p)) continue;
+		try {
+			const parsed = JSON.parse(stripJsonComments(readFileSync(p, "utf8")));
+			const res = detectNerdFontFromWindowsTerminalSettings(parsed, {
+				wtProfileId,
+				wslDistroName,
+				isWsl: wsl,
+			});
+			if (typeof res === "boolean") return res;
+		} catch {
+			// Ignore malformed settings file and try next candidate.
+		}
+	}
+	if (wsl) return false;
+	return true;
+}
+
+export function shouldUseNerdFont({
+	home = configHome(),
+	nerdFont = undefined,
+	autoDetect = false,
+} = {}) {
+	if (typeof nerdFont === "boolean") return nerdFont;
+	const envChoice = String(process.env.COPILOT_STATUSLINE_ICONS ?? "").trim().toLowerCase();
+	if (["nerdfont", "nerd", "nf", "true", "1"].includes(envChoice)) return true;
+	if (["unicode", "ascii", "plain", "false", "0"].includes(envChoice)) return false;
+	try {
+		const raw = JSON.parse(readFileSync(join(home, "statusline-config.json"), "utf8"));
+		if (raw?.iconMode === "unicode") return false;
+		if (raw?.iconMode === "nerdfont") return true;
+	} catch {
+		if (!autoDetect) return true;
+	}
+	return autoDetect ? detectNerdFontSupport() : true;
+}
+
 export function resolveNodeCommand(nodePath = process.execPath) {
 	const base = basename(String(nodePath || "")).toLowerCase();
 	if (!base || base.startsWith("copilot")) {
@@ -44,6 +197,7 @@ export function getEnabledStatuslines(home = configHome()) {
 export function setEnabledStatuslines(enabledIds, {
 	home = configHome(),
 	nodePath = process.execPath,
+	iconMode = undefined,
 } = {}) {
 	mkdirSync(home, { recursive: true });
 	const wanted = new Set((enabledIds ?? []).map(String));
@@ -52,9 +206,22 @@ export function setEnabledStatuslines(enabledIds, {
 	const composerDst = join(home, "statusline-compose.mjs");
 	const settingsPath = join(home, "settings.json");
 
+	let existingIconMode = "auto";
+	if (existsSync(configPath)) {
+		try {
+			const prev = JSON.parse(readFileSync(configPath, "utf8"));
+			if (["auto", "nerdfont", "unicode"].includes(prev?.iconMode)) {
+				existingIconMode = prev.iconMode;
+			}
+		} catch {
+			existingIconMode = "auto";
+		}
+	}
+	const resolvedIconMode = ["auto", "nerdfont", "unicode"].includes(iconMode) ? iconMode : existingIconMode;
+
 	atomicWriteText(
 		configPath,
-		`${JSON.stringify({ version: 1, enabled: validEnabled, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+		`${JSON.stringify({ version: 1, enabled: validEnabled, iconMode: resolvedIconMode, updatedAt: new Date().toISOString() }, null, 2)}\n`,
 	);
 
 	let settings = {};
@@ -126,11 +293,18 @@ export async function runInteractiveStatuslinePicker(session, {
 	args = "",
 	nodePath = process.execPath,
 } = {}) {
+	const rawTokens = String(args ?? "").trim().toLowerCase().split(/[\s,]+/).filter(Boolean);
+	let explicitIconMode;
+	if (rawTokens.includes("unicode") || rawTokens.includes("--unicode")) explicitIconMode = "unicode";
+	else if (rawTokens.includes("nerdfont") || rawTokens.includes("--nerdfont")) explicitIconMode = "nerdfont";
+	else if (rawTokens.includes("auto-icons") || rawTokens.includes("--auto-icons")) explicitIconMode = "auto";
+
 	const direct = parseQuickSetupTokens(args);
-	if (direct !== null) {
-		const res = setEnabledStatuslines(direct, { home, nodePath });
+	if (direct !== null || explicitIconMode) {
+		const targetEnabled = direct !== null ? direct : getEnabledStatuslines(home);
+		const res = setEnabledStatuslines(targetEnabled, { home, nodePath, iconMode: explicitIconMode });
 		const msg = res.enabled.length
-			? `Configured Copilot CLI statusline: ${res.enabled.join(", ")}`
+			? `Configured Copilot CLI statusline: ${res.enabled.join(", ")} (icons: ${explicitIconMode || "auto"})`
 			: "Disabled Copilot CLI statuslines.";
 		await session?.log?.(msg);
 		return { cancelled: false, enabled: res.enabled, message: msg };
@@ -138,6 +312,7 @@ export async function runInteractiveStatuslinePicker(session, {
 
 	if (session?.capabilities?.ui?.elicitation && typeof session?.ui?.elicitation === "function") {
 		const current = new Set(getEnabledStatuslines(home));
+		const currentUseNerd = shouldUseNerdFont({ home, autoDetect: true });
 		const response = await session.ui.elicitation({
 			message: "Choose which Copilot CLI statuslines to display in your terminal footer:",
 			requestedSchema: {
@@ -161,6 +336,12 @@ export async function runInteractiveStatuslinePicker(session, {
 						description: "Show session subagent phase counters (starting, in PR, merged, failed)",
 						default: current.has("subagent-statusline"),
 					},
+					nerdFontIcons: {
+						type: "boolean",
+						title: "Use Nerd Font icons",
+						description: "Uncheck if icons render as ? diamonds in your terminal or WSL profile (uses built-in Powerline + Unicode symbols instead)",
+						default: currentUseNerd,
+					},
 				},
 			},
 		});
@@ -171,7 +352,10 @@ export async function runInteractiveStatuslinePicker(session, {
 		if (response.content.prs !== false) selected.push("pr-statusline");
 		if (response.content.issues !== false) selected.push("issue-statusline");
 		if (response.content.subagents !== false) selected.push("subagent-statusline");
-		const res = setEnabledStatuslines(selected, { home, nodePath });
+		const pickedIconMode = typeof response.content.nerdFontIcons === "boolean"
+			? (response.content.nerdFontIcons ? "nerdfont" : "unicode")
+			: undefined;
+		const res = setEnabledStatuslines(selected, { home, nodePath, iconMode: pickedIconMode });
 		const msg = res.enabled.length
 			? `Configured Copilot CLI statusline: ${res.enabled.join(", ")}`
 			: "Disabled Copilot CLI statuslines.";
@@ -304,20 +488,22 @@ export async function composeStatusLine(payload, {
 	links = true,
 	color = links,
 	now = Date.now(),
+	nerdFont = undefined,
 	selfPath = null,
 	selfRender = null,
 } = {}) {
 	const renderers = discoverRenderers(home);
 	if (!renderers.length) return "";
+	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: true });
 	const outputs = await Promise.all(
 		renderers.map(async ({ path }) => {
 			try {
 				if (selfPath && typeof selfRender === "function" && resolve(path) === resolve(selfPath)) {
-					return await selfRender(payload, { home, now, links, color });
+					return await selfRender(payload, { home, now, links, color, nerdFont: useNerdFont });
 				}
 				const mod = await import(pathToFileURL(path).href);
 				if (typeof mod.render === "function") {
-					return await mod.render(payload, { home, now, links, color });
+					return await mod.render(payload, { home, now, links, color, nerdFont: useNerdFont });
 				}
 			} catch {
 				// Ignore broken renderer module so sibling statusline extensions still render.
@@ -325,7 +511,8 @@ export async function composeStatusLine(payload, {
 			return "";
 		}),
 	);
-	return joinOutputsHorizontally(outputs, { color });
+	const joined = joinOutputsHorizontally(outputs, { color });
+	return useNerdFont ? joined : toUnicodeIcons(joined);
 }
 
 async function main() {
