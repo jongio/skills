@@ -11,18 +11,27 @@ const skills = (await getCollection("skills")).sort(
 
 <Layout wide>
   <header class="hero">
-    <p class="eyebrow">Cross-agent skills · GitHub Copilot · Claude · Codex</p>
+    <p class="eyebrow">Agent Plugins 1.0 · GitHub Copilot · Claude · Codex · Cursor</p>
     <h1>jongio/skills</h1>
     <p class="lede">
-      Jon Gallant's collection of skills for AI coding agents. Each skill lives in
-      its own folder and installs individually or all at once — works with any agent
-      that supports the <a href="https://github.com/vercel-labs/skills">SKILL.md</a> format.
+      Jon Gallant's collection of skills and CLI statuslines for AI coding agents.
+      Add the plugin marketplace once, then install the entire collection or individual skills right from <code>/plugin</code>.
     </p>
     <div class="cta">
       <a class="btn" href={`${base}catalog/`}>Browse skills</a>
+      <a class="btn btn-ghost" href={`${base}statuslines/`}>CLI Statuslines</a>
       <a class="btn btn-ghost" href="https://github.com/jongio/skills">View on GitHub</a>
     </div>
-    <pre class="hero-cmd"><code>npx skills add jongio/skills --all</code></pre>
+    <div class="hero-cmds">
+      <div class="hero-cmd-item">
+        <span class="hero-cmd-label">1 · Add marketplace</span>
+        <pre class="hero-cmd"><code>/plugin marketplace add jongio/skills</code></pre>
+      </div>
+      <div class="hero-cmd-item">
+        <span class="hero-cmd-label">2 · Install all skills &amp; statuslines (or <code>&lt;skill&gt;@jongio-skills</code>)</span>
+        <pre class="hero-cmd"><code>/plugin install jongio-skills@jongio-skills</code></pre>
+      </div>
+    </div>
   </header>
 
   <section>
@@ -36,7 +45,7 @@ const skills = (await getCollection("skills")).sort(
   <section class="statusline-section">
     <div class="section-head">
       <h2 class="section-title">Copilot CLI Statuslines</h2>
-      <a class="section-link" href={`${base}pr-statusline-doc.html`}>Open full documentation →</a>
+      <a class="section-link" href={`${base}statuslines/`}>Open full documentation →</a>
     </div>
     <p class="muted" style="margin: 0 0 1rem;">
       Composable terminal statuslines for GitHub Copilot CLI: <strong>Pull Requests</strong> (<code>pr-statusline</code>), <strong>GitHub Issues</strong> (<code>issue-statusline</code>), and <strong>Subagents</strong> (<code>subagent-statusline</code>). Installed automatically when you install the <code>jongio/skills</code> plugin, or configurable via the one-liner setup script.
@@ -63,7 +72,7 @@ const skills = (await getCollection("skills")).sort(
             <span class="sl-rec-badge">Recommended</span>
             <strong class="sl-primary-title">Install via Copilot Plugin Marketplace</strong>
           </div>
-          <a href={`${base}pr-statusline-doc.html`}>Standalone guide →</a>
+          <a href={`${base}statuslines/`}>Standalone guide →</a>
         </div>
         <p class="sl-primary-sub">
           Add the marketplace once in Copilot CLI, install the <code>jongio-skills</code> plugin, and pick which statuslines (<strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, <strong>Subagents</strong>) you want enabled:
@@ -350,10 +359,36 @@ const skills = (await getCollection("skills")).sort(
   .lede { color: var(--muted); font-size: 1.12rem; max-width: 54ch; margin: 0 auto 1.4rem; }
   .cta { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.4rem; }
   .btn-ghost { background: var(--panel); color: var(--fg); border-color: var(--border); }
+  .hero-cmds {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    max-width: 520px;
+    margin: 0 auto;
+    text-align: left;
+  }
+  .hero-cmd-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .hero-cmd-label {
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    padding-left: 0.2rem;
+  }
   .hero-cmd {
-    display: inline-block; text-align: left; margin: 0 auto; max-width: 100%;
-    overflow-x: auto; background: var(--panel); border: 1px solid var(--border);
-    border-radius: 9px; padding: 0.7rem 1rem;
+    margin: 0;
+    width: 100%;
+    overflow-x: auto;
+    background: var(--panel);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+    border-radius: 9px;
+    padding: 0.7rem 1rem;
+    font-weight: 600;
   }
   .section-title { font-size: 1.4rem; margin: 0 0 1rem; }
   .section-head {

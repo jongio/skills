@@ -1,0 +1,636 @@
+---
+import Layout from "../../layouts/Layout.astro";
+
+const base = import.meta.env.BASE_URL;
+---
+
+<Layout wide title="Statuslines · jongio/skills" description="Composable GitHub Copilot CLI statusline extensions for Pull Requests, GitHub Issues, and Subagents.">
+  <header class="sl-hero">
+    <p class="eyebrow">GitHub Copilot CLI · Composable Terminal Footer</p>
+    <h1>Copilot CLI Statuslines</h1>
+    <p class="muted lede">
+      Composable terminal statuslines for GitHub Copilot CLI: <strong>Pull Requests</strong> (<code>pr-statusline</code>),
+      <strong>GitHub Issues</strong> (<code>issue-statusline</code>), and <strong>Subagents</strong> (<code>subagent-statusline</code>).
+      Run them individually or compose all three side-by-side on a single row via <code>~/.copilot/statusline-compose.mjs</code>.
+    </p>
+  </header>
+
+  <section class="statusline-showcase card">
+    <div class="sl-shot-block">
+      <div class="sl-trio-banner" aria-label="Three Statusline Types">
+        <span class="sl-trio-item c-pr">Pull Requests</span>
+        <span class="sl-trio-sep" aria-hidden="true">|</span>
+        <span class="sl-trio-item c-issue">Issues</span>
+        <span class="sl-trio-sep" aria-hidden="true">|</span>
+        <span class="sl-trio-item c-sub">Subagents</span>
+      </div>
+      <div class="sl-shot-wrap" data-full-img={`${base}screenshots/statusline-composed-terminal.png`} role="button" tabindex="0" aria-label="View Composed Statusline infographic full size">
+        <img src={`${base}screenshots/statusline-composed-terminal.png`} alt="Annotated overview of the three Copilot CLI statusline types: Pull Requests, Issues, and Subagents" loading="eager" />
+        <span class="sl-zoom-hint">Click to view full size</span>
+      </div>
+    </div>
+
+    <div class="sl-install-primary">
+      <div class="sl-primary-head">
+        <div class="sl-primary-title-row">
+          <span class="sl-rec-badge">Recommended</span>
+          <strong class="sl-primary-title">Install via Copilot Plugin Marketplace</strong>
+        </div>
+      </div>
+      <p class="sl-primary-sub">
+        Add the marketplace once in Copilot CLI, install the <code>jongio-skills</code> plugin, and pick which statuslines (<strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, <strong>Subagents</strong>) you want enabled:
+      </p>
+      <div class="sl-primary-stack">
+        <div class="sl-install-item">
+          <div class="sl-os-label">Step 1 · Add the marketplace (one-time setup in Copilot CLI)</div>
+          <pre class="sl-primary-pre"><code>/plugin marketplace add jongio/skills</code></pre>
+        </div>
+        <div class="sl-install-item">
+          <div class="sl-os-label">Step 2 · Install all skills &amp; statuslines in Copilot CLI</div>
+          <pre class="sl-primary-pre"><code>/plugin install jongio-skills@jongio-skills</code></pre>
+        </div>
+        <div class="sl-install-item">
+          <div class="sl-os-label">Step 3 · Pick your statuslines anytime in Copilot CLI</div>
+          <pre class="sl-primary-pre"><code>/statusline-setup</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="sl-install-secondary">
+      <div class="sl-secondary-summary">Alternative: Standalone Statusline Scripts (Install only the statuslines without the skills plugin)</div>
+      <div class="sl-secondary-stack">
+        <div class="sl-install-item">
+          <div class="sl-os-label">Windows (PowerShell one-liner)</div>
+          <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 | iex</code></pre>
+        </div>
+        <div class="sl-install-item">
+          <div class="sl-os-label">macOS &amp; Linux (Bash one-liner)</div>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="sl-infographic-list">
+      <div class="sl-shot-block">
+        <div class="sl-shot-header">
+          <div>
+            <strong>1. Pull Request Statusline (<code>pr-statusline</code>) · All States &amp; Icons</strong>
+            <p class="sl-shot-sub">Tracks every pull request this session touches across repositories and worktrees. Each pill is a clickable OSC 8 link to the PR web view.</p>
+          </div>
+          <span><a href="https://github.com/jongio/skills/tree/main/extensions/pr-statusline" target="_blank" rel="noopener">View source →</a></span>
+        </div>
+        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/pr-statusline.png`} role="button" tabindex="0" aria-label="View PR Statusline infographic full size">
+          <img src={`${base}screenshots/pr-statusline.png`} alt="Annotated infographic of pr-statusline showing Green, Amber, Red, and Purple PR pills and explaining each icon" loading="lazy" />
+          <span class="sl-zoom-hint">Click to view full size</span>
+        </div>
+        <div class="sl-legend-grid">
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-link.png`} role="button" tabindex="0" aria-label="View Repo#PR Link up-close screenshot">
+              <img src={`${base}screenshots/crops/pr-link.png`} alt="Up-close screenshot of clickable Repo#PR link token" loading="lazy" />
+            </div>
+            <code>Repo#PR Link</code>
+            <span>Clickable OSC 8 link to <code>owner/repo#number</code> on GitHub (Ctrl+Click or Cmd+Click)</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-ci.png`} role="button" tabindex="0" aria-label="View CI Checks up-close screenshot">
+              <img src={`${base}screenshots/crops/pr-ci.png`} alt="Up-close screenshot of passing, running, and failing CI check tokens" loading="lazy" />
+            </div>
+            <code>CI Checks (X/Y)</code>
+            <span>Passed checks out of total checks (green checkmark when all pass, hourglass when running, red X when any fail)</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-conflict.png`} role="button" tabindex="0" aria-label="View Merge Conflict up-close screenshot">
+              <img src={`${base}screenshots/crops/pr-conflict.png`} alt="Up-close screenshot of merge conflict warning token" loading="lazy" />
+            </div>
+            <code>Merge Conflict</code>
+            <span>Warning triangle shown on red pills when <code>mergeStateStatus === "DIRTY"</code></span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-approvals.png`} role="button" tabindex="0" aria-label="View Approvals up-close screenshot">
+              <img src={`${base}screenshots/crops/pr-approvals.png`} alt="Up-close screenshot of PR approval counter tokens" loading="lazy" />
+            </div>
+            <code>Approvals (X/Y)</code>
+            <span>Thumbs-up icon with approvals received vs total reviewers</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-threads.png`} role="button" tabindex="0" aria-label="View Review Threads up-close screenshot">
+              <img src={`${base}screenshots/crops/pr-threads.png`} alt="Up-close screenshot of PR review thread counter tokens" loading="lazy" />
+            </div>
+            <code>Threads (X/Y)</code>
+            <span>Comment icon with resolved review threads vs total review threads</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-merged.png`} role="button" tabindex="0" aria-label="View Purple Merged PR up-close screenshot">
+              <img src={`${base}screenshots/crops/pr-merged.png`} alt="Up-close screenshot of purple merged PR pill" loading="lazy" />
+            </div>
+            <code>Purple Merged</code>
+            <span>Turns GitHub Merged Purple when landed and auto-dismisses after your next prompt</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sl-shot-block">
+        <div class="sl-shot-header">
+          <div>
+            <strong>2. GitHub Issue Statusline (<code>issue-statusline</code>) · All States &amp; Icons</strong>
+            <p class="sl-shot-sub">Renders a separate clickable pill for each GitHub issue worked on in the active session with priority labels, linked PRs, assignees, and comment counts.</p>
+          </div>
+          <span><a href="https://github.com/jongio/skills/tree/main/extensions/issue-statusline" target="_blank" rel="noopener">View source →</a></span>
+        </div>
+        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/issue-statusline.png`} role="button" tabindex="0" aria-label="View Issue Statusline infographic full size">
+          <img src={`${base}screenshots/issue-statusline.png`} alt="Annotated infographic of issue-statusline showing Green, Amber, Red, and Purple issue pills and explaining each icon" loading="lazy" />
+          <span class="sl-zoom-hint">Click to view full size</span>
+        </div>
+        <div class="sl-legend-grid">
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-link.png`} role="button" tabindex="0" aria-label="View Repo#Issue Link up-close screenshot">
+              <img src={`${base}screenshots/crops/issue-link.png`} alt="Up-close screenshot of clickable Repo#Issue link token" loading="lazy" />
+            </div>
+            <code>Repo#Issue Link</code>
+            <span>Separate clickable OSC 8 link per issue (issue icon for standard issues, bug icon for bug-labeled issues)</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-label.png`} role="button" tabindex="0" aria-label="View Priority Label up-close screenshot">
+              <img src={`${base}screenshots/crops/issue-label.png`} alt="Up-close screenshot of issue priority and bug labels" loading="lazy" />
+            </div>
+            <code>Priority / Label</code>
+            <span>Surfaces the highest-signal label (<code>P0</code>, <code>P1</code>, <code>bug</code>, <code>enhancement</code>) right inside the pill</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-pr.png`} role="button" tabindex="0" aria-label="View Linked Open PR up-close screenshot">
+              <img src={`${base}screenshots/crops/issue-pr.png`} alt="Up-close screenshot of linked open PR indicator icon" loading="lazy" />
+            </div>
+            <code>Linked Open PR</code>
+            <span>PR branch icon shown when an open pull request cross-references or closes the issue</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-assignee.png`} role="button" tabindex="0" aria-label="View Assignee up-close screenshot">
+              <img src={`${base}screenshots/crops/issue-assignee.png`} alt="Up-close screenshot of issue assignee token" loading="lazy" />
+            </div>
+            <code>Assignee</code>
+            <span>User icon with the assigned GitHub handle (green when assigned + active, amber when unassigned)</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-comments.png`} role="button" tabindex="0" aria-label="View Comment Count up-close screenshot">
+              <img src={`${base}screenshots/crops/issue-comments.png`} alt="Up-close screenshot of issue comment count token" loading="lazy" />
+            </div>
+            <code>Comment Count</code>
+            <span>Comment bubble showing total discussion comments on the issue</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-closed.png`} role="button" tabindex="0" aria-label="View Purple Closed Issue up-close screenshot">
+              <img src={`${base}screenshots/crops/issue-closed.png`} alt="Up-close screenshot of purple closed completed issue pill" loading="lazy" />
+            </div>
+            <code>Purple Closed</code>
+            <span>Turns purple when closed as completed during this session and auto-dismisses on your next prompt</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sl-shot-block">
+        <div class="sl-shot-header">
+          <div>
+            <strong>3. Subagent Statusline (<code>subagent-statusline</code>) · Fleet Phases &amp; Counters</strong>
+            <p class="sl-shot-sub">Aggregates background subagents spawned by the current Copilot CLI session into live phase counters so you can see fleet progress at a glance.</p>
+          </div>
+          <span><a href="https://github.com/jongio/skills/tree/main/extensions/subagent-statusline" target="_blank" rel="noopener">View source →</a></span>
+        </div>
+        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/subagent-statusline.png`} role="button" tabindex="0" aria-label="View Subagent Statusline infographic full size">
+          <img src={`${base}screenshots/subagent-statusline.png`} alt="Annotated infographic of subagent-statusline showing active fleet counters and all-merged summary pill with pointer lines" loading="lazy" />
+          <span class="sl-zoom-hint">Click to view full size</span>
+        </div>
+        <div class="sl-legend-grid">
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-icon.png`} role="button" tabindex="0" aria-label="View Subagent Icon up-close screenshot">
+              <img src={`${base}screenshots/crops/sub-icon.png`} alt="Up-close screenshot of subagent fleet icon token" loading="lazy" />
+            </div>
+            <code>Subagent Icon</code>
+            <span>Session fleet tracker (click opens subagent PRs in your browser; run <code>/tasks</code> in console to inspect agents)</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-starting.png`} role="button" tabindex="0" aria-label="View Starting Counter up-close screenshot">
+              <img src={`${base}screenshots/crops/sub-starting.png`} alt="Up-close screenshot of subagents starting counter token" loading="lazy" />
+            </div>
+            <code>N starting</code>
+            <span>Hourglass counter for subagents currently running before opening a pull request</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-inpr.png`} role="button" tabindex="0" aria-label="View In-PR Counter up-close screenshot">
+              <img src={`${base}screenshots/crops/sub-inpr.png`} alt="Up-close screenshot of subagents in PR counter token" loading="lazy" />
+            </div>
+            <code>N in PR</code>
+            <span>PR icon counter for subagents with an open pull request under review or CI</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-merged.png`} role="button" tabindex="0" aria-label="View Merged Counter up-close screenshot">
+              <img src={`${base}screenshots/crops/sub-merged.png`} alt="Up-close screenshot of merged subagent PR counter token" loading="lazy" />
+            </div>
+            <code>N merged</code>
+            <span>Merge icon counter for subagents whose pull requests have landed</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-failed.png`} role="button" tabindex="0" aria-label="View Failed Counter up-close screenshot">
+              <img src={`${base}screenshots/crops/sub-failed.png`} alt="Up-close screenshot of failed subagent counter token" loading="lazy" />
+            </div>
+            <code>N failed</code>
+            <span>Red X counter shown if any subagent exits with a failure (turns the pill red)</span>
+          </div>
+          <div class="sl-legend-item">
+            <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-allmerged.png`} role="button" tabindex="0" aria-label="View All Merged Pill up-close screenshot">
+              <img src={`${base}screenshots/crops/sub-allmerged.png`} alt="Up-close screenshot of purple all-merged subagent pill" loading="lazy" />
+            </div>
+            <code>All Merged Pill</code>
+            <span>Turns purple when every subagent PR has merged (0 starting, 0 in PR) and dismisses on your next prompt</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Full-size image viewer overlay -->
+  <div class="img-zoom-overlay" id="img-zoom-overlay" hidden role="dialog" aria-modal="true" aria-label="Full-size image viewer">
+    <div class="img-zoom-toolbar">
+      <button class="img-zoom-btn" id="img-zoom-toggle" type="button">1:1 Actual Size</button>
+      <a class="img-zoom-btn" id="img-zoom-raw" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
+      <button class="img-zoom-btn img-zoom-close" id="img-zoom-close" type="button" aria-label="Close full-size image">✕ Close</button>
+    </div>
+    <div class="img-zoom-stage" id="img-zoom-stage">
+      <img id="img-zoom-target" alt="" />
+    </div>
+  </div>
+</Layout>
+
+<style>
+  .sl-hero { text-align: center; margin: 0.5rem 0 2rem; }
+  .eyebrow {
+    text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.74rem;
+    font-weight: 600; color: var(--muted); margin: 0 0 0.5rem;
+  }
+  .sl-hero h1 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: clamp(1.8rem, 5vw, 2.6rem); line-height: 1.15; margin: 0 0 0.75rem;
+  }
+  .lede { font-size: 1.05rem; max-width: 68ch; margin: 0 auto; }
+  .statusline-showcase {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    padding: clamp(1rem, 2.5vw, 1.5rem);
+  }
+  .sl-shot-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: clamp(0.85rem, 2vw, 1.25rem);
+  }
+  .sl-trio-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: clamp(0.6rem, 2.5vw, 1.5rem);
+    margin-bottom: 0.9rem;
+    padding: 0.5rem 0.75rem;
+    font-size: clamp(1.45rem, 3vw, 2.25rem);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+  .sl-trio-item.c-pr    { color: #58a6ff; }
+  .sl-trio-item.c-issue { color: #3fb950; }
+  .sl-trio-item.c-sub   { color: #f2cc60; }
+  .sl-trio-sep {
+    color: var(--border);
+    font-weight: 300;
+  }
+  .sl-install-primary {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 12%, var(--bg)), var(--bg));
+    border: 2px solid color-mix(in srgb, var(--accent) 60%, var(--border));
+    border-radius: 12px;
+    padding: clamp(1rem, 2.5vw, 1.4rem);
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    box-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.55);
+  }
+  .sl-primary-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .sl-primary-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+  }
+  .sl-rec-badge {
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: var(--accent-solid);
+    color: #fff;
+    padding: 0.22rem 0.6rem;
+    border-radius: 999px;
+  }
+  .sl-primary-title {
+    color: var(--fg);
+    font-size: clamp(1.15rem, 2.2vw, 1.38rem);
+  }
+  .sl-primary-sub {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.96rem;
+  }
+  .sl-primary-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .sl-primary-pre {
+    font-size: 0.96rem;
+    font-weight: 600;
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border)) !important;
+    padding: 0.8rem 3.8rem 0.8rem 1rem !important;
+  }
+  .sl-install-secondary {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.9rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .sl-secondary-summary {
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+  .sl-secondary-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .sl-install-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .sl-install-item pre { margin: 0; }
+  .sl-os-label {
+    font-size: 0.76rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+  .sl-infographic-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+  }
+  .sl-shot-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.85rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+  .sl-shot-header strong {
+    color: var(--fg);
+    font-size: 1.08rem;
+    display: block;
+    margin-bottom: 0.2rem;
+  }
+  .sl-shot-sub {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .sl-shot-wrap {
+    position: relative;
+    display: block;
+    width: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #0d1117;
+    cursor: zoom-in;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .sl-shot-wrap:hover, .sl-shot-wrap:focus-visible {
+    border-color: var(--accent);
+    box-shadow: 0 8px 28px -12px rgba(0, 0, 0, 0.65);
+    outline: none;
+  }
+  .sl-shot-wrap img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 7px;
+  }
+  .sl-zoom-hint {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(13, 17, 23, 0.85);
+    color: #e6edf3;
+    border: 1px solid rgba(240, 246, 252, 0.22);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    pointer-events: none;
+    opacity: 0.82;
+    transition: opacity 0.15s ease, border-color 0.15s ease;
+  }
+  .sl-shot-wrap:hover .sl-zoom-hint {
+    opacity: 1;
+    border-color: var(--accent);
+  }
+  .sl-legend-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.9rem;
+  }
+  .sl-legend-item {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.65rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    font-size: 0.84rem;
+    color: var(--muted);
+  }
+  .sl-legend-crop {
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #0d1117;
+    cursor: zoom-in;
+    transition: border-color 0.15s ease;
+  }
+  .sl-legend-crop:hover, .sl-legend-crop:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+  }
+  .sl-legend-crop img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .sl-legend-item code {
+    align-self: flex-start;
+    font-weight: 700;
+    color: var(--fg);
+  }
+  .img-zoom-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(1, 4, 9, 0.92);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    display: flex;
+    flex-direction: column;
+  }
+  .img-zoom-overlay[hidden] { display: none; }
+  .img-zoom-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1rem;
+    background: rgba(13, 17, 23, 0.9);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .img-zoom-btn {
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #e6edf3;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 0.35rem 0.75rem;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .img-zoom-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .img-zoom-stage {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  #img-zoom-target {
+    display: block;
+    max-width: 96vw;
+    max-height: calc(94vh - 56px);
+    width: auto;
+    height: auto;
+    border-radius: 8px;
+    border: 1px solid #30363d;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85);
+    cursor: zoom-in;
+  }
+  #img-zoom-target.is-actual-size {
+    max-width: none;
+    max-height: none;
+    width: auto;
+    cursor: zoom-out;
+    margin: auto;
+  }
+</style>
+
+<script>
+  function wireStatuslinesPageZoom() {
+    const zoomOverlay = document.getElementById("img-zoom-overlay");
+    const zoomTarget = document.getElementById("img-zoom-target") as HTMLImageElement | null;
+    const zoomToggle = document.getElementById("img-zoom-toggle");
+    const zoomRaw = document.getElementById("img-zoom-raw") as HTMLAnchorElement | null;
+    const zoomClose = document.getElementById("img-zoom-close") as HTMLElement | null;
+    if (!zoomOverlay || !zoomTarget || zoomOverlay.dataset.wired) return;
+    zoomOverlay.dataset.wired = "1";
+
+    let zoomLastFocus: HTMLElement | null = null;
+
+    function openFullImage(src: string, alt = "Full-size image") {
+      if (!zoomOverlay || !zoomTarget) return;
+      zoomLastFocus = document.activeElement as HTMLElement;
+      zoomTarget.src = src;
+      zoomTarget.alt = alt;
+      zoomTarget.classList.remove("is-actual-size");
+      if (zoomToggle) zoomToggle.textContent = "1:1 Actual Size";
+      if (zoomRaw) zoomRaw.href = src;
+      zoomOverlay.hidden = false;
+      document.body.style.overflow = "hidden";
+      zoomClose?.focus();
+    }
+
+    function closeFullImage() {
+      if (!zoomOverlay) return;
+      zoomOverlay.hidden = true;
+      document.body.style.overflow = "";
+      zoomLastFocus?.focus?.();
+    }
+
+    function toggleActualSize() {
+      if (!zoomTarget) return;
+      const isActual = zoomTarget.classList.toggle("is-actual-size");
+      if (zoomToggle) {
+        zoomToggle.textContent = isActual ? "Fit to Screen" : "1:1 Actual Size";
+      }
+    }
+
+    document.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.closest("#img-zoom-close")) return closeFullImage();
+      if (target.closest("#img-zoom-toggle") || target === zoomTarget) return toggleActualSize();
+      if (!zoomOverlay.hidden && (target === zoomOverlay || target.id === "img-zoom-stage")) {
+        return closeFullImage();
+      }
+      const fullImgTrigger = target.closest<HTMLElement>("[data-full-img]");
+      if (fullImgTrigger) {
+        const src = fullImgTrigger.getAttribute("data-full-img");
+        const img = fullImgTrigger.querySelector("img");
+        if (src) openFullImage(src, img?.alt || "Full-size image");
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (!zoomOverlay.hidden && event.key === "Escape") {
+        closeFullImage();
+        return;
+      }
+      const target = event.target as HTMLElement;
+      const fullImgTrigger = target.closest<HTMLElement>("[data-full-img]");
+      if ((event.key === "Enter" || event.key === " ") && fullImgTrigger) {
+        event.preventDefault();
+        const src = fullImgTrigger.getAttribute("data-full-img");
+        const img = fullImgTrigger.querySelector("img");
+        if (src) openFullImage(src, img?.alt || "Full-size image");
+      }
+    });
+  }
+  document.addEventListener("astro:page-load", wireStatuslinesPageZoom);
+  wireStatuslinesPageZoom();
+</script>
