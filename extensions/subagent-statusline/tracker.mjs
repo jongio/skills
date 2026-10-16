@@ -1,0 +1,483 @@
+import { randomBytes } from "node:crypto";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const INITIAL_HEAD_BYTES = 64 * 1024;
+const INITIAL_TAIL_BYTES = 16 * 1024 * 1024;
+const RELEVANT_EVENT_LINE = /"type"\s*:\s*"(?:session\.(?:start|resume|context_changed)|user\.message|tool\.execution_(?:start|complete)|subagent\.(?:started|completed|failed))"/;
+
+export const ICONS = {
+	agent: "\uF4B8",
+	starting: "\uF252",
+	inPr: "\uE726",
+	merged: "\uE727",
+	done: "\uF058",
+	failed: "\uF057",
+};
+
+export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");
+
+export function statePath(sessionId, home = configHome()) {
+	if (typeof sessionId !== "string" || !/^[\w-]{1,128}$/.test(sessionId)) {
+		throw new Error("A valid session_id is required.");
+	}
+	return join(home, "subagent-statusline", `${sessionId}.json`);
+}
+
+export function transcriptPathFor(sessionId, home = configHome(), explicitPath = null) {
+	statePath(sessionId, home);
+	if (typeof explicitPath === "string" && explicitPath.trim()) {
+		const trimmed = explicitPath.trim();
+		try {
+			if (statSync(trimmed).isDirectory()) return join(trimmed, "events.jsonl");
+		} catch {
+			if (!trimmed.endsWith(".jsonl")) return join(trimmed, "events.jsonl");
+		}
+		return trimmed;
+	}
+	return join(home, "session-state", sessionId, "events.jsonl");
+}
+
+function atomicWriteJson(filePath, data) {
+	mkdirSync(join(filePath, ".."), { recursive: true });
+	const temporary = `${filePath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+	const serialized = JSON.stringify(data);
+	writeFileSync(temporary, serialized, { mode: 0o600 });
+	try {
+		renameSync(temporary, filePath);
+	} catch (error) {
+		if (error?.code === "EPERM" || error?.code === "EACCES") {
+			try {
+				writeFileSync(filePath, serialized, { mode: 0o600 });
+				return;
+			} catch {
+				// Fall through to rethrow original error after cleanup.
+			}
+		}
+		throw error;
+	} finally {
+		rmSync(temporary, { force: true });
+	}
+}
+
+export function normalizePrUrl(reference) {
+	if (typeof reference !== "string") return null;
+	const qualified = /^([\w.-]+\/[\w.-]+)#([1-9]\d*)$/.exec(reference.trim());
+	let url;
+	try {
+		url = new URL(qualified ? `https://github.com/${qualified[1]}/pull/${qualified[2]}` : reference.trim());
+	} catch {
+		return null;
+	}
+	const match = /^\/([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)(?:\/|$)/.exec(url.pathname);
+	if (url.protocol !== "https:" || !match) return null;
+	return `https://${url.hostname}/${match[1]}/${match[2]}/pull/${match[3]}`;
+}
+
+function extractPrUrls(text) {
+	const source = String(text ?? "");
+	const found = [];
+	for (const [raw] of source.matchAll(/https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*/g)) {
+		const normalized = normalizePrUrl(raw);
+		if (normalized && !found.includes(normalized)) found.push(normalized);
+	}
+	return found;
+}
+
+export function readState(sessionId, home = configHome()) {
+	let raw;
+	try {
+		raw = readFileSync(statePath(sessionId, home), "utf8");
+	} catch (error) {
+		if (error.code === "ENOENT") return null;
+		throw error;
+	}
+	const state = JSON.parse(raw);
+	if (state.version !== 1 || state.sessionId !== sessionId || typeof state.agents !== "object" || state.agents === null) {
+		throw new Error("Invalid subagent statusline state.");
+	}
+	return state;
+}
+
+export function writeState(state, home = configHome()) {
+	atomicWriteJson(statePath(state.sessionId, home), state);
+}
+
+function readSharedPrCache(home) {
+	try {
+		return JSON.parse(readFileSync(join(home, "pr-statusline", "pr-cache.json"), "utf8"));
+	} catch {
+		return {};
+	}
+}
+
+export class SubagentTracker {
+	constructor(sessionId, previous = null) {
+		statePath(sessionId);
+		this.sessionId = sessionId;
+		this.repository = previous?.repository ?? null;
+		this.host = previous?.host ?? "github.com";
+		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
+		this.transcriptOffset = Number.isInteger(previous?.transcriptOffset) && previous.transcriptOffset >= 0
+			? previous.transcriptOffset
+			: 0;
+		this.dismissed = Boolean(previous?.dismissed);
+		this.simulated = Boolean(previous?.simulated);
+		this.agents = new Map(Object.entries(previous?.agents ?? {}));
+		this.taskCalls = new Map(Object.entries(previous?.taskCalls ?? {}));
+		this.agentToolCalls = new Map(Object.entries(previous?.agentToolCalls ?? {}));
+	}
+
+	ensureAgent(id, meta = {}) {
+		if (!id) return null;
+		let entry = this.agents.get(id);
+		if (!entry) {
+			entry = {
+				id,
+				name: meta.name || "subagent",
+				agentType: meta.agentType || meta.name || "subagent",
+				description: meta.description || "",
+				status: "starting",
+				prs: [],
+				mergedPrs: [],
+				startedAt: meta.timestamp || Date.now(),
+				completedAt: 0,
+			};
+			this.agents.set(id, entry);
+			this.dismissed = false;
+		} else {
+			if (meta.name && entry.name === "subagent") entry.name = meta.name;
+			if (meta.agentType && (!entry.agentType || entry.agentType === "subagent")) entry.agentType = meta.agentType;
+			if (meta.description && !entry.description) entry.description = meta.description;
+		}
+		return entry;
+	}
+
+	linkPr(agentId, prUrl, isMerged = false) {
+		const normalized = normalizePrUrl(prUrl);
+		if (!normalized) return;
+		const agent = this.ensureAgent(agentId);
+		if (!agent) return;
+		if (!agent.prs.includes(normalized)) agent.prs.push(normalized);
+		if (isMerged && !agent.mergedPrs.includes(normalized)) {
+			agent.mergedPrs.push(normalized);
+		}
+		this.dismissed = false;
+	}
+
+	clear() {
+		this.agents.clear();
+		this.taskCalls.clear();
+		this.agentToolCalls.clear();
+		this.dismissed = true;
+	}
+
+	observe(event) {
+		const data = event.data ?? {};
+		const ts = event.timestamp ? Date.parse(event.timestamp) : NaN;
+		const eventTime = Number.isFinite(ts) ? ts : Date.now();
+
+		if (event.type === "session.start" || event.type === "session.resume" || event.type === "session.context_changed") {
+			const context = data.context ?? data;
+			if (context.repository) this.repository = context.repository;
+			if (context.repositoryHost) this.host = context.repositoryHost;
+		}
+
+		if (event.type === "user.message" && !event.agentId) {
+			const content = String(data.content ?? "");
+			const source = String(data.source ?? "");
+			const isAutomated = source.startsWith("skill-") ||
+				content.trimStart().startsWith("<skill-context") ||
+				Boolean(data.isAutopilotContinuation) ||
+				source === "session-memory-rollover" ||
+				content.trimStart().startsWith("[Scheduled prompt");
+			if (!isAutomated) {
+				if (eventTime >= this.lastUserInputAt) this.lastUserInputAt = eventTime;
+				const counts = this.counts();
+				if (!this.simulated && counts.total > 0 && counts.starting === 0 && counts.inPr === 0 &&
+						this.latestSettlementTime() <= eventTime) {
+					this.dismissed = true;
+					this.agents.clear();
+					this.taskCalls.clear();
+					this.agentToolCalls.clear();
+				}
+			}
+		}
+
+		if (event.type === "subagent.started") {
+			const id = event.agentId || data.agentId || data.toolCallId;
+			if (["explore", "research", "rubber-duck", "code-review", "security-review"].includes(data.agentType)) {
+				if (data.toolCallId && this.agents.has(data.toolCallId)) this.agents.delete(data.toolCallId);
+				return;
+			}
+			if (data.toolCallId && id && data.toolCallId !== id && this.agents.has(data.toolCallId)) {
+				const prior = this.agents.get(data.toolCallId);
+				this.agents.delete(data.toolCallId);
+				const merged = this.ensureAgent(id, {
+					name: data.agentDisplayName || data.agentName || prior.name || "subagent",
+					agentType: data.agentType || data.agentName || prior.agentType || "subagent",
+					description: String(data.agentDescription || data.description || prior.description || "").slice(0, 140),
+					timestamp: prior.startedAt || eventTime,
+				});
+				for (const prUrl of prior.prs ?? []) this.linkPr(id, prUrl, prior.mergedPrs?.includes(prUrl));
+				this.taskCalls.set(data.toolCallId, merged.id);
+				return;
+			}
+			const agent = this.ensureAgent(id, {
+				name: data.agentDisplayName || data.agentName || "subagent",
+				agentType: data.agentType || data.agentName || "subagent",
+				description: String(data.agentDescription || data.description || "").slice(0, 140),
+				timestamp: eventTime,
+			});
+			if (agent && data.toolCallId) {
+				this.taskCalls.set(data.toolCallId, id);
+			}
+		}
+
+		if (event.type === "subagent.completed") {
+			const id = event.agentId || data.agentId || this.taskCalls.get(data.toolCallId) || data.toolCallId;
+			const agent = this.agents.get(id);
+			if (agent) {
+				agent.status = data.cancelled ? "cancelled" : "completed";
+				agent.completedAt = eventTime;
+			}
+		}
+
+		if (event.type === "subagent.failed") {
+			const id = event.agentId || data.agentId || this.taskCalls.get(data.toolCallId) || data.toolCallId;
+			const agent = this.agents.get(id);
+			if (agent) {
+				agent.status = "failed";
+				agent.completedAt = eventTime;
+			}
+		}
+
+		if (event.type === "tool.execution_start") {
+			const args = data.arguments ?? {};
+			const name = data.mcpToolName ?? data.toolName ?? "";
+			const command = String(args.command ?? "");
+
+			if (/(?:^|[._-])task$/.test(name)) {
+				if (["explore", "research", "rubber-duck", "code-review", "security-review"].includes(args.agent_type)) return;
+				const id = data.toolCallId;
+				const rawDesc = String(args.description || String(args.prompt ?? "").split(/\r?\n/)[0] || "").trim().slice(0, 140);
+				this.ensureAgent(id, {
+					name: args.name || args.agent_type || "subagent",
+					agentType: args.agent_type || "subagent",
+					description: rawDesc,
+					timestamp: eventTime,
+				});
+				this.taskCalls.set(data.toolCallId, id);
+				for (const prUrl of extractPrUrls(args.prompt)) this.linkPr(id, prUrl);
+				return;
+			}
+
+			if (event.agentId && this.agents.has(event.agentId)) {
+				const isMerge = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+merge\b/.test(command) ||
+					/(?:^|[_-])merge_pull_request$/.test(name);
+				const isPrCmd = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+(?:view|checks|create|edit|review|comment|merge|ready)\b/.test(command) ||
+					/(?:^|[_-])(?:create_pull_request|update_pull_request|merge_pull_request)$/.test(name);
+				if (isPrCmd) {
+					const explicitRepo = /(?:--repo|-R)(?:[=\s]+)["']?([\w.-]+\/[\w.-]+)(?![\w./-])/.exec(command)?.[1] ??
+						(args.owner && args.repo ? `${args.owner}/${args.repo}` : this.repository);
+					const numMatch = /\bgh(?:\s+\S+)*\s+pr\s+(?:view|checks|edit|review|comment|merge|ready)\s+([1-9]\d*)\b/.exec(command)?.[1] ??
+						args.pullNumber ?? args.pull_number;
+					for (const prUrl of extractPrUrls(command)) this.linkPr(event.agentId, prUrl, isMerge);
+					if (explicitRepo && /^[1-9]\d*$/.test(String(numMatch))) {
+						this.linkPr(event.agentId, `https://${this.host}/${explicitRepo}/pull/${numMatch}`, isMerge);
+					}
+					this.agentToolCalls.set(data.toolCallId, { agentId: event.agentId, isMerge });
+				}
+			}
+		}
+
+		if (event.type === "tool.execution_complete") {
+			const result = data.result ?? {};
+			const text = `${result.content ?? ""}\n${JSON.stringify(result.structuredContent ?? {})}`;
+			const taskAgentId = this.taskCalls.get(data.toolCallId);
+			if (taskAgentId && this.agents.has(taskAgentId)) {
+				const agent = this.agents.get(taskAgentId);
+				if (data.success) {
+					for (const prUrl of extractPrUrls(text)) this.linkPr(taskAgentId, prUrl);
+					if (agent.status === "starting") {
+						agent.status = "completed";
+						agent.completedAt = eventTime;
+					}
+				} else if (agent.status === "starting") {
+					agent.status = "failed";
+					agent.completedAt = eventTime;
+				}
+			}
+			const subCall = this.agentToolCalls.get(data.toolCallId);
+			this.agentToolCalls.delete(data.toolCallId);
+			if (subCall && data.success) {
+				for (const prUrl of extractPrUrls(text)) {
+					this.linkPr(subCall.agentId, prUrl, subCall.isMerge);
+				}
+				if (subCall.isMerge) {
+					const agent = this.agents.get(subCall.agentId);
+					if (agent) {
+						for (const prUrl of agent.prs) {
+							if (!agent.mergedPrs.includes(prUrl)) agent.mergedPrs.push(prUrl);
+						}
+						agent.completedAt = Math.max(agent.completedAt || 0, eventTime);
+					}
+				}
+			}
+		}
+	}
+
+	syncWithPrCache(prCache = {}, now = Date.now()) {
+		let changed = false;
+		for (const agent of this.agents.values()) {
+			for (const prUrl of agent.prs) {
+				const cached = prCache[prUrl];
+				const stateName = String(cached?.info?.state ?? "").toUpperCase();
+				if (stateName === "MERGED" && !agent.mergedPrs.includes(prUrl)) {
+					agent.mergedPrs.push(prUrl);
+					const mergedTime = cached?.info?.mergedAt ? Date.parse(cached.info.mergedAt) : NaN;
+					agent.completedAt = Math.max(agent.completedAt || 0, Number.isFinite(mergedTime) ? mergedTime : now);
+					changed = true;
+				}
+			}
+		}
+		return changed;
+	}
+
+	latestSettlementTime() {
+		let maxTime = 0;
+		for (const agent of this.agents.values()) {
+			maxTime = Math.max(maxTime, agent.completedAt || agent.startedAt || 0);
+		}
+		return maxTime;
+	}
+
+	counts() {
+		let starting = 0;
+		let inPr = 0;
+		let merged = 0;
+		let done = 0;
+		let failed = 0;
+		for (const agent of this.agents.values()) {
+			const hasMerged = agent.mergedPrs?.length > 0 && agent.mergedPrs.length >= agent.prs.length;
+			const hasOpenPr = agent.prs?.length > 0 && !hasMerged;
+			if (hasMerged) merged++;
+			else if (hasOpenPr) inPr++;
+			else if (agent.status === "starting") starting++;
+			else if (agent.status === "failed") failed++;
+			else if (agent.status === "completed") done++;
+		}
+		return {
+			total: starting + inPr + merged + done + failed,
+			starting,
+			inPr,
+			merged,
+			done,
+			failed,
+		};
+	}
+
+	snapshot() {
+		return {
+			version: 1,
+			sessionId: this.sessionId,
+			repository: this.repository,
+			host: this.host,
+			lastUserInputAt: this.lastUserInputAt,
+			transcriptOffset: this.transcriptOffset,
+			dismissed: this.dismissed,
+			...(this.simulated ? { simulated: true } : {}),
+			updatedAt: Date.now(),
+			agents: Object.fromEntries(this.agents),
+			taskCalls: Object.fromEntries(this.taskCalls),
+			agentToolCalls: Object.fromEntries(this.agentToolCalls),
+		};
+	}
+}
+
+function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false) {
+	if (length <= 0) return startOffset;
+	const chunk = Buffer.allocUnsafe(length);
+	const bytesRead = readSync(fd, chunk, 0, length, startOffset);
+	if (bytesRead <= 0) return startOffset;
+	let sliceStart = 0;
+	if (skipFirstPartialLine) {
+		const firstNewline = chunk.subarray(0, bytesRead).indexOf(0x0a);
+		if (firstNewline === -1) return startOffset;
+		sliceStart = firstNewline + 1;
+	}
+	const lastNewline = chunk.subarray(0, bytesRead).lastIndexOf(0x0a);
+	if (lastNewline < sliceStart) return startOffset;
+	const text = chunk.subarray(sliceStart, lastNewline + 1).toString("utf8");
+	for (const line of text.split("\n")) {
+		if (!line.trim() || !RELEVANT_EVENT_LINE.test(line)) continue;
+		try {
+			tracker.observe(JSON.parse(line));
+		} catch {
+			// Ignore malformed transcript lines.
+		}
+	}
+	return startOffset + lastNewline + 1;
+}
+
+export function syncSession(payload, { home = configHome() } = {}) {
+	const sessionId = payload?.session_id;
+	const transcriptFile = transcriptPathFor(sessionId, home, payload?.transcript_path);
+	let stat = null;
+	try {
+		const candidate = statSync(transcriptFile);
+		if (candidate.isFile()) stat = candidate;
+	} catch {
+		stat = null;
+	}
+	const hasTranscript = stat !== null;
+	let previous = null;
+	try {
+		previous = readState(sessionId, home);
+	} catch (error) {
+		if (!hasTranscript) throw error;
+		const path = statePath(sessionId, home);
+		try {
+			renameSync(path, `${path}.corrupt`);
+		} catch {
+			rmSync(path, { force: true });
+		}
+	}
+	if (!hasTranscript && !previous) return { tracker: null };
+
+	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
+	const tracker = new SubagentTracker(
+		sessionId,
+		reset && previous?.simulated ? { agents: previous.agents, simulated: true } : (reset ? null : previous),
+	);
+	let offset = reset ? 0 : tracker.transcriptOffset;
+	let changed = hasTranscript && (!previous || reset);
+
+	const prCache = readSharedPrCache(home);
+	if (tracker.syncWithPrCache(prCache)) changed = true;
+
+	if (hasTranscript && stat.size > offset) {
+		const fd = openSync(transcriptFile, "r");
+		try {
+			let nextOffset = offset;
+			if (offset === 0 && stat.size > INITIAL_HEAD_BYTES + INITIAL_TAIL_BYTES) {
+				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES, false);
+				const tailStart = stat.size - INITIAL_TAIL_BYTES;
+				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true);
+			} else {
+				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset, false);
+			}
+			if (nextOffset !== offset) {
+				tracker.transcriptOffset = nextOffset;
+				changed = true;
+			}
+		} finally {
+			closeSync(fd);
+		}
+	}
+
+	if (tracker.syncWithPrCache(prCache)) changed = true;
+	if (changed) writeState(tracker.snapshot(), home);
+	return { tracker };
+}

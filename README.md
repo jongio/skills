@@ -28,6 +28,30 @@ turns a one-line prompt into a working canvas:
 
 ![Invoking create-canvas-app from the Copilot composer: "/create-canvas-app customized stock ticker"](skills/create-canvas-app/docs/invoke.png)
 
+## Copilot CLI Statusline Extensions
+
+This plugin also ships three composable terminal statuslines for GitHub Copilot CLI under [`extensions/`](extensions/) (exposed to Agent Plugins 1.0 hosts via `com.github.copilot/extensions/`):
+
+| Extension | What it shows |
+|---|---|
+| [`pr-statusline`](extensions/pr-statusline/) | Color-coded PR status pills in the Copilot CLI footer for every pull request the active session is working on across repositories and worktrees: clickable `owner/repo#number` OSC 8 links, CI check progress (`passed/total`), merge conflict alerts, review approvals, resolved review threads, and a purple `Merged` badge that dismisses on your next prompt. |
+| [`issue-statusline`](extensions/issue-statusline/) | Separate clickable pill for each GitHub issue the active session is working on: priority or bug labels, linked open PR indicator, assignee handle, comment count, and a purple `Closed` badge that dismisses on your next prompt. |
+| [`subagent-statusline`](extensions/subagent-statusline/) | Live session subagent counter pill (`starting`, `in PR`, `merged`, and `failed`) that turns purple when all subagent PRs merge and dismisses on your next prompt. |
+
+![Three Composable Statusline Types Side-by-Side](extensions/pr-statusline/screenshots/statusline-composed.png)
+
+Installing the `jongio/skills` plugin (`copilot plugin install jongio/skills`) auto-registers the statuslines on session start, or you can run the interactive setup script to choose whether you want **Pull Requests**, **GitHub Issues**, and/or **Subagents**:
+
+```powershell
+# Windows (PowerShell one-liner)
+irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 | iex
+```
+
+```bash
+# macOS & Linux (Bash one-liner)
+curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash
+```
+
 ## Install
 
 Uses the [`vercel-labs/skills`](https://github.com/vercel-labs/skills) CLI

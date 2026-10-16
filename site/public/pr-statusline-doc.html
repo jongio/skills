@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="/skills/favicon.svg" />
+<title>Copilot CLI Statusline Extensions: PRs, Issues, and Subagents</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 36px 24px 80px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+  }
+  .container { max-width: 1140px; margin: 0 auto; }
+  h1 { font-size: 2rem; margin: 0 0 8px; }
+  h2 { font-size: 1.38rem; margin: 36px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  h3 { font-size: 1.1rem; margin: 24px 0 8px; color: #c9d1d9; }
+  p { margin: 0 0 14px; color: #c9d1d9; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  pre {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 44px 14px 16px;
+    overflow-x: auto;
+    font-family: "CaskaydiaCove Nerd Font Mono", "Cascadia Mono", Consolas, monospace;
+    font-size: 13.5px;
+    margin: 0 0 16px;
+  }
+  .code-copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #0d1117;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .code-copy-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .code-copy-btn .icon-check {
+    display: none;
+    color: #3fb950;
+  }
+  .code-copy-btn.copied {
+    border-color: #3fb950;
+  }
+  .code-copy-btn.copied .icon-copy {
+    display: none;
+  }
+  .code-copy-btn.copied .icon-check {
+    display: block;
+  }
+  code {
+    font-family: "CaskaydiaCove Nerd Font Mono", "Cascadia Mono", Consolas, monospace;
+    font-size: 0.92em;
+    background: rgba(110, 118, 129, 0.22);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  pre code { background: none; padding: 0; }
+  .trio-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 20px;
+    margin-bottom: 14px;
+    font-size: clamp(1.5rem, 3vw, 2.3rem);
+    font-weight: 900;
+    letter-spacing: -0.02em;
+  }
+  .trio-banner .c-pr { color: #58a6ff; }
+  .trio-banner .c-issue { color: #3fb950; }
+  .trio-banner .c-sub { color: #f2cc60; }
+  .trio-banner .sep { color: var(--border); font-weight: 300; }
+  .shot-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin: 12px 0 28px;
+  }
+  .shot-wrap {
+    position: relative;
+    display: block;
+    width: 100%;
+    border-radius: 7px;
+    background: #0d1117;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    cursor: zoom-in;
+  }
+  .shot-wrap:hover, .shot-wrap:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+  }
+  .shot-wrap img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 6px;
+  }
+  .zoom-hint {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background: rgba(13, 17, 23, 0.85);
+    color: #e6edf3;
+    border: 1px solid rgba(240, 246, 252, 0.22);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    pointer-events: none;
+  }
+  .legend-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+    gap: 12px;
+    margin-top: 14px;
+  }
+  .legend-item {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13.5px;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .legend-crop {
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #0d1117;
+    cursor: zoom-in;
+  }
+  .legend-crop:hover, .legend-crop:focus-visible {
+    border-color: var(--accent);
+    outline: none;
+  }
+  .legend-crop img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .legend-item strong {
+    display: block;
+    color: var(--text);
+  }
+  .img-zoom-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: rgba(1, 4, 9, 0.92);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    display: flex;
+    flex-direction: column;
+  }
+  .img-zoom-overlay[hidden] { display: none; }
+  .img-zoom-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: rgba(13, 17, 23, 0.9);
+    border-bottom: 1px solid var(--border);
+  }
+  .img-zoom-btn {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: #e6edf3;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .img-zoom-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .img-zoom-stage {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  #img-zoom-target {
+    display: block;
+    max-width: 96vw;
+    max-height: calc(94vh - 56px);
+    width: auto;
+    height: auto;
+    border-radius: 8px;
+    border: 1px solid #30363d;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85);
+    cursor: zoom-in;
+  }
+  #img-zoom-target.is-actual-size {
+    max-width: none;
+    max-height: none;
+    width: auto;
+    cursor: zoom-out;
+    margin: auto;
+  }
+  .os-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    margin: 16px 0 24px;
+  }
+  .os-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .os-card h3 { margin-top: 0; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <p><a href="/skills/">← Back to jongio/skills</a></p>
+    <h1>Copilot CLI Statusline Extensions</h1>
+    <p>Composable terminal statuslines for GitHub Copilot CLI: <strong>Pull Requests</strong> (<code>pr-statusline</code>), <strong>GitHub Issues</strong> (<code>issue-statusline</code>), and <strong>Subagents</strong> (<code>subagent-statusline</code>). Run them individually or compose all three side-by-side on a single row via <code>~/.copilot/statusline-compose.mjs</code>.</p>
+
+    <h2>Overview: Pull Requests | Issues | Subagents</h2>
+    <div class="shot-card">
+      <div class="trio-banner">
+        <span class="c-pr">Pull Requests</span>
+        <span class="sep">|</span>
+        <span class="c-issue">Issues</span>
+        <span class="sep">|</span>
+        <span class="c-sub">Subagents</span>
+      </div>
+      <div class="shot-wrap" data-full-img="/skills/screenshots/statusline-composed-terminal.png" role="button" tabindex="0">
+        <img src="/skills/screenshots/statusline-composed-terminal.png" alt="Annotated overview of the three Copilot CLI statusline types: Pull Requests, Issues, and Subagents" />
+        <span class="zoom-hint">Click to view full size</span>
+      </div>
+    </div>
+
+    <h2>Installation: Copilot Plugin, Windows, macOS, and Linux</h2>
+    <p>Install via the <code>jongio/skills</code> Copilot plugin (auto-registers the statuslines on session start), or run the interactive setup command for your operating system to choose whether you want <strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, and/or <strong>Subagents</strong>.</p>
+
+    <pre><code>copilot plugin install jongio/skills</code></pre>
+
+    <div class="os-grid">
+      <div class="os-card">
+        <h3>Windows (PowerShell)</h3>
+        <p>One-liner (no clone required):</p>
+        <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 | iex</code></pre>
+        <p>From a local clone:</p>
+        <pre><code>.\install-statusline.ps1
+# or non-interactive:
+.\install-statusline.ps1 -Prs -Issues -Subagents</code></pre>
+      </div>
+
+      <div class="os-card">
+        <h3>macOS &amp; Linux (Bash / Zsh)</h3>
+        <p>One-liner (no clone required):</p>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash</code></pre>
+        <p>From a local clone:</p>
+        <pre><code>./install-statusline.sh
+# or non-interactive:
+./install-statusline.sh --prs --issues --subagents</code></pre>
+      </div>
+    </div>
+
+    <h3>Cross-Platform via Node.js or Copilot CLI Prompt</h3>
+    <pre><code># Cross-platform Node.js interactive configurator (Windows, macOS, Linux)
+node ./scripts/setup-statusline.mjs
+
+# Or paste this prompt directly into GitHub Copilot CLI:
+set up the copilot statusline from jongio/skills and ask me whether I want PRs, issues, and/or subagents</code></pre>
+
+    <h2>Annotated Visual Guide: Each Statusline in Isolation</h2>
+
+    <h3>1. Pull Request Statusline (<code>extensions/pr-statusline</code>)</h3>
+    <p>Tracks every pull request the active session is working on across repositories and worktrees. The annotated infographic below shows all four status states and every icon inside a PR pill:</p>
+    <div class="shot-card">
+      <div class="shot-wrap" data-full-img="/skills/screenshots/pr-statusline.png" role="button" tabindex="0">
+        <img src="/skills/screenshots/pr-statusline.png" alt="Annotated infographic of PR Statusline in isolation" />
+        <span class="zoom-hint">Click to view full size</span>
+      </div>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/pr-link.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/pr-link.png" alt="Up-close screenshot of clickable Repo#PR link" loading="lazy" />
+          </div>
+          <strong>Clickable Repo#PR Link</strong>
+          <span>OSC 8 terminal hyperlink to <code>owner/repo#number</code> on GitHub (Ctrl+Click or Cmd+Click).</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/pr-ci.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/pr-ci.png" alt="Up-close screenshot of CI checks" loading="lazy" />
+          </div>
+          <strong>CI Checks (Passed / Total)</strong>
+          <span>Shows passing vs total checks with checkmark (all pass), hourglass (running), or X (failing).</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/pr-conflict.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/pr-conflict.png" alt="Up-close screenshot of merge conflict warning" loading="lazy" />
+          </div>
+          <strong>Merge Conflict Alert</strong>
+          <span>Warning icon shown when <code>mergeStateStatus === "DIRTY"</code>.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/pr-approvals.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/pr-approvals.png" alt="Up-close screenshot of approvals counter" loading="lazy" />
+          </div>
+          <strong>Approvals (Approved / Total)</strong>
+          <span>Thumbs-up icon with approvals received vs total reviewers.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/pr-threads.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/pr-threads.png" alt="Up-close screenshot of review threads counter" loading="lazy" />
+          </div>
+          <strong>Review Threads (Resolved / Total)</strong>
+          <span>Comment icon with resolved threads vs total review threads.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/pr-merged.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/pr-merged.png" alt="Up-close screenshot of purple merged PR pill" loading="lazy" />
+          </div>
+          <strong>Purple Merged Badge</strong>
+          <span>Turns GitHub Merged Purple when landed and auto-dismisses on your next prompt.</span>
+        </div>
+      </div>
+    </div>
+
+    <h3>2. GitHub Issue Statusline (<code>extensions/issue-statusline</code>)</h3>
+    <p>Renders a separate clickable pill for each GitHub issue the active session is working on. The annotated infographic below shows all four issue states and every icon inside an issue pill:</p>
+    <div class="shot-card">
+      <div class="shot-wrap" data-full-img="/skills/screenshots/issue-statusline.png" role="button" tabindex="0">
+        <img src="/skills/screenshots/issue-statusline.png" alt="Annotated infographic of Issue Statusline in isolation" />
+        <span class="zoom-hint">Click to view full size</span>
+      </div>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/issue-link.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/issue-link.png" alt="Up-close screenshot of separate issue link" loading="lazy" />
+          </div>
+          <strong>Separate Issue Pill &amp; Link</strong>
+          <span>Each tracked issue gets its own pill and clickable OSC 8 link (issue icon or bug icon).</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/issue-label.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/issue-label.png" alt="Up-close screenshot of priority and category labels" loading="lazy" />
+          </div>
+          <strong>Priority / Category Label</strong>
+          <span>Surfaces top priority or category labels (<code>P0</code>, <code>P1</code>, <code>bug</code>, <code>enhancement</code>).</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/issue-pr.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/issue-pr.png" alt="Up-close screenshot of linked open PR indicator" loading="lazy" />
+          </div>
+          <strong>Linked Open PR Indicator</strong>
+          <span>Displays a PR branch icon when an open pull request references or closes the issue.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/issue-assignee.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/issue-assignee.png" alt="Up-close screenshot of assignee handle" loading="lazy" />
+          </div>
+          <strong>Assignee Handle</strong>
+          <span>Shows the assigned GitHub user (green when assigned + active, amber when unassigned).</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/issue-comments.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/issue-comments.png" alt="Up-close screenshot of issue comment count" loading="lazy" />
+          </div>
+          <strong>Comment Count</strong>
+          <span>Displays total discussion comments on the issue.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/issue-closed.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/issue-closed.png" alt="Up-close screenshot of purple closed issue pill" loading="lazy" />
+          </div>
+          <strong>Purple Closed Badge</strong>
+          <span>Turns purple when closed as completed during this session and auto-dismisses on your next prompt.</span>
+        </div>
+      </div>
+    </div>
+
+    <h3>3. Subagent Statusline (<code>extensions/subagent-statusline</code>)</h3>
+    <p>Tracks active session subagent counts across <code>starting</code>, <code>in PR</code>, <code>merged</code>, and <code>failed</code>. The annotated infographic below explains each counter and status transition:</p>
+    <div class="shot-card">
+      <div class="shot-wrap" data-full-img="/skills/screenshots/subagent-statusline.png" role="button" tabindex="0">
+        <img src="/skills/screenshots/subagent-statusline.png" alt="Annotated infographic of Subagent Statusline in isolation" />
+        <span class="zoom-hint">Click to view full size</span>
+      </div>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/sub-icon.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/sub-icon.png" alt="Up-close screenshot of subagent fleet icon" loading="lazy" />
+          </div>
+          <strong>Subagent Fleet Icon</strong>
+          <span>Click opens subagent PRs in your browser; run <code>/tasks</code> in console to inspect background subagents.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/sub-starting.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/sub-starting.png" alt="Up-close screenshot of starting counter" loading="lazy" />
+          </div>
+          <strong>Starting Counter</strong>
+          <span>Number of session subagents actively working before opening a pull request.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/sub-inpr.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/sub-inpr.png" alt="Up-close screenshot of in-PR counter" loading="lazy" />
+          </div>
+          <strong>In-PR Counter</strong>
+          <span>Number of session subagents with an open pull request under review or CI.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/sub-merged.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/sub-merged.png" alt="Up-close screenshot of merged counter" loading="lazy" />
+          </div>
+          <strong>Merged Counter</strong>
+          <span>Number of session subagents whose pull requests have merged.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/sub-failed.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/sub-failed.png" alt="Up-close screenshot of failed counter" loading="lazy" />
+          </div>
+          <strong>Failed Counter</strong>
+          <span>Shown in red if any session subagent exits with an error.</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-crop" data-full-img="/skills/screenshots/crops/sub-allmerged.png" role="button" tabindex="0">
+            <img src="/skills/screenshots/crops/sub-allmerged.png" alt="Up-close screenshot of all-merged subagent pill" loading="lazy" />
+          </div>
+          <strong>Purple All-Merged Pill</strong>
+          <span>When all subagent PRs merge (0 starting, 0 in PR), the pill turns purple and auto-dismisses on your next prompt.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="img-zoom-overlay" id="img-zoom-overlay" hidden role="dialog" aria-modal="true" aria-label="Full-size image viewer">
+    <div class="img-zoom-toolbar">
+      <button class="img-zoom-btn" id="img-zoom-toggle" type="button">1:1 Actual Size</button>
+      <a class="img-zoom-btn" id="img-zoom-raw" href="#" target="_blank" rel="noopener">Open in new tab ↗</a>
+      <button class="img-zoom-btn" id="img-zoom-close" type="button">✕ Close</button>
+    </div>
+    <div class="img-zoom-stage" id="img-zoom-stage">
+      <img id="img-zoom-target" alt="" />
+    </div>
+  </div>
+<script>
+  document.querySelectorAll("pre").forEach((pre) => {
+    const code = pre.querySelector("code");
+    const text = (code ? code.textContent : pre.textContent || "").trim();
+    const btn = document.createElement("button");
+    btn.className = "code-copy-btn";
+    btn.type = "button";
+    btn.title = "Copy code";
+    btn.setAttribute("aria-label", "Copy code");
+    btn.innerHTML =
+      '<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path></svg>' +
+      '<svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>';
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {}
+      btn.classList.add("copied");
+      setTimeout(() => btn.classList.remove("copied"), 1500);
+    });
+    pre.appendChild(btn);
+  });
+
+  const zoomOverlay = document.getElementById("img-zoom-overlay");
+  const zoomTarget = document.getElementById("img-zoom-target");
+  const zoomToggle = document.getElementById("img-zoom-toggle");
+  const zoomRaw = document.getElementById("img-zoom-raw");
+
+  function openFullImage(src, alt) {
+    zoomTarget.src = src;
+    zoomTarget.alt = alt || "Full-size image";
+    zoomTarget.classList.remove("is-actual-size");
+    zoomToggle.textContent = "1:1 Actual Size";
+    zoomRaw.href = src;
+    zoomOverlay.hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeFullImage() {
+    zoomOverlay.hidden = true;
+    document.body.style.overflow = "";
+  }
+
+  document.addEventListener("click", (e) => {
+    const t = e.target;
+    if (t.closest("#img-zoom-close")) return closeFullImage();
+    if (t.closest("#img-zoom-toggle") || t === zoomTarget) {
+      const actual = zoomTarget.classList.toggle("is-actual-size");
+      zoomToggle.textContent = actual ? "Fit to Screen" : "1:1 Actual Size";
+      return;
+    }
+    if (!zoomOverlay.hidden && (t === zoomOverlay || t.id === "img-zoom-stage")) {
+      return closeFullImage();
+    }
+    const trigger = t.closest("[data-full-img]");
+    if (trigger) {
+      const img = trigger.querySelector("img");
+      openFullImage(trigger.getAttribute("data-full-img"), img ? img.alt : "");
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (!zoomOverlay.hidden && e.key === "Escape") closeFullImage();
+  });
+</script>
+</body>
+</html>
