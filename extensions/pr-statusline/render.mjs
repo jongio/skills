@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { OCTICONS, syncSession } from "./tracker.mjs";
-import { composeStatusLine } from "./compose.mjs";
+import { composeStatusLine, shouldUseNerdFont, toUnicodeIcons } from "./compose.mjs";
 
 const clean = (text) => String(text).replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
 
@@ -74,7 +74,7 @@ function prAttentionLevel(rawStatus) {
 	return "neutral";
 }
 
-function formatPrItem(pr, _currentRepo, { links, color }) {
+function formatPrItem(pr, _currentRepo, { links, color, nerdFont = true }) {
 	const displayLabel = pr.label;
 	let raw = pr.status ? clean(pr.status).trim() : "";
 	const level = prAttentionLevel(raw);
@@ -92,7 +92,8 @@ function formatPrItem(pr, _currentRepo, { links, color }) {
 			? `\x1b]8;;${pr.url}\x07${displayLabel}\x1b]8;;\x07${PALETTE.reset}${theme.mid}`
 			: `\x1b]8;;${pr.url}\x07${displayLabel}\x1b]8;;\x07`)
 		: `${displayLabel} (${pr.url})`;
-	const content = raw ? `${leadIcon}${labelText} ${raw}` : `${leadIcon}${labelText}`;
+	const rawContent = raw ? `${leadIcon}${labelText} ${raw}` : `${leadIcon}${labelText}`;
+	const content = nerdFont ? rawContent : toUnicodeIcons(rawContent);
 	return makePill(content, level, { color });
 }
 
@@ -101,14 +102,16 @@ export function render(payload, {
 	now = Date.now(),
 	links = true,
 	color = links,
+	nerdFont = undefined,
 	fetchPrStatus,
 	prCacheTtlMs,
 } = {}) {
 	if (!payload.session_id) return "";
 	const { state } = syncSession(payload, { home, now, fetchPrStatus, prCacheTtlMs });
 	if (!state || !state.prs.length) return "";
+	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: false });
 	const currentRepo = state.repository || null;
-	const allPills = state.prs.map((pr) => formatPrItem(pr, currentRepo, { links, color }));
+	const allPills = state.prs.map((pr) => formatPrItem(pr, currentRepo, { links, color, nerdFont: useNerdFont }));
 	if (!color) {
 		return allPills.map((p) => p.mid).join(" · ");
 	}
@@ -131,7 +134,7 @@ async function main() {
 		const color = !plain && !process.argv.includes("--no-color") && !process.env.NO_COLOR;
 		const selfPath = fileURLToPath(import.meta.url);
 		const composed = await composeStatusLine(payload, { links: !plain, color, selfPath, selfRender: render });
-		const output = composed || render(payload, { links: !plain, color });
+		const output = composed || render(payload, { links: !plain, color, nerdFont: shouldUseNerdFont({ autoDetect: true }) });
 		if (output) console.log(output);
 	} catch (error) {
 		console.error(`[pr-statusline] ${error.message}`);

@@ -42,6 +42,7 @@ const PLACEHOLDER_REPOS = new Set([
 	"backup/check",
 	"myorg/repo",
 ]);
+export const RELEVANT_EVENT_TYPE = /^(?:session\.(?:start|resume|context_changed|idle|compaction_start|compaction_complete|error|shutdown)|user\.message|assistant\.turn_(?:start|end)|model\.turn_(?:started|ended)|tool\.execution_(?:start|complete)|subagent\.(?:started|completed|failed)|(?:permission|user_input|elicitation|exit_plan_mode)\.(?:requested|completed)|abort)$/;
 const RELEVANT_EVENT_LINE = /"type"\s*:\s*"(?:session\.(?:start|resume|context_changed|idle|compaction_start|compaction_complete|error|shutdown)|user\.message|assistant\.turn_(?:start|end)|model\.turn_(?:started|ended)|tool\.execution_(?:start|complete)|subagent\.(?:started|completed|failed)|(?:permission|user_input|elicitation|exit_plan_mode)\.(?:requested|completed)|abort)"/;
 
 export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");

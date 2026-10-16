@@ -7,10 +7,13 @@ import { SubagentTracker } from "../tracker.mjs";
 import { render } from "../render.mjs";
 import {
 	composeStatusLine,
+	detectNerdFontFromWindowsTerminalSettings,
 	discoverRenderers,
 	ensurePluginStatuslineRegistered,
+	isNerdFontName,
 	joinOutputsHorizontally,
 	runInteractiveStatuslinePicker,
+	toUnicodeIcons,
 } from "../compose.mjs";
 import { configureStatuslines, parseStatuslineArgs } from "../../../scripts/setup-statusline.mjs";
 
@@ -128,6 +131,9 @@ try {
 			const pluginDiscovered = discoverRenderers(pluginHome).map((r) => r.name);
 			assert.deepEqual(pluginDiscovered, ["subagent-statusline"]);
 
+			ensurePluginStatuslineRegistered("subagent-statusline", extDir, { home: pluginHome, includeSiblings: true });
+			assert.deepEqual(discoverRenderers(pluginHome).map((r) => r.name), ["pr-statusline", "issue-statusline", "subagent-statusline"]);
+
 			// Test interactive elicitation picker via mock session.ui.elicitation
 			const logs = [];
 			const mockSession = {
@@ -153,6 +159,40 @@ try {
 			// Test direct CLI argument mode (/statusline-setup none)
 			const disableRes = await runInteractiveStatuslinePicker(mockSession, { home: pluginHome, args: "none" });
 			assert.deepEqual(disableRes.enabled, []);
+
+			// Test Nerd Font detection vs Powerline-only / WSL fallback
+			assert.equal(isNerdFontName("CaskaydiaCove Nerd Font Mono"), true);
+			assert.equal(isNerdFontName("JetBrainsMono NF"), true);
+			assert.equal(isNerdFontName("Cascadia Code PL"), false);
+			assert.equal(isNerdFontName("Cascadia Mono"), false);
+			assert.equal(isNerdFontName(""), false);
+			assert.equal(
+				detectNerdFontFromWindowsTerminalSettings(
+					{
+						profiles: {
+							defaults: {},
+							list: [{ name: "Ubuntu", source: "Windows.Terminal.Wsl", font: { face: "Cascadia Code PL" } }],
+						},
+					},
+					{ wslDistroName: "Ubuntu", isWsl: true },
+				),
+				false,
+			);
+			assert.equal(
+				detectNerdFontFromWindowsTerminalSettings(
+					{
+						profiles: {
+							defaults: { font: { face: "CaskaydiaCove Nerd Font Mono" } },
+							list: [{ name: "Ubuntu", source: "Windows.Terminal.Wsl" }],
+						},
+					},
+					{ wslDistroName: "Ubuntu", isWsl: true },
+				),
+				true,
+			);
+			const unicodeConverted = toUnicodeIcons("\uE726 microsoft/cae#3494 \uF058 23/23 \uF071 \uF440 \uF164 1/2 \uF075 3/5");
+			assert.equal(unicodeConverted, "\uE0A0 microsoft/cae#3494 \u2713 23/23 \u26A0 \u2691 \u2605 1/2 \u2709 3/5");
+			assert.doesNotMatch(unicodeConverted, /[\uE700-\uF8FF]/);
 		} finally {
 			rmSync(pluginHome, { recursive: true, force: true });
 		}
