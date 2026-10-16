@@ -5,7 +5,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SubagentTracker } from "../tracker.mjs";
 import { render } from "../render.mjs";
-import { composeStatusLine, discoverRenderers, ensurePluginStatuslineRegistered, joinOutputsHorizontally } from "../compose.mjs";
+import {
+	composeStatusLine,
+	discoverRenderers,
+	ensurePluginStatuslineRegistered,
+	joinOutputsHorizontally,
+	runInteractiveStatuslinePicker,
+} from "../compose.mjs";
 import { configureStatuslines, parseStatuslineArgs } from "../../../scripts/setup-statusline.mjs";
 
 const home = mkdtempSync(join(tmpdir(), "subagent-statusline-test-"));
@@ -117,9 +123,36 @@ try {
 		const pluginHome = mkdtempSync(join(tmpdir(), "statusline-plugin-bootstrap-"));
 		try {
 			const extDir = dirname(fileURLToPath(new URL("../render.mjs", import.meta.url)));
-			ensurePluginStatuslineRegistered("subagent-statusline", extDir, { home: pluginHome });
+			const boot = ensurePluginStatuslineRegistered("subagent-statusline", extDir, { home: pluginHome });
+			assert.equal(boot.firstRun, true);
 			const pluginDiscovered = discoverRenderers(pluginHome).map((r) => r.name);
 			assert.deepEqual(pluginDiscovered, ["subagent-statusline"]);
+
+			// Test interactive elicitation picker via mock session.ui.elicitation
+			const logs = [];
+			const mockSession = {
+				capabilities: { ui: { elicitation: true } },
+				ui: {
+					elicitation: async (params) => {
+						assert.ok(params.requestedSchema.properties.prs);
+						assert.ok(params.requestedSchema.properties.issues);
+						assert.ok(params.requestedSchema.properties.subagents);
+						return {
+							action: "accept",
+							content: { prs: true, issues: false, subagents: true },
+						};
+					},
+				},
+				log: async (msg) => logs.push(msg),
+			};
+			const pickerRes = await runInteractiveStatuslinePicker(mockSession, { home: pluginHome });
+			assert.equal(pickerRes.cancelled, false);
+			assert.deepEqual(pickerRes.enabled, ["pr-statusline", "subagent-statusline"]);
+			assert.ok(logs.some((m) => m.includes("pr-statusline, subagent-statusline")));
+
+			// Test direct CLI argument mode (/statusline-setup none)
+			const disableRes = await runInteractiveStatuslinePicker(mockSession, { home: pluginHome, args: "none" });
+			assert.deepEqual(disableRes.enabled, []);
 		} finally {
 			rmSync(pluginHome, { recursive: true, force: true });
 		}

@@ -40,7 +40,7 @@ This plugin also ships three composable terminal statuslines for GitHub Copilot 
 
 ![Three Composable Statusline Types Side-by-Side](extensions/pr-statusline/screenshots/statusline-composed.png)
 
-Installing the `jongio/skills` plugin (`copilot plugin install jongio/skills`) auto-registers the statuslines on session start, or you can run the interactive setup script to choose whether you want **Pull Requests**, **GitHub Issues**, and/or **Subagents**:
+Installing the `jongio/skills` plugin (`copilot plugin install jongio/skills`) auto-registers the statuslines and opens an interactive checkbox picker on first session start (and adds `/statusline-setup` so you can toggle **Pull Requests**, **GitHub Issues**, and **Subagents** anytime), or you can run the standalone setup script:
 
 ```powershell
 # Windows (PowerShell one-liner)

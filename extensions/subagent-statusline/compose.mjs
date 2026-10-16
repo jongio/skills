@@ -24,6 +24,155 @@ function atomicWriteText(filePath, content) {
 	}
 }
 
+export function getEnabledStatuslines(home = configHome()) {
+	const enabled = readEnabledConfig(home);
+	if (!enabled) return [...PREFERRED_ORDER];
+	return PREFERRED_ORDER.filter((id) => enabled.has(id));
+}
+
+export function setEnabledStatuslines(enabledIds, {
+	home = configHome(),
+	nodePath = process.execPath,
+} = {}) {
+	mkdirSync(home, { recursive: true });
+	const wanted = new Set((enabledIds ?? []).map(String));
+	const validEnabled = PREFERRED_ORDER.filter((id) => wanted.has(id));
+	const configPath = join(home, "statusline-config.json");
+	const composerDst = join(home, "statusline-compose.mjs");
+	const settingsPath = join(home, "settings.json");
+
+	atomicWriteText(
+		configPath,
+		`${JSON.stringify({ version: 1, enabled: validEnabled, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+	);
+
+	let settings = {};
+	if (existsSync(settingsPath)) {
+		try {
+			settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+		} catch {
+			settings = {};
+		}
+	}
+	if (validEnabled.length > 0) {
+		settings.statusLine = {
+			type: "command",
+			command: `"${nodePath}" "${composerDst}"`,
+			padding: 0,
+			refreshInterval: 2,
+		};
+		if (!settings.footer || typeof settings.footer !== "object" || Array.isArray(settings.footer)) {
+			settings.footer = {};
+		}
+		settings.footer.showCustom = true;
+	} else {
+		delete settings.statusLine;
+		if (settings.footer && typeof settings.footer !== "object" && !Array.isArray(settings.footer)) {
+			settings.footer.showCustom = false;
+		}
+	}
+	atomicWriteText(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+	return { enabled: validEnabled, configPath, settingsPath, composerPath: composerDst };
+}
+
+export function parseQuickSetupTokens(rawArgs = "") {
+	const tokens = String(rawArgs ?? "")
+		.trim()
+		.toLowerCase()
+		.split(/[\s,]+/)
+		.filter(Boolean);
+	if (!tokens.length) return null;
+	if (tokens.includes("none") || tokens.includes("off") || tokens.includes("disable")) {
+		return [];
+	}
+	if (tokens.includes("all") || tokens.includes("--all")) {
+		return [...PREFERRED_ORDER];
+	}
+	const map = {
+		pr: "pr-statusline",
+		prs: "pr-statusline",
+		"--prs": "pr-statusline",
+		"pr-statusline": "pr-statusline",
+		issue: "issue-statusline",
+		issues: "issue-statusline",
+		"--issues": "issue-statusline",
+		"issue-statusline": "issue-statusline",
+		subagent: "subagent-statusline",
+		subagents: "subagent-statusline",
+		"--subagents": "subagent-statusline",
+		"subagent-statusline": "subagent-statusline",
+	};
+	const picked = new Set();
+	for (const tok of tokens) {
+		if (map[tok]) picked.add(map[tok]);
+	}
+	return picked.size > 0 ? PREFERRED_ORDER.filter((id) => picked.has(id)) : null;
+}
+
+export async function runInteractiveStatuslinePicker(session, {
+	home = configHome(),
+	args = "",
+	nodePath = process.execPath,
+} = {}) {
+	const direct = parseQuickSetupTokens(args);
+	if (direct !== null) {
+		const res = setEnabledStatuslines(direct, { home, nodePath });
+		const msg = res.enabled.length
+			? `Configured Copilot CLI statusline: ${res.enabled.join(", ")}`
+			: "Disabled Copilot CLI statuslines.";
+		await session?.log?.(msg);
+		return { cancelled: false, enabled: res.enabled, message: msg };
+	}
+
+	if (session?.capabilities?.ui?.elicitation && typeof session?.ui?.elicitation === "function") {
+		const current = new Set(getEnabledStatuslines(home));
+		const response = await session.ui.elicitation({
+			message: "Choose which Copilot CLI statuslines to display in your terminal footer:",
+			requestedSchema: {
+				type: "object",
+				properties: {
+					prs: {
+						type: "boolean",
+						title: "Pull Requests (pr-statusline)",
+						description: "Track session PRs with clickable links, CI checks, approvals, review threads, and purple Merged pills",
+						default: current.has("pr-statusline"),
+					},
+					issues: {
+						type: "boolean",
+						title: "GitHub Issues (issue-statusline)",
+						description: "Render a separate clickable pill per active session issue with labels, linked PR icon, assignee, and comments",
+						default: current.has("issue-statusline"),
+					},
+					subagents: {
+						type: "boolean",
+						title: "Subagents (subagent-statusline)",
+						description: "Show session subagent phase counters (starting, in PR, merged, failed)",
+						default: current.has("subagent-statusline"),
+					},
+				},
+			},
+		});
+		if (response?.action !== "accept" || !response.content) {
+			return { cancelled: true, enabled: [...current], message: "Statusline setup cancelled." };
+		}
+		const selected = [];
+		if (response.content.prs !== false) selected.push("pr-statusline");
+		if (response.content.issues !== false) selected.push("issue-statusline");
+		if (response.content.subagents !== false) selected.push("subagent-statusline");
+		const res = setEnabledStatuslines(selected, { home, nodePath });
+		const msg = res.enabled.length
+			? `Configured Copilot CLI statusline: ${res.enabled.join(", ")}`
+			: "Disabled Copilot CLI statuslines.";
+		await session?.log?.(msg);
+		return { cancelled: false, enabled: res.enabled, message: msg };
+	}
+
+	const current = getEnabledStatuslines(home);
+	const msg = `Current statuslines: ${current.join(", ") || "none"}. Run /statusline-setup [all | none | prs issues subagents] to change.`;
+	await session?.log?.(msg);
+	return { cancelled: false, enabled: current, message: msg };
+}
+
 export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 	home = configHome(),
 	nodePath = process.execPath,
@@ -48,32 +197,14 @@ export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 		}
 
 		const configPath = join(home, "statusline-config.json");
-		if (!existsSync(configPath)) {
-			atomicWriteText(
-				configPath,
-				`${JSON.stringify({ version: 1, enabled: PREFERRED_ORDER, updatedAt: new Date().toISOString() }, null, 2)}\n`,
-			);
-			const settingsPath = join(home, "settings.json");
-			let settings = {};
-			if (existsSync(settingsPath)) {
-				settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-			}
-			if (!settings.statusLine?.command) {
-				settings.statusLine = {
-					type: "command",
-					command: `"${nodePath}" "${composerDst}"`,
-					padding: 0,
-					refreshInterval: 2,
-				};
-				if (!settings.footer || typeof settings.footer !== "object" || Array.isArray(settings.footer)) {
-					settings.footer = {};
-				}
-				settings.footer.showCustom = true;
-				atomicWriteText(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
-			}
+		const firstRun = !existsSync(configPath);
+		if (firstRun) {
+			setEnabledStatuslines(PREFERRED_ORDER, { home, nodePath });
 		}
+		return { firstRun };
 	} catch {
 		// Never fail extension startup if filesystem registration is read-only.
+		return { firstRun: false };
 	}
 }
 
