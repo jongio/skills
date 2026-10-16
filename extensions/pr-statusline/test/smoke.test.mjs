@@ -297,6 +297,9 @@ try {
 	try {
 		assert.equal(readState(session.sessionId, home).status, "Waiting on you (answer)");
 		assert.equal(readState(session.sessionId, home).prs[0].url, pr);
+		const mtimeBeforeDelta = readState(session.sessionId, home).updatedAt;
+		handler(event("assistant.message.delta", { deltaContent: "token" }));
+		assert.equal(readState(session.sessionId, home).updatedAt, mtimeBeforeDelta, "streaming delta events must not trigger disk writes");
 		handler(event("user_input.completed", { requestId: "live" }));
 		assert.equal(readState(session.sessionId, home).status, "Working");
 		collector.manage("remove", pr);

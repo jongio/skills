@@ -38,16 +38,22 @@ const base = import.meta.env.BASE_URL;
         </div>
       </div>
       <p class="sl-primary-sub">
-        Add the marketplace once in Copilot CLI, install the <code>jongio-skills</code> plugin, and pick which statuslines (<strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, <strong>Subagents</strong>) you want enabled:
+        Add the marketplace once in Copilot CLI, install just the statuslines or the full collection, and pick which statuslines (<strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, <strong>Subagents</strong>) you want enabled:
       </p>
       <div class="sl-primary-stack">
         <div class="sl-install-item">
           <div class="sl-os-label">Step 1 · Add the marketplace (one-time setup in Copilot CLI)</div>
           <pre class="sl-primary-pre"><code>/plugin marketplace add jongio/skills</code></pre>
         </div>
-        <div class="sl-install-item">
-          <div class="sl-os-label">Step 2 · Install all skills &amp; statuslines in Copilot CLI</div>
-          <pre class="sl-primary-pre"><code>/plugin install jongio-skills@jongio-skills</code></pre>
+        <div class="sl-scope-grid">
+          <div class="sl-install-item sl-scope-box sl-scope-focus">
+            <div class="sl-os-label">Step 2A · Install statuslines only (no skills)</div>
+            <pre class="sl-primary-pre"><code>/plugin install statuslines@jongio-skills</code></pre>
+          </div>
+          <div class="sl-install-item sl-scope-box">
+            <div class="sl-os-label">Step 2B · Or install all skills &amp; statuslines</div>
+            <pre class="sl-primary-pre"><code>/plugin install jongio-skills@jongio-skills</code></pre>
+          </div>
         </div>
         <div class="sl-install-item">
           <div class="sl-os-label">Step 3 · Pick your statuslines anytime in Copilot CLI</div>
@@ -349,6 +355,20 @@ const base = import.meta.env.BASE_URL;
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+  }
+  .sl-scope-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 0.75rem;
+  }
+  .sl-scope-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.75rem 0.85rem;
+  }
+  .sl-scope-focus {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   }
   .sl-primary-pre {
     font-size: 0.96rem;

@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-export const ISSUE_OPEN_TTL_MS = 20_000;
+export const ISSUE_OPEN_TTL_MS = 45_000;
 export const ISSUE_CLOSED_TTL_MS = 120_000;
 
 export const ICONS = {

@@ -40,7 +40,13 @@ This plugin also ships three composable terminal statuslines for GitHub Copilot 
 
 ![Three Composable Statusline Types Side-by-Side](extensions/pr-statusline/screenshots/statusline-composed.png)
 
-Installing the `jongio-skills` plugin from the `jongio/skills` marketplace (`/plugin marketplace add jongio/skills` then `/plugin install jongio-skills@jongio-skills`) auto-registers the statuslines and opens an interactive checkbox picker on first session start (and adds `/statusline-setup` so you can toggle **Pull Requests**, **GitHub Issues**, and **Subagents** anytime), or you can run the standalone setup script:
+Installing `statuslines@jongio-skills` (statuslines only) or `jongio-skills@jongio-skills` (all skills and statuslines) from the `jongio/skills` marketplace auto-registers the statuslines and opens an interactive checkbox picker on first session start (and adds `/statusline-setup` so you can toggle **Pull Requests**, **GitHub Issues**, and **Subagents** anytime), or you can run the standalone setup script:
+
+```text
+# Install just the statuslines (no skills) in Copilot CLI:
+/plugin marketplace add jongio/skills
+/plugin install statuslines@jongio-skills
+```
 
 ```powershell
 # Windows (PowerShell one-liner)
@@ -67,7 +73,10 @@ The repo ships a root [`marketplace.json`](marketplace.json) and [`plugin.json`]
 # 2a. Install the entire collection (all skills + CLI statuslines):
 /plugin install jongio-skills@jongio-skills
 
-# 2b. Or install just one skill from the marketplace:
+# 2b. Or install just the CLI statuslines (no skills):
+/plugin install statuslines@jongio-skills
+
+# 2c. Or install just one skill from the marketplace:
 /plugin install create-canvas-app@jongio-skills
 ```
 
@@ -77,6 +86,8 @@ Or from your terminal shell:
 copilot plugin marketplace add jongio/skills
 copilot plugin marketplace browse jongio-skills
 copilot plugin install jongio-skills@jongio-skills
+# or just the CLI statuslines (no skills):
+copilot plugin install statuslines@jongio-skills
 # or a single skill:
 copilot plugin install create-canvas-app@jongio-skills
 ```

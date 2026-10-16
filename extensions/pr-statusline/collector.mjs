@@ -1,17 +1,30 @@
-import { readState, SessionTracker, statePath, writeState } from "./tracker.mjs";
-import { renameSync, rmSync } from "node:fs";
+import { readState, RELEVANT_EVENT_TYPE, SessionTracker, statePath, writeState } from "./tracker.mjs";
+import { renameSync, rmSync, statSync } from "node:fs";
 
-export async function collect(session, { home, interval = 2000, report = console.error } = {}) {
+function serializeComparable(snap) {
+	const { updatedAt: _ignored, ...rest } = snap;
+	return JSON.stringify(rest);
+}
+
+export async function collect(session, { home, interval = 15000, report = console.error } = {}) {
+	const file = statePath(session.sessionId, home);
 	let previous = null;
+	let lastDiskMtimeMs = 0;
 	try {
 		previous = readState(session.sessionId, home);
+		if (previous) {
+			try {
+				lastDiskMtimeMs = statSync(file).mtimeMs;
+			} catch {
+				lastDiskMtimeMs = 0;
+			}
+		}
 	} catch (error) {
 		report(`[pr-statusline] Resetting unreadable state cache: ${error.message}`);
-		const path = statePath(session.sessionId, home);
 		try {
-			renameSync(path, `${path}.corrupt`);
+			renameSync(file, `${file}.corrupt`);
 		} catch {
-			rmSync(path, { force: true });
+			rmSync(file, { force: true });
 		}
 	}
 	const tracker = new SessionTracker(session.sessionId, previous);
@@ -20,10 +33,18 @@ export async function collect(session, { home, interval = 2000, report = console
 	let stopped = false;
 	let polling = false;
 	let lastSavedAt = previous?.updatedAt ?? 0;
-	const save = (activity, { preferMemoryIgnore = false } = {}) => {
+	let lastComparable = previous ? serializeComparable(tracker.snapshot()) : null;
+	const save = (activity, { preferMemoryIgnore = false, force = false } = {}) => {
 		try {
-			const disk = readState(session.sessionId, home);
+			let currentMtimeMs = 0;
+			try {
+				currentMtimeMs = statSync(file).mtimeMs;
+			} catch {
+				currentMtimeMs = 0;
+			}
+			const disk = currentMtimeMs > lastDiskMtimeMs ? readState(session.sessionId, home) : null;
 			if (disk) {
+				lastDiskMtimeMs = currentMtimeMs;
 				if (Number.isInteger(disk.transcriptOffset) && disk.transcriptOffset > tracker.state.transcriptOffset) {
 					tracker.state.transcriptOffset = disk.transcriptOffset;
 				}
@@ -58,10 +79,19 @@ export async function collect(session, { home, interval = 2000, report = console
 			// Ignore transient disk read errors before saving.
 		}
 		const snap = tracker.snapshot(activity);
+		const comparable = serializeComparable(snap);
+		if (!force && comparable === lastComparable) return;
+		lastComparable = comparable;
 		lastSavedAt = snap.updatedAt;
 		writeState(snap, home);
+		try {
+			lastDiskMtimeMs = statSync(file).mtimeMs;
+		} catch {
+			// Ignore stat failure after write.
+		}
 	};
 	const unsubscribe = session.on((event) => {
+		if (!RELEVANT_EVENT_TYPE.test(String(event?.type ?? ""))) return;
 		if (loading) queued.push(event);
 		else {
 			try {
@@ -73,10 +103,14 @@ export async function collect(session, { home, interval = 2000, report = console
 		}
 	});
 	try {
-		for (const event of await session.getEvents()) tracker.observe(event, true);
+		for (const event of await session.getEvents()) {
+			if (RELEVANT_EVENT_TYPE.test(String(event?.type ?? ""))) {
+				tracker.observe(event, true);
+			}
+		}
 		loading = false;
 		for (const event of queued) tracker.observe(event);
-		save();
+		save(null, { force: true });
 	} catch (error) {
 		unsubscribe();
 		throw error;
@@ -100,7 +134,7 @@ export async function collect(session, { home, interval = 2000, report = console
 		tracker,
 		manage(action, reference) {
 			const prs = tracker.manage(action, reference);
-			save(null, { preferMemoryIgnore: true });
+			save(null, { preferMemoryIgnore: true, force: true });
 			return prs;
 		},
 		stop() {

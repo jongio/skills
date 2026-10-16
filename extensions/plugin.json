@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "statuslines",
+  "description": "Composable PR, GitHub Issue, and Subagent statusline extensions for GitHub Copilot CLI.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Jon Gallant",
+    "url": "https://github.com/jongio"
+  },
+  "license": "MIT",
+  "keywords": ["copilot", "copilot-cli", "statusline", "pr-statusline", "issue-statusline", "subagent-statusline"],
+  "repository": "https://github.com/jongio/skills"
+}

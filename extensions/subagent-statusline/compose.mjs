@@ -71,7 +71,7 @@ export function setEnabledStatuslines(enabledIds, {
 			type: "command",
 			command: `${nodeCmd} "${composerDst}"`,
 			padding: 0,
-			refreshInterval: 2,
+			refreshInterval: 5,
 		};
 		if (!settings.footer || typeof settings.footer !== "object" || Array.isArray(settings.footer)) {
 			settings.footer = {};
@@ -188,18 +188,24 @@ export async function runInteractiveStatuslinePicker(session, {
 export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 	home = configHome(),
 	nodePath = process.execPath,
+	includeSiblings = false,
 } = {}) {
 	try {
 		mkdirSync(home, { recursive: true });
 		const extRoot = join(home, "extensions");
-		const dstDir = join(extRoot, extensionId);
-		mkdirSync(dstDir, { recursive: true });
-
-		for (const entry of readdirSync(extensionDir, { withFileTypes: true })) {
-			if (!entry.isFile()) continue;
-			if (entry.name === "extension.mjs") continue;
-			if (entry.name.endsWith(".mjs") || entry.name === "copilot-extension.json") {
-				copyFileSync(join(extensionDir, entry.name), join(dstDir, entry.name));
+		const parentDir = dirname(extensionDir);
+		const candidateIds = includeSiblings ? new Set([extensionId, ...PREFERRED_ORDER]) : new Set([extensionId]);
+		for (const id of candidateIds) {
+			const srcDir = id === extensionId ? extensionDir : join(parentDir, id);
+			if (!existsSync(join(srcDir, "render.mjs"))) continue;
+			const dstDir = join(extRoot, id);
+			mkdirSync(dstDir, { recursive: true });
+			for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
+				if (!entry.isFile()) continue;
+				if (entry.name === "extension.mjs") continue;
+				if (entry.name.endsWith(".mjs") || entry.name === "copilot-extension.json") {
+					copyFileSync(join(srcDir, entry.name), join(dstDir, entry.name));
+				}
 			}
 		}
 
@@ -217,7 +223,10 @@ export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 			const settingsPath = join(home, "settings.json");
 			if (existsSync(settingsPath)) {
 				const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-				if (typeof settings?.statusLine?.command === "string" && settings.statusLine.command.toLowerCase().includes("copilot.exe")) {
+				if (
+					(typeof settings?.statusLine?.command === "string" && settings.statusLine.command.toLowerCase().includes("copilot.exe")) ||
+					settings?.statusLine?.refreshInterval === 2
+				) {
 					setEnabledStatuslines(getEnabledStatuslines(home), { home, nodePath });
 				}
 			}

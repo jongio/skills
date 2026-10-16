@@ -6,8 +6,20 @@ import {
 	ensurePluginStatuslineRegistered,
 	runInteractiveStatuslinePicker,
 } from "./compose.mjs";
+import {
+	IssueTracker,
+	readState as readIssueState,
+	writeState as writeIssueState,
+} from "../issue-statusline/tracker.mjs";
+import {
+	readState as readSubagentState,
+	SubagentTracker,
+	writeState as writeSubagentState,
+} from "../subagent-statusline/tracker.mjs";
 
-const { firstRun } = ensurePluginStatuslineRegistered("pr-statusline", dirname(fileURLToPath(import.meta.url)));
+const { firstRun } = ensurePluginStatuslineRegistered("pr-statusline", dirname(fileURLToPath(import.meta.url)), {
+	includeSiblings: true,
+});
 
 let collector;
 function manage(action, reference) {
@@ -35,6 +47,37 @@ const session = await joinSession({
 				} catch (error) {
 					await session.log(`Usage: /session-prs [list | add <pr> | remove <pr> | clear] (${error.message})`);
 				}
+			},
+		},
+		{
+			name: "session-issues",
+			description: "Session issue links: list, add owner/repo#123, remove owner/repo#123, or clear",
+			handler: async ({ args }) => {
+				try {
+					const [action = "list", reference] = args.trim().split(/\s+/);
+					const tracker = new IssueTracker(session.sessionId, readIssueState(session.sessionId));
+					const issues = tracker.manage(action, reference);
+					writeIssueState(tracker.snapshot());
+					await session.log(issues.length ? issues.map((i) => `${i.label}: ${i.url}`).join("\n") : "No tracked session issues.");
+				} catch (error) {
+					await session.log(`Usage: /session-issues [list | add <issue> | remove <issue> | clear] (${error.message})`);
+				}
+			},
+		},
+		{
+			name: "session-subagents",
+			description: "Session subagent statusline: list or clear",
+			handler: async ({ args }) => {
+				const action = args.trim().split(/\s+/)[0] || "list";
+				const tracker = new SubagentTracker(session.sessionId, readSubagentState(session.sessionId));
+				if (action === "clear") {
+					tracker.clear();
+					writeSubagentState(tracker.snapshot());
+					await session.log("Cleared subagent statusline.");
+					return;
+				}
+				const c = tracker.counts();
+				await session.log(`Subagents: ${c.starting} starting, ${c.inPr} in PR, ${c.merged} merged, ${c.done} done, ${c.failed} failed`);
 			},
 		},
 	],
@@ -70,6 +113,25 @@ const session = await joinSession({
 				additionalProperties: false,
 			},
 			handler: ({ action, reference }) => JSON.stringify(manage(action, reference)),
+		},
+		{
+			name: "session_issues",
+			description: "Manage only this session's statusline issues. Add issues being worked on; remove issues no longer relevant.",
+			parameters: {
+				type: "object",
+				properties: {
+					action: { type: "string", enum: ["list", "add", "remove", "clear"] },
+					reference: { type: "string", description: "Issue web URL or owner/repo#number; required for add/remove" },
+				},
+				required: ["action"],
+				additionalProperties: false,
+			},
+			handler: ({ action, reference }) => {
+				const tracker = new IssueTracker(session.sessionId, readIssueState(session.sessionId));
+				const issues = tracker.manage(action, reference);
+				writeIssueState(tracker.snapshot());
+				return JSON.stringify(issues);
+			},
 		},
 	],
 });

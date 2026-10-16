@@ -318,12 +318,29 @@ test("every canonical skill is registered in the Copilot marketplace", async () 
   );
   assert.ok(copilotMarketplace.metadata.description.length > 0);
   const individualEntries = copilotMarketplace.plugins.filter(
-    ({ name }) => name !== packageName,
+    ({ name }) => name !== packageName && name !== "statuslines",
   );
   assert.deepEqual(
     individualEntries.map(({ name }) => name).sort(),
     skillNames,
   );
+
+  const statuslinesEntry = copilotMarketplace.plugins.find(
+    ({ name }) => name === "statuslines",
+  );
+  assert.ok(
+    statuslinesEntry,
+    "Copilot marketplace must expose the standalone statuslines plugin",
+  );
+  assertExactKeys(
+    statuslinesEntry,
+    ["name", "source", "description", "version"],
+    "statuslines Copilot marketplace entry",
+  );
+  assert.equal(statuslinesEntry.source, "./extensions");
+  assertLocalSource(statuslinesEntry.source, "statuslines Copilot source");
+  assert.ok(statuslinesEntry.description.length > 0);
+  assert.equal(statuslinesEntry.version, "1.0.0");
 
   for (const entry of individualEntries) {
     assertExactKeys(
@@ -602,10 +619,10 @@ test("portable package cannot gain implicit executable components", async () => 
     .sort();
   assert.deepEqual(
     extEntries,
-    ["issue-statusline", "pr-statusline", "subagent-statusline"],
-    "only reviewed statusline extensions may be exposed under com.github.copilot/extensions",
+    ["pr-statusline"],
+    "only the unified pr-statusline entry point may be exposed under com.github.copilot/extensions",
   );
-  for (const extName of extEntries) {
+  for (const extName of ["issue-statusline", "pr-statusline", "subagent-statusline"]) {
     const result = spawnSync(
       process.execPath,
       [path.join(root, "extensions", extName, "test", "smoke.test.mjs")],
