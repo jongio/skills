@@ -1,11 +1,22 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");
 
 const PREFERRED_ORDER = ["pr-statusline", "issue-statusline", "subagent-statusline"];
+
+export function resolveNodeCommand(nodePath = process.execPath) {
+	const base = basename(String(nodePath || "")).toLowerCase();
+	if (!base || base.startsWith("copilot")) {
+		if (process.platform === "win32" && existsSync("C:\\Program Files\\nodejs\\node.exe")) {
+			return "\"C:\\Program Files\\nodejs\\node.exe\"";
+		}
+		return "node";
+	}
+	return `"${nodePath}"`;
+}
 
 function atomicWriteText(filePath, content) {
 	mkdirSync(dirname(filePath), { recursive: true });
@@ -55,9 +66,10 @@ export function setEnabledStatuslines(enabledIds, {
 		}
 	}
 	if (validEnabled.length > 0) {
+		const nodeCmd = resolveNodeCommand(nodePath);
 		settings.statusLine = {
 			type: "command",
-			command: `"${nodePath}" "${composerDst}"`,
+			command: `${nodeCmd} "${composerDst}"`,
 			padding: 0,
 			refreshInterval: 2,
 		};
@@ -67,7 +79,7 @@ export function setEnabledStatuslines(enabledIds, {
 		settings.footer.showCustom = true;
 	} else {
 		delete settings.statusLine;
-		if (settings.footer && typeof settings.footer !== "object" && !Array.isArray(settings.footer)) {
+		if (settings.footer && typeof settings.footer === "object" && !Array.isArray(settings.footer)) {
 			settings.footer.showCustom = false;
 		}
 	}
@@ -185,6 +197,7 @@ export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 
 		for (const entry of readdirSync(extensionDir, { withFileTypes: true })) {
 			if (!entry.isFile()) continue;
+			if (entry.name === "extension.mjs") continue;
 			if (entry.name.endsWith(".mjs") || entry.name === "copilot-extension.json") {
 				copyFileSync(join(extensionDir, entry.name), join(dstDir, entry.name));
 			}
@@ -200,6 +213,14 @@ export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 		const firstRun = !existsSync(configPath);
 		if (firstRun) {
 			setEnabledStatuslines(PREFERRED_ORDER, { home, nodePath });
+		} else {
+			const settingsPath = join(home, "settings.json");
+			if (existsSync(settingsPath)) {
+				const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+				if (typeof settings?.statusLine?.command === "string" && settings.statusLine.command.toLowerCase().includes("copilot.exe")) {
+					setEnabledStatuslines(getEnabledStatuslines(home), { home, nodePath });
+				}
+			}
 		}
 		return { firstRun };
 	} catch {
