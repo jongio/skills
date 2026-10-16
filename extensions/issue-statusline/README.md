@@ -1,0 +1,80 @@
+# Issue Statusline
+
+A composable GitHub Copilot CLI status line that tracks **GitHub issues** the active session is working on, rendering a separate clickable pill for each issue with priority/type labels, linked-PR indicator, assignee, comment count, and a purple ` Closed` pill that dismisses on your next input. Coexists side-by-side with [`pr-statusline`](../pr-statusline) and [`subagent-statusline`](../subagent-statusline) via `~/.copilot/statusline-compose.mjs`.
+
+![Issue Statusline in isolation](screenshots/issue-statusline.png)
+
+## Install (Windows, macOS, and Linux)
+
+### Option 1: Install as a Copilot Plugin or Interactive Script (Recommended)
+
+Install via the `jongio/skills` Copilot plugin, or run a single command to choose whether you want **Pull Requests**, **GitHub Issues**, and/or **Subagents**:
+
+**Copilot CLI Plugin:**
+
+```bash
+copilot plugin install jongio/skills
+```
+
+**Windows (PowerShell):**
+
+```powershell
+# One-liner (no clone required)
+irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 | iex
+
+# Or from a clone
+.\install-statusline.ps1
+```
+
+**macOS & Linux (Bash / Zsh):**
+
+```bash
+# One-liner (no clone required)
+curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash
+
+# Or from a clone
+./install-statusline.sh
+```
+
+### Option 2: Ask Copilot
+
+```text
+set up the copilot statusline from jongio/skills and ask me whether I want PRs, issues, and/or subagents
+```
+
+### Option 3: Standalone extension installer
+
+```powershell
+# Windows (PowerShell)
+& .\extensions\issue-statusline\install.ps1
+```
+
+```bash
+# macOS & Linux (Bash)
+./extensions/issue-statusline/install.sh
+```
+
+## What appears in each pill
+
+- `  Azure/azure-dev#3315 P1   jongio  4 ` (Green: assigned and has a linked open PR)
+- `  Azure/azure-dev#3322 enhancement  unassigned  1 ` (Amber: open and unassigned)
+- `  Azure/azure-dev#3318 bug  2 ` (Red: bug or blocker label)
+- `  Azure/azure-dev#3314 Closed ` (Purple: closed as completed during this session; dismisses on your next prompt)
+
+- **Separate clickable pill per issue:** Every tracked issue renders in its own pill with a fully-qualified `owner/repo#number` OSC 8 link.
+- **Auto-hides when no issues are active:** Outputs nothing (0 lines) when the session is not working on any issues.
+- **Icons & Metadata:**
+  - `` (`U+F41B`): Open issue
+  - `` (`U+F188`): Bug / security / critical issue (red pill)
+  - `` (`U+E726`): Linked pull request indicator (green pill)
+  - ` login` (`U+F415`): Assignee
+  - ` N` (`U+F075`): Comment count
+  - ` Closed` (`U+F41D`): Closed as completed during the session (purple pill, dismissed on your next prompt)
+
+## Validate
+
+```powershell
+node .\extensions\issue-statusline\test\smoke.test.mjs
+node .\scripts\validate-extensions.mjs
+node .\scripts\lint.mjs
+```

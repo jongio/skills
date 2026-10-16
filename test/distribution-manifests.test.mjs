@@ -570,7 +570,7 @@ test("repo-ready remains self-contained when installed individually", async (t) 
   });
 });
 
-test("portable package cannot gain implicit executable components", () => {
+test("portable package cannot gain implicit executable components", async () => {
   for (const implicitPath of [
     "mcp.json",
     ".mcp.json",
@@ -584,12 +584,37 @@ test("portable package cannot gain implicit executable components", () => {
     "themes",
     "monitors",
     "bin",
-    "com.github.copilot",
   ]) {
     assert.equal(
       existsSync(path.join(root, implicitPath)),
       false,
       `${implicitPath} requires an explicit security review before distribution`,
+    );
+  }
+
+  const extEntries = (
+    await readdir(path.join(root, "com.github.copilot", "extensions"), {
+      withFileTypes: true,
+    })
+  )
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  assert.deepEqual(
+    extEntries,
+    ["issue-statusline", "pr-statusline", "subagent-statusline"],
+    "only reviewed statusline extensions may be exposed under com.github.copilot/extensions",
+  );
+  for (const extName of extEntries) {
+    const result = spawnSync(
+      process.execPath,
+      [path.join(root, "extensions", extName, "test", "smoke.test.mjs")],
+      { encoding: "utf8" },
+    );
+    assert.equal(
+      result.status,
+      0,
+      `${extName} smoke test failed: ${result.stderr || result.stdout}`,
     );
   }
 });

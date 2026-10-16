@@ -29,17 +29,46 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
     </p>
   </header>
 
-  <section class="card">
+  <section class="card install-section">
     <h2>Install</h2>
-    <p class="muted" style="margin:0.8rem 0 0.3rem;">Ask your agent</p>
-    <pre><code>{`install ${skill.id} from jongio/skills`}</code></pre>
-    {skill.data.install.map((step) => (
-      <>
-        <p class="muted" style="margin:0.8rem 0 0.3rem;">{step.label}</p>
-        <pre><code>{step.cmd}</code></pre>
-      </>
-    ))}
-    <p class="muted">Then reload with <code>/skills reload</code> or start a new session.</p>
+    <p class="muted" style="margin:0 0 1rem;">
+      Install just <code>{skill.id}</code> (via the Copilot marketplace or Skills CLI), or install the entire <code>jongio/skills</code> collection in one command.
+    </p>
+
+    <div class="install-split">
+      <div class="install-box install-box--primary">
+        <div class="install-box__head">
+          <span class="install-badge">This skill only</span>
+          <strong>Install just <code>{skill.id}</code></strong>
+        </div>
+
+        <p class="install-label">In Copilot CLI (add marketplace once, then install this skill):</p>
+        <pre><code>/plugin marketplace add jongio/skills</code></pre>
+        <pre><code>{`/plugin install ${skill.id}@jongio-skills`}</code></pre>
+
+        <p class="install-label">Or via Skills CLI (terminal):</p>
+        <pre><code>{`npx skills add jongio/skills --skill ${skill.id} -g --agent github-copilot`}</code></pre>
+
+        <p class="install-label">Or ask your agent:</p>
+        <pre><code>{`install ${skill.id} from jongio/skills`}</code></pre>
+      </div>
+
+      <div class="install-box">
+        <div class="install-box__head">
+          <span class="install-badge install-badge--neutral">Full collection</span>
+          <strong>Install all skills &amp; statuslines</strong>
+        </div>
+
+        <p class="install-label">In Copilot CLI (add marketplace once, then install the full bundle):</p>
+        <pre><code>/plugin marketplace add jongio/skills</code></pre>
+        <pre><code>/plugin install jongio-skills@jongio-skills</code></pre>
+
+        <p class="install-label">Or via Skills CLI (all skills):</p>
+        <pre><code>npx skills add jongio/skills --all</code></pre>
+      </div>
+    </div>
+
+    <p class="muted" style="margin:0.9rem 0 0;">After any install, reload with <code>/skills reload</code> or start a new session.</p>
   </section>
 
   <article class="prose">
@@ -67,7 +96,55 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
   }
   .card pre, .prose pre {
     background: var(--bg); border: 1px solid var(--border); border-radius: 9px;
-    padding: 0.7rem 0.9rem; overflow-x: auto;
+    padding: 0.7rem 0.9rem; overflow-x: auto; margin: 0.35rem 0;
+  }
+  .install-split {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .install-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+  }
+  .install-box--primary {
+    border: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, var(--bg)), var(--bg));
+  }
+  .install-box pre {
+    background: var(--panel);
+  }
+  .install-box__head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.65rem;
+  }
+  .install-badge {
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: var(--accent-solid);
+    color: #fff;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+  }
+  .install-badge--neutral {
+    background: var(--panel);
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .install-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin: 0.75rem 0 0.25rem;
   }
   .prose :global(h2) { font-size: 1.25rem; margin: 1.8rem 0 0.6rem; }
   .prose :global(h3) { font-size: 1.05rem; margin: 1.3rem 0 0.5rem; }
