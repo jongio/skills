@@ -116,10 +116,26 @@ export function detectNerdFontSupport({
 	wtSettingsPaths = null,
 	wtProfileId = process.env.WT_PROFILE_ID,
 	wslDistroName = process.env.WSL_DISTRO_NAME,
+	termProgram = process.env.TERM_PROGRAM,
+	vscodeSettingsPaths = null,
 } = {}) {
 	const envChoice = String(process.env.COPILOT_STATUSLINE_ICONS ?? "").trim().toLowerCase();
 	if (["nerdfont", "nerd", "nf", "true", "1"].includes(envChoice)) return true;
 	if (["unicode", "ascii", "plain", "false", "0"].includes(envChoice)) return false;
+
+	if (String(termProgram ?? "").toLowerCase() === "vscode") {
+		const vsPaths = vscodeSettingsPaths ?? candidateVsCodeSettingsPaths();
+		for (const p of vsPaths) {
+			if (!existsSync(p)) continue;
+			try {
+				const parsed = JSON.parse(stripJsonComments(readFileSync(p, "utf8")));
+				const face = parsed?.["terminal.integrated.fontFamily"] || parsed?.["editor.fontFamily"] || "";
+				return isNerdFontName(face);
+			} catch {
+				// Ignore malformed VS Code settings.json.
+			}
+		}
+	}
 
 	const wsl = isWslEnvironment();
 	const paths = wtSettingsPaths ?? candidateWindowsTerminalSettingsPaths();
@@ -139,6 +155,43 @@ export function detectNerdFontSupport({
 	}
 	if (wsl) return false;
 	return true;
+}
+
+function candidateVsCodeSettingsPaths() {
+	const paths = [];
+	if (process.platform === "win32" && process.env.APPDATA) {
+		paths.push(
+			join(process.env.APPDATA, "Code", "User", "settings.json"),
+			join(process.env.APPDATA, "Code - Insiders", "User", "settings.json"),
+		);
+	} else if (process.platform === "linux" && existsSync("/mnt/c/Users")) {
+		try {
+			const skip = new Set(["Public", "Default", "Default User", "All Users"]);
+			for (const entry of readdirSync("/mnt/c/Users", { withFileTypes: true })) {
+				if (!entry.isDirectory() || skip.has(entry.name)) continue;
+				const roaming = join("/mnt/c/Users", entry.name, "AppData", "Roaming");
+				paths.push(
+					join(roaming, "Code", "User", "settings.json"),
+					join(roaming, "Code - Insiders", "User", "settings.json"),
+				);
+			}
+		} catch {
+			// Ignore unreadable /mnt/c/Users.
+		}
+	} else if (process.platform === "darwin") {
+		const support = join(homedir(), "Library", "Application Support");
+		paths.push(
+			join(support, "Code", "User", "settings.json"),
+			join(support, "Code - Insiders", "User", "settings.json"),
+		);
+	} else {
+		const cfg = join(homedir(), ".config");
+		paths.push(
+			join(cfg, "Code", "User", "settings.json"),
+			join(cfg, "Code - Insiders", "User", "settings.json"),
+		);
+	}
+	return paths;
 }
 
 export function shouldUseNerdFont({
@@ -163,8 +216,26 @@ export function shouldUseNerdFont({
 export function resolveNodeCommand(nodePath = process.execPath) {
 	const base = basename(String(nodePath || "")).toLowerCase();
 	if (!base || base.startsWith("copilot")) {
-		if (process.platform === "win32" && existsSync("C:\\Program Files\\nodejs\\node.exe")) {
-			return "\"C:\\Program Files\\nodejs\\node.exe\"";
+		if (process.platform === "win32") {
+			if (existsSync("C:\\Program Files\\nodejs\\node.exe")) {
+				return "\"C:\\Program Files\\nodejs\\node.exe\"";
+			}
+			return "node";
+		}
+		const pathDirs = String(process.env.PATH ?? "").split(":").filter(Boolean);
+		const home = homedir();
+		const candidates = [
+			...pathDirs.map((dir) => join(dir, "node")),
+			join(home, ".local", "share", "mise", "shims", "node"),
+			join(home, ".volta", "bin", "node"),
+			"/opt/homebrew/bin/node",
+			"/usr/local/bin/node",
+			"/usr/bin/node",
+		];
+		for (const candidate of candidates) {
+			if (candidate && !candidate.startsWith("/mnt/") && existsSync(candidate)) {
+				return `"${candidate}"`;
+			}
 		}
 		return "node";
 	}
