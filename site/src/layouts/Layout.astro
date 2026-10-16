@@ -113,7 +113,7 @@ const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.gi
       <nav class="topnav">
         <a href={base}>Home</a>
         <a href={`${base}catalog/`}>Skills</a>
-        <a href={`${base}pr-statusline-doc.html`}>Statuslines</a>
+        <a href={`${base}statuslines/`}>Statuslines</a>
         <a href={`${base}about/`}>About</a>
       </nav>
       <div class="bar-actions">
@@ -157,7 +157,7 @@ const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.gi
     <script>
       // Add a "Copy" button to every authored code block.
       function enhanceCopy() {
-        const blocks = document.querySelectorAll(".card pre, .prose pre");
+        const blocks = document.querySelectorAll(".hero pre, .card pre, .prose pre");
         blocks.forEach((pre) => {
           if (pre.dataset.copyReady) return;
           const code = pre.querySelector("code");

@@ -10,7 +10,7 @@ const { href, skillId, title, tagline, thumb } = Astro.props;
 const base = import.meta.env.BASE_URL;
 // The install command uses the skill id, not the display title. The title is
 // human-readable and may differ from the id it is installed by.
-const install = `install ${skillId} from jongio/skills`;
+const install = `/plugin install ${skillId}@jongio-skills`;
 // Lowercased haystack the client-side search filters against.
 const search = `${title} ${tagline}`.toLowerCase();
 ---
