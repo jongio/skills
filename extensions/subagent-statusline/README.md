@@ -1,6 +1,6 @@
 # Subagent Statusline
 
-A composable GitHub Copilot CLI status line that tracks **subagent state counts** (`starting`, `in PR`, `merged`, and `failed`) for the active session, with a clickable OSC 8 link to your repository's pull requests page. Coexists side-by-side with [`pr-statusline`](../pr-statusline) and [`issue-statusline`](../issue-statusline) via `~/.copilot/statusline-compose.mjs`.
+A composable GitHub Copilot CLI status line that tracks **subagent state counts** (`starting`, `exploring`, `in PR`, `merged`, and `failed`) for the active session, with a clickable OSC 8 link to your repository's pull requests page. Coexists side-by-side with [`pr-statusline`](../pr-statusline) and [`issue-statusline`](../issue-statusline) via `~/.copilot/statusline-compose.mjs`.
 
 ![Subagent Statusline in isolation](screenshots/subagent-statusline.png)
 
@@ -58,19 +58,20 @@ set up the copilot statusline from jongio/skills and ask me whether I want PRs, 
 
 ## What appears in the pill
 
-- `   2 starting  1 in PR  1 merged ` (Amber: subagents actively starting)
+- `   1 starting  1 exploring  1 in PR  1 merged ` (Amber: subagents actively starting or exploring)
 - `   3 in PR  1 merged ` (Green: all active subagents have open PRs)
 - `   1 in PR  1 failed ` (Red: at least one subagent exited with an error)
 - `   4 merged ` (Purple: all subagent PRs merged; dismisses on your next prompt)
 
-- **Auto-hides when idle:** Outputs nothing (0 lines) when the session has not spawned implementation subagents.
+- **Auto-hides when idle:** Outputs nothing (0 lines) when the session has no active or merged subagents.
 - **Clickable link:** The pill links via OSC 8 (`https://github.com/<owner>/<repo>/pulls`) to your repository's pull requests page, and you can run `/tasks` in the Copilot CLI console at any time to inspect individual subagent timelines.
 - **State lifecycle:**
-  - ` N starting` (`U+F252`): Subagents currently running that have not opened a PR yet.
+  - ` N starting` (`U+F252`): Implementation subagents currently running that have not opened a PR yet.
+  - ` N exploring` (`U+F422` / Unicode `◎`): Read-only `explore` and `research` subagents currently investigating.
   - ` N in PR` (`U+E726`): Subagents that have opened or worked on an open pull request.
   - ` N merged` (`U+E727`): Subagents whose pull requests have merged.
   - ` N failed` (`U+F057`): Subagents that failed with an error.
-- **Purple Merged dismissal:** Once all subagent PRs have merged (`starting === 0` and `inPr === 0`), the pill turns GitHub Merged purple (`  4 merged`) and automatically dismisses itself on your next prompt in that session.
+- **Purple Merged dismissal:** Once all subagent PRs have merged (`starting === 0`, `exploring === 0`, and `inPr === 0`), the pill turns GitHub Merged purple (`  4 merged`) and automatically dismisses itself on your next prompt in that session.
 
 ## Validate
 

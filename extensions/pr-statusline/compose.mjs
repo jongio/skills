@@ -24,9 +24,11 @@ const NERD_FONT_TO_UNICODE = new Map([
 	["\uF188", "\u2731"],
 	["\uF415", ""],
 	["\uF4B8", "\u25C8"],
+	["\uF422", "\u25CE"],
+	["\uF002", "\u25CE"],
 ]);
 
-const NERD_FONT_REGEX = /[\uE726\uE727\uF419\uF4DD\uF058\uF252\uF057\uF071\uF440\uF164\uF075\uF41B\uF41D\uF188\uF415\uF4B8]/g;
+const NERD_FONT_REGEX = /[\uE726\uE727\uF419\uF4DD\uF058\uF252\uF057\uF071\uF440\uF164\uF075\uF41B\uF41D\uF188\uF415\uF4B8\uF422\uF002]/g;
 
 export function toUnicodeIcons(text) {
 	return String(text ?? "").replace(NERD_FONT_REGEX, (ch) => NERD_FONT_TO_UNICODE.get(ch) ?? ch);
@@ -404,7 +406,7 @@ export async function runInteractiveStatuslinePicker(session, {
 					subagents: {
 						type: "boolean",
 						title: "Subagents (subagent-statusline)",
-						description: "Show session subagent phase counters (starting, in PR, merged, failed)",
+						description: "Show session subagent phase counters (starting, exploring, in PR, merged, failed)",
 						default: current.has("subagent-statusline"),
 					},
 					nerdFontIcons: {
