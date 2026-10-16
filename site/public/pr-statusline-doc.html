@@ -4,85 +4,130 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="icon" href="/skills/favicon.svg" />
-<title>Copilot CLI Statusline Extensions: PRs, Issues, and Subagents</title>
+<title>Copilot CLI Statusline Extensions · jongio/skills</title>
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem("theme") ||
+        (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
 <style>
   :root {
-    color-scheme: dark;
     --bg: #0d1117;
     --panel: #161b22;
     --border: #30363d;
+    --fg: #e6edf3;
     --text: #e6edf3;
-    --muted: #8b949e;
-    --accent: #58a6ff;
+    --muted: #9198a1;
+    --accent: #2f81f7;
+    --accent-solid: #1f6feb;
+  }
+  :root[data-theme="light"] {
+    --bg: #fff;
+    --panel: #f6f8fa;
+    --border: #d0d7de;
+    --fg: #1f2328;
+    --text: #1f2328;
+    --muted: #59636e;
+    --accent: #0969da;
+    --accent-solid: #0969da;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
-    padding: 36px 24px 80px;
     background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    line-height: 1.55;
+    color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    transition: background 0.2s, color 0.2s;
   }
-  .container { max-width: 1140px; margin: 0 auto; }
-  h1 { font-size: 2rem; margin: 0 0 8px; }
-  h2 { font-size: 1.38rem; margin: 36px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-  h3 { font-size: 1.1rem; margin: 24px 0 8px; color: #c9d1d9; }
-  p { margin: 0 0 14px; color: #c9d1d9; }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  pre {
-    position: relative;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 14px 44px 14px 16px;
-    overflow-x: auto;
-    font-family: "CaskaydiaCove Nerd Font Mono", "Cascadia Mono", Consolas, monospace;
-    font-size: 13.5px;
-    margin: 0 0 16px;
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem clamp(1rem, 4vw, 2rem);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(8px);
   }
-  .code-copy-btn {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 30px;
-    height: 30px;
+  .brand { font-weight: 700; text-decoration: none; color: var(--fg); }
+  .topnav { display: flex; gap: 1rem; margin-left: 0.5rem; }
+  .topnav a { color: var(--muted); text-decoration: none; font-weight: 500; }
+  .bar-actions { margin-left: auto; display: flex; gap: 0.4rem; align-items: center; }
+  .icon-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: #0d1117;
-    color: var(--muted);
+    width: 36px;
+    height: 36px;
+    border-radius: 9px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    background: var(--panel);
+    color: var(--fg);
     cursor: pointer;
-    padding: 0;
+    text-decoration: none;
   }
-  .code-copy-btn:hover {
-    color: var(--accent);
+  .icon-btn:hover { border-color: var(--accent); }
+  .container { max-width: 1200px; margin: 0 auto; padding: clamp(1.5rem, 5vw, 3.5rem) 1.25rem; }
+  h1 { font-size: 2rem; margin: 0 0 8px; }
+  h2 { font-size: 1.38rem; margin: 36px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  h3 { font-size: 1.1rem; margin: 24px 0 8px; color: var(--fg); }
+  p { margin: 0 0 14px; color: var(--fg); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .codeblock {
+    position: relative;
+    margin: 0 0 12px;
+  }
+  .codeblock:last-child {
+    margin-bottom: 0;
+  }
+  pre {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 0.7rem 3.8rem 0.7rem 0.9rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+    margin: 0;
+  }
+  .copy-btn {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.4rem;
+    font: 600 0.72rem/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 0.3rem 0.55rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--muted);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  }
+  .copy-btn:hover {
+    color: var(--fg);
     border-color: var(--accent);
   }
-  .code-copy-btn .icon-check {
-    display: none;
-    color: #3fb950;
-  }
-  .code-copy-btn.copied {
-    border-color: #3fb950;
-  }
-  .code-copy-btn.copied .icon-copy {
-    display: none;
-  }
-  .code-copy-btn.copied .icon-check {
-    display: block;
+  .copy-btn.copied {
+    color: #fff;
+    background: var(--accent-solid);
+    border-color: var(--accent-solid);
   }
   code {
-    font-family: "CaskaydiaCove Nerd Font Mono", "Cascadia Mono", Consolas, monospace;
-    font-size: 0.92em;
-    background: rgba(110, 118, 129, 0.22);
-    padding: 2px 6px;
-    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    padding: 0.1em 0.4em;
+    border-radius: 6px;
   }
-  pre code { background: none; padding: 0; }
+  pre code { background: none; padding: 0; border-radius: 0; font-size: inherit; }
   .trio-banner {
     display: flex;
     align-items: center;
@@ -238,24 +283,109 @@
     cursor: zoom-out;
     margin: auto;
   }
-  .os-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 16px;
+  .primary-install-card {
+    background: linear-gradient(180deg, rgba(47, 129, 247, 0.12), #161b22);
+    border: 2px solid rgba(88, 166, 255, 0.65);
+    border-radius: 12px;
+    padding: 22px 24px;
     margin: 16px 0 24px;
+    box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.65);
   }
-  .os-card {
-    background: var(--panel);
+  .primary-install-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .rec-badge {
+    font-size: 11.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: #1f6feb;
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 999px;
+  }
+  .primary-install-title {
+    font-size: 1.32rem;
+    font-weight: 800;
+    color: #f0f6fc;
+    margin: 0;
+  }
+  .primary-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 14px;
+  }
+  .primary-row-2 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 14px;
+  }
+  .primary-step-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #8b949e;
+    margin-bottom: 6px;
+  }
+  .primary-install-card pre {
+    font-size: 14.5px;
+    font-weight: 600;
+    background: #0d1117;
+    border-color: rgba(88, 166, 255, 0.45);
+    margin: 0;
+  }
+  .secondary-section {
+    background: rgba(22, 27, 34, 0.65);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 16px 18px;
+    padding: 16px 20px;
+    margin: 0 0 28px;
   }
-  .os-card h3 { margin-top: 0; }
+  .secondary-heading {
+    font-size: 0.92rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+  .os-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .os-card {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+  }
+  .os-card h3 { margin: 0 0 6px; font-size: 0.92rem; }
+  .os-card pre { margin: 0; font-size: 13px; }
 </style>
 </head>
 <body>
+  <header class="topbar">
+    <a class="brand" href="/skills/">jongio/skills</a>
+    <nav class="topnav">
+      <a href="/skills/">Home</a>
+      <a href="/skills/catalog/">Skills</a>
+      <a href="/skills/pr-statusline-doc.html">Statuslines</a>
+      <a href="/skills/about/">About</a>
+    </nav>
+    <div class="bar-actions">
+      <button id="theme-toggle" class="icon-btn" type="button" aria-label="Toggle color theme" title="Toggle theme"></button>
+      <a class="icon-btn" href="https://github.com/jongio/skills" target="_blank" rel="noopener" aria-label="View source on GitHub" title="View source on GitHub">
+        <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+    </div>
+  </header>
   <div class="container">
-    <p><a href="/skills/">← Back to jongio/skills</a></p>
     <h1>Copilot CLI Statusline Extensions</h1>
     <p>Composable terminal statuslines for GitHub Copilot CLI: <strong>Pull Requests</strong> (<code>pr-statusline</code>), <strong>GitHub Issues</strong> (<code>issue-statusline</code>), and <strong>Subagents</strong> (<code>subagent-statusline</code>). Run them individually or compose all three side-by-side on a single row via <code>~/.copilot/statusline-compose.mjs</code>.</p>
 
@@ -274,41 +404,44 @@
       </div>
     </div>
 
-    <h2>Installation: Copilot Plugin, Windows, macOS, and Linux</h2>
-    <p>Install via the <code>jongio/skills</code> Copilot plugin (opens an interactive checkbox picker on first session start, or run <code>/statusline-setup</code> anytime in Copilot CLI), or run the interactive setup command for your operating system to choose whether you want <strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, and/or <strong>Subagents</strong>.</p>
+    <h2>Installation</h2>
 
-    <pre><code>copilot plugin install jongio/skills
-# Re-open the interactive checkbox picker anytime inside Copilot CLI:
-/statusline-setup</code></pre>
-
-    <div class="os-grid">
-      <div class="os-card">
-        <h3>Windows (PowerShell)</h3>
-        <p>One-liner (no clone required):</p>
-        <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 | iex</code></pre>
-        <p>From a local clone:</p>
-        <pre><code>.\install-statusline.ps1
-# or non-interactive:
-.\install-statusline.ps1 -Prs -Issues -Subagents</code></pre>
+    <div class="primary-install-card">
+      <div class="primary-install-head">
+        <span class="rec-badge">Recommended</span>
+        <h3 class="primary-install-title">Install via Copilot Plugin Marketplace</h3>
       </div>
-
-      <div class="os-card">
-        <h3>macOS &amp; Linux (Bash / Zsh)</h3>
-        <p>One-liner (no clone required):</p>
-        <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash</code></pre>
-        <p>From a local clone:</p>
-        <pre><code>./install-statusline.sh
-# or non-interactive:
-./install-statusline.sh --prs --issues --subagents</code></pre>
+      <p style="margin: 0;">Add the marketplace once in Copilot CLI, install the <code>jongio-skills</code> plugin, and pick which statuslines (<strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, and <strong>Subagents</strong>) you want enabled:</p>
+      <div class="primary-stack">
+        <div>
+          <div class="primary-step-label">Step 1 · Add the marketplace (one-time setup in Copilot CLI)</div>
+          <pre><code>/plugin marketplace add jongio/skills</code></pre>
+        </div>
+        <div>
+          <div class="primary-step-label">Step 2 · Install all skills &amp; statuslines in Copilot CLI</div>
+          <pre><code>/plugin install jongio-skills@jongio-skills</code></pre>
+        </div>
+        <div>
+          <div class="primary-step-label">Step 3 · Pick your statuslines anytime in Copilot CLI</div>
+          <pre><code>/statusline-setup</code></pre>
+        </div>
       </div>
     </div>
 
-    <h3>Cross-Platform via Node.js or Copilot CLI Prompt</h3>
-    <pre><code># Cross-platform Node.js interactive configurator (Windows, macOS, Linux)
-node ./scripts/setup-statusline.mjs
+    <div class="secondary-section">
+      <div class="secondary-heading">Alternative: Standalone Statusline Scripts (Install only the statuslines without the skills plugin)</div>
+      <div class="os-stack">
+        <div class="os-card">
+          <h3>Windows (PowerShell one-liner)</h3>
+          <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 | iex</code></pre>
+        </div>
 
-# Or paste this prompt directly into GitHub Copilot CLI:
-set up the copilot statusline from jongio/skills and ask me whether I want PRs, issues, and/or subagents</code></pre>
+        <div class="os-card">
+          <h3>macOS &amp; Linux (Bash one-liner)</h3>
+          <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash</code></pre>
+        </div>
+      </div>
+    </div>
 
     <h2>Annotated Visual Guide: Each Statusline in Isolation</h2>
 
@@ -483,25 +616,42 @@ set up the copilot statusline from jongio/skills and ask me whether I want PRs, 
     </div>
   </div>
 <script>
+  const SUN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+  const MOON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+  const rootEl = document.documentElement;
+  function renderThemeIcon() {
+    const b = document.getElementById("theme-toggle");
+    if (b) b.innerHTML = rootEl.getAttribute("data-theme") === "dark" ? SUN : MOON;
+  }
+  document.getElementById("theme-toggle")?.addEventListener("click", () => {
+    const next = rootEl.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    rootEl.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch (err) {}
+    renderThemeIcon();
+  });
+  renderThemeIcon();
+
   document.querySelectorAll("pre").forEach((pre) => {
     const code = pre.querySelector("code");
     const text = (code ? code.textContent : pre.textContent || "").trim();
+    const wrap = document.createElement("div");
+    wrap.className = "codeblock";
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
     const btn = document.createElement("button");
-    btn.className = "code-copy-btn";
+    btn.className = "copy-btn";
     btn.type = "button";
-    btn.title = "Copy code";
-    btn.setAttribute("aria-label", "Copy code");
-    btn.innerHTML =
-      '<svg class="icon-copy" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path></svg>' +
-      '<svg class="icon-check" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>';
+    btn.textContent = "Copy";
+    btn.setAttribute("aria-label", "Copy to clipboard");
     btn.addEventListener("click", async () => {
       try {
         await navigator.clipboard.writeText(text);
       } catch {}
+      btn.textContent = "Copied";
       btn.classList.add("copied");
-      setTimeout(() => btn.classList.remove("copied"), 1500);
+      setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1600);
     });
-    pre.appendChild(btn);
+    wrap.appendChild(btn);
   });
 
   const zoomOverlay = document.getElementById("img-zoom-overlay");

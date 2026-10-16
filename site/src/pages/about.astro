@@ -38,13 +38,19 @@ import Layout from "../layouts/Layout.astro";
 
   <section class="card">
     <h2>Install</h2>
-    <p>Ask your agent — in Copilot (or any agent that supports plugins), just say:</p>
-    <pre><code>install jongio/skills</code></pre>
-    <p class="muted">Or use the Skills CLI for the whole repo:</p>
+    <p><strong>1 · Add the Copilot plugin marketplace</strong> (one-time setup in Copilot CLI):</p>
+    <pre><code>/plugin marketplace add jongio/skills</code></pre>
+    <p><strong>2 · Install a single skill vs. all skills &amp; statuslines:</strong></p>
+    <p class="muted">Install just one skill:</p>
+    <pre><code>/plugin install create-canvas-app@jongio-skills</code></pre>
+    <p class="muted">Or install all skills and statuslines together:</p>
+    <pre><code>/plugin install jongio-skills@jongio-skills</code></pre>
+    <p><strong>3 · Or use the Skills CLI (`npx skills`):</strong></p>
+    <pre><code>npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot</code></pre>
     <pre><code>npx skills add jongio/skills --all</code></pre>
     <p class="muted">
-      Or grab one skill at a time — see <a href="/skills/catalog/">the catalog</a>.
-      After any install, reload with <code>/skills reload</code>.
+      Browse all skills in <a href="/skills/catalog/">the catalog</a> or view the <a href="/skills/pr-statusline-doc.html">Copilot CLI statuslines guide</a>.
+      After any install, reload with <code>/skills reload</code> or start a new session.
     </p>
   </section>
 
