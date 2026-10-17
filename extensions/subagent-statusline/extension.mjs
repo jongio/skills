@@ -20,7 +20,7 @@ const session = await joinSession({
 				return;
 			}
 			const c = tracker.counts();
-			await session.log(`Subagents: ${c.starting} starting, ${c.inPr} in PR, ${c.merged} merged, ${c.done} done, ${c.failed} failed`);
+			await session.log(`Subagents: ${c.starting} starting, ${c.exploring} exploring, ${c.inPr} in PR, ${c.merged} merged, ${c.done} done, ${c.failed} failed`);
 		},
 	}],
 });

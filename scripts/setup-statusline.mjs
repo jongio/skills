@@ -29,7 +29,7 @@ export const EXTENSION_CATALOG = [
 		flag: "--subagents",
 		noFlag: "--no-subagents",
 		label: "Subagents (subagent-statusline)",
-		description: "Show session subagent state counts (starting, in PR, merged) with whole-pill hover details",
+		description: "Show session subagent state counts (starting, exploring, in PR, merged, failed)",
 		files: ["extension.mjs", "tracker.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
 	},
 ];
@@ -135,10 +135,22 @@ export function configureStatuslines({
 		}
 	}
 
+	let existingIconMode = "auto";
+	if (existsSync(configPath)) {
+		try {
+			const prev = JSON.parse(readFileSync(configPath, "utf8"));
+			if (["auto", "nerdfont", "unicode"].includes(prev?.iconMode)) {
+				existingIconMode = prev.iconMode;
+			}
+		} catch {
+			existingIconMode = "auto";
+		}
+	}
+
 	// Write statusline-config.json so compose.mjs only renders the selected extensions
 	atomicWriteText(
 		configPath,
-		`${JSON.stringify({ version: 1, enabled: validEnabled, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+		`${JSON.stringify({ version: 1, enabled: validEnabled, iconMode: existingIconMode, updatedAt: new Date().toISOString() }, null, 2)}\n`,
 	);
 
 	// Update settings.json
@@ -161,7 +173,7 @@ export function configureStatuslines({
 			type: "command",
 			command,
 			padding: 0,
-			refreshInterval: 2,
+			refreshInterval: 5,
 		};
 		if (!settings.footer || typeof settings.footer !== "object" || Array.isArray(settings.footer)) {
 			settings.footer = {};

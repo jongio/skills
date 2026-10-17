@@ -95,7 +95,7 @@ Using `Azure/azure-dev` as an example checkout:
 
 - **Fully-qualified clickable links:** Every pill includes an OSC 8 hyperlink (`Ctrl+click` or `Cmd+click`) on `owner/repo#number` that opens the pull request web page directly on GitHub.
 - **Zero-line auto-hide:** When a session has no tracked open PRs (or after merged PRs are dismissed on your next input), `render.mjs` outputs nothing and `padding: 0` ensures the status line takes **zero rows**.
-- **Symmetric vertical padding:** Each pill uses `▂` (`U+2582`) and `▔` (`U+2594`) block caps in the pill's background color so text and icons stay vertically centered.
+- **Single-line compact pills:** Each pill renders on a single terminal row with horizontal padding so the statusline sits flush below the CLI status bar with no blank lines above or below.
 
 ### Nerd Font Icons & Metrics (`x/y`)
 

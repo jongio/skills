@@ -27,15 +27,18 @@ const event = (type, data = {}, agentId, timestamp = new Date(1000).toISOString(
 
 try {
 	const tracker = new SubagentTracker("sub-session");
-	// Exploratory subagents are ignored
-	tracker.observe(event("subagent.started", { agentId: "exp-1", agentType: "explore", agentName: "explore" }));
-	assert.equal(tracker.counts().total, 0);
+	// Exploratory subagents are tracked in the `exploring` counter while running, and move to `done` on completion
+	tracker.observe(event("subagent.started", { agentId: "exp-1", toolCallId: "tc-exp-1", agentType: "explore", agentName: "explore", executionMode: "background" }));
+	tracker.observe(event("tool.execution_complete", { toolCallId: "tc-exp-1", success: true, result: { content: "Background agent launched" } }));
+	assert.deepEqual(tracker.counts(), { total: 1, starting: 0, exploring: 1, inPr: 0, merged: 0, done: 0, failed: 0 });
+	tracker.observe(event("subagent.completed", { agentId: "exp-1", toolCallId: "tc-exp-1", agentType: "explore", agentName: "explore" }));
+	assert.deepEqual(tracker.counts(), { total: 1, starting: 0, exploring: 0, inPr: 0, merged: 0, done: 1, failed: 0 });
 
 	// 3 developer subagents start
 	tracker.observe(event("subagent.started", { agentId: "agent-1", toolCallId: "tc-1", agentName: "devx-developer" }, "agent-1", new Date(1000).toISOString()));
 	tracker.observe(event("subagent.started", { agentId: "agent-2", toolCallId: "tc-2", agentName: "devx-developer" }, "agent-2", new Date(1100).toISOString()));
 	tracker.observe(event("subagent.started", { agentId: "agent-3", toolCallId: "tc-3", agentName: "devx-developer" }, "agent-3", new Date(1200).toISOString()));
-	assert.deepEqual(tracker.counts(), { total: 3, starting: 3, inPr: 0, merged: 0, done: 0, failed: 0 });
+	assert.deepEqual(tracker.counts(), { total: 4, starting: 3, exploring: 0, inPr: 0, merged: 0, done: 1, failed: 0 });
 
 	// agent-1 opens PR #101 -> moves to inPr
 	tracker.observe(event("tool.execution_start", {
@@ -48,7 +51,7 @@ try {
 		success: true,
 		result: { content: "https://github.com/Azure/azure-dev/pull/101" },
 	}, "agent-1", new Date(2100).toISOString()));
-	assert.deepEqual(tracker.counts(), { total: 3, starting: 2, inPr: 1, merged: 0, done: 0, failed: 0 });
+	assert.deepEqual(tracker.counts(), { total: 4, starting: 2, exploring: 0, inPr: 1, merged: 0, done: 1, failed: 0 });
 
 	// agent-2 opens PR #102 and merges it -> moves to merged
 	tracker.observe(event("tool.execution_start", {
@@ -61,9 +64,9 @@ try {
 		success: true,
 		result: { content: "Merged" },
 	}, "agent-2", new Date(2600).toISOString()));
-	assert.deepEqual(tracker.counts(), { total: 3, starting: 1, inPr: 1, merged: 1, done: 0, failed: 0 });
+	assert.deepEqual(tracker.counts(), { total: 4, starting: 1, exploring: 0, inPr: 1, merged: 1, done: 1, failed: 0 });
 
-	// Live transcript rendering test
+	// Live transcript rendering test (including parallel general-purpose + explore subagents)
 	const transcriptDir = join(home, "session-state", "live-subagents");
 	mkdirSync(transcriptDir, { recursive: true });
 	const transcriptFile = join(transcriptDir, "events.jsonl");
@@ -72,16 +75,24 @@ try {
 		[
 			JSON.stringify(event("subagent.started", { agentId: "a1", toolCallId: "t1", agentName: "devx-developer" }, "a1", new Date(1000).toISOString())),
 			JSON.stringify(event("subagent.started", { agentId: "a2", toolCallId: "t2", agentName: "devx-developer" }, "a2", new Date(1100).toISOString())),
+			JSON.stringify(event("subagent.started", { agentId: "e1", toolCallId: "te1", agentType: "explore", agentName: "explore" }, "e1", new Date(1150).toISOString())),
 			JSON.stringify(event("tool.execution_start", { toolCallId: "c2", toolName: "powershell", arguments: { command: "gh pr view https://github.com/Azure/azure-dev/pull/4812" } }, "a2", new Date(1200).toISOString())),
 		].join("\n") + "\n",
 	);
 	const plainOut = render({ session_id: "live-subagents", transcript_path: transcriptDir }, { home, links: false, color: false });
-	assert.equal(plainOut, "\uF4B8 \uF252 1 starting \uE726 1 in PR");
+	assert.equal(plainOut, "\uF4B8 \uF252 1 starting \uF422 1 exploring \uE726 1 in PR");
+	const unicodeOut = render({ session_id: "live-subagents", transcript_path: transcriptDir }, { home, links: false, color: false, nerdFont: false });
+	assert.equal(unicodeOut, "\u25C8 \u25F7 1 starting \u25CE 1 exploring \uE0A0 1 in PR");
 
-	// When both subagents finish & merge, pill turns purple and dismisses on next user input
+	// Colored output is a single compact line (no top/bottom cap lines wasting vertical rows)
+	const activeColorOut = render({ session_id: "live-subagents", transcript_path: transcriptDir }, { home, links: false, color: true });
+	assert.equal(activeColorOut.split("\n").length, 1, "colored pill must be a single line without extra vertical cap rows");
+
+	// When subagents finish & merge, pill turns purple and dismisses on next user input
 	appendFileSync(
 		transcriptFile,
 		[
+			JSON.stringify(event("subagent.completed", { agentId: "e1", toolCallId: "te1", agentType: "explore", agentName: "explore" }, "e1", new Date(1900).toISOString())),
 			JSON.stringify(event("tool.execution_start", { toolCallId: "m1", toolName: "powershell", arguments: { command: "gh pr merge https://github.com/Azure/azure-dev/pull/4811 --squash" } }, "a1", new Date(2000).toISOString())),
 			JSON.stringify(event("tool.execution_complete", { toolCallId: "m1", success: true, result: { content: "Merged" } }, "a1", new Date(2100).toISOString())),
 			JSON.stringify(event("tool.execution_start", { toolCallId: "m2", toolName: "powershell", arguments: { command: "gh pr merge https://github.com/Azure/azure-dev/pull/4812 --squash" } }, "a2", new Date(2200).toISOString())),
@@ -91,7 +102,7 @@ try {
 		].join("\n") + "\n",
 	);
 	const mergedColorOut = render({ session_id: "live-subagents", transcript_path: transcriptDir }, { home, links: false, color: true });
-	assert.ok(mergedColorOut.includes("\x1b[1;38;2;237;224;255;48;2;88;44;142m \uF4B8 \uE727 2 merged \x1b[0m"), "all-merged subagents use purple pill");
+	assert.equal(mergedColorOut, "\x1b[1;38;2;237;224;255;48;2;88;44;142m \uF4B8 \uE727 2 merged \x1b[0m", "all-merged subagents use single-line purple pill");
 
 	appendFileSync(transcriptFile, `${JSON.stringify(event("user.message", { content: "Next task" }, undefined, new Date(3000).toISOString()))}\n`);
 	assert.equal(render({ session_id: "live-subagents", transcript_path: transcriptDir }, { home, links: false, color: false }), "");

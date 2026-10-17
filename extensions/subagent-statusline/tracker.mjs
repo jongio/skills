@@ -10,11 +10,22 @@ const RELEVANT_EVENT_LINE = /"type"\s*:\s*"(?:session\.(?:start|resume|context_c
 export const ICONS = {
 	agent: "\uF4B8",
 	starting: "\uF252",
+	exploring: "\uF422",
 	inPr: "\uE726",
 	merged: "\uE727",
 	done: "\uF058",
 	failed: "\uF057",
 };
+
+const READONLY_AGENT_TYPES = new Set(["explore", "research", "rubber-duck", "code-review", "security-review"]);
+
+export function isExploreAgentType(agentType) {
+	return /^(?:explore|research)$/i.test(String(agentType ?? "").trim());
+}
+
+function isReadonlyAgentType(agentType) {
+	return READONLY_AGENT_TYPES.has(String(agentType ?? "").trim().toLowerCase());
+}
 
 export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");
 
@@ -139,6 +150,7 @@ export class SubagentTracker {
 				agentType: meta.agentType || meta.name || "subagent",
 				description: meta.description || "",
 				status: "starting",
+				executionMode: meta.executionMode || "sync",
 				prs: [],
 				mergedPrs: [],
 				startedAt: meta.timestamp || Date.now(),
@@ -150,6 +162,7 @@ export class SubagentTracker {
 			if (meta.name && entry.name === "subagent") entry.name = meta.name;
 			if (meta.agentType && (!entry.agentType || entry.agentType === "subagent")) entry.agentType = meta.agentType;
 			if (meta.description && !entry.description) entry.description = meta.description;
+			if (meta.executionMode === "background") entry.executionMode = "background";
 		}
 		return entry;
 	}
@@ -158,7 +171,7 @@ export class SubagentTracker {
 		const normalized = normalizePrUrl(prUrl);
 		if (!normalized) return;
 		const agent = this.ensureAgent(agentId);
-		if (!agent) return;
+		if (!agent || isReadonlyAgentType(agent.agentType || agent.name)) return;
 		if (!agent.prs.includes(normalized)) agent.prs.push(normalized);
 		if (isMerged && !agent.mergedPrs.includes(normalized)) {
 			agent.mergedPrs.push(normalized);
@@ -195,7 +208,7 @@ export class SubagentTracker {
 			if (!isAutomated) {
 				if (eventTime >= this.lastUserInputAt) this.lastUserInputAt = eventTime;
 				const counts = this.counts();
-				if (!this.simulated && counts.total > 0 && counts.starting === 0 && counts.inPr === 0 &&
+				if (!this.simulated && counts.total > 0 && counts.starting === 0 && counts.exploring === 0 && counts.inPr === 0 &&
 						this.latestSettlementTime() <= eventTime) {
 					this.dismissed = true;
 					this.agents.clear();
@@ -207,10 +220,6 @@ export class SubagentTracker {
 
 		if (event.type === "subagent.started") {
 			const id = event.agentId || data.agentId || data.toolCallId;
-			if (["explore", "research", "rubber-duck", "code-review", "security-review"].includes(data.agentType)) {
-				if (data.toolCallId && this.agents.has(data.toolCallId)) this.agents.delete(data.toolCallId);
-				return;
-			}
 			if (data.toolCallId && id && data.toolCallId !== id && this.agents.has(data.toolCallId)) {
 				const prior = this.agents.get(data.toolCallId);
 				this.agents.delete(data.toolCallId);
@@ -218,8 +227,10 @@ export class SubagentTracker {
 					name: data.agentDisplayName || data.agentName || prior.name || "subagent",
 					agentType: data.agentType || data.agentName || prior.agentType || "subagent",
 					description: String(data.agentDescription || data.description || prior.description || "").slice(0, 140),
+					executionMode: data.executionMode || prior.executionMode || "sync",
 					timestamp: prior.startedAt || eventTime,
 				});
+				merged.status = "starting";
 				for (const prUrl of prior.prs ?? []) this.linkPr(id, prUrl, prior.mergedPrs?.includes(prUrl));
 				this.taskCalls.set(data.toolCallId, merged.id);
 				return;
@@ -228,10 +239,14 @@ export class SubagentTracker {
 				name: data.agentDisplayName || data.agentName || "subagent",
 				agentType: data.agentType || data.agentName || "subagent",
 				description: String(data.agentDescription || data.description || "").slice(0, 140),
+				executionMode: data.executionMode || "sync",
 				timestamp: eventTime,
 			});
-			if (agent && data.toolCallId) {
-				this.taskCalls.set(data.toolCallId, id);
+			if (agent) {
+				agent.status = "starting";
+				if (data.toolCallId) {
+					this.taskCalls.set(data.toolCallId, id);
+				}
 			}
 		}
 
@@ -259,17 +274,19 @@ export class SubagentTracker {
 			const command = String(args.command ?? "");
 
 			if (/(?:^|[._-])task$/.test(name)) {
-				if (["explore", "research", "rubber-duck", "code-review", "security-review"].includes(args.agent_type)) return;
 				const id = data.toolCallId;
 				const rawDesc = String(args.description || String(args.prompt ?? "").split(/\r?\n/)[0] || "").trim().slice(0, 140);
 				this.ensureAgent(id, {
 					name: args.name || args.agent_type || "subagent",
 					agentType: args.agent_type || "subagent",
 					description: rawDesc,
+					executionMode: args.mode === "background" ? "background" : "sync",
 					timestamp: eventTime,
 				});
 				this.taskCalls.set(data.toolCallId, id);
-				for (const prUrl of extractPrUrls(args.prompt)) this.linkPr(id, prUrl);
+				if (!isReadonlyAgentType(args.agent_type)) {
+					for (const prUrl of extractPrUrls(args.prompt)) this.linkPr(id, prUrl);
+				}
 				return;
 			}
 
@@ -299,8 +316,10 @@ export class SubagentTracker {
 			if (taskAgentId && this.agents.has(taskAgentId)) {
 				const agent = this.agents.get(taskAgentId);
 				if (data.success) {
-					for (const prUrl of extractPrUrls(text)) this.linkPr(taskAgentId, prUrl);
-					if (agent.status === "starting") {
+					if (!isReadonlyAgentType(agent.agentType || agent.name)) {
+						for (const prUrl of extractPrUrls(text)) this.linkPr(taskAgentId, prUrl);
+					}
+					if (agent.status === "starting" && agent.executionMode !== "background") {
 						agent.status = "completed";
 						agent.completedAt = eventTime;
 					}
@@ -355,6 +374,7 @@ export class SubagentTracker {
 
 	counts() {
 		let starting = 0;
+		let exploring = 0;
 		let inPr = 0;
 		let merged = 0;
 		let done = 0;
@@ -364,13 +384,16 @@ export class SubagentTracker {
 			const hasOpenPr = agent.prs?.length > 0 && !hasMerged;
 			if (hasMerged) merged++;
 			else if (hasOpenPr) inPr++;
-			else if (agent.status === "starting") starting++;
-			else if (agent.status === "failed") failed++;
+			else if (agent.status === "starting") {
+				if (isExploreAgentType(agent.agentType) || isExploreAgentType(agent.name)) exploring++;
+				else starting++;
+			} else if (agent.status === "failed") failed++;
 			else if (agent.status === "completed") done++;
 		}
 		return {
-			total: starting + inPr + merged + done + failed,
+			total: starting + exploring + inPr + merged + done + failed,
 			starting,
+			exploring,
 			inPr,
 			merged,
 			done,
