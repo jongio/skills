@@ -622,7 +622,7 @@ test("portable package cannot gain implicit executable components", async () => 
     ["pr-statusline"],
     "only the unified pr-statusline entry point may be exposed under com.github.copilot/extensions",
   );
-  for (const extName of ["issue-statusline", "pr-statusline", "subagent-statusline"]) {
+  for (const extName of ["issue-statusline", "pr-statusline", "subagent-statusline", "worktree-statusline"]) {
     const result = spawnSync(
       process.execPath,
       [path.join(root, "extensions", extName, "test", "smoke.test.mjs")],

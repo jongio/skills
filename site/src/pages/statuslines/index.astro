@@ -4,14 +4,15 @@ import Layout from "../../layouts/Layout.astro";
 const base = import.meta.env.BASE_URL;
 ---
 
-<Layout wide title="Statuslines · jongio/skills" description="Composable GitHub Copilot CLI statusline extensions for Pull Requests, GitHub Issues, and Subagents.">
+<Layout wide title="Statuslines · jongio/skills" description="Composable GitHub Copilot CLI statusline extensions for Pull Requests, GitHub Issues, Subagents, and Branch/Worktree.">
   <header class="sl-hero">
     <p class="eyebrow">GitHub Copilot CLI · Composable Terminal Footer</p>
     <h1>Copilot CLI Statuslines</h1>
     <p class="muted lede">
       Composable terminal statuslines for GitHub Copilot CLI: <strong>Pull Requests</strong> (<code>pr-statusline</code>),
-      <strong>GitHub Issues</strong> (<code>issue-statusline</code>), and <strong>Subagents</strong> (<code>subagent-statusline</code>).
-      Run them individually or compose all three side-by-side on a single row via <code>~/.copilot/statusline-compose.mjs</code>.
+      <strong>GitHub Issues</strong> (<code>issue-statusline</code>), <strong>Subagents</strong> (<code>subagent-statusline</code>),
+      and <strong>Branch and Worktree</strong> (<code>worktree-statusline</code>).
+      Run them individually or compose all four side-by-side on a single row via <code>~/.copilot/statusline-compose.mjs</code>.
     </p>
   </header>
 
@@ -38,7 +39,7 @@ const base = import.meta.env.BASE_URL;
         </div>
       </div>
       <p class="sl-primary-sub">
-        Add the marketplace once in Copilot CLI, install just the statuslines or the full collection, and pick which statuslines (<strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, <strong>Subagents</strong>) you want enabled:
+        Add the marketplace once in Copilot CLI, install just the statuslines or the full collection, and pick which statuslines (<strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, <strong>Subagents</strong>, <strong>Branch and Worktree</strong>) you want enabled:
       </p>
       <div class="sl-primary-stack">
         <div class="sl-install-item">
@@ -77,6 +78,17 @@ const base = import.meta.env.BASE_URL;
     </div>
 
     <div class="sl-infographic-list">
+      <div class="sl-shot-block">
+        <div class="sl-shot-header">
+          <div>
+            <strong>Branch and Worktree (<code>worktree-statusline</code>)</strong>
+            <p class="sl-shot-sub">Shows session and subagent work happening outside Copilot's current checkout, with full paths first and live branches in brackets. Hides entirely when all work is local.</p>
+          </div>
+          <span><a href="https://github.com/jongio/skills/tree/main/extensions/worktree-statusline" target="_blank" rel="noopener">View source →</a></span>
+        </div>
+        <pre><code>C:\code\.worktrees\my-project\feat-login [feat/login]</code></pre>
+        <p class="sl-shot-sub">One padded, non-underlined pill per distinct external checkout, with full paths and no colon separator. Subdirectories of Copilot's checkout do not create redundant pills. Supports detached HEADs and updates existing pills when branches change. Enable with <code>/statusline-setup</code>; list all session checkouts with <code>/session-worktree</code>. Existing saved selections are preserved.</p>
+      </div>
       <div class="sl-shot-block">
         <div class="sl-shot-header">
           <div>

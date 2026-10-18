@@ -113,9 +113,9 @@ try {
 	assert.equal(await composeStatusLine({ session_id: "none" }, { home }), "");
 
 	// Interactive/CLI setup configurator and statusline-config.json filtering test
-	assert.deepEqual(parseStatuslineArgs(["--all"]), ["pr-statusline", "issue-statusline", "subagent-statusline"]);
+	assert.deepEqual(parseStatuslineArgs(["--all"]), ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"]);
 	assert.deepEqual(parseStatuslineArgs(["--prs", "--subagents"]), ["pr-statusline", "subagent-statusline"]);
-	assert.deepEqual(parseStatuslineArgs(["--no-issues"]), ["pr-statusline", "subagent-statusline"]);
+	assert.deepEqual(parseStatuslineArgs(["--no-issues"]), ["pr-statusline", "subagent-statusline", "worktree-statusline"]);
 	assert.equal(parseStatuslineArgs([]), null);
 
 	const setupHome = mkdtempSync(join(tmpdir(), "statusline-setup-test-"));
@@ -143,7 +143,7 @@ try {
 			assert.deepEqual(pluginDiscovered, ["subagent-statusline"]);
 
 			ensurePluginStatuslineRegistered("subagent-statusline", extDir, { home: pluginHome, includeSiblings: true });
-			assert.deepEqual(discoverRenderers(pluginHome).map((r) => r.name), ["pr-statusline", "issue-statusline", "subagent-statusline"]);
+			assert.deepEqual(discoverRenderers(pluginHome).map((r) => r.name), ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"]);
 
 			// Test interactive elicitation picker via mock session.ui.elicitation
 			const logs = [];

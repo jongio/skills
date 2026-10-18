@@ -30,17 +30,18 @@ turns a one-line prompt into a working canvas:
 
 ## Copilot CLI Statusline Extensions
 
-This plugin also ships three composable terminal statuslines for GitHub Copilot CLI under [`extensions/`](extensions/) (exposed to Agent Plugins 1.0 hosts via `com.github.copilot/extensions/`):
+This plugin also ships four composable terminal statuslines for GitHub Copilot CLI under [`extensions/`](extensions/) (exposed to Agent Plugins 1.0 hosts via `com.github.copilot/extensions/`):
 
 | Extension | What it shows |
 |---|---|
 | [`pr-statusline`](extensions/pr-statusline/) | Color-coded PR status pills in the Copilot CLI footer for every pull request the active session is working on across repositories and worktrees: clickable `owner/repo#number` OSC 8 links, CI check progress (`passed/total`), merge conflict alerts, review approvals, resolved review threads, and a purple `Merged` badge that dismisses on your next prompt. |
 | [`issue-statusline`](extensions/issue-statusline/) | Separate clickable pill for each GitHub issue the active session is working on: priority or bug labels, linked open PR indicator, assignee handle, comment count, and a purple `Closed` badge that dismisses on your next prompt. |
 | [`subagent-statusline`](extensions/subagent-statusline/) | Live session subagent counter pill (`starting`, `in PR`, `merged`, and `failed`) that turns purple when all subagent PRs merge and dismisses on your next prompt. |
+| [`worktree-statusline`](extensions/worktree-statusline/) | Full checkout paths followed by `[branch]` for session or subagent work outside Copilot's current checkout. Hides when all work is local; reads live Git state and supports detached HEADs. |
 
 ![Three Composable Statusline Types Side-by-Side](extensions/pr-statusline/screenshots/statusline-composed.png)
 
-Installing `statuslines@jongio-skills` (statuslines only) or `jongio-skills@jongio-skills` (all skills and statuslines) from the `jongio/skills` marketplace auto-registers the statuslines and opens an interactive checkbox picker on first session start (and adds `/statusline-setup` so you can toggle **Pull Requests**, **GitHub Issues**, and **Subagents** anytime), or you can run the standalone setup script:
+Installing `statuslines@jongio-skills` (statuslines only) or `jongio-skills@jongio-skills` (all skills and statuslines) from the `jongio/skills` marketplace auto-registers the statuslines and opens an interactive checkbox picker on first session start (and adds `/statusline-setup` so you can toggle **Pull Requests**, **GitHub Issues**, **Subagents**, and **Branch and Worktree** anytime), or you can run the standalone setup script:
 
 ```text
 # Install just the statuslines (no skills) in Copilot CLI:

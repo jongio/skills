@@ -4,9 +4,11 @@ param(
 	[switch]$Prs,
 	[switch]$Issues,
 	[switch]$Subagents,
+	[switch]$Worktrees,
 	[switch]$NoPrs,
 	[switch]$NoIssues,
-	[switch]$NoSubagents
+	[switch]$NoSubagents,
+	[switch]$NoWorktrees
 )
 
 Set-StrictMode -Version Latest
@@ -18,9 +20,11 @@ if ($All) { $forwardArgs += '--all' }
 if ($Prs) { $forwardArgs += '--prs' }
 if ($Issues) { $forwardArgs += '--issues' }
 if ($Subagents) { $forwardArgs += '--subagents' }
+if ($Worktrees) { $forwardArgs += '--worktrees' }
 if ($NoPrs) { $forwardArgs += '--no-prs' }
 if ($NoIssues) { $forwardArgs += '--no-issues' }
 if ($NoSubagents) { $forwardArgs += '--no-subagents' }
+if ($NoWorktrees) { $forwardArgs += '--no-worktrees' }
 
 $localSetup = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'scripts\setup-statusline.mjs' } else { $null }
 if ($localSetup -and (Test-Path -LiteralPath $localSetup)) {
@@ -41,6 +45,7 @@ try {
 		'pr-statusline'       = @('extension.mjs', 'collector.mjs', 'tracker.mjs', 'github.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 		'issue-statusline'    = @('extension.mjs', 'tracker.mjs', 'github.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 		'subagent-statusline' = @('extension.mjs', 'tracker.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
+		'worktree-statusline' = @('extension.mjs', 'tracker.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 	}
 	foreach ($ext in $manifest.Keys) {
 		$extDir = Join-Path $tempRoot "extensions\$ext"

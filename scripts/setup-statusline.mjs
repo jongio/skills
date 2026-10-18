@@ -32,6 +32,14 @@ export const EXTENSION_CATALOG = [
 		description: "Show session subagent state counts (starting, exploring, in PR, merged, failed)",
 		files: ["extension.mjs", "tracker.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
 	},
+	{
+		id: "worktree-statusline",
+		flag: "--worktrees",
+		noFlag: "--no-worktrees",
+		label: "Branch and Worktree (worktree-statusline)",
+		description: "Show the session's active branch and checkout, following directory changes during the session",
+		files: ["extension.mjs", "tracker.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
+	},
 ];
 
 function atomicWriteText(filePath, content) {
@@ -203,17 +211,19 @@ async function main() {
 		console.log([
 			"Usage: node scripts/setup-statusline.mjs [options]",
 			"",
-			"Interactive by default (prompts for PRs, Issues, and Subagents).",
+			"Interactive by default (prompts for PRs, Issues, Subagents, and Branch/Worktree).",
 			"",
 			"Options:",
-			"  --all          Enable all three statuslines without prompting",
+			"  --all          Enable all four statuslines without prompting",
 			"  --prs          Enable Pull Requests statusline (pr-statusline)",
 			"  --issues       Enable GitHub Issues statusline (issue-statusline)",
 			"  --subagents    Enable Subagents statusline (subagent-statusline)",
+			"  --worktrees    Enable Branch and Worktree statusline (worktree-statusline)",
 			"  --merge        Merge enabled flag(s) with existing statusline-config.json",
 			"  --no-prs       Disable Pull Requests statusline",
 			"  --no-issues    Disable GitHub Issues statusline",
 			"  --no-subagents Disable Subagents statusline",
+			"  --no-worktrees Disable Branch and Worktree statusline",
 		].join("\n"));
 		return;
 	}

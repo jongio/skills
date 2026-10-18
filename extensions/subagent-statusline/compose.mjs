@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");
 
-const PREFERRED_ORDER = ["pr-statusline", "issue-statusline", "subagent-statusline"];
+const PREFERRED_ORDER = ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"];
 
 const NERD_FONT_TO_UNICODE = new Map([
 	["\uE726", "\uE0A0"],
@@ -353,6 +353,12 @@ export function parseQuickSetupTokens(rawArgs = "") {
 		subagents: "subagent-statusline",
 		"--subagents": "subagent-statusline",
 		"subagent-statusline": "subagent-statusline",
+		branch: "worktree-statusline",
+		branches: "worktree-statusline",
+		worktree: "worktree-statusline",
+		worktrees: "worktree-statusline",
+		"--worktrees": "worktree-statusline",
+		"worktree-statusline": "worktree-statusline",
 	};
 	const picked = new Set();
 	for (const tok of tokens) {
@@ -409,6 +415,12 @@ export async function runInteractiveStatuslinePicker(session, {
 						description: "Show session subagent phase counters (starting, exploring, in PR, merged, failed)",
 						default: current.has("subagent-statusline"),
 					},
+					worktrees: {
+						type: "boolean",
+						title: "Branch and Worktree (worktree-statusline)",
+						description: "Follow the session's active Git branch and checkout directory",
+						default: current.has("worktree-statusline"),
+					},
 					nerdFontIcons: {
 						type: "boolean",
 						title: "Use Nerd Font icons",
@@ -425,6 +437,7 @@ export async function runInteractiveStatuslinePicker(session, {
 		if (response.content.prs !== false) selected.push("pr-statusline");
 		if (response.content.issues !== false) selected.push("issue-statusline");
 		if (response.content.subagents !== false) selected.push("subagent-statusline");
+		if (response.content.worktrees === true) selected.push("worktree-statusline");
 		const pickedIconMode = typeof response.content.nerdFontIcons === "boolean"
 			? (response.content.nerdFontIcons ? "nerdfont" : "unicode")
 			: undefined;
@@ -437,7 +450,7 @@ export async function runInteractiveStatuslinePicker(session, {
 	}
 
 	const current = getEnabledStatuslines(home);
-	const msg = `Current statuslines: ${current.join(", ") || "none"}. Run /statusline-setup [all | none | prs issues subagents] to change.`;
+	const msg = `Current statuslines: ${current.join(", ") || "none"}. Run /statusline-setup [all | none | prs issues subagents worktrees] to change.`;
 	await session?.log?.(msg);
 	return { cancelled: false, enabled: current, message: msg };
 }
