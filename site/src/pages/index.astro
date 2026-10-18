@@ -53,20 +53,11 @@ const skills = (await getCollection("skills")).sort(
 
     <div class="statusline-showcase card">
       <div class="sl-shot-block">
-        <div class="sl-types-banner" aria-label="Four Statusline Types">
-          <span class="sl-types-item c-worktree">Branch &amp; Worktree</span>
-          <span class="sl-types-sep" aria-hidden="true">|</span>
-          <span class="sl-types-item c-pr">Pull Requests</span>
-          <span class="sl-types-sep" aria-hidden="true">|</span>
-          <span class="sl-types-item c-issue">Issues</span>
-          <span class="sl-types-sep" aria-hidden="true">|</span>
-          <span class="sl-types-item c-sub">Subagents</span>
-        </div>
         <div class="sl-shot-wrap" data-full-img={`${base}screenshots/statusline-worktree-grouped.svg`} role="button" tabindex="0" aria-label="View four-component grouped footer illustration full size">
-          <img src={`${base}screenshots/statusline-worktree-grouped.svg`} alt="Illustrative grouped footer with blue branch/worktree pills first, related PRs and issues, and one overall subagent summary" loading="lazy" />
+          <img src={`${base}screenshots/statusline-worktree-grouped.svg`} alt="Matching headings above blue checkout pills, green passing PRs, an amber unassigned issue, and a purple merged subagent summary" loading="lazy" />
           <span class="sl-zoom-hint">Click to view full size</span>
         </div>
-        <p class="sl-shot-sub">Example footer with related PRs and issues grouped by checkout. The path label appears only for work outside Copilot's own checkout.</p>
+        <p class="sl-shot-sub">PRs appear beside their checkout. An unassigned issue and the overall subagent summary appear below. The path label is shown only for work outside Copilot's own checkout.</p>
       </div>
 
       <div class="sl-legend-grid">
@@ -75,7 +66,6 @@ const skills = (await getCollection("skills")).sort(
         <div class="sl-legend-item"><strong class="sl-types-item c-issue">Issues</strong><span>Keep priority, assignees, linked PRs, and discussion counts beside the work.</span></div>
         <div class="sl-legend-item"><strong class="sl-types-item c-sub">Subagents</strong><span>See background work starting, exploring, in PR, merged, or failed. Inspect individual agents with <code>/tasks</code>.</span></div>
       </div>
-      <p class="sl-shot-sub">Feature accents match the diagram labels. Pill backgrounds show current status and can change as work progresses.</p>
       <p><a href={`${base}statuslines/`}>Read the symbols, colors, and setup guide →</a></p>
     </div>
   </section>
@@ -329,27 +319,10 @@ const skills = (await getCollection("skills")).sort(
     border-radius: 10px;
     padding: clamp(0.85rem, 2vw, 1.25rem);
   }
-  .sl-types-banner {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: clamp(0.6rem, 2.5vw, 1.5rem);
-    margin-bottom: 0.9rem;
-    padding: 0.5rem 0.75rem;
-    font-size: clamp(1.45rem, 3vw, 2.25rem);
-    font-weight: 900;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
-  }
   .sl-types-item.c-worktree { color: var(--feature-worktree); }
   .sl-types-item.c-pr    { color: var(--feature-pr); }
   .sl-types-item.c-issue { color: var(--feature-issue); }
   .sl-types-item.c-sub   { color: var(--feature-subagent); }
-  .sl-types-sep {
-    color: var(--border);
-    font-weight: 300;
-  }
   .sl-shot-header {
     display: flex;
     justify-content: space-between;

@@ -26,10 +26,8 @@
       <text x="485" y="173" fill="#d8fae4">4</text>
       <rect x="32" y="204" width="590" height="44" rx="4" fill="#764410"/>
       <use href="#icon-issue" data-icon="issue" x="46" y="216" width="19" height="19" fill="#ffeec4"/>
-      <use href="#icon-assignee" data-icon="assignee" x="350" y="216" width="19" height="19" fill="#ffeec4"/>
       <use href="#icon-comment" data-icon="comment" x="540" y="216" width="19" height="19" fill="#ffeec4"/>
       <text x="76" y="233" fill="#ffeec4">widget#19 enhancement</text>
-      <text x="380" y="233" fill="#ffeec4">unassigned</text>
       <text x="570" y="233" fill="#ffeec4">1</text>
       <rect x="32" y="264" width="590" height="44" rx="4" fill="#8c2525"/>
       <use href="#icon-bug" data-icon="bug" x="46" y="276" width="19" height="19" fill="#ffe2df"/>
@@ -42,10 +40,10 @@
     </g>
     <g fill="#b1bac4" font-size="18">
       <text x="650" y="171">Assigned, with an open PR linked to the issue.</text>
-      <text x="650" y="231">Open and unassigned; ownership is visible.</text>
+      <text x="650" y="231">Open, unassigned, and without a linked PR.</text>
       <text x="650" y="291">A bug or blocker label draws attention in red.</text>
       <text x="650" y="351">Closed as completed; shown briefly in purple.</text>
-      <text x="32" y="406">Examples · Label: priority or category · @handle: assignee · Comment count: total discussion comments</text>
+      <text x="32" y="406">Examples · Label: priority or category · Assignee shown only when assigned · Comments: total discussion</text>
     </g>
   </g>
 </svg>

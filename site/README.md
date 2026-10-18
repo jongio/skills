@@ -75,8 +75,8 @@ The social card is authored as `og.svg` and published as `og.png`.
 
 `public/screenshots/statusline-worktree-grouped.svg` is a labeled illustration,
 not a live session screenshot. Both statusline showcases and the repository
-READMEs reuse it. It shows blue external-checkout pills first, related PRs and
-issues beside each checkout, and one overall subagent summary. Three smaller
+READMEs reuse it. It shows blue external-checkout pills beside green passing PRs,
+with an amber unassigned issue and purple all-merged subagent summary below. Three smaller
 SVG guides explain PR, issue, and subagent status; cropped PNGs show individual
 terminal symbols.
 The legacy PNG diagram URLs and extension screenshot copies are generated from
@@ -85,5 +85,6 @@ The illustration also distinguishes upstream ahead/behind counts from missing
 base commits, labels unavailable comparisons with `?`, and states that counts
 use locally fetched refs rather than background network refreshes.
 Feature accents are consistent throughout the site: blue for Branch and Worktree,
-green for PRs, amber for Issues, and purple for Subagents. Diagram labels and
-explanatory outlines identify features; the pill backgrounds still indicate status.
+green for PRs, amber for Issues, and purple for Subagents. Each diagram heading
+sits directly above its matching-color pill group. The examples use real states
+that produce those colors; other live states are explained in the detail guides.
