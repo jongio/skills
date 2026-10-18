@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { observeMergedPr } from "./lifecycle.mjs";
+import { isMergedPr, observeMergedPr } from "./lifecycle.mjs";
 
 export const PR_RUNNING_TTL_MS = 20_000;
 export const PR_SETTLED_TTL_MS = 45_000;
@@ -413,13 +413,16 @@ export function refreshTrackedPrStatuses(tracker, {
 	for (const pr of [...tracker.state.prs]) {
 		const cached = cache?.[pr.url];
 		if (updatePrContext(pr, cached?.info, (cached?.checkedAt ?? 0) < (pr.checkedAt ?? 0))) changed = true;
-		if (pr.simulated || pr.mergedAt) continue;
+		if (pr.simulated) continue;
 		const hasOcticonFormat = typeof pr.status === "string" &&
 			pr.status.includes(OCTICONS.approved) &&
 			pr.status.includes(OCTICONS.comment);
-		const defaultTtl = pr.status?.includes(OCTICONS.running) ? PR_RUNNING_TTL_MS : PR_SETTLED_TTL_MS;
+		const merged = isMergedPr(pr);
+		const defaultTtl = merged ? PR_CLOSED_TTL_MS :
+			(pr.status?.includes(OCTICONS.running) ? PR_RUNNING_TTL_MS : PR_SETTLED_TTL_MS);
 		const effectiveTtl = prCacheTtlMs ?? defaultTtl;
-		if (hasOcticonFormat && Number.isFinite(pr.checkedAt) && pr.checkedAt > 0 && now - pr.checkedAt < effectiveTtl) continue;
+		if ((hasOcticonFormat || merged) && Number.isFinite(pr.checkedAt) && pr.checkedAt > 0 &&
+				now - pr.checkedAt < effectiveTtl && !((cached?.checkedAt ?? 0) > pr.checkedAt)) continue;
 
 		let info = null;
 		if (useSharedCache) {
@@ -486,6 +489,11 @@ export function refreshTrackedPrStatuses(tracker, {
 					changed = true;
 				}
 				continue;
+			}
+			if (stateName === "OPEN" && (Number.isFinite(pr.mergedAt) || Number.isFinite(pr.mergedObservedAt))) {
+				delete pr.mergedAt;
+				delete pr.mergedObservedAt;
+				changed = true;
 			}
 			if (typeof info.title === "string" && info.title && pr.title !== info.title) {
 				pr.title = info.title;

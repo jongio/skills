@@ -75,15 +75,19 @@ test("merge detection, not remote merge time or checkedAt, defines dismissal; sh
 	assert.equal(readState(id, home).prs.find((pr) => pr.url === url(1)).generation, 1);
 }));
 
-test("legacy merged caches receive one conservative fresh observation boundary without using checkedAt", async () => fixture((home) => {
+test("legacy merge badges are revalidated before receiving a fresh observation boundary", async () => fixture((home) => {
 	const tracker = new SessionTracker("legacy");
 	tracker.add(url(1));
 	Object.assign(tracker.state.prs[0], { mergedAt: 10, checkedAt: 9000, status: `${OCTICONS.merged} Merged` });
 	tracker.lastUserInputAt = 500;
-	writeState(tracker.snapshot(), home);
-	let result = syncSession({ session_id: "legacy" }, { home, now: 1000, fetchPrStatus: false });
+	const legacy = tracker.snapshot();
+	delete legacy.mergeStateVersion;
+	writeState(legacy, home);
+	let result = syncSession({ session_id: "legacy" }, {
+		home, now: 1000, fetchPrStatus: () => ({ state: "MERGED", mergedAt: new Date(10).toISOString() }),
+	});
 	assert.equal(result.state.prs[0].mergedObservedAt, 1000);
-	assert.equal(result.state.prs[0].checkedAt, 9000);
+	assert.equal(result.state.prs[0].checkedAt, 1000);
 	const current = new SessionTracker("legacy", result.state);
 	current.observe(event("user.message", 750));
 	assert.equal(current.state.prs.length, 1);
@@ -209,7 +213,7 @@ test("settled subagent counts dismiss independently, without losing active PRs o
 	assert.equal(legacy.counts().total, 0);
 });
 
-test("subagent merge attempts require success and settle only their targeted PR", () => {
+test("subagent merge attempts settle only after their targeted PR is confirmed merged", () => {
 	const tracker = new SubagentTracker("targets");
 	tracker.linkPr("a", url(1));
 	tracker.linkPr("a", url(2));
@@ -224,6 +228,8 @@ test("subagent merge attempts require success and settle only their targeted PR"
 	tracker.observe(event("tool.execution_complete", 3000, {
 		toolCallId: "success", success: true, result: { content: `Merged ${url(1)}. Related ${url(2)}` },
 	}, "a"));
+	assert.deepEqual(tracker.agents.get("a").mergedPrs, []);
+	tracker.syncWithPrCache({ [url(1)]: { info: { state: "MERGED" }, checkedAt: 3000 } }, 3000);
 	assert.deepEqual(tracker.agents.get("a").mergedPrs, [url(1)]);
 	assert.equal(tracker.counts().inPr, 1);
 	tracker.observe(event("user.message", 4000));

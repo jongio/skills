@@ -2,7 +2,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, renameSync, rm
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { mergePrProvenance, normalizePrProvenance, sourceProvenance } from "./provenance.mjs";
-import { dismissMergedPrs, initializeMergedPrs, observeMergedPr, reconcilePrStates } from "./lifecycle.mjs";
+import { dismissMergedPrs, initializeMergedPrs, normalizePrMergeState, reconcilePrStates } from "./lifecycle.mjs";
 import {
 	atomicWriteJson,
 	OCTICONS,
@@ -169,8 +169,9 @@ export function writeState(state, home = configHome()) {
 export class SessionTracker {
 	constructor(sessionId, previous = null) {
 		statePath(sessionId);
-		this.state = {
+		this.state = normalizePrMergeState({
 			version: 1,
+			mergeStateVersion: previous?.mergeStateVersion,
 			sessionId,
 			prs: [...(previous?.prs ?? [])],
 			ignored: [...(previous?.ignored ?? [])],
@@ -181,7 +182,7 @@ export class SessionTracker {
 				? previous.transcriptOffset
 				: 0,
 			...(Array.isArray(previous?.simulate) ? { simulate: [...previous.simulate] } : {}),
-		};
+		});
 		this.repository = previous?.repository ?? null;
 		this.host = previous?.host ?? "github.com";
 		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
@@ -385,16 +386,10 @@ export class SessionTracker {
 						this.manage("remove", targetUrl);
 					}
 				} else if (call.merging) {
-					const ts = event.timestamp ? Date.parse(event.timestamp) : NaN;
-					const mergedAt = Number.isFinite(ts) ? ts : Date.now();
 					for (const targetUrl of [...call.targets, ...resultPrs.map((pr) => pr.url)]) {
 						this.add(targetUrl, false, call.source);
 						const existing = this.state.prs.find((p) => p.url === pullRequest(targetUrl).url);
-						if (existing) {
-							observeMergedPr(existing, mergedAt);
-							existing.status = `${OCTICONS.merged} Merged`;
-							existing.checkedAt = mergedAt;
-						}
+						if (existing) existing.checkedAt = 0;
 					}
 				} else {
 					for (const pr of resultPrs) {
@@ -612,7 +607,8 @@ export function syncSession(payload, {
 			ignoredRevisions: previous.ignoredRevisions, simulate: previous.simulate } : previous,
 	);
 	let offset = reset ? 0 : tracker.state.transcriptOffset;
-	let changed = (hasTranscript || hasWorkspace) && (!previous || reset);
+	let changed = Boolean(previous && previous.mergeStateVersion !== tracker.state.mergeStateVersion) ||
+		((hasTranscript || hasWorkspace) && (!previous || reset));
 	if (initializeMergedPrs(tracker, now)) changed = true;
 	const useDefaultGh = fetchPrStatus === undefined && (hasTranscript || hasWorkspace);
 

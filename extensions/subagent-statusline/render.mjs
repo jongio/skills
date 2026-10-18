@@ -71,9 +71,9 @@ export function renderGroup(entries, { home, color = true, nerdFont = undefined 
 	return pill.mid;
 }
 
-export function renderEntries(payload, { home } = {}) {
+export function renderEntries(payload, { home, now } = {}) {
 	if (!payload?.session_id) return [];
-	const { tracker } = syncSession(payload, { home });
+	const { tracker } = syncSession(payload, { home, now });
 	if (!tracker) return [];
 	return [...tracker.agents].map(([agentId, agent]) => ({
 		agentId, prUrls: agent.prs ?? [], counts: tracker.dismissed ? tracker.counts([]) : tracker.counts([agent]),

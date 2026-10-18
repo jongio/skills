@@ -1,7 +1,25 @@
 import { mergePrProvenance } from "./provenance.mjs";
 
 const revision = (value) => Number.isSafeInteger(value) && value >= 0 ? value : 0;
-const isMerged = (pr) => Number.isFinite(pr.mergedAt) || /(?:\uE727|\uF419|🟣|\bMerged\b)/i.test(pr.status ?? "");
+export const isMergedPr = (pr) => Number.isFinite(pr.mergedAt) || /(?:\uE727|\uF419|🟣|\bMerged\b)/i.test(pr.status ?? "");
+
+export function normalizePrMergeState(state) {
+	if (state.mergeStateVersion === 1) return state;
+	return {
+		...state,
+		mergeStateVersion: 1,
+		prs: state.prs.map((pr) => {
+			if (pr.simulated || !isMergedPr(pr)) return pr;
+			const recovered = { ...pr };
+			// Older collectors inferred merges from tool success, including queued/running commands.
+			delete recovered.mergedAt;
+			delete recovered.mergedObservedAt;
+			delete recovered.status;
+			delete recovered.checkedAt;
+			return recovered;
+		}),
+	};
+}
 
 export function observeMergedPr(pr, observedAt, mergedAt = observedAt) {
 	let changed = false;
@@ -19,7 +37,7 @@ export function observeMergedPr(pr, observedAt, mergedAt = observedAt) {
 export function initializeMergedPrs(tracker, now) {
 	let changed = false;
 	for (const pr of tracker.state.prs) {
-		if (!pr.simulated && isMerged(pr) &&
+		if (!pr.simulated && isMergedPr(pr) &&
 			observeMergedPr(pr, Math.max(now, tracker.lastUserInputAt), pr.mergedAt)) changed = true;
 	}
 	return changed;
@@ -28,7 +46,7 @@ export function initializeMergedPrs(tracker, now) {
 export function dismissMergedPrs(tracker) {
 	let changed = false;
 	for (const pr of [...tracker.state.prs]) {
-		if (!pr.simulated && isMerged(pr) && Number.isFinite(pr.mergedObservedAt) &&
+		if (!pr.simulated && isMergedPr(pr) && Number.isFinite(pr.mergedObservedAt) &&
 			tracker.lastUserInputAt > pr.mergedObservedAt) {
 			tracker.manage("remove", pr.url);
 			changed = true;
@@ -38,6 +56,7 @@ export function dismissMergedPrs(tracker) {
 }
 
 export function reconcilePrStates(tracker, disk) {
+	disk = normalizePrMergeState(disk);
 	const ignored = { ...tracker.state.ignoredRevisions };
 	for (const state of [tracker.state, disk]) {
 		for (const [url, value] of Object.entries(state.ignoredRevisions ?? {})) {
@@ -55,9 +74,14 @@ export function reconcilePrStates(tracker, disk) {
 			const newer = (pr.checkedAt ?? 0) > (existing.checkedAt ?? 0) ? pr : existing;
 			const older = newer === pr ? existing : pr;
 			const merged = { ...older, ...newer, provenance: mergePrProvenance(existing.provenance, pr.provenance) };
-			const observations = [existing.mergedObservedAt, pr.mergedObservedAt].filter(Number.isFinite);
-			if (observations.length) merged.mergedObservedAt = Math.min(...observations);
-			if (isMerged(merged)) merged.status = "\uE727 Merged";
+			if (newer.status && !isMergedPr(newer)) {
+				delete merged.mergedAt;
+				delete merged.mergedObservedAt;
+			} else if (isMergedPr(merged)) {
+				const observations = [existing.mergedObservedAt, pr.mergedObservedAt].filter(Number.isFinite);
+				if (observations.length) merged.mergedObservedAt = Math.min(...observations);
+				merged.status = "\uE727 Merged";
+			}
 			prs.set(pr.url, merged);
 		}
 	}

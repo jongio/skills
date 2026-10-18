@@ -64,6 +64,8 @@ try {
 		success: true,
 		result: { content: "Merged" },
 	}, "agent-2", new Date(2600).toISOString()));
+	assert.equal(tracker.counts().merged, 0, "merge command success is not remote merge confirmation");
+	tracker.syncWithPrCache({ "https://github.com/Azure/azure-dev/pull/102": { info: { state: "MERGED" } } }, 2600);
 	assert.deepEqual(tracker.counts(), { total: 4, starting: 1, exploring: 0, inPr: 1, merged: 1, done: 1, failed: 0 });
 
 	// Live transcript rendering test (including parallel general-purpose + explore subagents)
@@ -101,7 +103,12 @@ try {
 			JSON.stringify(event("subagent.completed", { agentId: "a2", toolCallId: "t2", agentName: "devx-developer" }, "a2", new Date(2500).toISOString())),
 		].join("\n") + "\n",
 	);
-	const mergedColorOut = render({ session_id: "live-subagents", transcript_path: transcriptDir }, { home, links: false, color: true });
+	mkdirSync(join(home, "pr-statusline"), { recursive: true });
+	writeFileSync(join(home, "pr-statusline", "pr-cache.json"), JSON.stringify({
+		"https://github.com/Azure/azure-dev/pull/4811": { info: { state: "MERGED" }, checkedAt: 2600 },
+		"https://github.com/Azure/azure-dev/pull/4812": { info: { state: "MERGED" }, checkedAt: 2600 },
+	}));
+	const mergedColorOut = render({ session_id: "live-subagents", transcript_path: transcriptDir }, { home, now: 2600, links: false, color: true });
 	assert.equal(mergedColorOut, "\x1b[1;38;2;237;224;255;48;2;88;44;142m \uF4B8 \uE727 2 merged \x1b[0m", "all-merged subagents use single-line purple pill");
 
 	appendFileSync(transcriptFile, `${JSON.stringify(event("user.message", { content: "Next task" }, undefined, new Date(3000).toISOString()))}\n`);
@@ -211,7 +218,7 @@ try {
 		rmSync(setupHome, { recursive: true, force: true });
 	}
 
-	console.log("ok - subagent state counts (starting, in PR, merged), OSC 8 console link, purple merged dismissal, setup configurator, and horizontal compositor");
+	console.log("ok - subagent counts, GitHub-confirmed merges, non-linked summary, merged dismissal, setup configurator, and horizontal compositor");
 } finally {
 	rmSync(home, { recursive: true, force: true });
 }
