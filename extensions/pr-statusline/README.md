@@ -130,7 +130,13 @@ Using `Azure/azure-dev` as an example checkout:
 - **Green (All Clear):** All checks passing, no conflicts, and all review threads resolved (` #4812  14/14  2/2  3/3`).
 - **Amber (In Progress / Needs Attention):** Checks are running (``), approvals are still pending (` 1/2`), or review threads remain unresolved (` 2/4`).
 - **Red (Critical):** One or more checks failed (``), the PR has merge conflicts (``), or changes were requested (``).
-- **Purple (Merged):** When a tracked PR merges during the session, its pill turns GitHub Merged purple (` #4810 Merged`) so you can see it landed, and automatically dismisses itself as soon as you submit your next prompt in that session.
+- **Purple (Merged):** A merged PR remains visible until the next real user message
+  after this session detects the merge, then disappears. GitHub's merge time and
+  later cache polls don't move that first-observed boundary. Scheduled prompts,
+  skill injections and subagent messages don't dismiss it. Older merged caches
+  without an observation time conservatively start a fresh boundary on first
+  load. Dismissal survives collector saves; explicit re-add/reopen starts a new
+  tracking revision.
 - **Slate (Neutral):** Draft PR (``).
 
 ## How PRs are discovered and refreshed

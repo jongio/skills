@@ -208,15 +208,21 @@ test("Git refresh work is bounded and rotates through cached directories without
 		const cwd = args[1];
 		if (args[2] === "symbolic-ref") return { status: 0, stdout: "main\n" };
 		if (args[2] === "config") return { status: 1, stdout: "" };
+		if (args[2] === "status") return { status: 0, stdout: "" };
 		return { status: 0, stdout: `${cwd}\n${join(cwd, ".git")}\n${join(cwd, ".git")}\n` };
 	};
 	const first = sessionContexts({ session_id: "bounded" }, { home, run });
-	assert.equal(calls, 16 * 3);
+	assert.equal(calls, 16 * 4);
 	assert.equal(first.contexts.length, 16);
 	calls = 0;
 	const second = sessionContexts({ session_id: "bounded" }, { home, run });
-	assert.equal(calls, 16 * 3);
+	assert.equal(calls, 16 * 4);
 	assert.equal(second.contexts.length, 20);
+	calls = 0;
+	const reserved = sessionContexts({ session_id: "bounded" }, { home, run, reserveGitDirectories: 4 });
+	assert.equal(calls, 12 * 4);
+	assert.equal(reserved.remainingGitDirectories, 4);
+	assert.equal(reserved.contexts.length, 20);
 }));
 
 test("installed compositor keeps the checkout first after real PR provider metadata enrichment in plain and color", async () => fixture(async (root) => {
@@ -245,7 +251,7 @@ test("installed compositor keeps the checkout first after real PR provider metad
 	const installedComposer = await import(pathToFileURL(join(home, "statusline-compose.mjs")).href);
 	const installedPr = await import(pathToFileURL(join(home, "extensions", "pr-statusline", "render.mjs")).href);
 	const before = await installedComposer.composeStatusLine(payload, { home, now, ...plain });
-	assert.equal(before.split("\n")[0], `${worktree} [${branch}]`);
+	assert.equal(before.split("\n")[0], `${worktree} [⎇ ${branch}]`);
 	assert.equal(before.split("\n")[1], installedPr.render(payload, { home, now, ...plain }));
 	assert.ok(before.split("\n")[1].includes(prUrl(119)), before);
 	installedPr.render(payload, {
@@ -264,8 +270,8 @@ test("installed compositor keeps the checkout first after real PR provider metad
 		assert.equal(entries[0].url, prUrl(119));
 		const output = await installedComposer.composeStatusLine(payload, options);
 		const prefix = color
-			? `\x1b[1;38;2;219;234;254;48;2;30;64;115m ${worktree} [${branch}] \x1b[0m `
-			: `${worktree} [${branch}] · `;
+			? `\x1b[1;38;2;219;234;254;48;2;30;64;115m ${worktree} [⎇ ${branch}] \x1b[0m `
+			: `${worktree} [⎇ ${branch}] · `;
 		assert.equal(output.split("\n").length, 1, output);
 		assert.ok(output.startsWith(prefix), output);
 		assert.equal(output, prefix + entries[0].text, "provider-rendered PR pill must follow the checkout label");
@@ -331,9 +337,9 @@ test("installed structured providers group independent checkouts, preserve local
 	const text = await composeStatusLine(payload, { home, now, ...plain });
 	const rows = text.split("\n");
 	assert.equal(rows.length, 5, text);
-	assert.ok(rows[0].startsWith(`${first} [feat/a]`), text);
-	assert.ok(rows[1].startsWith(`${second} [feat/b]`), text);
-	assert.ok(rows[2].startsWith(`${otherRepo} [feat/a]`), text);
+	assert.ok(rows[0].startsWith(`${first} [⎇ feat/a]`), text);
+	assert.ok(rows[1].startsWith(`${second} [⎇ feat/b]`), text);
+	assert.ok(rows[2].startsWith(`${otherRepo} [⎇ feat/a]`), text);
 	for (const [index, number] of [[0, 1], [1, 2], [2, 3]]) {
 		assert.ok(rows[index].includes(prUrl(number)), text);
 		assert.ok(!rows[index].includes("starting"), text);
@@ -344,10 +350,10 @@ test("installed structured providers group independent checkouts, preserve local
 	assert.doesNotMatch(rows[3], /^(?:Session|[ \t·])/);
 	for (const item of [prUrl(4), prUrl(5), issueUrl(3), issueUrl(4), "6 starting", "opaque"]) assert.ok(rows[3].includes(item), text);
 	assert.equal(rows[4], "  extra  ", "opaque multiline third-party output stays intact");
-	assert.ok(!text.includes(`${firstRepo} [main]`), text);
+	assert.ok(!text.includes(`${firstRepo} [⎇ main]`), text);
 	const colored = await composeStatusLine(payload, { home, now, color: true, links: true });
 	assert.equal(colored.split("\n").length, 5);
-	assert.ok(colored.startsWith(`\x1b[1;38;2;219;234;254;48;2;30;64;115m ${first} [feat/a] \x1b[0m `));
+	assert.ok(colored.startsWith(`\x1b[1;38;2;219;234;254;48;2;30;64;115m ${first} [⎇ feat/a] \x1b[0m `));
 	assert.equal(readFileSync(configPath, "utf8"), config);
 	assert.equal(readFileSync(settingsPath, "utf8"), settings);
 	for (const [entries, render] of [[prEntries, renderPr], [issueEntries, renderIssue]]) {

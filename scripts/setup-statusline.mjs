@@ -14,7 +14,7 @@ export const EXTENSION_CATALOG = [
 		noFlag: "--no-prs",
 		label: "Pull Requests (pr-statusline)",
 		description: "Track session PRs across repos/worktrees with CI checks, approvals, review threads, and purple Merged pills",
-		files: ["extension.mjs", "collector.mjs", "tracker.mjs", "github.mjs", "provenance.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
+		files: ["extension.mjs", "collector.mjs", "tracker.mjs", "github.mjs", "provenance.mjs", "lifecycle.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
 	},
 	{
 		id: "issue-statusline",
@@ -30,7 +30,7 @@ export const EXTENSION_CATALOG = [
 		noFlag: "--no-subagents",
 		label: "Subagents (subagent-statusline)",
 		description: "Show session subagent state counts (starting, exploring, in PR, merged, failed)",
-		files: ["extension.mjs", "tracker.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
+		files: ["extension.mjs", "tracker.mjs", "settlement.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
 	},
 	{
 		id: "worktree-statusline",
@@ -38,7 +38,7 @@ export const EXTENSION_CATALOG = [
 		noFlag: "--no-worktrees",
 		label: "Branch and Worktree (worktree-statusline)",
 		description: "Show the session's active branch and checkout, following directory changes during the session",
-		files: ["extension.mjs", "tracker.mjs", "render.mjs", "grouping.mjs", "compose.mjs", "copilot-extension.json"],
+		files: ["extension.mjs", "tracker.mjs", "render.mjs", "grouping.mjs", "worktrees.mjs", "compose.mjs", "copilot-extension.json"],
 	},
 ];
 

@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { observeMergedPr } from "./lifecycle.mjs";
 
 export const PR_RUNNING_TTL_MS = 20_000;
 export const PR_SETTLED_TTL_MS = 45_000;
@@ -474,16 +475,7 @@ export function refreshTrackedPrStatuses(tracker, {
 			}
 			if (stateName === "MERGED") {
 				const remoteMergedAt = info.mergedAt ? Date.parse(info.mergedAt) : NaN;
-				if (!pr.mergedAt && Number.isFinite(remoteMergedAt) && tracker.lastUserInputAt > 0 && remoteMergedAt < tracker.lastUserInputAt) {
-					tracker.manage("remove", pr.url);
-					changed = true;
-					continue;
-				}
-				const effectiveMergedAt = Number.isFinite(remoteMergedAt) ? remoteMergedAt : now;
-				if (!pr.mergedAt) {
-					pr.mergedAt = effectiveMergedAt;
-					changed = true;
-				}
+				if (observeMergedPr(pr, Math.max(now, tracker.lastUserInputAt), remoteMergedAt)) changed = true;
 				const mergedStatus = `${OCTICONS.merged} Merged`;
 				if (pr.status !== mergedStatus) {
 					pr.status = mergedStatus;

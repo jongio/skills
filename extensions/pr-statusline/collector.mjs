@@ -1,7 +1,6 @@
 import { readState, RELEVANT_EVENT_TYPE, SessionTracker, statePath, writeState } from "./tracker.mjs";
 import { renameSync, rmSync, statSync } from "node:fs";
-import { prContextFields } from "./github.mjs";
-import { mergePrProvenance } from "./provenance.mjs";
+import { dismissMergedPrs, initializeMergedPrs, reconcilePrStates } from "./lifecycle.mjs";
 
 function serializeComparable(snap) {
 	const { updatedAt: _ignored, ...rest } = snap;
@@ -30,13 +29,14 @@ export async function collect(session, { home, interval = 15000, report = consol
 		}
 	}
 	const tracker = new SessionTracker(session.sessionId, previous);
+	initializeMergedPrs(tracker, Date.now());
 	const queued = [];
 	let loading = true;
 	let stopped = false;
 	let polling = false;
-	let lastSavedAt = previous?.updatedAt ?? 0;
 	let lastComparable = previous ? serializeComparable(tracker.snapshot()) : null;
-	const save = (activity, { preferMemoryIgnore = false, force = false } = {}) => {
+	const save = (activity, { force = false } = {}) => {
+		let diskComparable = null;
 		try {
 			let currentMtimeMs = 0;
 			try {
@@ -44,49 +44,27 @@ export async function collect(session, { home, interval = 15000, report = consol
 			} catch {
 				currentMtimeMs = 0;
 			}
-			const disk = currentMtimeMs > lastDiskMtimeMs ? readState(session.sessionId, home) : null;
+			const disk = currentMtimeMs >= lastDiskMtimeMs && currentMtimeMs > 0 ? readState(session.sessionId, home) : null;
 			if (disk) {
+				diskComparable = serializeComparable(disk);
 				lastDiskMtimeMs = currentMtimeMs;
 				if (Number.isInteger(disk.transcriptOffset) && disk.transcriptOffset > tracker.state.transcriptOffset) {
 					tracker.state.transcriptOffset = disk.transcriptOffset;
 				}
-				if (Number.isFinite(disk.lastUserInputAt) && disk.lastUserInputAt > tracker.lastUserInputAt) {
-					tracker.lastUserInputAt = disk.lastUserInputAt;
-				}
 				if (Array.isArray(disk.simulate)) {
 					tracker.state.simulate = [...disk.simulate];
 				}
-				if (!preferMemoryIgnore && disk.updatedAt > lastSavedAt) {
-					const diskPrUrls = new Set(disk.prs.map((pr) => pr.url));
-					tracker.state.ignored = tracker.state.ignored.filter((url) => !diskPrUrls.has(url));
-				}
-				for (const ignoredUrl of disk.ignored) {
-					if (!tracker.state.ignored.includes(ignoredUrl)) tracker.state.ignored.push(ignoredUrl);
-				}
-				tracker.state.prs = tracker.state.prs.filter((pr) => !tracker.state.ignored.includes(pr.url));
-				for (const diskPr of disk.prs) {
-					const existing = tracker.state.prs.find((pr) => pr.url === diskPr.url);
-					if (existing) {
-						Object.assign(existing, prContextFields(diskPr));
-						existing.provenance = mergePrProvenance(existing.provenance, diskPr.provenance);
-						if (diskPr.title) existing.title = diskPr.title;
-						if (diskPr.status) existing.status = diskPr.status;
-						if (Number.isFinite(diskPr.checkedAt)) existing.checkedAt = diskPr.checkedAt;
-						if (Number.isFinite(diskPr.mergedAt)) existing.mergedAt = diskPr.mergedAt;
-						if (diskPr.simulated) existing.simulated = true;
-					} else if (!tracker.state.ignored.includes(diskPr.url)) {
-						tracker.state.prs.push(diskPr);
-					}
-				}
+				reconcilePrStates(tracker, disk);
 			}
 		} catch {
 			// Ignore transient disk read errors before saving.
 		}
+		initializeMergedPrs(tracker, Date.now());
+		dismissMergedPrs(tracker);
 		const snap = tracker.snapshot(activity);
 		const comparable = serializeComparable(snap);
-		if (!force && comparable === lastComparable) return;
+		if (!force && comparable === lastComparable && (diskComparable === null || diskComparable === comparable)) return;
 		lastComparable = comparable;
-		lastSavedAt = snap.updatedAt;
 		writeState(snap, home);
 		try {
 			lastDiskMtimeMs = statSync(file).mtimeMs;
@@ -138,7 +116,7 @@ export async function collect(session, { home, interval = 15000, report = consol
 		tracker,
 		manage(action, reference) {
 			const prs = tracker.manage(action, reference);
-			save(null, { preferMemoryIgnore: true, force: true });
+			save(null, { force: true });
 			return prs;
 		},
 		stop() {

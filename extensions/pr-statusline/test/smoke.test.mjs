@@ -9,7 +9,7 @@ import { render } from "../render.mjs";
 import { collect } from "../collector.mjs";
 
 const home = mkdtempSync(join(tmpdir(), "pr-statusline-test-"));
-const event = (type, data = {}, agentId) => ({ type, data, agentId });
+const event = (type, data = {}, agentId) => ({ type, data, agentId, timestamp: new Date(1000).toISOString() });
 const start = (id, command, toolName = "powershell", extra = {}) => event("tool.execution_start", {
 	toolCallId: id,
 	toolName,
@@ -261,9 +261,10 @@ try {
 		{ home, links: false, now: 3500, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
 	assert.ok(afterScheduledRender.includes("\uE727 acme/app#42 (https://github.com/acme/app/pull/42) Merged"), "scheduled prompt should not dismiss merged PR");
-	// Historical user.message earlier than mergedAt does NOT dismiss the merged PR
+	// Historical input before merge detection doesn't dismiss the merged PR.
 	const stateBeforeOldInput = readState("transcript-session", home);
 	const mergedPr = stateBeforeOldInput.prs.find((p) => p.url.endsWith("/pull/42"));
+	assert.equal(mergedPr.mergedObservedAt, 4500);
 	mergedPr.mergedAt = 5000;
 	writeState(stateBeforeOldInput, home);
 	appendFileSync(transcriptFile, `${JSON.stringify({ ...event("user.message", { content: "Older message" }), timestamp: new Date(4000).toISOString() })}\n`);
@@ -271,8 +272,8 @@ try {
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
 		{ home, links: false, now: 3600, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
-	assert.ok(afterOlderInputRender.includes("\uE727 acme/app#42 (https://github.com/acme/app/pull/42) Merged"), "user message older than mergedAt should not dismiss merged PR");
-	// Next real user input at or after mergedAt dismisses the merged PR
+	assert.ok(afterOlderInputRender.includes("\uE727 acme/app#42 (https://github.com/acme/app/pull/42) Merged"), "user message older than merge detection should not dismiss merged PR");
+	// The next real user input after detection dismisses the merged PR.
 	appendFileSync(transcriptFile, `${JSON.stringify({ ...event("user.message", { content: "What should we work on next?" }), timestamp: new Date(6000).toISOString() })}\n`);
 	const afterNextUserInputRender = render(
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
@@ -336,4 +337,3 @@ try {
 } finally {
 	rmSync(home, { recursive: true, force: true });
 }
-

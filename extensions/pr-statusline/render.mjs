@@ -86,16 +86,18 @@ export function renderEntries(payload, {
 } = {}) {
 	if (!payload?.session_id) return [];
 	const { state } = syncSession(payload, { home, now, fetchPrStatus, prCacheTtlMs });
-	if (!state || !state.prs.length) return [];
+	if (!state) return [];
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: false });
 	const currentRepo = state.repository || null;
-	return state.prs.map((pr) => ({
+	const entries = state.prs.map((pr) => ({
 		...pr, text: formatPrItem(pr, currentRepo, { links, color, nerdFont: useNerdFont }).mid,
 	}));
+	if (Object.keys(state.ignoredRevisions ?? {}).length) entries.push({ kind: "dismissal", text: "" });
+	return entries;
 }
 
 export function render(payload, options = {}) {
-	return renderEntries(payload, options).map((entry) => entry.text).join((options.color ?? options.links ?? true) ? " " : " · ");
+	return renderEntries(payload, options).map((entry) => entry.text).filter(Boolean).join((options.color ?? options.links ?? true) ? " " : " · ");
 }
 
 async function main() {
@@ -120,4 +122,3 @@ async function main() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
-

@@ -42,6 +42,10 @@ export function composeGroups(blocks, options = {}) {
 		return [pr.url, key];
 	}));
 	const linkedKey = (urls) => unique(urls.map((url) => prKeys.get(url) ?? null));
+	const groupedPrs = [...prKeys.values()].some(Boolean) || prs.some((pr) => pr.kind === "dismissal");
+	const agentWorking = new Map((agentBlock?.entries ?? []).map((entry) => [entry.agentId, entry.working]));
+	const workingKeys = new Set(Object.entries(checkouts[0]?.agentCurrentCheckouts ?? {})
+		.filter(([id]) => agentWorking.get(id) !== false).map(([, key]) => key));
 	const append = (key, text) => {
 		if (!text?.trim()) return;
 		(rows.get(key) ?? session).push(text);
@@ -65,7 +69,9 @@ export function composeGroups(blocks, options = {}) {
 			if (!entry.compact) append(key, entry.text);
 		}
 	}
-	const output = [...rows.values()].map((parts) => parts.join(separator));
+	const output = [...rows].filter(([key, parts]) => !groupedPrs || parts.length > 1 ||
+		checkouts.find((entry) => entry.key === key)?.focused !== false || workingKeys.has(key))
+		.map(([, parts]) => parts.join(separator));
 	if (session.length) output.push(session.join(separator));
 	return output.join("\n");
 }

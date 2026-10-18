@@ -1,28 +1,40 @@
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkoutKey, gitContext, sessionContexts } from "./tracker.mjs";
+import { checkoutKey, checkoutLabel, gitContext, sessionContexts } from "./tracker.mjs";
+import { resolveLinkedCheckouts } from "./worktrees.mjs";
 export { composeGroups } from "./grouping.mjs";
-
-function safeLabel(value) {
-	return String(value).replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, "");
-}
 
 function makePill(content, color) {
 	return color ? `\x1b[1;38;2;219;234;254;48;2;30;64;115m ${content} \x1b[0m` : content;
 }
 
-export function renderEntries(payload, { home, color = true } = {}) {
-	const { contexts, catchingUp, agentCheckouts } = sessionContexts(payload, { home });
+export function renderEntries(payload, { home, color = true, reserveGitDirectories = 0 } = {}) {
+	const { contexts, catchingUp, agentCheckouts, agentCurrentCheckouts, focusKey, remainingGitDirectories } =
+		sessionContexts(payload, { home, reserveGitDirectories });
 	if (catchingUp) return [{ text: makePill("branch/worktree syncing session", color) }];
 	const current = typeof payload?.cwd === "string" && isAbsolute(payload.cwd) ? gitContext(payload.cwd) : null;
 	const currentKey = current ? checkoutKey(current.root) : null;
-	return contexts.map((context) => {
-		const content = `${safeLabel(context.root)} [${safeLabel(context.branch)}]`;
-		return {
-			...context, kind: "checkout", key: checkoutKey(context.root), agentCheckouts,
-			text: checkoutKey(context.root) === currentKey ? "" : makePill(content, color),
-		};
-	});
+	return contexts.map((context) => checkoutEntry(context, currentKey, {
+		color, agentCheckouts, agentCurrentCheckouts, remainingGitDirectories, focused: checkoutKey(context.root) === focusKey,
+	}));
+}
+
+function checkoutEntry(context, currentKey, { color, ...metadata }) {
+	const content = checkoutLabel(context);
+	return {
+		...context, ...metadata, currentKey, kind: "checkout", key: checkoutKey(context.root),
+		text: checkoutKey(context.root) === currentKey ? "" : makePill(content, color),
+	};
+}
+
+export function resolveCheckoutEntries(payload, entries, prs, options = {}) {
+	const checkouts = entries.filter((entry) => entry.kind === "checkout");
+	const extra = resolveLinkedCheckouts(payload, checkouts, prs, options);
+	if (!extra.length) return entries;
+	const currentKey = checkouts[0]?.currentKey ?? null;
+	return [...entries, ...extra.map((context) => checkoutEntry(context, currentKey, {
+		color: options.color !== false, focused: false,
+	}))];
 }
 
 export function render(payload, options = {}) {

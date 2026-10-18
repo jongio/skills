@@ -581,7 +581,10 @@ export async function composeStatusLine(payload, {
 	const renderers = discoverRenderers(home);
 	if (!renderers.length) return "";
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: true });
-	const options = { home, now, links, color, nerdFont: useNerdFont };
+	const options = {
+		home, now, links, color, nerdFont: useNerdFont,
+		reserveGitDirectories: renderers.some(({ name }) => name === "pr-statusline") ? 4 : 0,
+	};
 	const modules = await Promise.all(renderers.map(async ({ name, path }) => {
 		try {
 			return { name, path, mod: await import(pathToFileURL(path).href) };
@@ -611,6 +614,11 @@ export async function composeStatusLine(payload, {
 			return { name, entries: [] };
 		}),
 	);
+	if (grouped && typeof checkoutModule.resolveCheckoutEntries === "function") {
+		const checkoutBlock = blocks.find((block) => block.name === "worktree-statusline");
+		const prs = blocks.find((block) => block.name === "pr-statusline")?.entries ?? [];
+		checkoutBlock.entries = await checkoutModule.resolveCheckoutEntries(payload, checkoutBlock.entries, prs, options);
+	}
 	const agentBlock = blocks.find((block) => block.name === "subagent-statusline");
 	const agentSummary = agentBlock?.renderGroup?.(agentBlock.entries, options) ?? "";
 	const agentPrUrls = new Set(agentSummary ? agentBlock.entries.flatMap((entry) => entry.prUrls ?? []) : []);

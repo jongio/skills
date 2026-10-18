@@ -97,7 +97,7 @@ export class WorktreeTracker {
 	}
 }
 
-function readJson(path) {
+export function readJson(path) {
 	try {
 		return JSON.parse(readFileSync(path, "utf8"));
 	} catch (error) {
@@ -106,7 +106,7 @@ function readJson(path) {
 	}
 }
 
-function writeJson(path, value) {
+export function writeJson(path, value) {
 	mkdirSync(dirname(path), { recursive: true });
 	const temporary = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
 	try {
@@ -193,6 +193,7 @@ export function sessionDirectory(payload, { home = configHome() } = {}) {
 	return {
 		cwd: tracker.cwd ?? fallback, directories: [...tracker.directories], catchingUp,
 		agentDirectories: Object.fromEntries([...tracker.agentDirectories].map(([id, paths]) => [id, [...paths]])),
+		agentCwds: Object.fromEntries(tracker.agentCwds),
 	};
 }
 
@@ -204,6 +205,25 @@ export function checkoutKey(root) {
 		if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
 	}
 	return process.platform === "win32" ? path.toLowerCase() : path;
+}
+
+export function dirtyMarkers(porcelain) {
+	let unstaged = false, staged = false, untracked = false;
+	const records = porcelain.split("\0");
+	for (let i = 0; i < records.length; i++) {
+		const entry = records[i];
+		if (entry.startsWith("?? ")) { untracked = true; continue; }
+		if (entry.length < 4 || entry[2] !== " " || entry.startsWith("!! ")) continue;
+		staged ||= entry[0] !== " ";
+		unstaged ||= entry[1] !== " ";
+		if (/[RC]/.test(entry.slice(0, 2))) i++;
+	}
+	return `${unstaged ? "*" : ""}${staged ? "+" : ""}${untracked ? "%" : ""}`;
+}
+
+export function checkoutLabel(context) {
+	const safe = (value) => String(value).replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, "");
+	return `${safe(context.root)} [⎇ ${safe(context.branch)}${safe(context.dirty ?? "")}]`;
 }
 
 export function gitContext(cwd, { run = spawnSync } = {}) {
@@ -244,13 +264,17 @@ export function gitContext(cwd, { run = spawnSync } = {}) {
 	if (remotes.error) throw remotes.error;
 	if (remotes.status !== 0 && remotes.status !== 1) throw new Error("Cannot read Git remotes.");
 	const remoteUrls = remotes.stdout.trim() ? [remotes.stdout.trim()] : [];
-	return { cwd, root, branch: label, worktree, commonDir: checkoutKey(common), remoteUrls };
+	const status = run("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none"], options);
+	if (status.error) throw status.error;
+	if (status.status !== 0) throw new Error("Cannot read Git status.");
+	return { cwd, root, branch: label, worktree, commonDir: checkoutKey(common), remoteUrls, dirty: dirtyMarkers(status.stdout) };
 }
 
 export function sessionContexts(payload, options = {}) {
 	const location = sessionDirectory(payload, options);
 	const contexts = new Map();
 	const directoryKeys = new Map();
+	let remainingGitDirectories = MAX_GIT_DIRECTORIES;
 	if (!location.catchingUp) {
 		const directories = [...new Set([location.cwd, ...location.directories].filter(Boolean).map((cwd) => resolve(cwd)))];
 		const cachePath = payload?.session_id
@@ -264,11 +288,13 @@ export function sessionContexts(payload, options = {}) {
 		}
 		const records = new Map(Object.entries(cached?.records ?? {}).filter(([cwd]) => directories.includes(cwd)));
 		const cursor = Number.isSafeInteger(cached?.cursor) && cached.cursor >= 0 ? cached.cursor % (directories.length || 1) : 0;
-		const count = Math.min(directories.length, MAX_GIT_DIRECTORIES);
+		const reserved = options.reserveGitDirectories === 4 ? 4 : 0;
+		const count = Math.min(directories.length, MAX_GIT_DIRECTORIES - reserved);
 		for (let i = 0; i < count; i++) {
 			const cwd = directories[(cursor + i) % directories.length];
 			records.set(cwd, gitContext(cwd, options));
 		}
+		remainingGitDirectories -= count;
 		if (cachePath) writeJson(cachePath, {
 			cursor: (cursor + count) % (directories.length || 1), records: Object.fromEntries(records),
 		});
@@ -284,13 +310,17 @@ export function sessionContexts(payload, options = {}) {
 	const agentCheckouts = Object.fromEntries(Object.entries(location.agentDirectories ?? {}).map(([id, paths]) => [
 		id, [...new Set(paths.map((path) => directoryKeys.get(checkoutKey(path)) ?? null))],
 	]));
-	return { ...location, contexts: [...contexts.values()], agentCheckouts };
+	const agentCurrentCheckouts = Object.fromEntries(Object.entries(location.agentCwds ?? {}).map(([id, value]) => [
+		id, directoryKeys.get(checkoutKey(value.cwd)) ?? null,
+	]));
+	const focusKey = location.cwd ? directoryKeys.get(checkoutKey(location.cwd)) : null;
+	return { ...location, contexts: [...contexts.values()], agentCheckouts, agentCurrentCheckouts, focusKey, remainingGitDirectories };
 }
 
 export function describeSessionDirectory(payload, options) {
 	const { cwd, contexts, catchingUp } = sessionContexts(payload, options);
 	if (catchingUp) return "Branch/worktree statusline is replaying session context; retry after the next footer refresh.";
 	return contexts.length
-		? contexts.map((context) => `${context.root} [${context.branch}]`).join("\n")
+		? contexts.map(checkoutLabel).join("\n")
 		: `No Git checkout found for session directory: ${cwd ?? "unknown"}`;
 }

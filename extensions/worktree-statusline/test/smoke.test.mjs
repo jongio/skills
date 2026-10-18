@@ -129,7 +129,7 @@ test("large transcripts replay within bounded reads and never report caught-up p
 	appendFileSync(path, JSON.stringify(event("session.context_changed", { cwd: "/latest" })) + "\n");
 	const payload = { session_id: "large" };
 	assert.equal(render(payload, { home, color: true, links: true }), pill("branch/worktree syncing session"));
-	assert.deepEqual(sessionDirectory(payload, { home }), { cwd: "/latest", directories: ["/initial", "/latest"], catchingUp: false, agentDirectories: {} });
+	assert.deepEqual(sessionDirectory(payload, { home }), { cwd: "/latest", directories: ["/initial", "/latest"], catchingUp: false, agentDirectories: {}, agentCwds: {} });
 }));
 
 test("oversized records do not stall replay; malformed records do not hide later context", () => fixture((home) => {
@@ -142,7 +142,7 @@ test("oversized records do not stall replay; malformed records do not hide later
 		state = sessionDirectory({ session_id: "oversized" }, { home });
 		if (!state.catchingUp) break;
 	}
-	assert.deepEqual(state, { cwd: "/latest", directories: ["/initial", "/latest"], catchingUp: false, agentDirectories: {} });
+	assert.deepEqual(state, { cwd: "/latest", directories: ["/initial", "/latest"], catchingUp: false, agentDirectories: {}, agentCwds: {} });
 }));
 
 test("subagent relative directories are isolated from root and other agents", () => {
@@ -199,7 +199,7 @@ test("repositories without a first commit still expose their branch", () => fixt
 	assert.equal(gitContext(repository).branch, "main");
 	const home = join(root, "home");
 	transcript(home, "unborn", [event("session.start", { context: { cwd: repository } })]);
-	assert.equal(render({ session_id: "unborn", cwd: root }, { home, ...plain }), `${repository} [main]`);
+	assert.equal(render({ session_id: "unborn", cwd: root }, { home, ...plain }), `${repository} [⎇ main]`);
 	assert.equal(render({ session_id: "unborn", cwd: repository }, { home, ...plain }), "");
 }));
 
@@ -244,24 +244,24 @@ test("end-to-end rendering follows session checkout and preserves unknown render
 		assert.equal(render(payload, { home, ...plain }), "", "hide work confined to Copilot's current checkout");
 		appendFileSync(path, [start("switch", `Set-Location '${target}'; git status`), complete("switch")]
 			.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-		assert.equal(render(payload, { home, ...plain }), `${target} [feat/active]`);
+		assert.equal(render(payload, { home, ...plain }), `${target} [⎇ feat/active]`);
 		git(target, "switch", "-c", "feat/new");
-		assert.equal(render(payload, { home, ...plain }), `${target} [feat/new]`);
+		assert.equal(render(payload, { home, ...plain }), `${target} [⎇ feat/new]`);
 		const colored = render(payload, { home, color: true, links: true, nerdFont: true });
 		assert.equal(colored.split("\n").length, 1);
 		assert.doesNotMatch(colored, /\x1b\]8;/, "worktree pills must not enable terminal hyperlink underlining");
-		assert.equal(colored, pill(`${target} [feat/new]`), "the external checkout has padding inside its background, without a colon separator");
+		assert.equal(colored, pill(`${target} [⎇ feat/new]`), "the external checkout has padding inside its background, without a colon separator");
 		assert.equal(render({ cwd: root }, { home, ...plain }), "");
 		const result = configureStatuslines({ enabled: ["worktree-statusline"], home, repoRoot });
 		assert.deepEqual(result.enabled, ["worktree-statusline"]);
 		assert.ok(existsSync(join(home, "extensions", "worktree-statusline", "tracker.mjs")));
-		assert.equal(await composeStatusLine(payload, { home, ...plain }), `${target} [feat/new]`);
+		assert.equal(await composeStatusLine(payload, { home, ...plain }), `${target} [⎇ feat/new]`);
 		assert.equal(await composeStatusLine(payload, { home, color: true, links: true }), colored, "composition preserves padding and never adds worktree hyperlinks");
 		const sibling = join(home, "extensions", "sibling");
 		mkdirSync(sibling, { recursive: true });
 		writeFileSync(join(sibling, "render.mjs"), 'export const render = () => "PR #42";\n');
 		writeFileSync(join(home, "statusline-config.json"), JSON.stringify({ enabled: ["sibling", "worktree-statusline"] }));
-		assert.equal(await composeStatusLine(payload, { home, ...plain }), `${target} [feat/new]\nPR #42`);
+		assert.equal(await composeStatusLine(payload, { home, ...plain }), `${target} [⎇ feat/new]\nPR #42`);
 		for (const [name, label] of [["pr-statusline", "PR"], ["issue-statusline", "Issue"], ["subagent-statusline", "Agent"]]) {
 			const directory = join(home, "extensions", name);
 			mkdirSync(directory, { recursive: true });
@@ -270,7 +270,7 @@ test("end-to-end rendering follows session checkout and preserves unknown render
 		writeFileSync(join(home, "statusline-config.json"), JSON.stringify({
 			enabled: ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"],
 		}));
-		assert.equal(await composeStatusLine(payload, { home, ...plain }), `${target} [feat/new]\nPR \u00b7 Issue \u00b7 Agent`);
+		assert.equal(await composeStatusLine(payload, { home, ...plain }), `${target} [⎇ feat/new]\nPR \u00b7 Issue \u00b7 Agent`);
 		assert.equal(await composeStatusLine(payload, { home, color: true, links: true }), `${colored}\nPR Issue Agent`);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
@@ -300,30 +300,30 @@ test("multiple root and subagent worktrees render once each, with current branch
 		complete("failed", false),
 	]);
 	const payload = { session_id: "multiple", cwd: unrelated };
-	const expected = `${first} [feat/first] | ${repository} [main] | ${second} [feat/second]`;
+	const expected = `${first} [⎇ feat/first] | ${repository} [⎇ main] | ${second} [⎇ feat/second]`;
 	assert.equal(render(payload, { home, ...plain }), expected);
-	assert.equal(render({ ...payload, cwd: repository }, { home, ...plain }), `${first} [feat/first] | ${second} [feat/second]`, "show all external worktrees while hiding Copilot's checkout");
-	assert.equal(render({ ...payload, cwd: nested }, { home, ...plain }), `${repository} [main] | ${second} [feat/second]`, "nested working directories resolve to the same checkout root");
+	assert.equal(render({ ...payload, cwd: repository }, { home, ...plain }), `${first} [⎇ feat/first] | ${second} [⎇ feat/second]`, "show all external worktrees while hiding Copilot's checkout");
+	assert.equal(render({ ...payload, cwd: nested }, { home, ...plain }), `${repository} [⎇ main] | ${second} [⎇ feat/second]`, "nested working directories resolve to the same checkout root");
 	assert.equal(render({ session_id: "multiple" }, { home, ...plain }), expected, "do not guess Copilot's working directory when the payload omits it");
 	if (process.platform === "win32") {
-		assert.equal(render({ ...payload, cwd: repository.toUpperCase() }, { home, ...plain }), `${first} [feat/first] | ${second} [feat/second]`, "Windows path casing must not create a redundant pill");
+		assert.equal(render({ ...payload, cwd: repository.toUpperCase() }, { home, ...plain }), `${first} [⎇ feat/first] | ${second} [⎇ feat/second]`, "Windows path casing must not create a redundant pill");
 	}
 	assert.equal(sessionContexts(payload, { home }).contexts.length, 3);
 	assert.equal(describeSessionDirectory(payload, { home }), expected.replaceAll(" | ", "\n"));
 	const colored = render(payload, { home, links: true, color: true });
-	assert.equal(colored, `${pill(`${first} [feat/first]`)} ${pill(`${repository} [main]`)} ${pill(`${second} [feat/second]`)}`);
+	assert.equal(colored, `${pill(`${first} [⎇ feat/first]`)} ${pill(`${repository} [⎇ main]`)} ${pill(`${second} [⎇ feat/second]`)}`);
 	assert.doesNotMatch(colored, /\x1b\]8;/);
 	assert.equal(colored.split("\n").length, 1);
 	assert.ok(!colored.includes(unrelated));
 	git(second, "switch", "-c", "feat/updated");
-	assert.ok(render(payload, { home, ...plain }).includes(`${second} [feat/updated]`));
-	assert.ok(!render(payload, { home, ...plain }).includes("[feat/second]"));
+	assert.ok(render(payload, { home, ...plain }).includes(`${second} [⎇ feat/updated]`));
+	assert.ok(!render(payload, { home, ...plain }).includes("[⎇ feat/second]"));
 	// A removed checkout no longer renders, but another session never inherits this list.
 	git(repository, "worktree", "remove", second);
 	assert.ok(!render(payload, { home, ...plain }).includes(second));
 	assert.equal(render({ session_id: "different", cwd: repository }, { home, ...plain }), "");
 	appendFileSync(path, JSON.stringify(event("session.context_changed", { cwd: repository })) + "\n");
-	assert.ok(render(payload, { home, ...plain }).startsWith(`${repository} [main]`));
+	assert.ok(render(payload, { home, ...plain }).startsWith(`${repository} [⎇ main]`));
 }));
 
 test("full checkout paths are not shortened or truncated", () => fixture((root) => {
@@ -333,7 +333,7 @@ test("full checkout paths are not shortened or truncated", () => fixture((root) 
 	assert.ok(repository.length > 160);
 	const home = join(root, "home");
 	transcript(home, "long-path", [event("session.start", { context: { cwd: repository } })]);
-	assert.equal(render({ session_id: "long-path", cwd: root }, { home, ...plain }), `${repository} [main]`);
+	assert.equal(render({ session_id: "long-path", cwd: root }, { home, ...plain }), `${repository} [⎇ main]`);
 }));
 
 test("local-only sessions hide in plain and colored output, including subdirectories and changed branches", () => fixture((root) => {
@@ -352,7 +352,7 @@ test("local-only sessions hide in plain and colored output, including subdirecto
 	assert.equal(render({ ...payload, cwd: nested }, { home, ...plain }), "");
 	git(repository, "switch", "-c", "feat/local");
 	assert.equal(render(payload, { home, ...plain }), "");
-	assert.equal(describeSessionDirectory(payload, { home }), `${repository} [feat/local]`, "the inspection command still lists local session checkouts");
+	assert.equal(describeSessionDirectory(payload, { home }), `${repository} [⎇ feat/local]`, "the inspection command still lists local session checkouts");
 	assert.equal(render({ cwd: repository }, { home, ...plain }), "", "no transcript and no external work means no pill");
 }));
 

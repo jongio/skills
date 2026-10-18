@@ -71,7 +71,12 @@ set up the copilot statusline from jongio/skills and ask me whether I want PRs, 
   - ` N in PR` (`U+E726`): Subagents that have opened or worked on an open pull request.
   - ` N merged` (`U+E727`): Subagents whose pull requests have merged.
   - ` N failed` (`U+F057`): Subagents that failed with an error.
-- **Purple Merged dismissal:** Once all subagent PRs have merged (`starting === 0`, `exploring === 0`, and `inPr === 0`), the pill turns GitHub Merged purple (`  4 merged`) and automatically dismisses itself on your next prompt in that session.
+- **Merged dismissal:** Each settled contribution remains visible until the next
+  real user message after its settlement is detected. Other active agents don't
+  keep old merged counts visible. Active PRs and ongoing agents remain; an agent
+  still running after its merged count is dismissed returns to its running count.
+  Cache polls don't reset the observation time. Legacy settled caches without a
+  reliable boundary get one fresh observation boundary on load.
 
 ## Validate
 

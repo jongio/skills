@@ -74,9 +74,10 @@ export function renderGroup(entries, { home, color = true, nerdFont = undefined 
 export function renderEntries(payload, { home } = {}) {
 	if (!payload?.session_id) return [];
 	const { tracker } = syncSession(payload, { home });
-	if (!tracker || tracker.dismissed) return [];
+	if (!tracker) return [];
 	return [...tracker.agents].map(([agentId, agent]) => ({
-		agentId, prUrls: agent.prs ?? [], counts: tracker.counts([agent]),
+		agentId, prUrls: agent.prs ?? [], counts: tracker.dismissed ? tracker.counts([]) : tracker.counts([agent]),
+		working: agent.status === "starting",
 	}));
 }
 
