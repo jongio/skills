@@ -11,9 +11,13 @@ export const PR_CLOSED_TTL_MS = 120_000;
 export function prContextFields(info) {
 	if (!info || typeof info !== "object") return {};
 	const headRepositoryUrl = info.headRepository?.url ?? info.headRepositoryUrl;
+	const baseRepositoryUrl = info.baseRepository?.url ?? info.baseRepositoryUrl;
 	const issueUrls = info.closingIssuesReferences?.nodes?.map((issue) => issue?.url) ?? info.issueUrls;
 	return {
 		...("headRefName" in info ? { headRefName: typeof info.headRefName === "string" ? info.headRefName : null } : {}),
+		...("baseRefName" in info ? { baseRefName: typeof info.baseRefName === "string" ? info.baseRefName : null } : {}),
+		...("baseRepository" in info || "baseRepositoryUrl" in info
+			? { baseRepositoryUrl: typeof baseRepositoryUrl === "string" ? baseRepositoryUrl : null } : {}),
 		...("headRepository" in info || "headRepositoryUrl" in info
 			? { headRepositoryUrl: typeof headRepositoryUrl === "string" ? headRepositoryUrl : null } : {}),
 		...(Array.isArray(issueUrls) ? { issueUrls: issueUrls.filter((url) => typeof url === "string") } : {}),
@@ -205,6 +209,8 @@ const PR_STATUS_GRAPHQL = `query($owner:String!,$name:String!,$number:Int!){
 			title
 			headRefName
 			headRepository{url}
+			baseRefName
+			baseRepository{url}
 			closingIssuesReferences(first:100){nodes{url}}
 			state
 			mergedAt
@@ -259,6 +265,8 @@ const BRANCH_PR_GRAPHQL = `query($owner:String!,$name:String!,$head:String!){
 				title
 				headRefName
 				headRepository{url}
+				baseRefName
+				baseRepository{url}
 				closingIssuesReferences(first:100){nodes{url}}
 				state
 				isDraft
@@ -332,7 +340,7 @@ function normalizeGraphqlPr(pr) {
 	};
 }
 
-export function queryPrStatusWithGh(url) {
+export function queryPrStatusWithGh(url, { run = runGhWithFallback } = {}) {
 	let parsed;
 	try {
 		parsed = new URL(url);
@@ -355,7 +363,7 @@ export function queryPrStatusWithGh(url) {
 		"-f",
 		`query=${PR_STATUS_GRAPHQL}`,
 	];
-	const res = runGhWithFallback(args);
+	const res = run(args);
 	if (res.status !== 0) {
 		const stderr = String(res.stderr ?? "");
 		if (/Could not resolve to a PullRequest/i.test(stderr)) {
@@ -373,10 +381,10 @@ export function queryPrStatusWithGh(url) {
 	}
 }
 
-export function queryBranchPrWithGh(repository, branch) {
+export function queryBranchPrWithGh(repository, branch, { run = runGhWithFallback } = {}) {
 	const [owner, repo] = String(repository ?? "").split("/");
 	if (!owner || !repo || !branch) return null;
-	const res = runGhWithFallback([
+	const res = run([
 		"api",
 		"graphql",
 		"-F",

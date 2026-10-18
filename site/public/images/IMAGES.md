@@ -1,15 +1,12 @@
 # Images
 
-What lives in `site/public/images/`, what uses it, and what is still a
-placeholder waiting on real art.
+What lives in `site/public/images/`, what uses it, and which files are spare assets.
 
-## Placeholders (replace these)
-
-Keep the filename (or update the reference) and aim for the listed size.
+## Shared site artwork
 
 | File | Used by | Purpose | Recommended size |
 | --- | --- | --- | --- |
-| `og.svg` | `<meta og:image>` | Social share card. Replace with a raster `og.png` (scrapers ignore SVG) and update the meta tag in `src/layouts/Layout.astro`. | 1200×630 |
+| `og.svg` / `og.png` | `<meta og:image>` uses the PNG | Collection overview social card; SVG is the editable source. | 1200×630 |
 | `favicon.svg` | _(not referenced — the root `public/favicon.svg` is used)_ | Optional. | 64×64 |
 | `hero.svg` | _(spare)_ | Optional hero banner if you add one. | 1280×640 |
 | `item-thumb.svg` | _(spare)_ | Superseded by generated `thumb-<skill>.png` art. | 640×400 |
@@ -36,6 +33,15 @@ validate all catalog mappings and generate byte-identical public copies.
 | `thumb-naming-is-hard.png` | `naming-is-hard` card/detail | Candidate names screened across registries. |
 | `thumb-repo-ready.png` | `repo-ready` card/detail | Repository health checklist with gap indicators. |
 
+## Statusline diagrams
+
+The four guides in `public/screenshots/` embed vector outlines of the actual
+runtime icon code points, sourced from CaskaydiaCove Nerd Font. Readers do not
+need that font installed. The guide tests compare icon mappings with the PR,
+issue, and subagent trackers. The three standalone PNG diagrams and extension
+copies are rendered from those SVGs. Close-up PNGs retain the original terminal
+glyphs with their technical title bars removed.
+
 ## Unreferenced (safe to delete)
 
 Superseded when every skill moved to a generated `thumb-<skill>.png`. Nothing in
@@ -50,7 +56,6 @@ the repo links to these:
 Tips:
 - Export at 2× for crisp display on high-DPI screens, then keep the file small.
 - PNG for screenshots/photos, SVG for logos/diagrams.
-- A placeholder left in place still deploys fine; it just visibly says "replace me".
 - Adding a skill? Write a prompt in [`docs/thumbnail-prompts.md`](../../../docs/thumbnail-prompts.md)
   following the house style documented there, generate the art, save it as
   `skills/<skill>/thumbnail.png`, and point `thumb:` at

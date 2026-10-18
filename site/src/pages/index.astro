@@ -11,11 +11,11 @@ const skills = (await getCollection("skills")).sort(
 
 <Layout wide>
   <header class="hero">
-    <p class="eyebrow">Agent Plugins 1.0 · GitHub Copilot · Claude · Codex · Cursor</p>
+    <p class="eyebrow">Skills for AI coding agents · Statuslines for Copilot CLI</p>
     <h1>jongio/skills</h1>
     <p class="lede">
-      Jon Gallant's collection of skills and CLI statuslines for AI coding agents.
-      Add the plugin marketplace once, then install the entire collection or individual skills right from <code>/plugin</code>.
+      Give your agent a repeatable workflow for building, explaining, and maintaining projects.
+      Add a live Copilot CLI footer to follow branches, worktrees, PRs, issues, and background agents.
     </p>
     <div class="cta">
       <a class="btn" href={`${base}catalog/`}>Browse skills</a>
@@ -48,246 +48,35 @@ const skills = (await getCollection("skills")).sort(
       <a class="section-link" href={`${base}statuslines/`}>Open full documentation →</a>
     </div>
     <p class="muted" style="margin: 0 0 1rem;">
-      Composable terminal statuslines for GitHub Copilot CLI: <strong>Pull Requests</strong> (<code>pr-statusline</code>), <strong>GitHub Issues</strong> (<code>issue-statusline</code>), <strong>Subagents</strong> (<code>subagent-statusline</code>), and <strong>Branch and Worktree</strong> (<code>worktree-statusline</code>). Installed automatically when you install the <code>jongio/skills</code> plugin, or configurable via the one-liner setup script.
+      Know where the agent is working and what needs attention without leaving the conversation. Enable the footer components you want with <code>/statusline-setup</code>.
     </p>
 
     <div class="statusline-showcase card">
       <div class="sl-shot-block">
-        <div class="sl-trio-banner" aria-label="Three Statusline Types">
-          <span class="sl-trio-item c-pr">Pull Requests</span>
-          <span class="sl-trio-sep" aria-hidden="true">|</span>
-          <span class="sl-trio-item c-issue">Issues</span>
-          <span class="sl-trio-sep" aria-hidden="true">|</span>
-          <span class="sl-trio-item c-sub">Subagents</span>
+        <div class="sl-types-banner" aria-label="Four Statusline Types">
+          <span class="sl-types-item c-worktree">Branch &amp; Worktree</span>
+          <span class="sl-types-sep" aria-hidden="true">|</span>
+          <span class="sl-types-item c-pr">Pull Requests</span>
+          <span class="sl-types-sep" aria-hidden="true">|</span>
+          <span class="sl-types-item c-issue">Issues</span>
+          <span class="sl-types-sep" aria-hidden="true">|</span>
+          <span class="sl-types-item c-sub">Subagents</span>
         </div>
-        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/statusline-composed-terminal.png`} role="button" tabindex="0" aria-label="View Composed Statusline infographic full size">
-          <img src={`${base}screenshots/statusline-composed-terminal.png`} alt="Annotated overview of the three Copilot CLI statusline types: Pull Requests, Issues, and Subagents" loading="lazy" />
+        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/statusline-worktree-grouped.svg`} role="button" tabindex="0" aria-label="View four-component grouped footer illustration full size">
+          <img src={`${base}screenshots/statusline-worktree-grouped.svg`} alt="Illustrative grouped footer with blue branch/worktree pills first, related PRs and issues, and one overall subagent summary" loading="lazy" />
           <span class="sl-zoom-hint">Click to view full size</span>
         </div>
+        <p class="sl-shot-sub">Example footer with related PRs and issues grouped by checkout. The path label appears only for work outside Copilot's own checkout.</p>
       </div>
 
-      <div class="sl-install-primary">
-        <div class="sl-primary-head">
-          <div class="sl-primary-title-row">
-            <span class="sl-rec-badge">Recommended</span>
-            <strong class="sl-primary-title">Install via Copilot Plugin Marketplace</strong>
-          </div>
-          <a href={`${base}statuslines/`}>Standalone guide →</a>
-        </div>
-        <p class="sl-primary-sub">
-          Add the marketplace once in Copilot CLI, install just the statuslines or the full collection, and pick which statuslines (<strong>Pull Requests</strong>, <strong>GitHub Issues</strong>, <strong>Subagents</strong>, <strong>Branch and Worktree</strong>) you want enabled:
-        </p>
-        <div class="sl-primary-stack">
-          <div class="sl-install-item">
-            <div class="sl-os-label">Step 1 · Add the marketplace (one-time setup in Copilot CLI)</div>
-            <pre class="sl-primary-pre"><code>/plugin marketplace add jongio/skills</code></pre>
-          </div>
-          <div class="sl-scope-grid">
-            <div class="sl-install-item sl-scope-box sl-scope-focus">
-              <div class="sl-os-label">Step 2A · Install statuslines only (no skills)</div>
-              <pre class="sl-primary-pre"><code>/plugin install statuslines@jongio-skills</code></pre>
-            </div>
-            <div class="sl-install-item sl-scope-box">
-              <div class="sl-os-label">Step 2B · Or install all skills &amp; statuslines</div>
-              <pre class="sl-primary-pre"><code>/plugin install jongio-skills@jongio-skills</code></pre>
-            </div>
-          </div>
-          <div class="sl-install-item">
-            <div class="sl-os-label">Step 3 · Pick your statuslines anytime in Copilot CLI</div>
-            <pre class="sl-primary-pre"><code>/statusline-setup</code></pre>
-          </div>
-        </div>
+      <div class="sl-legend-grid">
+        <div class="sl-legend-item"><strong class="sl-types-item c-worktree">Branch &amp; Worktree</strong><span>See the full path and live branch when work moves outside Copilot's checkout, plus changed files and missing commits.</span></div>
+        <div class="sl-legend-item"><strong class="sl-types-item c-pr">Pull Requests</strong><span>Follow checks, approvals, and review threads. Open the PR on GitHub from its pill.</span></div>
+        <div class="sl-legend-item"><strong class="sl-types-item c-issue">Issues</strong><span>Keep priority, assignees, linked PRs, and discussion counts beside the work.</span></div>
+        <div class="sl-legend-item"><strong class="sl-types-item c-sub">Subagents</strong><span>See background work starting, exploring, in PR, merged, or failed. Inspect individual agents with <code>/tasks</code>.</span></div>
       </div>
-
-      <div class="sl-install-secondary">
-        <div class="sl-secondary-summary">Alternative: Standalone Statusline Scripts (Install only the statuslines without the skills plugin)</div>
-        <div class="sl-secondary-stack">
-          <div class="sl-install-item">
-            <div class="sl-os-label">Windows (PowerShell one-liner)</div>
-            <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 | iex</code></pre>
-          </div>
-          <div class="sl-install-item">
-            <div class="sl-os-label">macOS &amp; Linux (Bash one-liner)</div>
-            <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash</code></pre>
-          </div>
-        </div>
-      </div>
-
-      <div class="sl-infographic-list">
-        <div class="sl-shot-block">
-          <div class="sl-shot-header">
-            <div>
-              <strong>1. Pull Request Statusline (<code>pr-statusline</code>) · All States &amp; Icons</strong>
-              <p class="sl-shot-sub">Tracks session PRs across repositories and worktrees. Detailed pills link to GitHub; proven subagent-only PRs use overall subagent counts instead of individual pills.</p>
-            </div>
-            <span><a href="https://github.com/jongio/skills/tree/main/extensions/pr-statusline" target="_blank" rel="noopener">View source →</a></span>
-          </div>
-          <div class="sl-shot-wrap" data-full-img={`${base}screenshots/pr-statusline.png`} role="button" tabindex="0" aria-label="View PR Statusline infographic full size">
-            <img src={`${base}screenshots/pr-statusline.png`} alt="Annotated infographic of pr-statusline showing Green, Amber, Red, and Purple PR pills and explaining each icon" loading="lazy" />
-            <span class="sl-zoom-hint">Click to view full size</span>
-          </div>
-          <div class="sl-legend-grid">
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-link.png`} role="button" tabindex="0" aria-label="View Repo#PR Link up-close screenshot">
-                <img src={`${base}screenshots/crops/pr-link.png`} alt="Up-close screenshot of clickable Repo#PR link token" loading="lazy" />
-              </div>
-              <code>Repo#PR Link</code>
-              <span>Clickable OSC 8 link to <code>owner/repo#number</code> on GitHub (Ctrl+Click or Cmd+Click)</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-ci.png`} role="button" tabindex="0" aria-label="View CI Checks up-close screenshot">
-                <img src={`${base}screenshots/crops/pr-ci.png`} alt="Up-close screenshot of passing, running, and failing CI check tokens" loading="lazy" />
-              </div>
-              <code>CI Checks (X/Y)</code>
-              <span>Passed checks out of total checks (green checkmark when all pass, hourglass when running, red X when any fail)</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-conflict.png`} role="button" tabindex="0" aria-label="View Merge Conflict up-close screenshot">
-                <img src={`${base}screenshots/crops/pr-conflict.png`} alt="Up-close screenshot of merge conflict warning token" loading="lazy" />
-              </div>
-              <code>Merge Conflict</code>
-              <span>Warning triangle shown on red pills when <code>mergeStateStatus === "DIRTY"</code></span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-approvals.png`} role="button" tabindex="0" aria-label="View Approvals up-close screenshot">
-                <img src={`${base}screenshots/crops/pr-approvals.png`} alt="Up-close screenshot of PR approval counter tokens" loading="lazy" />
-              </div>
-              <code>Approvals (X/Y)</code>
-              <span>Thumbs-up icon with approvals received vs total reviewers</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-threads.png`} role="button" tabindex="0" aria-label="View Review Threads up-close screenshot">
-                <img src={`${base}screenshots/crops/pr-threads.png`} alt="Up-close screenshot of PR review thread counter tokens" loading="lazy" />
-              </div>
-              <code>Threads (X/Y)</code>
-              <span>Comment icon with resolved review threads vs total review threads</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-merged.png`} role="button" tabindex="0" aria-label="View Purple Merged PR up-close screenshot">
-                <img src={`${base}screenshots/crops/pr-merged.png`} alt="Up-close screenshot of purple merged PR pill" loading="lazy" />
-              </div>
-              <code>Purple Merged</code>
-              <span>Turns purple when the merge is detected, then dismisses on the next real user message; cache refreshes do not reset that boundary</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="sl-shot-block">
-          <div class="sl-shot-header">
-            <div>
-              <strong>2. GitHub Issue Statusline (<code>issue-statusline</code>) · All States &amp; Icons</strong>
-              <p class="sl-shot-sub">Renders a separate clickable pill for each GitHub issue worked on in the active session with priority labels, linked PRs, assignees, and comment counts.</p>
-            </div>
-            <span><a href="https://github.com/jongio/skills/tree/main/extensions/issue-statusline" target="_blank" rel="noopener">View source →</a></span>
-          </div>
-          <div class="sl-shot-wrap" data-full-img={`${base}screenshots/issue-statusline.png`} role="button" tabindex="0" aria-label="View Issue Statusline infographic full size">
-            <img src={`${base}screenshots/issue-statusline.png`} alt="Annotated infographic of issue-statusline showing Green, Amber, Red, and Purple issue pills and explaining each icon" loading="lazy" />
-            <span class="sl-zoom-hint">Click to view full size</span>
-          </div>
-          <div class="sl-legend-grid">
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-link.png`} role="button" tabindex="0" aria-label="View Repo#Issue Link up-close screenshot">
-                <img src={`${base}screenshots/crops/issue-link.png`} alt="Up-close screenshot of clickable Repo#Issue link token" loading="lazy" />
-              </div>
-              <code>Repo#Issue Link</code>
-              <span>Separate clickable OSC 8 link per issue (issue icon for standard issues, bug icon for bug-labeled issues)</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-label.png`} role="button" tabindex="0" aria-label="View Priority Label up-close screenshot">
-                <img src={`${base}screenshots/crops/issue-label.png`} alt="Up-close screenshot of issue priority and bug labels" loading="lazy" />
-              </div>
-              <code>Priority / Label</code>
-              <span>Surfaces the highest-signal label (<code>P0</code>, <code>P1</code>, <code>bug</code>, <code>enhancement</code>) right inside the pill</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-pr.png`} role="button" tabindex="0" aria-label="View Linked Open PR up-close screenshot">
-                <img src={`${base}screenshots/crops/issue-pr.png`} alt="Up-close screenshot of linked open PR indicator icon" loading="lazy" />
-              </div>
-              <code>Linked Open PR</code>
-              <span>PR branch icon shown when an open pull request cross-references or closes the issue</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-assignee.png`} role="button" tabindex="0" aria-label="View Assignee up-close screenshot">
-                <img src={`${base}screenshots/crops/issue-assignee.png`} alt="Up-close screenshot of issue assignee token" loading="lazy" />
-              </div>
-              <code>Assignee</code>
-              <span>User icon with the assigned GitHub handle (green when assigned + active, amber when unassigned)</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-comments.png`} role="button" tabindex="0" aria-label="View Comment Count up-close screenshot">
-                <img src={`${base}screenshots/crops/issue-comments.png`} alt="Up-close screenshot of issue comment count token" loading="lazy" />
-              </div>
-              <code>Comment Count</code>
-              <span>Comment bubble showing total discussion comments on the issue</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-closed.png`} role="button" tabindex="0" aria-label="View Purple Closed Issue up-close screenshot">
-                <img src={`${base}screenshots/crops/issue-closed.png`} alt="Up-close screenshot of purple closed completed issue pill" loading="lazy" />
-              </div>
-              <code>Purple Closed</code>
-              <span>Turns purple when closed as completed during this session and auto-dismisses on your next prompt</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="sl-shot-block">
-          <div class="sl-shot-header">
-            <div>
-              <strong>3. Subagent Statusline (<code>subagent-statusline</code>) · Fleet Phases &amp; Counters</strong>
-              <p class="sl-shot-sub">Aggregates background subagents spawned by the current Copilot CLI session into live phase counters so you can see fleet progress at a glance.</p>
-            </div>
-            <span><a href="https://github.com/jongio/skills/tree/main/extensions/subagent-statusline" target="_blank" rel="noopener">View source →</a></span>
-          </div>
-          <div class="sl-shot-wrap" data-full-img={`${base}screenshots/subagent-statusline.png`} role="button" tabindex="0" aria-label="View Subagent Statusline infographic full size">
-            <img src={`${base}screenshots/subagent-statusline.png`} alt="Annotated infographic of subagent-statusline showing active fleet counters and all-merged summary pill with pointer lines" loading="lazy" />
-            <span class="sl-zoom-hint">Click to view full size</span>
-          </div>
-          <div class="sl-legend-grid">
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-icon.png`} role="button" tabindex="0" aria-label="View Subagent Icon up-close screenshot">
-                <img src={`${base}screenshots/crops/sub-icon.png`} alt="Up-close screenshot of subagent fleet icon token" loading="lazy" />
-              </div>
-              <code>Subagent Icon</code>
-              <span>One padded, non-linked session summary; run <code>/tasks</code> in the console to inspect individual agents</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-starting.png`} role="button" tabindex="0" aria-label="View Starting Counter up-close screenshot">
-                <img src={`${base}screenshots/crops/sub-starting.png`} alt="Up-close screenshot of subagents starting counter token" loading="lazy" />
-              </div>
-              <code>N starting / N exploring</code>
-              <span>Hourglass counter for subagents starting up and search counter for read-only <code>explore</code> / <code>research</code> subagents</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-inpr.png`} role="button" tabindex="0" aria-label="View In-PR Counter up-close screenshot">
-                <img src={`${base}screenshots/crops/sub-inpr.png`} alt="Up-close screenshot of subagents in PR counter token" loading="lazy" />
-              </div>
-              <code>N in PR</code>
-              <span>PR icon counter for subagents with an open pull request under review or CI</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-merged.png`} role="button" tabindex="0" aria-label="View Merged Counter up-close screenshot">
-                <img src={`${base}screenshots/crops/sub-merged.png`} alt="Up-close screenshot of merged subagent PR counter token" loading="lazy" />
-              </div>
-              <code>N merged</code>
-              <span>Merge icon counter for subagents whose pull requests have landed</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-failed.png`} role="button" tabindex="0" aria-label="View Failed Counter up-close screenshot">
-                <img src={`${base}screenshots/crops/sub-failed.png`} alt="Up-close screenshot of failed subagent counter token" loading="lazy" />
-              </div>
-              <code>N failed</code>
-              <span>Red X counter shown if any subagent exits with a failure (turns the pill red)</span>
-            </div>
-            <div class="sl-legend-item">
-              <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-allmerged.png`} role="button" tabindex="0" aria-label="View All Merged Pill up-close screenshot">
-                <img src={`${base}screenshots/crops/sub-allmerged.png`} alt="Up-close screenshot of purple all-merged subagent pill" loading="lazy" />
-              </div>
-              <code>All Merged Pill</code>
-              <span>Turns purple when only merged counts remain; settled counts dismiss on the next real user message after detection, even while other agents keep working</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <p class="sl-shot-sub">Feature accents match the diagram labels. Pill backgrounds show current status and can change as work progresses.</p>
+      <p><a href={`${base}statuslines/`}>Read the symbols, colors, and setup guide →</a></p>
     </div>
   </section>
 
@@ -335,10 +124,10 @@ const skills = (await getCollection("skills")).sort(
         <img class="shot" src={`${base}images/app-installed.png`} alt="create-canvas-app installed and enabled" loading="lazy" />
       </li>
     </ol>
-    <h3>2 · Skills CLI</h3>
+    <h3>Alternative: Skills CLI</h3>
     <pre><code>npx skills add jongio/skills --list</code></pre>
     <pre><code>npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot</code></pre>
-    <h3>3 · Other apps and editors</h3>
+    <h3>Other apps and editors</h3>
     <ul class="host-list">
       <li><strong>VS Code and Cursor:</strong> install <code>https://github.com/jongio/skills</code> as a plugin source.</li>
       <li><strong>Claude Code:</strong> add <code>jongio/skills</code> as a marketplace, then install <code>jongio-skills@jongio-skills</code>.</li>
@@ -350,7 +139,7 @@ const skills = (await getCollection("skills")).sort(
       ChatGPT web and mobile require public directory review. The Codex IDE
       extension accepts standalone skills but not plugins. See the <a href="https://github.com/jongio/skills#app-and-editor-support">complete support matrix</a>.
     </p>
-    <p class="muted">After any install, reload with <code>/skills reload</code> or start a new session.</p>
+    <p class="muted">In Copilot CLI, start a new session after installing statusline extensions. For skills alone, <code>/skills reload</code> refreshes the available skills.</p>
   </section>
 </Layout>
 
@@ -540,7 +329,7 @@ const skills = (await getCollection("skills")).sort(
     border-radius: 10px;
     padding: clamp(0.85rem, 2vw, 1.25rem);
   }
-  .sl-trio-banner {
+  .sl-types-banner {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -553,10 +342,11 @@ const skills = (await getCollection("skills")).sort(
     letter-spacing: -0.02em;
     line-height: 1.1;
   }
-  .sl-trio-item.c-pr    { color: #58a6ff; }
-  .sl-trio-item.c-issue { color: #3fb950; }
-  .sl-trio-item.c-sub   { color: #f2cc60; }
-  .sl-trio-sep {
+  .sl-types-item.c-worktree { color: var(--feature-worktree); }
+  .sl-types-item.c-pr    { color: var(--feature-pr); }
+  .sl-types-item.c-issue { color: var(--feature-issue); }
+  .sl-types-item.c-sub   { color: var(--feature-subagent); }
+  .sl-types-sep {
     color: var(--border);
     font-weight: 300;
   }

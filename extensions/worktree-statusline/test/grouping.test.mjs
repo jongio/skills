@@ -270,8 +270,8 @@ test("installed compositor keeps the checkout first after real PR provider metad
 		assert.equal(entries[0].url, prUrl(119));
 		const output = await installedComposer.composeStatusLine(payload, options);
 		const prefix = color
-			? `\x1b[1;38;2;219;234;254;48;2;30;64;115m ${worktree} [⎇ ${branch}] \x1b[0m `
-			: `${worktree} [⎇ ${branch}] · `;
+			? `\x1b[1;38;2;219;234;254;48;2;30;64;115m ${worktree} [⎇ ${branch} base?] \x1b[0m `
+			: `${worktree} [⎇ ${branch} base?] · `;
 		assert.equal(output.split("\n").length, 1, output);
 		assert.ok(output.startsWith(prefix), output);
 		assert.equal(output, prefix + entries[0].text, "provider-rendered PR pill must follow the checkout label");
@@ -337,9 +337,9 @@ test("installed structured providers group independent checkouts, preserve local
 	const text = await composeStatusLine(payload, { home, now, ...plain });
 	const rows = text.split("\n");
 	assert.equal(rows.length, 5, text);
-	assert.ok(rows[0].startsWith(`${first} [⎇ feat/a]`), text);
-	assert.ok(rows[1].startsWith(`${second} [⎇ feat/b]`), text);
-	assert.ok(rows[2].startsWith(`${otherRepo} [⎇ feat/a]`), text);
+	assert.ok(rows[0].startsWith(`${first} [⎇ feat/a base?]`), text);
+	assert.ok(rows[1].startsWith(`${second} [⎇ feat/b base?]`), text);
+	assert.ok(rows[2].startsWith(`${otherRepo} [⎇ feat/a base?]`), text);
 	for (const [index, number] of [[0, 1], [1, 2], [2, 3]]) {
 		assert.ok(rows[index].includes(prUrl(number)), text);
 		assert.ok(!rows[index].includes("starting"), text);
@@ -353,7 +353,7 @@ test("installed structured providers group independent checkouts, preserve local
 	assert.ok(!text.includes(`${firstRepo} [⎇ main]`), text);
 	const colored = await composeStatusLine(payload, { home, now, color: true, links: true });
 	assert.equal(colored.split("\n").length, 5);
-	assert.ok(colored.startsWith(`\x1b[1;38;2;219;234;254;48;2;30;64;115m ${first} [⎇ feat/a] \x1b[0m `));
+	assert.ok(colored.startsWith(`\x1b[1;38;2;219;234;254;48;2;30;64;115m ${first} [⎇ feat/a base?] \x1b[0m `));
 	assert.equal(readFileSync(configPath, "utf8"), config);
 	assert.equal(readFileSync(settingsPath, "utf8"), settings);
 	for (const [entries, render] of [[prEntries, renderPr], [issueEntries, renderIssue]]) {

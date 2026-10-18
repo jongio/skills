@@ -5,23 +5,55 @@ own checkout, with its full path first and its live branch in brackets. When
 enabled, the compositor groups related PRs and issues on that checkout's row by
 default, with one overall subagent summary on an unlabeled row.
 
+![Illustrative blue branch/worktree pills leading checkout rows, with related PRs, issues, and one overall subagent summary](../../site/public/screenshots/statusline-worktree-grouped.svg)
+
 ```text
-C:\code\.worktrees\my-project\feat-login [⎇ feat/login*+%]  PR #119  Issue #42
-C:\code\.worktrees\my-project\release-check [⎇ release/check]  Issue #44
+C:\code\.worktrees\my-project\feat-login [⎇ feat/login*+% origin/feat/login↑1↓2 origin/main↓3]  PR #119  Issue #42
+C:\code\.worktrees\my-project\release-check [⎇ release/check origin/main↓2]  Issue #44
 Issue #43  2 starting  20 in PR  1 merged
 ```
 
 Each checkout gets a separate row in `statusline-compose.mjs`, ordered as
 checkout, PR pills, then issue pills. A single overall subagent summary appears
 on an unlabeled fallback row. Missing categories are omitted. Checkout pills are always
-leftmost when shown. Each pill
-has horizontal padding inside its background and no terminal hyperlink, avoiding
-hyperlink underlining. Paths are not shortened or truncated, and no Nerd Font is
-required. There is no colon between the path and branch.
+leftmost when shown. Paths are shown in full. Checkout labels are not links;
+use `/session-worktree` to inspect the session's directories. No Nerd Font is required.
 The native `⎇` branch indicator uses `*` for unstaged changes, `+` for staged
 changes, and `%` for untracked files, always in that order. Clean branches have
-no markers. One bounded porcelain-status read supplies all three markers,
-including changes to the same file both before and after staging.
+no markers. A file can have both staged and unstaged changes.
+
+## Upstream and base divergence
+
+The pill keeps local file markers and commit comparisons separate:
+
+| Signal | Meaning |
+|---|---|
+| `origin/feat/login↑1` | One local commit is not in the configured upstream. |
+| `origin/feat/login↓2` | Two upstream commits are missing locally. |
+| `origin/feat/login↑1↓2` | Both sides have unique commits: the branch has diverged. |
+| `origin/main↓3` | Three commits from the selected base are missing locally. |
+| `origin/main?` | The target is known, but its comparison is unavailable. |
+| `base?` | A matched PR's base identity is incomplete or conflicting; no other base is substituted. |
+
+Upstream counts compare `HEAD` with its configured tracking ref. Base counts
+show only missing commits, not all the feature commits ahead of the base.
+The base comes from a uniquely matched tracked PR's target branch/repository,
+or, when no PR matches, a locally verified remote default branch. A matched PR
+with incomplete or conflicting base metadata shows `base?`, not a default-branch
+fallback. Without a matched PR, the remote is the configured upstream's remote,
+otherwise `origin`, otherwise the sole configured remote. Its local remote-default
+symbolic ref must be valid; no known default means no base indicator. Fork PRs must use the
+target repository's remote, not a same-named branch in the fork. The target ref
+is always labeled; two comparisons to the same target are not duplicated.
+Zero counts and an unconfigured upstream are omitted. Detached or unborn HEADs,
+missing refs, and ambiguous metadata never imply an up-to-date branch.
+
+All comparisons use **locally fetched refs**. The footer never fetches or
+contacts GitHub for commit counts; fetch through your normal workflow to update
+those refs. It never pulls, rebases, merges, or changes branches. Behind does not
+mean rebase is mandatory: integrating the base is a separate workflow decision.
+Git does not reliably record a branch's historical creation point, so this is a
+comparison with its current upstream and selected base, not its "parent branch."
 
 Newlines are preserved in both plain and colored grouped output. The standalone
 `render(payload, options)` exports still return strings for standalone use.
@@ -123,6 +155,12 @@ this item. `/session-worktree` lists the session's checkout paths and branches.
   `<session_id>.contexts.json` snapshot cache, retaining already discovered
   checkout rows. Discovery, branch changes and removal beyond that budget
   appear on subsequent refreshes.
+- Each refreshed, visible checkout adds at most one upstream graph comparison,
+  one selected-base graph comparison, and one remote-default symbolic-ref lookup.
+  PR-base selection skips the default lookup; identical targets reuse counts.
+  Cached checkouts outside the current refresh budget show unavailable comparisons
+  rather than reusing stale counts. Git commands retain 1.5-second timeouts,
+  bounded output, and disabled lazy fetching, so rendering never downloads objects.
 - Hides Copilot's own checkout and shows the root session's external checkout
   first, then other external checkouts used during the session. Deduplicates checkout roots, including subdirectories of
   the same checkout. It does not list unrelated worktrees from other sessions.

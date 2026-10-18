@@ -12,23 +12,26 @@ const base = import.meta.env.BASE_URL;
       Composable terminal statuslines for GitHub Copilot CLI: <strong>Pull Requests</strong> (<code>pr-statusline</code>),
       <strong>GitHub Issues</strong> (<code>issue-statusline</code>), <strong>Subagents</strong> (<code>subagent-statusline</code>),
       and <strong>Branch and Worktree</strong> (<code>worktree-statusline</code>).
-      Run them individually or compose checkout-grouped rows via <code>~/.copilot/statusline-compose.mjs</code>, with PRs and linked issues beside each worktree and one overall subagent summary.
+      Choose any combination. See where work is happening, what needs attention on GitHub, and how background tasks are progressing.
     </p>
   </header>
 
   <section class="statusline-showcase card">
     <div class="sl-shot-block">
-      <div class="sl-trio-banner" aria-label="Three Statusline Types">
-        <span class="sl-trio-item c-pr">Pull Requests</span>
-        <span class="sl-trio-sep" aria-hidden="true">|</span>
-        <span class="sl-trio-item c-issue">Issues</span>
-        <span class="sl-trio-sep" aria-hidden="true">|</span>
-        <span class="sl-trio-item c-sub">Subagents</span>
+      <div class="sl-types-banner" aria-label="Four Statusline Types">
+        <span class="sl-types-item c-worktree">Branch &amp; Worktree</span>
+        <span class="sl-types-sep" aria-hidden="true">|</span>
+        <span class="sl-types-item c-pr">Pull Requests</span>
+        <span class="sl-types-sep" aria-hidden="true">|</span>
+        <span class="sl-types-item c-issue">Issues</span>
+        <span class="sl-types-sep" aria-hidden="true">|</span>
+        <span class="sl-types-item c-sub">Subagents</span>
       </div>
-      <div class="sl-shot-wrap" data-full-img={`${base}screenshots/statusline-composed-terminal.png`} role="button" tabindex="0" aria-label="View Composed Statusline infographic full size">
-        <img src={`${base}screenshots/statusline-composed-terminal.png`} alt="Annotated overview of the three Copilot CLI statusline types: Pull Requests, Issues, and Subagents" loading="eager" />
+      <div class="sl-shot-wrap" data-full-img={`${base}screenshots/statusline-worktree-grouped.svg`} role="button" tabindex="0" aria-label="View four-component grouped footer illustration full size">
+        <img src={`${base}screenshots/statusline-worktree-grouped.svg`} alt="Illustrative grouped footer with blue branch/worktree pills first, related PRs and issues, and one overall subagent summary" loading="eager" />
         <span class="sl-zoom-hint">Click to view full size</span>
       </div>
+      <p class="sl-shot-sub">Example footer: related PRs and issues share their checkout's row. Feature labels use blue for Branch &amp; Worktree, green for PRs, amber for Issues, and purple for Subagents. The explanatory outlines help you match each label; pill backgrounds show status, not feature type.</p>
     </div>
 
     <div class="sl-install-primary">
@@ -61,17 +64,18 @@ const base = import.meta.env.BASE_URL;
           <pre class="sl-primary-pre"><code>/statusline-setup</code></pre>
         </div>
       </div>
+      <p class="sl-primary-sub">Start a new session after installation to load the extensions. Run setup again whenever you want to change the enabled components.</p>
     </div>
 
     <div class="sl-install-secondary">
-      <div class="sl-secondary-summary">Alternative: Standalone Statusline Scripts (Install only the statuslines without the skills plugin)</div>
+      <div class="sl-secondary-summary">Alternative: install without a plugin</div>
       <div class="sl-secondary-stack">
         <div class="sl-install-item">
-          <div class="sl-os-label">Windows (PowerShell one-liner)</div>
+          <div class="sl-os-label">Windows · PowerShell</div>
           <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 | iex</code></pre>
         </div>
         <div class="sl-install-item">
-          <div class="sl-os-label">macOS &amp; Linux (Bash one-liner)</div>
+          <div class="sl-os-label">macOS &amp; Linux · Bash</div>
           <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash</code></pre>
         </div>
       </div>
@@ -81,25 +85,38 @@ const base = import.meta.env.BASE_URL;
       <div class="sl-shot-block">
         <div class="sl-shot-header">
           <div>
-            <strong>Branch and Worktree (<code>worktree-statusline</code>)</strong>
-            <p class="sl-shot-sub">Shows session and subagent work happening outside Copilot's current checkout, with full paths first and live branches in brackets. Hides entirely when all work is local.</p>
+            <h2 id="branch-worktree" class="sl-types-item c-worktree">Branch and Worktree · Paths, branches, and missing commits</h2>
+            <p class="sl-shot-sub">See the folder and live branch when the session or a background agent works outside Copilot's current checkout. Related PRs and issues follow that checkout. The current checkout's label is hidden to avoid repeating Copilot's own display.</p>
           </div>
           <span><a href="https://github.com/jongio/skills/tree/main/extensions/worktree-statusline" target="_blank" rel="noopener">View source →</a></span>
         </div>
-        <pre><code>C:\code\.worktrees\my-project\feat-login [⎇ feat/login*+%]</code></pre>
-        <p class="sl-shot-sub">Native branch markers: <code>*</code> unstaged changes, <code>+</code> staged changes, and <code>%</code> untracked files. Related PRs and issues share each checkout's row; empty historical rows disappear while current working checkouts remain visible.</p>
-        <p class="sl-shot-sub">One padded, non-underlined pill per distinct external checkout, with full paths and no colon separator. Subdirectories of Copilot's checkout do not create redundant pills. Supports detached HEADs and updates existing pills when branches change. Enable with <code>/statusline-setup</code>; list all session checkouts with <code>/session-worktree</code>. Existing saved selections are preserved.</p>
+        <pre><code>C:\code\.worktrees\my-project\feat-login [⎇ feat/login*+% origin/feat/login↑1↓2 origin/main↓3]</code></pre>
+        <div class="sl-legend-grid">
+          <div class="sl-legend-item"><code>⎇ branch</code><span>The branch currently checked out, or a short commit ID when no branch is checked out.</span></div>
+          <div class="sl-legend-item"><code>* unstaged</code><span>Tracked files have unstaged changes.</span></div>
+          <div class="sl-legend-item"><code>+ staged</code><span>The index has staged changes.</span></div>
+          <div class="sl-legend-item"><code>% untracked</code><span>Untracked files exist. This is not a percentage.</span></div>
+          <div class="sl-legend-item"><code>origin/feat/login↑1↓2</code><span>One local-only commit and two upstream commits missing locally. Both arrows mean the branch has diverged; zero counts are hidden.</span></div>
+          <div class="sl-legend-item"><code>origin/main↓3</code><span>Three commits from the PR's target branch are missing locally. Without a matched PR, the comparison uses the verified remote default branch.</span></div>
+          <div class="sl-legend-item"><code>origin/main?</code><span>The target is known but cannot be compared, for example because it has not been fetched. This does not mean the branch is up to date. No configured upstream means no upstream count.</span></div>
+          <div class="sl-legend-item"><code>base?</code><span>A tracked PR matches this checkout, but its target cannot be verified. The footer does not substitute another branch.</span></div>
+        </div>
+        <p class="sl-shot-sub">Counts reflect your last fetch, not a live check of GitHub. Fetch through your normal workflow to update them. The footer never changes branches or runs a pull, merge, or rebase. A behind count means missing commits; it does not require one particular way to synchronize.</p>
+        <p class="sl-shot-sub">For fork PRs, the base comparison uses the target repository's remote, not a same-named branch in your fork. If upstream and base are the same target, they appear once.</p>
+        <p class="sl-shot-sub">Without a matched PR, the base is the verified remote default branch. If no default is known, no base count appears. In large sessions, some checkouts may show unavailable comparisons while waiting for their next refresh.</p>
+        <p class="sl-shot-sub">Items that cannot be matched to a checkout remain visible on a separate row. Background-agent counts appear once for the whole session.</p>
+        <p class="sl-shot-sub">Enable with <code>/statusline-setup</code>. Run <code>/session-worktree</code> to inspect the session’s checkouts, including any hidden current-checkout label.</p>
       </div>
       <div class="sl-shot-block">
         <div class="sl-shot-header">
           <div>
-            <strong>1. Pull Request Statusline (<code>pr-statusline</code>) · All States &amp; Icons</strong>
-            <p class="sl-shot-sub">Tracks session PRs across repositories and worktrees. Detailed pills link to GitHub; proven subagent-only PRs use overall subagent counts instead of individual pills.</p>
+            <h2 id="pull-requests" class="sl-types-item c-pr">Pull Requests · Checks and reviews</h2>
+            <p class="sl-shot-sub">Follow the PRs worked on in this session, even across repositories. Open a PR from its pill using your terminal’s link gesture. PRs tracked only through background agents contribute to the subagent summary instead of adding individual pills.</p>
           </div>
           <span><a href="https://github.com/jongio/skills/tree/main/extensions/pr-statusline" target="_blank" rel="noopener">View source →</a></span>
         </div>
-        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/pr-statusline.png`} role="button" tabindex="0" aria-label="View PR Statusline infographic full size">
-          <img src={`${base}screenshots/pr-statusline.png`} alt="Annotated infographic of pr-statusline showing Green, Amber, Red, and Purple PR pills and explaining each icon" loading="lazy" />
+        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/pr-statusline.svg`} role="button" tabindex="0" aria-label="View PR Statusline infographic full size">
+          <img src={`${base}screenshots/pr-statusline.svg`} alt="Annotated infographic of pr-statusline showing Green, Amber, Red, and Purple PR pills and explaining each icon" loading="lazy" />
           <span class="sl-zoom-hint">Click to view full size</span>
         </div>
         <div class="sl-legend-grid">
@@ -108,7 +125,7 @@ const base = import.meta.env.BASE_URL;
               <img src={`${base}screenshots/crops/pr-link.png`} alt="Up-close screenshot of clickable Repo#PR link token" loading="lazy" />
             </div>
             <code>Repo#PR Link</code>
-            <span>Clickable OSC 8 link to <code>owner/repo#number</code> on GitHub (Ctrl+Click or Cmd+Click)</span>
+            <span>Open <code>owner/repo#number</code> on GitHub with your terminal’s link gesture, often Ctrl+Click or Cmd+Click.</span>
           </div>
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-ci.png`} role="button" tabindex="0" aria-label="View CI Checks up-close screenshot">
@@ -122,14 +139,14 @@ const base = import.meta.env.BASE_URL;
               <img src={`${base}screenshots/crops/pr-conflict.png`} alt="Up-close screenshot of merge conflict warning token" loading="lazy" />
             </div>
             <code>Merge Conflict</code>
-            <span>Warning triangle shown on red pills when <code>mergeStateStatus === "DIRTY"</code></span>
+            <span>A warning triangle means GitHub reports a merge conflict with the base branch. Open the PR to review it.</span>
           </div>
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-approvals.png`} role="button" tabindex="0" aria-label="View Approvals up-close screenshot">
               <img src={`${base}screenshots/crops/pr-approvals.png`} alt="Up-close screenshot of PR approval counter tokens" loading="lazy" />
             </div>
             <code>Approvals (X/Y)</code>
-            <span>Thumbs-up icon with approvals received vs total reviewers</span>
+            <span>Approvals received out of reviewers counted by the footer. This is not a count of remaining branch-protection requirements.</span>
           </div>
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/pr-threads.png`} role="button" tabindex="0" aria-label="View Review Threads up-close screenshot">
@@ -143,7 +160,7 @@ const base = import.meta.env.BASE_URL;
               <img src={`${base}screenshots/crops/pr-merged.png`} alt="Up-close screenshot of purple merged PR pill" loading="lazy" />
             </div>
             <code>Purple Merged</code>
-            <span>Turns purple when the merge is detected, then dismisses on the next real user message; cache refreshes do not reset that boundary</span>
+            <span>Purple means GitHub confirmed the merge. The pill disappears after your next message following detection.</span>
           </div>
         </div>
       </div>
@@ -151,13 +168,13 @@ const base = import.meta.env.BASE_URL;
       <div class="sl-shot-block">
         <div class="sl-shot-header">
           <div>
-            <strong>2. GitHub Issue Statusline (<code>issue-statusline</code>) · All States &amp; Icons</strong>
+            <h2 id="issues" class="sl-types-item c-issue">Issues · Priority and ownership</h2>
             <p class="sl-shot-sub">Renders a separate clickable pill for each GitHub issue worked on in the active session with priority labels, linked PRs, assignees, and comment counts.</p>
           </div>
           <span><a href="https://github.com/jongio/skills/tree/main/extensions/issue-statusline" target="_blank" rel="noopener">View source →</a></span>
         </div>
-        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/issue-statusline.png`} role="button" tabindex="0" aria-label="View Issue Statusline infographic full size">
-          <img src={`${base}screenshots/issue-statusline.png`} alt="Annotated infographic of issue-statusline showing Green, Amber, Red, and Purple issue pills and explaining each icon" loading="lazy" />
+        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/issue-statusline.svg`} role="button" tabindex="0" aria-label="View Issue Statusline infographic full size">
+          <img src={`${base}screenshots/issue-statusline.svg`} alt="Annotated infographic of issue-statusline showing Green, Amber, Red, and Purple issue pills and explaining each icon" loading="lazy" />
           <span class="sl-zoom-hint">Click to view full size</span>
         </div>
         <div class="sl-legend-grid">
@@ -166,14 +183,14 @@ const base = import.meta.env.BASE_URL;
               <img src={`${base}screenshots/crops/issue-link.png`} alt="Up-close screenshot of clickable Repo#Issue link token" loading="lazy" />
             </div>
             <code>Repo#Issue Link</code>
-            <span>Separate clickable OSC 8 link per issue (issue icon for standard issues, bug icon for bug-labeled issues)</span>
+            <span>Open the issue on GitHub. A bug icon identifies bug-labeled issues.</span>
           </div>
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-label.png`} role="button" tabindex="0" aria-label="View Priority Label up-close screenshot">
               <img src={`${base}screenshots/crops/issue-label.png`} alt="Up-close screenshot of issue priority and bug labels" loading="lazy" />
             </div>
             <code>Priority / Label</code>
-            <span>Surfaces the highest-signal label (<code>P0</code>, <code>P1</code>, <code>bug</code>, <code>enhancement</code>) right inside the pill</span>
+            <span>Shows a priority or category label (<code>P0</code>, <code>P1</code>, <code>bug</code>, <code>enhancement</code>) right inside the pill</span>
           </div>
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-pr.png`} role="button" tabindex="0" aria-label="View Linked Open PR up-close screenshot">
@@ -187,7 +204,7 @@ const base = import.meta.env.BASE_URL;
               <img src={`${base}screenshots/crops/issue-assignee.png`} alt="Up-close screenshot of issue assignee token" loading="lazy" />
             </div>
             <code>Assignee</code>
-            <span>User icon with the assigned GitHub handle (green when assigned + active, amber when unassigned)</span>
+            <span>The assigned GitHub handle, or <code>unassigned</code>. Assignment or an open linked PR can make an issue green; urgent labels can still make it red.</span>
           </div>
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/issue-comments.png`} role="button" tabindex="0" aria-label="View Comment Count up-close screenshot">
@@ -209,29 +226,29 @@ const base = import.meta.env.BASE_URL;
       <div class="sl-shot-block">
         <div class="sl-shot-header">
           <div>
-            <strong>3. Subagent Statusline (<code>subagent-statusline</code>) · Fleet Phases &amp; Counters</strong>
-            <p class="sl-shot-sub">Aggregates background subagents spawned by the current Copilot CLI session into live phase counters so you can see fleet progress at a glance.</p>
+            <h2 id="subagents" class="sl-types-item c-sub">Subagents · Background work</h2>
+            <p class="sl-shot-sub">See how many background agents are starting, exploring, working on open PRs, merged, or failed. Use <code>/tasks</code> to inspect their individual output.</p>
           </div>
           <span><a href="https://github.com/jongio/skills/tree/main/extensions/subagent-statusline" target="_blank" rel="noopener">View source →</a></span>
         </div>
-        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/subagent-statusline.png`} role="button" tabindex="0" aria-label="View Subagent Statusline infographic full size">
-          <img src={`${base}screenshots/subagent-statusline.png`} alt="Annotated infographic of subagent-statusline showing active fleet counters and all-merged summary pill with pointer lines" loading="lazy" />
+        <div class="sl-shot-wrap" data-full-img={`${base}screenshots/subagent-statusline.svg`} role="button" tabindex="0" aria-label="View Subagent Statusline infographic full size">
+          <img src={`${base}screenshots/subagent-statusline.svg`} alt="Illustrative subagent summaries with starting, open PR, merged, and failed counts, plus the command to inspect them" loading="lazy" />
           <span class="sl-zoom-hint">Click to view full size</span>
         </div>
         <div class="sl-legend-grid">
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-icon.png`} role="button" tabindex="0" aria-label="View Subagent Icon up-close screenshot">
-              <img src={`${base}screenshots/crops/sub-icon.png`} alt="Up-close screenshot of subagent fleet icon token" loading="lazy" />
+              <img src={`${base}screenshots/crops/sub-icon.png`} alt="Subagent summary icon" loading="lazy" />
             </div>
             <code>Subagent Icon</code>
-            <span>One padded, non-linked session summary; run <code>/tasks</code> in the console to inspect individual agents</span>
+            <span>One summary for the whole session. It is not a link; run <code>/tasks</code> to inspect individual agents.</span>
           </div>
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-starting.png`} role="button" tabindex="0" aria-label="View Starting Counter up-close screenshot">
               <img src={`${base}screenshots/crops/sub-starting.png`} alt="Up-close screenshot of subagents starting counter token" loading="lazy" />
             </div>
             <code>N starting / N exploring</code>
-            <span>Hourglass counter for subagents starting up and search counter for read-only <code>explore</code> / <code>research</code> subagents</span>
+            <span>Starting means work has begun before a PR is tracked. Exploring identifies read-only investigation.</span>
           </div>
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-inpr.png`} role="button" tabindex="0" aria-label="View In-PR Counter up-close screenshot">
@@ -259,10 +276,16 @@ const base = import.meta.env.BASE_URL;
               <img src={`${base}screenshots/crops/sub-allmerged.png`} alt="Up-close screenshot of purple all-merged subagent pill" loading="lazy" />
             </div>
             <code>All Merged Pill</code>
-            <span>Turns purple when only merged counts remain; settled counts dismiss on the next real user message after detection, even while other agents keep working</span>
+            <span>Purple means only merged work remains. Completed counts clear after your next message following detection, even if other agents are still working.</span>
           </div>
         </div>
       </div>
+    </div>
+    <div class="sl-shot-block">
+      <h2>Inspect what the footer is tracking</h2>
+      <p>Run <code>/session-worktree</code>, <code>/session-prs</code>, <code>/session-issues</code>, or <code>/session-subagents</code> in Copilot CLI to inspect this session's tracked work.</p>
+      <p>PR, issue, and subagent commands also accept <code>clear</code> to clear their tracked items for this session. The worktree command is inspect-only; there is no unified force-refresh command yet.</p>
+      <p>For an unexpected commit count, fetch the relevant remote through your normal workflow first. For extensions updated during a running session, start a new session to load the updated collector.</p>
     </div>
   </section>
 
@@ -302,7 +325,7 @@ const base = import.meta.env.BASE_URL;
     border-radius: 10px;
     padding: clamp(0.85rem, 2vw, 1.25rem);
   }
-  .sl-trio-banner {
+  .sl-types-banner {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -315,10 +338,12 @@ const base = import.meta.env.BASE_URL;
     letter-spacing: -0.02em;
     line-height: 1.1;
   }
-  .sl-trio-item.c-pr    { color: #58a6ff; }
-  .sl-trio-item.c-issue { color: #3fb950; }
-  .sl-trio-item.c-sub   { color: #f2cc60; }
-  .sl-trio-sep {
+  .sl-types-item.c-worktree { color: var(--feature-worktree); }
+  .sl-types-item.c-pr    { color: var(--feature-pr); }
+  .sl-types-item.c-issue { color: var(--feature-issue); }
+  .sl-types-item.c-sub   { color: var(--feature-subagent); }
+  .sl-shot-header h2 { margin: 0; font-size: 1.15rem; }
+  .sl-types-sep {
     color: var(--border);
     font-weight: 300;
   }

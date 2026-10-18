@@ -1,10 +1,10 @@
 # PR Statusline
 
-A composable GitHub Copilot CLI status line that tracks the pull requests **this session** is actively working on across repositories and worktrees, rendering live, color-coded status pills with fully-qualified clickable web links (`owner/repo#number`), CI check progress (`passed/total`), review approvals (`approved/requested`), and review comment resolution (`resolved/total`). Coexists side-by-side with [`issue-statusline`](../issue-statusline) and [`subagent-statusline`](../subagent-statusline) via `~/.copilot/statusline-compose.mjs`.
+A composable GitHub Copilot CLI status line that tracks the pull requests **this session** is actively working on across repositories and worktrees, rendering live, color-coded status pills with fully-qualified clickable web links (`owner/repo#number`), CI check progress (`passed/total`), review approvals (`approved/requested`), and review comment resolution (`resolved/total`). Composes with [`issue-statusline`](../issue-statusline), [`subagent-statusline`](../subagent-statusline), and [`worktree-statusline`](../worktree-statusline) via `~/.copilot/statusline-compose.mjs`.
 
-![PR Statusline in isolation](screenshots/azure-dev-statusline.png)
+![Pull request pill examples and their status meanings](../../site/public/screenshots/pr-statusline.svg)
 
-![Composed PR, Issue, and Subagent statusline](screenshots/statusline-composed.png)
+![Illustrative checkout-grouped footer with branch/worktree pills, related PRs and issues, and one subagent summary](../../site/public/screenshots/statusline-worktree-grouped.svg)
 
 ## Compact subagent PRs
 
@@ -17,7 +17,12 @@ dismissing the subagent summary restores those PR details; no arbitrary item
 limit drops PRs or issues. Standalone PR rendering remains detailed.
 
 Enabling the worktree statusline also groups PRs and linked issues by checkout
-on separate rows. See [association rules](../worktree-statusline/README.md#association-rules).
+on separate rows. Its branch pill compares the configured upstream (`↑` local
+only, `↓` missing locally) and the matched PR's target branch (`↓` missing base
+commits), using locally fetched refs. The target repository is respected for
+fork PRs; ambiguous or unavailable comparisons are not reported as current.
+See [divergence indicators](../worktree-statusline/README.md#upstream-and-base-divergence)
+and [association rules](../worktree-statusline/README.md#association-rules).
 
 ## Install (Windows, macOS, and Linux)
 

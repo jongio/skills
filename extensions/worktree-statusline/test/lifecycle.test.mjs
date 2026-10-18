@@ -272,7 +272,7 @@ test("last merged PR dismissal removes empty historical checkout rows but preser
 	writeAgents(agents.snapshot(), home);
 	const payload = { session_id: "group-dismissal", cwd: home };
 	const before = await composeStatusLine(payload, { home, ...plain });
-	assert.ok(before.includes(`${merged} [⎇ feat/merged]`) && before.includes("widget#1") && before.includes("1 merged"), before);
+	assert.ok(before.includes(`${merged} [⎇ feat/merged base?]`) && before.includes("widget#1") && before.includes("1 merged"), before);
 	appendFileSync(file, JSON.stringify(event("user.message", 3000, { content: "Next task" })) + "\n");
 	for (const color of [false, true]) {
 		const output = await composeStatusLine(payload, { home, ...plain, color });

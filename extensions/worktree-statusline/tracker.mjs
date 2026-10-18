@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
+import { repositoryKey } from "./grouping.mjs";
 
 const MAX_READ_BYTES = 4 * 1024 * 1024;
 const MAX_GIT_DIRECTORIES = 16;
@@ -223,7 +224,125 @@ export function dirtyMarkers(porcelain) {
 
 export function checkoutLabel(context) {
 	const safe = (value) => String(value).replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g, "");
-	return `${safe(context.root)} [⎇ ${safe(context.branch)}${safe(context.dirty ?? "")}]`;
+	const { upstream, base } = context.divergence ?? {};
+	const indicator = (entry, onlyBehind = false) => {
+		if (!entry) return "";
+		const counts = entry.ahead === null || entry.behind === null ? "?"
+			: `${!onlyBehind && entry.ahead ? `↑${entry.ahead}` : ""}${entry.behind ? `↓${entry.behind}` : ""}`;
+		return counts ? ` ${safe(entry.target)}${counts}` : "";
+	};
+	return `${safe(context.root)} [⎇ ${safe(context.branch)}${safe(context.dirty ?? "")}${indicator(upstream)}${base?.target === upstream?.target ? "" : indicator(base, true)}]`;
+}
+
+const gitOptions = () => ({
+	encoding: "utf8", timeout: 1500, maxBuffer: 64 * 1024, windowsHide: true,
+	env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", GIT_NO_LAZY_FETCH: "1" },
+});
+
+function configuredRefs(output, branch) {
+	const remotes = new Map();
+	const upstream = { remotes: [], merges: [] };
+	for (const record of output.split("\0")) {
+		const newline = record.indexOf("\n");
+		if (newline < 0) continue;
+		const key = record.slice(0, newline), value = record.slice(newline + 1);
+		const match = /^remote\.(.+)\.(url|fetch)$/.exec(key);
+		if (match) {
+			if (!remotes.has(match[1])) remotes.set(match[1], { name: match[1], urls: [], fetch: [] });
+			remotes.get(match[1])[match[2] === "url" ? "urls" : "fetch"].push(value);
+		} else if (branch !== null && key === `branch.${branch}.remote`) upstream.remotes.push(value);
+		else if (branch !== null && key === `branch.${branch}.merge`) upstream.merges.push(value);
+	}
+	return { remotes: [...remotes.values()], upstream };
+}
+
+function localRef(ref) {
+	return typeof ref === "string" && /^refs\/(?:heads|remotes)\/.+/.test(ref) &&
+		!(/[\x00-\x20\x7f~^:?*[\]\\]|\.\.|@\{|\/\/|(?:^|\/)\.|\.(?:lock)?(?:\/|$)|\/$/.test(ref));
+}
+
+function refspecMatch(pattern, ref) {
+	const parts = pattern.split("*");
+	if (parts.length === 1) return pattern === ref ? "" : null;
+	if (parts.length !== 2 || ref.length < parts[0].length + parts[1].length ||
+		!ref.startsWith(parts[0]) || !ref.endsWith(parts[1])) return null;
+	return ref.slice(parts[0].length, ref.length - parts[1].length);
+}
+
+function unambiguousRef(ref, remote, remotes) {
+	return !remotes.some((other) => other !== remote && other.fetch.some((spec) => {
+		const destination = spec.replace(/^\+/, "").split(":")[1];
+		return destination && refspecMatch(destination, ref) !== null;
+	}));
+}
+
+function mappedTarget(remote, branch, remotes = []) {
+	const target = `${remote?.name ? `${remote.name}/` : ""}${branch}`;
+	if (!remote || branch.startsWith("-") || !localRef(`refs/heads/${branch}`)) return { target };
+	const source = `refs/heads/${branch}`;
+	const matches = [];
+	for (const spec of remote.fetch) {
+		// Exclusions and nonstandard mappings must not silently select a stale ref.
+		if (spec.startsWith("^")) return { target };
+		const [from, to, extra] = spec.replace(/^\+/, "").split(":");
+		if (!to || extra) continue;
+		const capture = refspecMatch(from, source);
+		if (capture !== null && from.split("*").length === to.split("*").length) matches.push(to.replace("*", capture));
+	}
+	const refs = [...new Set(matches)];
+	return refs.length === 1 && localRef(refs[0]) && unambiguousRef(refs[0], remote, remotes)
+		? { target: refs[0].replace(/^refs\/(?:remotes|heads)\//, ""), ref: refs[0] } : { target };
+}
+
+export function checkoutDivergence(context, prs = [], { run = spawnSync } = {}) {
+	const read = (args) => {
+		if (context.gitRefreshed === false) return null;
+		try {
+			const result = run("git", ["-C", context.root, ...args], gitOptions());
+			if (!result.error && result.status === 1 && args[0] === "symbolic-ref") return "";
+			return !result.error && result.status === 0 && typeof result.stdout === "string" ? result.stdout.trim() : null;
+		} catch { return null; }
+	};
+	const remotes = context.remotes ?? [];
+	const config = context.upstream;
+	let upstream = null;
+	if (config?.remotes.length || config?.merges.length) {
+		const branch = (config.merges[0] ?? "").replace(/^refs\/heads\//, "");
+		upstream = config.remotes.length !== 1 || config.merges.length !== 1 ? { target: "upstream" }
+			: config.remotes[0] === "." ? { target: branch, ...(localRef(config.merges[0]) ? { ref: config.merges[0] } : {}) }
+			: mappedTarget(remotes.find((remote) => remote.name === config.remotes[0]) ?? { name: config.remotes[0], fetch: [] }, branch, remotes);
+	}
+	const matches = prs.filter((pr) => pr.headRefName === context.branch && repositoryKey(pr.headRepositoryUrl) &&
+		context.remoteUrls?.some((url) => repositoryKey(url) === repositoryKey(pr.headRepositoryUrl)));
+	let base = null;
+	if (matches.length) {
+		const targets = new Set(matches.map((pr) => JSON.stringify([pr.baseRefName, repositoryKey(pr.baseRepositoryUrl)])));
+		const pr = matches[0], repository = repositoryKey(pr.baseRepositoryUrl);
+		const candidates = remotes.filter((remote) => remote.urls.length &&
+			remote.urls.every((url) => repositoryKey(url) === repository));
+		base = targets.size !== 1 || !pr.baseRefName || !repository ? { target: "base" }
+			: candidates.length === 1 ? mappedTarget(candidates[0], pr.baseRefName, remotes) : { target: pr.baseRefName };
+	} else {
+		const remote = remotes.find((item) => item.name === config?.remotes[0]) ??
+			remotes.find((item) => item.name === "origin") ?? (remotes.length === 1 ? remotes[0] : null);
+		if (remote) {
+			const symbolic = `refs/remotes/${remote.name}/HEAD`;
+			const ref = localRef(symbolic) ? read(["symbolic-ref", "--quiet", symbolic]) : null;
+			if (ref !== "") base = ref && localRef(ref) && ref.startsWith(`refs/remotes/${remote.name}/`) &&
+				ref !== symbolic && unambiguousRef(ref, remote, remotes)
+				? { target: ref.slice(13), ref } : { target: `${remote.name}/HEAD` };
+		}
+	}
+	const compare = (entry) => {
+		if (!entry) return null;
+		const output = entry.ref ? read(["rev-list", "--left-right", "--count", `HEAD...${entry.ref}`, "--"]) : null;
+		const counts = /^(\d+)\s+(\d+)$/.exec(output ?? "");
+		const values = counts ? counts.slice(1).map(Number) : [];
+		return { target: entry.target, ahead: values.length && values.every(Number.isSafeInteger) ? values[0] : null,
+			behind: values.length && values.every(Number.isSafeInteger) ? values[1] : null };
+	};
+	const result = compare(upstream);
+	return { upstream: result, base: base?.ref && base.ref === upstream?.ref ? result : compare(base) };
 }
 
 export function gitContext(cwd, { run = spawnSync } = {}) {
@@ -234,10 +353,7 @@ export function gitContext(cwd, { run = spawnSync } = {}) {
 		if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
 		throw error;
 	}
-	const options = {
-		encoding: "utf8", timeout: 1500, maxBuffer: 64 * 1024, windowsHide: true,
-		env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
-	};
+	const options = gitOptions();
 	const result = run("git", ["-C", cwd, "rev-parse", "--show-toplevel", "--git-common-dir", "--absolute-git-dir"], options);
 	if (result.error) throw result.error;
 	if (result.status !== 0) {
@@ -260,19 +376,21 @@ export function gitContext(cwd, { run = spawnSync } = {}) {
 	const common = resolve(cwd, commonDir);
 	const checkoutGit = resolve(gitDir);
 	const worktree = process.platform === "win32" ? common.toLowerCase() !== checkoutGit.toLowerCase() : common !== checkoutGit;
-	const remotes = run("git", ["-C", cwd, "config", "--get", "remote.origin.url"], options);
+	const remotes = run("git", ["-C", cwd, "config", "--null", "--get-regexp", "^(remote\\..*\\.(url|fetch)|branch\\..*\\.(remote|merge))$"], options);
 	if (remotes.error) throw remotes.error;
 	if (remotes.status !== 0 && remotes.status !== 1) throw new Error("Cannot read Git remotes.");
-	const remoteUrls = remotes.stdout.trim() ? [remotes.stdout.trim()] : [];
+	const refs = configuredRefs(remotes.stdout, branch.status === 0 ? label : null);
+	const remoteUrls = refs.remotes.find((remote) => remote.name === "origin")?.urls.slice(-1) ?? [];
 	const status = run("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none"], options);
 	if (status.error) throw status.error;
 	if (status.status !== 0) throw new Error("Cannot read Git status.");
-	return { cwd, root, branch: label, worktree, commonDir: checkoutKey(common), remoteUrls, dirty: dirtyMarkers(status.stdout) };
+	return { cwd, root, branch: label, worktree, commonDir: checkoutKey(common), remoteUrls, ...refs, dirty: dirtyMarkers(status.stdout) };
 }
 
 export function sessionContexts(payload, options = {}) {
 	const location = sessionDirectory(payload, options);
 	const contexts = new Map();
+	const refreshedDirectories = new Set();
 	const directoryKeys = new Map();
 	let remainingGitDirectories = MAX_GIT_DIRECTORIES;
 	if (!location.catchingUp) {
@@ -293,6 +411,7 @@ export function sessionContexts(payload, options = {}) {
 		for (let i = 0; i < count; i++) {
 			const cwd = directories[(cursor + i) % directories.length];
 			records.set(cwd, gitContext(cwd, options));
+			refreshedDirectories.add(cwd);
 		}
 		remainingGitDirectories -= count;
 		if (cachePath) writeJson(cachePath, {
@@ -304,7 +423,8 @@ export function sessionContexts(payload, options = {}) {
 			const root = resolve(context.root);
 			const key = checkoutKey(root);
 			directoryKeys.set(checkoutKey(cwd), key);
-			if (!contexts.has(key)) contexts.set(key, { ...context, root });
+			if (!contexts.has(key)) contexts.set(key, { ...context, root, gitRefreshed: refreshedDirectories.has(cwd) });
+			else if (refreshedDirectories.has(cwd)) contexts.set(key, { ...context, root, gitRefreshed: true });
 		}
 	}
 	const agentCheckouts = Object.fromEntries(Object.entries(location.agentDirectories ?? {}).map(([id, paths]) => [
@@ -321,6 +441,6 @@ export function describeSessionDirectory(payload, options) {
 	const { cwd, contexts, catchingUp } = sessionContexts(payload, options);
 	if (catchingUp) return "Branch/worktree statusline is replaying session context; retry after the next footer refresh.";
 	return contexts.length
-		? contexts.map(checkoutLabel).join("\n")
+		? contexts.map((context) => checkoutLabel({ ...context, divergence: checkoutDivergence(context, [], options) })).join("\n")
 		: `No Git checkout found for session directory: ${cwd ?? "unknown"}`;
 }

@@ -2,7 +2,17 @@
 
 A composable GitHub Copilot CLI status line that tracks **subagent state counts** (`starting`, `exploring`, `in PR`, `merged`, and `failed`) for the active session. The padded summary has no terminal hyperlink; use `/tasks` to inspect individual agents. Coexists with [`pr-statusline`](../pr-statusline) and [`issue-statusline`](../issue-statusline) via `~/.copilot/statusline-compose.mjs`, or appears once on the unlabeled summary row when [`worktree-statusline`](../worktree-statusline) groups checkouts.
 
-![Subagent Statusline in isolation](screenshots/subagent-statusline.png)
+![Subagent summary examples and the command to inspect individual agents](../../site/public/screenshots/subagent-statusline.svg)
+
+![Illustrative grouped footer with branch/worktree rows and a single overall subagent summary](../../site/public/screenshots/statusline-worktree-grouped.svg)
+
+The summary is not repeated per checkout. PR details owned only by active
+subagents can collapse into these counts, while root-worked and unknown-owner
+PRs remain detailed. See the [worktree association rules](../worktree-statusline/README.md#association-rules).
+Each checkout can independently show its upstream/base divergence even when
+subagent-only PR details are compacted. These commit counts are separate from
+the overall agent counts and use locally fetched refs.
+See the [divergence legend](../worktree-statusline/README.md#upstream-and-base-divergence).
 
 ## Install (Windows, macOS, and Linux)
 

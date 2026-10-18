@@ -101,6 +101,7 @@ export function resolveLinkedCheckouts(payload, checkouts, prs, {
 		}
 	}
 	const paths = [...candidates];
+	const refreshed = new Set();
 	if (paths.length) {
 		const offset = Number.isSafeInteger(cache.contextCursor) && cache.contextCursor >= 0 ? cache.contextCursor % paths.length : 0;
 		const count = Math.min(paths.length, MAX_CHECKOUT_CHECKS, budget);
@@ -113,6 +114,7 @@ export function resolveLinkedCheckouts(payload, checkouts, prs, {
 				// Leave this PR unassigned when live Git verification fails.
 			}
 			cache.contexts[key] = { checkedAt: now, context };
+			refreshed.add(key);
 		}
 		cache.contextCursor = offset + count;
 	}
@@ -123,7 +125,7 @@ export function resolveLinkedCheckouts(payload, checkouts, prs, {
 		if (!fresh(verified) || !context || context.commonDir !== candidate.commonDir ||
 			context.branch !== candidate.branch || !matchesRepository(context, candidate.repository)) continue;
 		try {
-			if (statSync(context.root).isDirectory()) found.push({ ...context, root: resolve(context.root) });
+			if (statSync(context.root).isDirectory()) found.push({ ...context, root: resolve(context.root), gitRefreshed: refreshed.has(key) });
 		} catch {
 			// Removed or inaccessible checkouts stay on the unassigned row.
 		}

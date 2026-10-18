@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkoutKey, checkoutLabel, gitContext, sessionContexts } from "./tracker.mjs";
+import { checkoutDivergence, checkoutKey, checkoutLabel, gitContext, sessionContexts } from "./tracker.mjs";
 import { resolveLinkedCheckouts } from "./worktrees.mjs";
 export { composeGroups } from "./grouping.mjs";
 
@@ -8,19 +8,20 @@ function makePill(content, color) {
 	return color ? `\x1b[1;38;2;219;234;254;48;2;30;64;115m ${content} \x1b[0m` : content;
 }
 
-export function renderEntries(payload, { home, color = true, reserveGitDirectories = 0 } = {}) {
+export function renderEntries(payload, { home, color = true, reserveGitDirectories = 0, deferCheckoutDivergence = false, run } = {}) {
 	const { contexts, catchingUp, agentCheckouts, agentCurrentCheckouts, focusKey, remainingGitDirectories } =
-		sessionContexts(payload, { home, reserveGitDirectories });
+		sessionContexts(payload, { home, reserveGitDirectories, run });
 	if (catchingUp) return [{ text: makePill("branch/worktree syncing session", color) }];
-	const current = typeof payload?.cwd === "string" && isAbsolute(payload.cwd) ? gitContext(payload.cwd) : null;
+	const current = typeof payload?.cwd === "string" && isAbsolute(payload.cwd) ? gitContext(payload.cwd, { run }) : null;
 	const currentKey = current ? checkoutKey(current.root) : null;
 	return contexts.map((context) => checkoutEntry(context, currentKey, {
 		color, agentCheckouts, agentCurrentCheckouts, remainingGitDirectories, focused: checkoutKey(context.root) === focusKey,
+		...(deferCheckoutDivergence || checkoutKey(context.root) === currentKey ? {} : { divergence: checkoutDivergence(context, [], { run }) }),
 	}));
 }
 
 function checkoutEntry(context, currentKey, { color, ...metadata }) {
-	const content = checkoutLabel(context);
+	const content = checkoutLabel({ ...context, ...metadata });
 	return {
 		...context, ...metadata, currentKey, kind: "checkout", key: checkoutKey(context.root),
 		text: checkoutKey(context.root) === currentKey ? "" : makePill(content, color),
@@ -30,11 +31,11 @@ function checkoutEntry(context, currentKey, { color, ...metadata }) {
 export function resolveCheckoutEntries(payload, entries, prs, options = {}) {
 	const checkouts = entries.filter((entry) => entry.kind === "checkout");
 	const extra = resolveLinkedCheckouts(payload, checkouts, prs, options);
-	if (!extra.length) return entries;
 	const currentKey = checkouts[0]?.currentKey ?? null;
-	return [...entries, ...extra.map((context) => checkoutEntry(context, currentKey, {
-		color: options.color !== false, focused: false,
-	}))];
+	return [...entries, ...extra.map((context) => ({ ...context, kind: "checkout", currentKey, focused: false }))].map((entry) =>
+		entry.kind !== "checkout" || checkoutKey(entry.root) === currentKey ? entry : checkoutEntry(entry, currentKey, {
+			color: options.color !== false, divergence: checkoutDivergence(entry, prs, options),
+		}));
 }
 
 export function render(payload, options = {}) {

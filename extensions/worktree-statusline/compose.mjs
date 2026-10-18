@@ -583,6 +583,7 @@ export async function composeStatusLine(payload, {
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: true });
 	const options = {
 		home, now, links, color, nerdFont: useNerdFont,
+		deferCheckoutDivergence: true,
 		reserveGitDirectories: renderers.some(({ name }) => name === "pr-statusline") ? 4 : 0,
 	};
 	const modules = await Promise.all(renderers.map(async ({ name, path }) => {

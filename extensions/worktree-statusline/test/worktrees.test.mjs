@@ -110,7 +110,7 @@ test("unobserved tracked PR checkout is discovered without historical or unrelat
 		assert.ok(output.includes(`${focus} [⎇ feat/unpublished]`), output);
 		assert.ok(output.includes(`${working} [⎇ feat/working-agent]`), output);
 		const row = output.split("\n").find((line) => line.includes(linked));
-		const label = `${linked} [⎇ feat/exact/full-branch]`;
+		const label = `${linked} [⎇ feat/exact/full-branch base?]`;
 		assert.ok(row, output);
 		assert.ok(color ? row.startsWith(`\x1b[1;38;2;219;234;254;48;2;30;64;115m ${label} \x1b[0m `) : row.startsWith(`${label} · `), row);
 		assert.ok(row.includes("example/widget#1"), row);
@@ -193,7 +193,7 @@ test("repository inventory and checkout verification share the remaining per-tic
 		}
 		if (args[2] === "symbolic-ref") return { status: 0, stdout: context.branch };
 		if (args[2] === "status") return { status: 0, stdout: "" };
-		return { status: 0, stdout: context.remoteUrls[0] };
+		return { status: 0, stdout: `remote.origin.url\n${context.remoteUrls[0]}\0remote.origin.fetch\n+refs/heads/*:refs/remotes/origin/*\0` };
 	};
 	let found = [];
 	for (let tick = 0; tick < 3; tick++) {

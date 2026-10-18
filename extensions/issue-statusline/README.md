@@ -1,8 +1,18 @@
 # Issue Statusline
 
-A composable GitHub Copilot CLI status line that tracks **GitHub issues** the active session is working on, rendering a separate clickable pill for each issue with priority/type labels, linked-PR indicator, assignee, comment count, and a purple ` Closed` pill that dismisses on your next input. Coexists side-by-side with [`pr-statusline`](../pr-statusline) and [`subagent-statusline`](../subagent-statusline) via `~/.copilot/statusline-compose.mjs`.
+A composable GitHub Copilot CLI status line that tracks **GitHub issues** the active session is working on, rendering a separate clickable pill for each issue with priority/type labels, linked-PR indicator, assignee, comment count, and a purple ` Closed` pill that dismisses on your next input. Composes with [`pr-statusline`](../pr-statusline), [`subagent-statusline`](../subagent-statusline), and [`worktree-statusline`](../worktree-statusline) via `~/.copilot/statusline-compose.mjs`.
 
-![Issue Statusline in isolation](screenshots/issue-statusline.png)
+![Issue pill examples showing priority, ownership, and progress](../../site/public/screenshots/issue-statusline.svg)
+
+With Branch and Worktree enabled, linked issues follow their PR on a checkout
+row after its full-path/branch pill. Unassigned or ambiguous issues remain on
+the unlabeled fallback row; issue numbers alone never determine a checkout.
+See the [association rules](../worktree-statusline/README.md#association-rules).
+Checkout pills also show labeled upstream/base divergence counts from locally
+fetched refs; these are Git commit comparisons, not issue state or a percentage.
+See the [divergence legend](../worktree-statusline/README.md#upstream-and-base-divergence).
+
+![Illustrative grouped footer with worktree, PR, issue, and subagent components](../../site/public/screenshots/statusline-worktree-grouped.svg)
 
 ## Install (Windows, macOS, and Linux)
 
