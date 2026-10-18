@@ -1,6 +1,6 @@
 ---
 title: naming-is-hard
-tagline: "Interactive naming assistant for projects, CLIs, and products — generates diverse candidate names, learns your preferences, validates availability across domains, GitHub, package registries, and social handles, and screens for trademark and existing-business collisions."
+tagline: "Explore project and product names, refine your favorites, and check domains, packages, and existing uses."
 useWhen: "When you need to name a project, product, CLI tool, company, or package — or want to check whether a name is available across domains, GitHub, npm, and other channels."
 repoPath: skills/naming-is-hard
 thumb: images/thumb-naming-is-hard.png
@@ -15,25 +15,25 @@ install:
 ## What it does
 
 `naming-is-hard` is an interactive naming assistant that walks you from a blank page
-to a validated, available name. It combines creative generation with real-world
-validation so you don't fall in love with a name you can't use.
+to a shortlist with availability checks. It combines creative suggestions with
+research into where each name is already in use.
 
 1. **Profiles the thing.** Reads your context (a description, a repo path, or a URL)
    and writes a Naming Brief: what it is, who it's for, the tone, the constraints.
 2. **Generates a deck.** Produces a diverse, on-brief pool of candidate names across
    many naming strategies (compound, coined, metaphor, suffix play, and more).
 3. **Learns your preferences.** You react to one card at a time (Like / Pass /
-   Super-like). A transparent preference model learns your type and surfaces more of
-   what you like, with enough variety that it never tunnels. It can tell you your
-   type in words.
+   Super-like). Later suggestions reflect your choices while keeping a mix of styles.
 4. **Checks real availability.** For your finalists it scans domains (DNS
-   NS-delegation, confirmed by RDAP), GitHub, npm / PyPI / crates.io / RubyGems /
-   NuGet, and social handles, then screens for trademark and existing-business
-   collisions using a bundled famous-marks list plus live searches.
+   and registration checks), GitHub, package registries, and social handles, then
+   searches for trademark and existing-business conflicts.
 5. **Gives a verdict.** Every finalist rolls up to one of three tiers:
    - 🚫 **Deal Breaker**: a famous trademark or company owns it. Walk away.
-   - 💛 **It's Complicated**: no legal blocker, but a key channel is taken. Usable with a compromise.
-   - 💚 **Perfect Match**: trademark-clear and the channels that matter are free. Grab it.
+   - 💛 **It's Complicated**: a key channel is taken or a potential conflict needs review.
+   - 💚 **Perfect Match**: no conflict was found in the checked sources, and the requested channels appear available.
+
+Availability can change. These checks are a shortlist aid, not trademark clearance
+or a guarantee that a name is safe to use.
 
 ## Use it
 

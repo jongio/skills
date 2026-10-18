@@ -11,13 +11,13 @@ import Layout from "../layouts/Layout.astro";
     <h2>What this is</h2>
     <p>
       <a href="https://github.com/jongio/skills">jongio/skills</a> is Jon Gallant's
-      collection of skills for AI coding agents. It's a general-purpose monorepo:
-      each skill lives in its own folder under <code>skills/</code> and can be
-      installed individually or all at once.
+      collection of reusable skills for AI coding agents, plus a live session
+      footer for Copilot CLI. Install a skill for a specific task, or the full collection.
     </p>
     <p class="muted">
-      A skill is a packaged capability the agent loads on demand. Once installed it's
-      available straight from the composer as <code>/&lt;skill-name&gt;</code>.
+      A skill gives your agent a repeatable way to handle a task, such as checking
+      dependencies, setting up a repository, or explaining an error. In Copilot,
+      invoke an installed skill with <code>/&lt;skill-name&gt;</code> and describe what you need.
     </p>
   </section>
 
@@ -31,8 +31,27 @@ import Layout from "../layouts/Layout.astro";
       install the whole repo as a single plugin.
     </p>
     <p class="muted">
-      Native manifests cover Copilot, VS Code, Codex, ChatGPT desktop, Claude
-      Code, Cursor, and Gemini CLI. See the <a href="https://github.com/jongio/skills#app-and-editor-support">support matrix</a> for install paths and web, mobile, and IDE limitations.
+      Installation steps differ by app. See the
+      <a href="https://github.com/jongio/skills#app-and-editor-support">support matrix</a>
+      for your editor or agent, including web, mobile, and IDE limitations.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Copilot CLI statuslines</h2>
+    <p>
+      Four footer components show your session's <strong>Branch and Worktree</strong>,
+      <strong>Pull Requests</strong>, <strong>Issues</strong>, and <strong>Subagents</strong>.
+      See where the agent is working, whether commits are missing, which PR checks
+      need attention, and how background work is progressing. Related PRs and
+      issues stay beside their checkout.
+    </p>
+    <p class="muted">
+      These are Copilot CLI extensions, not skills. Use <code>/statusline-setup</code>
+      to choose components and <code>/session-worktree</code> to inspect checkouts.
+      See the <a href="/skills/statuslines/">statuslines guide</a> for the grouped
+      footer illustration and the meaning of <code>*</code>, <code>+</code>,
+      <code>%</code>, <code>↑</code>, <code>↓</code>, and <code>?</code>.
     </p>
   </section>
 
@@ -50,7 +69,8 @@ import Layout from "../layouts/Layout.astro";
     <pre><code>npx skills add jongio/skills --all</code></pre>
     <p class="muted">
       Browse all skills in <a href="/skills/catalog/">the catalog</a> or view the <a href="/skills/statuslines/">Copilot CLI statuslines guide</a>.
-      After any install, reload with <code>/skills reload</code> or start a new session.
+      In Copilot CLI, start a new session after installing extensions. For skills
+      alone, <code>/skills reload</code> also refreshes the available skills.
     </p>
   </section>
 
@@ -61,7 +81,6 @@ import Layout from "../layouts/Layout.astro";
       <li><strong>Source</strong> — <a href="https://github.com/jongio/skills">github.com/jongio/skills</a></li>
       <li><strong>License</strong> — MIT</li>
     </ul>
-    <p class="muted">This site itself was scaffolded by the <code>create-gh-pages-site</code> skill.</p>
   </section>
 </Layout>
 

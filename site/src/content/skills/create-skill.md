@@ -1,7 +1,7 @@
 ---
 title: create-skill
-tagline: "Create and register a complete portable agent skill with tests, Vally evals, catalog metadata, and optional validated thumbnail art."
-useWhen: "When you want to add a production-ready skill to a managed skills marketplace repository or an existing skills collection without missing registration, tests, evals, or catalog assets."
+tagline: "Turn a skill idea into reusable agent instructions, documentation, tests, and a registered catalog entry."
+useWhen: "When you want to add a skill to an existing collection and include the files needed to document, test, and distribute it."
 repoPath: skills/create-skill
 thumb: images/thumb-create-skill.png
 order: 3
@@ -16,20 +16,19 @@ install:
 
 `create-skill` turns a skill idea into a complete, registered repository entry:
 
-- Portable `SKILL.md` instructions with focused routing metadata.
-- Human documentation, license, deterministic tests, and Vally capability evals.
-- Registration across every marketplace, plugin, CI, Dependabot, and catalog surface the repository uses.
-- Optional 1024 by 1024 thumbnail art from Azure OpenAI, OpenAI, a custom provider workflow you describe, or a deterministic local placeholder.
+- `SKILL.md` instructions that tell the agent when and how to use the skill.
+- A README, license, tests, and evaluation cases for checking its behavior.
+- Registration in the repository's marketplace, plugin listings, CI, and catalog.
+- Optional thumbnail art, or a local placeholder when you do not want generated art.
 
-Managed repositories use their configuration and sync contract. Existing repositories
-are discovered first, and creation stops before writes when registration surfaces are
-ambiguous.
+It checks how your repository distributes skills before making changes. If that
+setup is unclear, it stops for clarification rather than guessing where to register.
 
 ## Safety
 
-Every mutation is previewed first. Billed image generation and custom provider actions
-require single-use approval, never retry or change providers automatically, and must
-produce a fully validated PNG before either thumbnail copy is written.
+You review proposed changes before they are applied. Paid image generation needs
+separate approval; the skill does not retry a billed request or switch providers
+without asking.
 
 ## Use it
 
@@ -38,3 +37,6 @@ produce a fully validated PNG before either thumbnail copy is written.
 /create-skill art release-notes-helper
 /create-skill check release-notes-helper
 ```
+
+The first command creates the skill, `art` adds or replaces its thumbnail, and
+`check` checks its files and registration.

@@ -2,18 +2,18 @@
 
 The public site for [`jongio/skills`](https://github.com/jongio/skills), a
 statically-rendered **[Astro](https://astro.build)** site deployed to GitHub Pages.
-It presents the repo's skills as a browsable catalog.
+It presents the repo's skills as a browsable catalog and documents all four
+composable Copilot CLI statusline extensions.
 
 Live: https://jongio.github.io/skills/
-
-> Scaffolded by the `create-gh-pages-site` skill, then authored from a digest of
-> this repo (classified as a *collection*) — so the content is the actual skills
-> catalog, not template demo copy.
 
 ## What's here
 
 - **Home** (`/`) — hero, a grid of skill cards (each with an "install in your agent"
-  snippet), and the install options.
+  snippet), install options, and an overview of the four statusline components.
+- **Statuslines** (`/statuslines/`) — Branch and Worktree, Pull Requests, Issues,
+  and Subagents, including a grouped-footer illustration, native branch-marker
+  and upstream/base divergence legends, setup commands, and links to the extension guides.
 - **Skills** (`/catalog/`) — the catalog, one card per skill.
 - **Skill detail** (`/catalog/<skill>/`) — thumbnail, install commands, and the
   skill's write-up, generated from a content collection.
@@ -57,17 +57,34 @@ src/
     index.astro               home: hero + skills grid + install
     catalog/index.astro       the catalog list
     catalog/[slug].astro      per-skill detail page
+    statuslines/index.astro   all four statuslines and checkout-grouped footer
     about.astro               about the repo
   layouts/Layout.astro        HTML shell, base-aware nav, theme toggle, copy buttons
   components/SkillCard.astro   skill card (thumbnail + install snippet)
 public/
   favicon.svg                 site icon
   images/                     thumbnails + placeholders (see images/IMAGES.md)
+  screenshots/                statusline detail artwork and grouped-footer SVG
 .github/workflows/deploy.yml  (at the repo root) Pages deploy
 ```
 
 ## Images
 
-`public/images/IMAGES.md` is the hand-off checklist: which images are real vs.
-placeholders, their purpose, and recommended sizes. Replace placeholders in place
-(keep the filename, or update the reference) — placeholders still deploy fine.
+`public/images/IMAGES.md` records the used images, their sources, and spare assets.
+The social card is authored as `og.svg` and published as `og.png`.
+
+`public/screenshots/statusline-worktree-grouped.svg` is a labeled illustration,
+not a live session screenshot. Both statusline showcases and the repository
+READMEs reuse it. It shows blue external-checkout pills beside green passing PRs,
+with an amber unassigned issue and purple all-merged subagent summary below. Three smaller
+SVG guides explain PR, issue, and subagent status; cropped PNGs show individual
+terminal symbols.
+The legacy PNG diagram URLs and extension screenshot copies are generated from
+the corresponding SVG guides and kept byte-identical.
+The illustration also distinguishes upstream ahead/behind counts from missing
+base commits, labels unavailable comparisons with `?`, and states that counts
+use locally fetched refs rather than background network refreshes.
+Feature accents are consistent throughout the site: blue for Branch and Worktree,
+green for PRs, amber for Issues, and purple for Subagents. Each diagram heading
+sits directly above its matching-color pill group. The examples use real states
+that produce those colors; other live states are explained in the detail guides.
