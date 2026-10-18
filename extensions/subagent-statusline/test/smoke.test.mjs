@@ -143,7 +143,7 @@ try {
 			assert.deepEqual(pluginDiscovered, ["subagent-statusline"]);
 
 			ensurePluginStatuslineRegistered("subagent-statusline", extDir, { home: pluginHome, includeSiblings: true });
-			assert.deepEqual(discoverRenderers(pluginHome).map((r) => r.name), ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"]);
+			assert.deepEqual(discoverRenderers(pluginHome).map((r) => r.name), ["worktree-statusline", "pr-statusline", "issue-statusline", "subagent-statusline"]);
 
 			// Test interactive elicitation picker via mock session.ui.elicitation
 			const logs = [];

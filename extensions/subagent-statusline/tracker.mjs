@@ -372,14 +372,14 @@ export class SubagentTracker {
 		return maxTime;
 	}
 
-	counts() {
+	counts(agents = this.agents.values()) {
 		let starting = 0;
 		let exploring = 0;
 		let inPr = 0;
 		let merged = 0;
 		let done = 0;
 		let failed = 0;
-		for (const agent of this.agents.values()) {
+		for (const agent of agents) {
 			const hasMerged = agent.mergedPrs?.length > 0 && agent.mergedPrs.length >= agent.prs.length;
 			const hasOpenPr = agent.prs?.length > 0 && !hasMerged;
 			if (hasMerged) merged++;

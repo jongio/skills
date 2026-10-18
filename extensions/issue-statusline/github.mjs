@@ -6,6 +6,20 @@ import { dirname, join } from "node:path";
 export const ISSUE_OPEN_TTL_MS = 45_000;
 export const ISSUE_CLOSED_TTL_MS = 120_000;
 
+export function issueContextFields(info) {
+	if (!info || typeof info !== "object") return {};
+	const urls = info.closedByPullRequestsReferences?.nodes?.map((pr) => pr?.url) ?? info.prUrls;
+	return Array.isArray(urls) ? { prUrls: urls.filter((url) => typeof url === "string") } : {};
+}
+
+function updateIssueContext(issue, info, onlyMissing = false) {
+	const fields = issueContextFields(info);
+	if (onlyMissing && "prUrls" in issue) return false;
+	if (!("prUrls" in fields) || JSON.stringify(issue.prUrls) === JSON.stringify(fields.prUrls)) return false;
+	issue.prUrls = fields.prUrls;
+	return true;
+}
+
 export const ICONS = {
 	open: "\uF41B",
 	closed: "\uF41D",
@@ -200,6 +214,8 @@ export function refreshTrackedIssueStatuses(tracker, {
 	let changed = false;
 
 	for (const issue of [...tracker.state.issues]) {
+		const cached = cache?.[issue.url];
+		if (updateIssueContext(issue, cached?.info, (cached?.checkedAt ?? 0) < (issue.checkedAt ?? 0))) changed = true;
 		if (issue.simulated || issue.closedAt) continue;
 		if (typeof issue.status === "string" && issue.status.includes(ICONS.comment) &&
 				Number.isFinite(issue.checkedAt) && issue.checkedAt > 0 && now - issue.checkedAt < issueCacheTtlMs) {
@@ -237,6 +253,7 @@ export function refreshTrackedIssueStatuses(tracker, {
 		}
 
 		if (info && typeof info === "object") {
+			if (updateIssueContext(issue, info)) changed = true;
 			const stateName = String(info.state ?? "").toUpperCase();
 			if (stateName === "NOT_FOUND" || (stateName === "CLOSED" && String(info.stateReason ?? "").toUpperCase() === "NOT_PLANNED")) {
 				tracker.manage("remove", issue.url);

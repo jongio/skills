@@ -129,7 +129,7 @@ test("large transcripts replay within bounded reads and never report caught-up p
 	appendFileSync(path, JSON.stringify(event("session.context_changed", { cwd: "/latest" })) + "\n");
 	const payload = { session_id: "large" };
 	assert.equal(render(payload, { home, color: true, links: true }), pill("branch/worktree syncing session"));
-	assert.deepEqual(sessionDirectory(payload, { home }), { cwd: "/latest", directories: ["/initial", "/latest"], catchingUp: false });
+	assert.deepEqual(sessionDirectory(payload, { home }), { cwd: "/latest", directories: ["/initial", "/latest"], catchingUp: false, agentDirectories: {} });
 }));
 
 test("oversized records do not stall replay; malformed records do not hide later context", () => fixture((home) => {
@@ -142,7 +142,7 @@ test("oversized records do not stall replay; malformed records do not hide later
 		state = sessionDirectory({ session_id: "oversized" }, { home });
 		if (!state.catchingUp) break;
 	}
-	assert.deepEqual(state, { cwd: "/latest", directories: ["/initial", "/latest"], catchingUp: false });
+	assert.deepEqual(state, { cwd: "/latest", directories: ["/initial", "/latest"], catchingUp: false, agentDirectories: {} });
 }));
 
 test("subagent relative directories are isolated from root and other agents", () => {
@@ -172,7 +172,7 @@ test("version-one caches replay the transcript to recover every checkout", () =>
 	delete cache.directories;
 	writeFileSync(cachePath, JSON.stringify(cache));
 	assert.deepEqual(sessionDirectory({ session_id: "migration" }, { home }).directories, ["/first", "/second"]);
-	assert.equal(JSON.parse(readFileSync(cachePath, "utf8")).version, 2);
+	assert.equal(JSON.parse(readFileSync(cachePath, "utf8")).version, 3);
 	assert.ok(existsSync(path));
 }));
 
@@ -189,7 +189,7 @@ test("malformed caches recover from the transcript with an explicit diagnostic",
 	assert.deepEqual(sessionDirectory({ session_id: "corrupt" }, { home }).directories, ["/first", "/second"]);
 	assert.equal(diagnostic.mock.callCount(), 1);
 	assert.match(diagnostic.mock.calls[0].arguments[0], /Rebuilding malformed session cache/);
-	assert.equal(JSON.parse(readFileSync(cachePath, "utf8")).version, 2);
+	assert.equal(JSON.parse(readFileSync(cachePath, "utf8")).version, 3);
 }));
 
 test("repositories without a first commit still expose their branch", () => fixture((root) => {
@@ -232,7 +232,7 @@ test("a separate Git directory is not misclassified as a linked worktree", () =>
 	assert.equal(gitContext(repository).branch, "main");
 }));
 
-test("end-to-end rendering follows session checkout rather than launch folder and composes horizontally", async () => {
+test("end-to-end rendering follows session checkout and preserves unknown renderers on an unlabeled fallback row", async () => {
 	const root = mkdtempSync(join(tmpdir(), "worktree-statusline-render-"));
 	try {
 		const repository = checkout(root);
@@ -261,7 +261,17 @@ test("end-to-end rendering follows session checkout rather than launch folder an
 		mkdirSync(sibling, { recursive: true });
 		writeFileSync(join(sibling, "render.mjs"), 'export const render = () => "PR #42";\n');
 		writeFileSync(join(home, "statusline-config.json"), JSON.stringify({ enabled: ["sibling", "worktree-statusline"] }));
-		assert.equal(await composeStatusLine(payload, { home, ...plain }), `${target} [feat/new] \u00b7 PR #42`);
+		assert.equal(await composeStatusLine(payload, { home, ...plain }), `${target} [feat/new]\nPR #42`);
+		for (const [name, label] of [["pr-statusline", "PR"], ["issue-statusline", "Issue"], ["subagent-statusline", "Agent"]]) {
+			const directory = join(home, "extensions", name);
+			mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "render.mjs"), `export const render = () => ${JSON.stringify(label)};\n`);
+		}
+		writeFileSync(join(home, "statusline-config.json"), JSON.stringify({
+			enabled: ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"],
+		}));
+		assert.equal(await composeStatusLine(payload, { home, ...plain }), `${target} [feat/new]\nPR \u00b7 Issue \u00b7 Agent`);
+		assert.equal(await composeStatusLine(payload, { home, color: true, links: true }), `${colored}\nPR Issue Agent`);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}

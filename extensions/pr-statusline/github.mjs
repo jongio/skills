@@ -7,6 +7,30 @@ export const PR_RUNNING_TTL_MS = 20_000;
 export const PR_SETTLED_TTL_MS = 45_000;
 export const PR_CLOSED_TTL_MS = 120_000;
 
+export function prContextFields(info) {
+	if (!info || typeof info !== "object") return {};
+	const headRepositoryUrl = info.headRepository?.url ?? info.headRepositoryUrl;
+	const issueUrls = info.closingIssuesReferences?.nodes?.map((issue) => issue?.url) ?? info.issueUrls;
+	return {
+		...("headRefName" in info ? { headRefName: typeof info.headRefName === "string" ? info.headRefName : null } : {}),
+		...("headRepository" in info || "headRepositoryUrl" in info
+			? { headRepositoryUrl: typeof headRepositoryUrl === "string" ? headRepositoryUrl : null } : {}),
+		...(Array.isArray(issueUrls) ? { issueUrls: issueUrls.filter((url) => typeof url === "string") } : {}),
+	};
+}
+
+function updatePrContext(pr, info, onlyMissing = false) {
+	let changed = false;
+	for (const [key, value] of Object.entries(prContextFields(info))) {
+		if (onlyMissing && key in pr) continue;
+		if (JSON.stringify(pr[key]) !== JSON.stringify(value)) {
+			pr[key] = value;
+			changed = true;
+		}
+	}
+	return changed;
+}
+
 export function atomicWriteJson(filePath, data) {
 	mkdirSync(dirname(filePath), { recursive: true });
 	const temporary = `${filePath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
@@ -178,6 +202,9 @@ const PR_STATUS_GRAPHQL = `query($owner:String!,$name:String!,$number:Int!){
 	repository(owner:$owner,name:$name){
 		pullRequest(number:$number){
 			title
+			headRefName
+			headRepository{url}
+			closingIssuesReferences(first:100){nodes{url}}
 			state
 			mergedAt
 			isDraft
@@ -229,6 +256,9 @@ const BRANCH_PR_GRAPHQL = `query($owner:String!,$name:String!,$head:String!){
 			nodes{
 				url
 				title
+				headRefName
+				headRepository{url}
+				closingIssuesReferences(first:100){nodes{url}}
 				state
 				isDraft
 				reviewDecision
@@ -286,6 +316,7 @@ function normalizeGraphqlPr(pr) {
 		}
 	}
 	return {
+		...prContextFields(pr),
 		...(pr.url ? { url: pr.url } : {}),
 		...(typeof pr.title === "string" && pr.title ? { title: pr.title } : {}),
 		state: pr.state,
@@ -379,6 +410,8 @@ export function refreshTrackedPrStatuses(tracker, {
 	let changed = false;
 
 	for (const pr of [...tracker.state.prs]) {
+		const cached = cache?.[pr.url];
+		if (updatePrContext(pr, cached?.info, (cached?.checkedAt ?? 0) < (pr.checkedAt ?? 0))) changed = true;
 		if (pr.simulated || pr.mergedAt) continue;
 		const hasOcticonFormat = typeof pr.status === "string" &&
 			pr.status.includes(OCTICONS.approved) &&
@@ -432,6 +465,7 @@ export function refreshTrackedPrStatuses(tracker, {
 		}
 
 		if (info && typeof info === "object") {
+			if (updatePrContext(pr, info)) changed = true;
 			const stateName = String(info.state ?? "").toUpperCase();
 			if (stateName === "CLOSED" || stateName === "NOT_FOUND") {
 				tracker.manage("remove", pr.url);
@@ -479,4 +513,3 @@ export function refreshTrackedPrStatuses(tracker, {
 	if (cacheDirty && cache) writePrCache(cache, home);
 	return changed;
 }
-

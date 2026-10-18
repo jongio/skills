@@ -42,10 +42,10 @@ try {
 	Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/scripts/setup-statusline.mjs" -OutFile (Join-Path $tempRoot 'scripts\setup-statusline.mjs')
 
 	$manifest = @{
-		'pr-statusline'       = @('extension.mjs', 'collector.mjs', 'tracker.mjs', 'github.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
+		'pr-statusline'       = @('extension.mjs', 'collector.mjs', 'tracker.mjs', 'github.mjs', 'provenance.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 		'issue-statusline'    = @('extension.mjs', 'tracker.mjs', 'github.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 		'subagent-statusline' = @('extension.mjs', 'tracker.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
-		'worktree-statusline' = @('extension.mjs', 'tracker.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
+		'worktree-statusline' = @('extension.mjs', 'tracker.mjs', 'render.mjs', 'grouping.mjs', 'compose.mjs', 'copilot-extension.json')
 	}
 	foreach ($ext in $manifest.Keys) {
 		$extDir = Join-Path $tempRoot "extensions\$ext"

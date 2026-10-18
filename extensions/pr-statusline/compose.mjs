@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");
 
-const PREFERRED_ORDER = ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"];
+const PREFERRED_ORDER = ["worktree-statusline", "pr-statusline", "issue-statusline", "subagent-statusline"];
 
 const NERD_FONT_TO_UNICODE = new Map([
 	["\uE726", "\uE0A0"],
@@ -581,23 +581,47 @@ export async function composeStatusLine(payload, {
 	const renderers = discoverRenderers(home);
 	if (!renderers.length) return "";
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: true });
-	const outputs = await Promise.all(
-		renderers.map(async ({ path }) => {
+	const options = { home, now, links, color, nerdFont: useNerdFont };
+	const modules = await Promise.all(renderers.map(async ({ name, path }) => {
+		try {
+			return { name, path, mod: await import(pathToFileURL(path).href) };
+		} catch {
+			return { name, path, mod: {} };
+		}
+	}));
+	const checkoutModule = modules.find(({ name }) => name === "worktree-statusline")?.mod;
+	const grouped = typeof checkoutModule?.renderEntries === "function" && typeof checkoutModule?.composeGroups === "function";
+	const agentModule = modules.find(({ name }) => name === "subagent-statusline")?.mod;
+	const structured = grouped || (typeof agentModule?.renderEntries === "function" && typeof agentModule?.renderGroup === "function");
+	const blocks = await Promise.all(
+		modules.map(async ({ name, path, mod }) => {
 			try {
-				if (selfPath && typeof selfRender === "function" && resolve(path) === resolve(selfPath)) {
-					return await selfRender(payload, { home, now, links, color, nerdFont: useNerdFont });
+				if (structured && PREFERRED_ORDER.includes(name) && typeof mod.renderEntries === "function") {
+					return { name, entries: await mod.renderEntries(payload, options), renderGroup: mod.renderGroup };
 				}
-				const mod = await import(pathToFileURL(path).href);
+				if (selfPath && typeof selfRender === "function" && resolve(path) === resolve(selfPath)) {
+					return { name, entries: [{ text: await selfRender(payload, options) }] };
+				}
 				if (typeof mod.render === "function") {
-					return await mod.render(payload, { home, now, links, color, nerdFont: useNerdFont });
+					return { name, entries: [{ text: await mod.render(payload, options) }] };
 				}
 			} catch {
 				// Ignore broken renderer module so sibling statusline extensions still render.
 			}
-			return "";
+			return { name, entries: [] };
 		}),
 	);
-	const joined = joinOutputsHorizontally(outputs, { color });
+	const agentBlock = blocks.find((block) => block.name === "subagent-statusline");
+	const agentSummary = agentBlock?.renderGroup?.(agentBlock.entries, options) ?? "";
+	const agentPrUrls = new Set(agentSummary ? agentBlock.entries.flatMap((entry) => entry.prUrls ?? []) : []);
+	for (const entry of blocks.find((block) => block.name === "pr-statusline")?.entries ?? []) {
+		entry.compact = entry.provenance?.root === false && entry.provenance?.unknown === false && agentPrUrls.has(entry.url);
+	}
+	const joined = grouped
+		? checkoutModule.composeGroups(blocks, options)
+		: joinOutputsHorizontally(blocks.map((block) => block.renderGroup
+			? block.renderGroup(block.entries, options)
+			: block.entries.filter((entry) => !entry.compact).map((entry) => entry.text).join(color ? " " : " · ")), { color });
 	return useNerdFont ? joined : toUnicodeIcons(joined);
 }
 

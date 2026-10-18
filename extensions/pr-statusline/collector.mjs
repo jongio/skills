@@ -1,5 +1,7 @@
 import { readState, RELEVANT_EVENT_TYPE, SessionTracker, statePath, writeState } from "./tracker.mjs";
 import { renameSync, rmSync, statSync } from "node:fs";
+import { prContextFields } from "./github.mjs";
+import { mergePrProvenance } from "./provenance.mjs";
 
 function serializeComparable(snap) {
 	const { updatedAt: _ignored, ...rest } = snap;
@@ -65,6 +67,8 @@ export async function collect(session, { home, interval = 15000, report = consol
 				for (const diskPr of disk.prs) {
 					const existing = tracker.state.prs.find((pr) => pr.url === diskPr.url);
 					if (existing) {
+						Object.assign(existing, prContextFields(diskPr));
+						existing.provenance = mergePrProvenance(existing.provenance, diskPr.provenance);
 						if (diskPr.title) existing.title = diskPr.title;
 						if (diskPr.status) existing.status = diskPr.status;
 						if (Number.isFinite(diskPr.checkedAt)) existing.checkedAt = diskPr.checkedAt;
@@ -144,4 +148,3 @@ export async function collect(session, { home, interval = 15000, report = consol
 		},
 	};
 }
-

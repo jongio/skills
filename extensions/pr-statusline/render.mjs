@@ -75,7 +75,7 @@ function formatPrItem(pr, _currentRepo, { links, color, nerdFont = true }) {
 	return makePill(content, level, { color });
 }
 
-export function render(payload, {
+export function renderEntries(payload, {
 	home,
 	now = Date.now(),
 	links = true,
@@ -84,16 +84,18 @@ export function render(payload, {
 	fetchPrStatus,
 	prCacheTtlMs,
 } = {}) {
-	if (!payload.session_id) return "";
+	if (!payload?.session_id) return [];
 	const { state } = syncSession(payload, { home, now, fetchPrStatus, prCacheTtlMs });
-	if (!state || !state.prs.length) return "";
+	if (!state || !state.prs.length) return [];
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: false });
 	const currentRepo = state.repository || null;
-	const allPills = state.prs.map((pr) => formatPrItem(pr, currentRepo, { links, color, nerdFont: useNerdFont }));
-	if (!color) {
-		return allPills.map((p) => p.mid).join(" · ");
-	}
-	return allPills.map((p) => p.mid).join(" ");
+	return state.prs.map((pr) => ({
+		...pr, text: formatPrItem(pr, currentRepo, { links, color, nerdFont: useNerdFont }).mid,
+	}));
+}
+
+export function render(payload, options = {}) {
+	return renderEntries(payload, options).map((entry) => entry.text).join((options.color ?? options.links ?? true) ? " " : " · ");
 }
 
 async function main() {
@@ -118,5 +120,4 @@ async function main() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
-
 

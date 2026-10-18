@@ -47,11 +47,9 @@ export function subagentHoverUrl(sessionId, counts = null, repository = null, ho
 	return `${base}#${parts.join("__")}`;
 }
 
-export function render(payload, { home, color = true, nerdFont = undefined } = {}) {
-	if (!payload?.session_id) return "";
-	const { tracker } = syncSession(payload, { home });
-	if (!tracker || tracker.dismissed) return "";
-	const c = tracker.counts();
+export function renderGroup(entries, { home, color = true, nerdFont = undefined } = {}) {
+	const c = { total: 0, starting: 0, exploring: 0, inPr: 0, merged: 0, failed: 0 };
+	for (const entry of entries) for (const key of Object.keys(c)) c[key] += entry.counts[key];
 	if (c.total === 0) return "";
 	if (c.starting === 0 && c.exploring === 0 && c.inPr === 0 && c.merged === 0 && c.failed === 0) return "";
 
@@ -71,6 +69,19 @@ export function render(payload, { home, color = true, nerdFont = undefined } = {
 	const content = useNerdFont ? rawContent : toUnicodeIcons(rawContent);
 	const pill = makePill(content, level, { color });
 	return pill.mid;
+}
+
+export function renderEntries(payload, { home } = {}) {
+	if (!payload?.session_id) return [];
+	const { tracker } = syncSession(payload, { home });
+	if (!tracker || tracker.dismissed) return [];
+	return [...tracker.agents].map(([agentId, agent]) => ({
+		agentId, prUrls: agent.prs ?? [], counts: tracker.counts([agent]),
+	}));
+}
+
+export function render(payload, options = {}) {
+	return renderGroup(renderEntries(payload, options), options);
 }
 
 async function main() {

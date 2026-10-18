@@ -6,6 +6,19 @@ A composable GitHub Copilot CLI status line that tracks the pull requests **this
 
 ![Composed PR, Issue, and Subagent statusline](screenshots/statusline-composed.png)
 
+## Compact subagent PRs
+
+With both PR and subagent statuslines enabled, positively identified
+subagent-only PRs contribute to one overall subagent summary instead of
+individual detailed PR pills. PRs directly worked on by the main session remain
+detailed, even if an agent also references them. Unknown ownership, including
+older cache entries without provable provenance, stays detailed. Disabling or
+dismissing the subagent summary restores those PR details; no arbitrary item
+limit drops PRs or issues. Standalone PR rendering remains detailed.
+
+Enabling the worktree statusline also groups PRs and linked issues by checkout
+on separate rows. See [association rules](../worktree-statusline/README.md#association-rules).
+
 ## Install (Windows, macOS, and Linux)
 
 ### Option 1: Install as a Copilot Plugin or Interactive Script (Recommended)
