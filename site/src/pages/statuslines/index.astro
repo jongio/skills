@@ -12,7 +12,7 @@ const base = import.meta.env.BASE_URL;
       Composable terminal statuslines for GitHub Copilot CLI: <strong>Pull Requests</strong> (<code>pr-statusline</code>),
       <strong>GitHub Issues</strong> (<code>issue-statusline</code>), <strong>Subagents</strong> (<code>subagent-statusline</code>),
       and <strong>Branch and Worktree</strong> (<code>worktree-statusline</code>).
-      Run them individually or compose all four side-by-side on a single row via <code>~/.copilot/statusline-compose.mjs</code>.
+      Run them individually or compose checkout-grouped rows via <code>~/.copilot/statusline-compose.mjs</code>, with PRs and linked issues beside each worktree and one overall subagent summary.
     </p>
   </header>
 
@@ -86,14 +86,15 @@ const base = import.meta.env.BASE_URL;
           </div>
           <span><a href="https://github.com/jongio/skills/tree/main/extensions/worktree-statusline" target="_blank" rel="noopener">View source →</a></span>
         </div>
-        <pre><code>C:\code\.worktrees\my-project\feat-login [feat/login]</code></pre>
+        <pre><code>C:\code\.worktrees\my-project\feat-login [⎇ feat/login*+%]</code></pre>
+        <p class="sl-shot-sub">Native branch markers: <code>*</code> unstaged changes, <code>+</code> staged changes, and <code>%</code> untracked files. Related PRs and issues share each checkout's row; empty historical rows disappear while current working checkouts remain visible.</p>
         <p class="sl-shot-sub">One padded, non-underlined pill per distinct external checkout, with full paths and no colon separator. Subdirectories of Copilot's checkout do not create redundant pills. Supports detached HEADs and updates existing pills when branches change. Enable with <code>/statusline-setup</code>; list all session checkouts with <code>/session-worktree</code>. Existing saved selections are preserved.</p>
       </div>
       <div class="sl-shot-block">
         <div class="sl-shot-header">
           <div>
             <strong>1. Pull Request Statusline (<code>pr-statusline</code>) · All States &amp; Icons</strong>
-            <p class="sl-shot-sub">Tracks every pull request this session touches across repositories and worktrees. Each pill is a clickable OSC 8 link to the PR web view.</p>
+            <p class="sl-shot-sub">Tracks session PRs across repositories and worktrees. Detailed pills link to GitHub; proven subagent-only PRs use overall subagent counts instead of individual pills.</p>
           </div>
           <span><a href="https://github.com/jongio/skills/tree/main/extensions/pr-statusline" target="_blank" rel="noopener">View source →</a></span>
         </div>
@@ -142,7 +143,7 @@ const base = import.meta.env.BASE_URL;
               <img src={`${base}screenshots/crops/pr-merged.png`} alt="Up-close screenshot of purple merged PR pill" loading="lazy" />
             </div>
             <code>Purple Merged</code>
-            <span>Turns GitHub Merged Purple when landed and auto-dismisses after your next prompt</span>
+            <span>Turns purple when the merge is detected, then dismisses on the next real user message; cache refreshes do not reset that boundary</span>
           </div>
         </div>
       </div>
@@ -223,7 +224,7 @@ const base = import.meta.env.BASE_URL;
               <img src={`${base}screenshots/crops/sub-icon.png`} alt="Up-close screenshot of subagent fleet icon token" loading="lazy" />
             </div>
             <code>Subagent Icon</code>
-            <span>Session fleet tracker (click opens subagent PRs in your browser; run <code>/tasks</code> in console to inspect agents)</span>
+            <span>One padded, non-linked session summary; run <code>/tasks</code> in the console to inspect individual agents</span>
           </div>
           <div class="sl-legend-item">
             <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-starting.png`} role="button" tabindex="0" aria-label="View Starting Counter up-close screenshot">
@@ -258,7 +259,7 @@ const base = import.meta.env.BASE_URL;
               <img src={`${base}screenshots/crops/sub-allmerged.png`} alt="Up-close screenshot of purple all-merged subagent pill" loading="lazy" />
             </div>
             <code>All Merged Pill</code>
-            <span>Turns purple when every subagent PR has merged (0 starting, 0 in PR) and dismisses on your next prompt</span>
+            <span>Turns purple when only merged counts remain; settled counts dismiss on the next real user message after detection, even while other agents keep working</span>
           </div>
         </div>
       </div>

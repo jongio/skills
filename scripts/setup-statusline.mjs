@@ -129,9 +129,13 @@ export function configureStatuslines({
 	const sourceComposer = join(repoRoot, "extensions", "pr-statusline", "compose.mjs");
 	copyFileSync(sourceComposer, composerPath);
 
-	// Copy selected extensions into ~/.copilot/extensions/<id>
+	// The unified PR entry point exposes commands backed by sibling trackers.
+	const requiredRuntime = new Set(validEnabled);
+	if (requiredRuntime.has("pr-statusline")) {
+		for (const item of EXTENSION_CATALOG) requiredRuntime.add(item.id);
+	}
 	for (const item of EXTENSION_CATALOG) {
-		if (!validEnabled.includes(item.id)) continue;
+		if (!requiredRuntime.has(item.id)) continue;
 		const srcDir = join(repoRoot, "extensions", item.id);
 		const dstDir = join(extRoot, item.id);
 		mkdirSync(dstDir, { recursive: true });

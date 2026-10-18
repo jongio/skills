@@ -34,10 +34,10 @@ This plugin also ships four composable terminal statuslines for GitHub Copilot C
 
 | Extension | What it shows |
 |---|---|
-| [`pr-statusline`](extensions/pr-statusline/) | Color-coded PR status pills in the Copilot CLI footer for every pull request the active session is working on across repositories and worktrees: clickable `owner/repo#number` OSC 8 links, CI check progress (`passed/total`), merge conflict alerts, review approvals, resolved review threads, and a purple `Merged` badge that dismisses on your next prompt. |
+| [`pr-statusline`](extensions/pr-statusline/) | Color-coded session PR pills with clickable `owner/repo#number` OSC 8 links, CI progress, conflicts, approvals, and resolved review threads. Proven subagent-only PRs use overall subagent counts when enabled; merged pills dismiss on the next real user message after detection. |
 | [`issue-statusline`](extensions/issue-statusline/) | Separate clickable pill for each GitHub issue the active session is working on: priority or bug labels, linked open PR indicator, assignee handle, comment count, and a purple `Closed` badge that dismisses on your next prompt. |
-| [`subagent-statusline`](extensions/subagent-statusline/) | Live session subagent counter pill (`starting`, `in PR`, `merged`, and `failed`) that turns purple when all subagent PRs merge and dismisses on your next prompt. |
-| [`worktree-statusline`](extensions/worktree-statusline/) | Full checkout paths followed by `[branch]` for session or subagent work outside Copilot's current checkout. Hides when all work is local; reads live Git state and supports detached HEADs. |
+| [`subagent-statusline`](extensions/subagent-statusline/) | Overall session subagent counts (`starting`, `exploring`, `in PR`, `merged`, and `failed`). Settled counts dismiss on the next real user message after detection without hiding ongoing agents. Use `/tasks` to inspect individual agents. |
+| [`worktree-statusline`](extensions/worktree-statusline/) | Checkout-grouped rows with full paths and native `[⎇ branch*+%]` labels, followed by related PRs and issues. Hides Copilot's own checkout label and empty historical rows; supports detached HEADs and one overall subagent summary. |
 
 ![Three Composable Statusline Types Side-by-Side](extensions/pr-statusline/screenshots/statusline-composed.png)
 

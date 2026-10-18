@@ -2,8 +2,8 @@
 
 A grouped, multiline Copilot CLI footer showing session work outside Copilot's
 own checkout, with its full path first and its live branch in brackets. When
-enabled, the compositor groups related PRs, issues and subagent counts on that
-checkout's row by default.
+enabled, the compositor groups related PRs and issues on that checkout's row by
+default, with one overall subagent summary on an unlabeled row.
 
 ```text
 C:\code\.worktrees\my-project\feat-login [⎇ feat/login*+%]  PR #119  Issue #42
@@ -24,11 +24,11 @@ no markers. One bounded porcelain-status read supplies all three markers,
 including changes to the same file both before and after staging.
 
 Newlines are preserved in both plain and colored grouped output. The standalone
-`render(payload, options)` exports still return strings with their previous
-formatting. Disabling the worktree extension retains the legacy horizontal
+`render(payload, options)` exports still return strings for standalone use.
+Disabling the worktree extension retains the legacy horizontal
 compositor. Disabled extensions never render or contribute entries.
 
-### Association rules
+## Association rules
 
 - PRs match a unique checkout using their cached head repository URL and head
   branch, compared with that checkout's `origin` URL and live branch. SSH and
@@ -148,7 +148,7 @@ unexpected filesystem/Git errors are reported by the standalone renderer.
 ## Validate
 
 ```powershell
-node --test .\extensions\worktree-statusline\test\smoke.test.mjs .\extensions\worktree-statusline\test\grouping.test.mjs .\extensions\worktree-statusline\test\compact.test.mjs .\extensions\worktree-statusline\test\worktrees.test.mjs .\extensions\worktree-statusline\test\markers.test.mjs
+node --test .\extensions\worktree-statusline\test\*.test.mjs
 ```
 
 When updating an existing install, copy every runtime file listed in

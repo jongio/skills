@@ -23,7 +23,7 @@ on separate rows. See [association rules](../worktree-statusline/README.md#assoc
 
 ### Option 1: Install as a Copilot Plugin or Interactive Script (Recommended)
 
-Install via the `jongio/skills` Copilot plugin (auto-registers the statuslines on session start), or run the interactive setup script to choose whether you want **Pull Requests**, **GitHub Issues**, and/or **Subagents**:
+Install via the `jongio/skills` Copilot plugin (auto-registers the statuslines on session start), or run the interactive setup script to choose **Pull Requests**, **GitHub Issues**, **Subagents**, and/or **Branch and Worktree**:
 
 **Copilot CLI Plugin:**
 
@@ -56,12 +56,13 @@ curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusli
 ```bash
 node ./scripts/setup-statusline.mjs
 node ./scripts/setup-statusline.mjs --prs --issues --subagents
+node ./scripts/setup-statusline.mjs --all
 ```
 
 ### Option 2: Ask Copilot (App or CLI)
 
 ```text
-set up the copilot statusline from jongio/skills and ask me whether I want PRs, issues, and/or subagents
+set up the copilot statusline from jongio/skills and ask me which of PRs, issues, subagents, and worktrees I want
 ```
 
 ### Option 3: Standalone extension installer
@@ -76,11 +77,11 @@ set up the copilot statusline from jongio/skills and ask me whether I want PRs, 
 ./extensions/pr-statusline/install.sh
 ```
 
-`setup-statusline.mjs` and `install.ps1` copy the runtime files (`extension.mjs`, `collector.mjs`, `tracker.mjs`, `github.mjs`, `render.mjs`, `compose.mjs`, `copilot-extension.json`) into `$HOME\.copilot\extensions\pr-statusline`, install the shared `~/.copilot/statusline-compose.mjs` compositor, save your selection to `~/.copilot/statusline-config.json`, and configure `statusLine` (`padding: 0`, `refreshInterval: 2`) and `footer.showCustom` in `$HOME\.copilot\settings.json`.
+`setup-statusline.mjs` and the installers copy runtime files listed in `scripts/setup-statusline.mjs`'s `EXTENSION_CATALOG` into `$COPILOT_HOME/extensions/<id>/` (default `~/.copilot`). PR installs include sibling runtime dependencies because the unified SDK entry point exposes their commands; only your selected footer items are enabled. Setup installs the shared `statusline-compose.mjs`, saves selections to `statusline-config.json`, and configures `statusLine` (`padding: 0`, `refreshInterval: 5`) and `footer.showCustom` in `settings.json`.
 
 ### Option 4: Manual setup (macOS / Linux / Windows)
 
-1. Copy `extensions/pr-statusline/*.mjs` and `copilot-extension.json` to `~/.copilot/extensions/pr-statusline/`, and copy `compose.mjs` to `~/.copilot/statusline-compose.mjs`.
+1. Copy every runtime file in `EXTENSION_CATALOG` for all four packages to `~/.copilot/extensions/<id>/`, preserving package directories. This includes the unified PR entry point's sibling dependencies. Copy `extensions/pr-statusline/compose.mjs` to `~/.copilot/statusline-compose.mjs`.
 2. Add the following to `~/.copilot/settings.json`:
 
 ```json
@@ -89,11 +90,21 @@ set up the copilot statusline from jongio/skills and ask me whether I want PRs, 
     "type": "command",
     "command": "node \"/Users/you/.copilot/statusline-compose.mjs\"",
     "padding": 0,
-    "refreshInterval": 2
+    "refreshInterval": 5
   },
   "footer": {
     "showCustom": true
   }
+}
+```
+
+3. To enable only PR pills, create `~/.copilot/statusline-config.json`:
+
+```json
+{
+  "version": 1,
+  "enabled": ["pr-statusline"],
+  "iconMode": "auto"
 }
 ```
 
@@ -151,7 +162,7 @@ Using `Azure/azure-dev` as an example checkout:
 2. **Single-query GraphQL status + shared cache (`github.mjs`):**
    Live PR status is fetched via `gh api graphql` (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (10s TTL while checks are running, 15s TTL when settled, with in-flight deduplication locks). It does **not** use Copilot AI model requests or touch Copilot's internal databases.
 3. **Automatic cleanup & manual controls:**
-   Closed or merged PRs are automatically removed from the statusline. When the SDK extension (`extension.mjs`) is loaded, you can also manage the list manually:
+   Closed PRs are removed automatically. Merged PRs remain until the next real user message after this session detects the merge. When the SDK extension (`extension.mjs`) is loaded, you can also manage the list manually:
 
 ```text
 /session-prs list
@@ -163,9 +174,8 @@ Using `Azure/azure-dev` as an example checkout:
 ## Validate
 
 ```powershell
-node .\extensions\pr-statusline\test\smoke.test.mjs
-node .\scripts\validate-extensions.mjs
-node .\scripts\lint.mjs
+node --test .\extensions\pr-statusline\test\smoke.test.mjs
+node --test .\extensions\worktree-statusline\test\entrypoints.test.mjs
 ```
 
 To disable the custom footer at any time, run `copilot config footer.showCustom off`.

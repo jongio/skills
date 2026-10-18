@@ -118,7 +118,7 @@ const skills = (await getCollection("skills")).sort(
           <div class="sl-shot-header">
             <div>
               <strong>1. Pull Request Statusline (<code>pr-statusline</code>) · All States &amp; Icons</strong>
-              <p class="sl-shot-sub">Tracks every pull request this session touches across repositories and worktrees. Each pill is a clickable OSC 8 link to the PR web view.</p>
+              <p class="sl-shot-sub">Tracks session PRs across repositories and worktrees. Detailed pills link to GitHub; proven subagent-only PRs use overall subagent counts instead of individual pills.</p>
             </div>
             <span><a href="https://github.com/jongio/skills/tree/main/extensions/pr-statusline" target="_blank" rel="noopener">View source →</a></span>
           </div>
@@ -167,7 +167,7 @@ const skills = (await getCollection("skills")).sort(
                 <img src={`${base}screenshots/crops/pr-merged.png`} alt="Up-close screenshot of purple merged PR pill" loading="lazy" />
               </div>
               <code>Purple Merged</code>
-              <span>Turns GitHub Merged Purple when landed and auto-dismisses after your next prompt</span>
+              <span>Turns purple when the merge is detected, then dismisses on the next real user message; cache refreshes do not reset that boundary</span>
             </div>
           </div>
         </div>
@@ -248,7 +248,7 @@ const skills = (await getCollection("skills")).sort(
                 <img src={`${base}screenshots/crops/sub-icon.png`} alt="Up-close screenshot of subagent fleet icon token" loading="lazy" />
               </div>
               <code>Subagent Icon</code>
-              <span>Session fleet tracker (click opens subagent PRs in your browser; run <code>/tasks</code> in console to inspect agents)</span>
+              <span>One padded, non-linked session summary; run <code>/tasks</code> in the console to inspect individual agents</span>
             </div>
             <div class="sl-legend-item">
               <div class="sl-legend-crop" data-full-img={`${base}screenshots/crops/sub-starting.png`} role="button" tabindex="0" aria-label="View Starting Counter up-close screenshot">
@@ -283,7 +283,7 @@ const skills = (await getCollection("skills")).sort(
                 <img src={`${base}screenshots/crops/sub-allmerged.png`} alt="Up-close screenshot of purple all-merged subagent pill" loading="lazy" />
               </div>
               <code>All Merged Pill</code>
-              <span>Turns purple when every subagent PR has merged (0 starting, 0 in PR) and dismisses on your next prompt</span>
+              <span>Turns purple when only merged counts remain; settled counts dismiss on the next real user message after detection, even while other agents keep working</span>
             </div>
           </div>
         </div>
