@@ -32,7 +32,7 @@ function transcript(home, id, events) {
 const cache = (home, entries, now) => atomicWriteJson(join(home, "pr-statusline", "pr-cache.json"),
 	Object.fromEntries(entries.map(([number, info]) => [url(number), { info, checkedAt: now, ttlMs: PR_CLOSED_TTL_MS }])));
 
-test("merge detection, not remote merge time or checkedAt, defines dismissal; shared cache polls cannot resurrect", async () => fixture((home) => {
+test("merges after the latest input remain visible; shared cache polls cannot resurrect dismissed PRs", async () => fixture((home) => {
 	const id = "stable";
 	const file = transcript(home, id, [event("user.message", 1000, { content: "Continue" })]);
 	const tracker = new SessionTracker(id);
@@ -41,13 +41,13 @@ test("merge detection, not remote merge time or checkedAt, defines dismissal; sh
 	tracker.lastUserInputAt = 1000;
 	tracker.state.transcriptOffset = statSync(file).size;
 	writeState(tracker.snapshot(), home);
-	const merged = { state: "MERGED", mergedAt: new Date(500).toISOString() };
+	const merged = { state: "MERGED", mergedAt: new Date(1500).toISOString() };
 	cache(home, [[1, merged], [2, { state: "OPEN" }]], 2000);
 	const payload = { session_id: id };
 	let output = renderPr(payload, { home, now: 2000, ...plain });
 	assert.ok(output.includes("widget#1") && output.includes("Merged"), output);
 	assert.equal(readState(id, home).prs[0].mergedObservedAt, 2000);
-	assert.equal(readState(id, home).prs[0].mergedAt, 500);
+	assert.equal(readState(id, home).prs[0].mergedAt, 1500);
 	for (const now of [3000, 4000]) {
 		cache(home, [[1, merged], [2, { state: "OPEN" }]], now);
 		output = renderPr(payload, { home, now, ...plain });
@@ -57,7 +57,7 @@ test("merge detection, not remote merge time or checkedAt, defines dismissal; sh
 	for (const message of [
 		event("user.message", 4500, { content: "[Scheduled prompt #1] check" }),
 		event("user.message", 4600, { content: "agent input" }, "child"),
-		event("user.message", 1500, { content: "Older input" }),
+		event("user.message", 1200, { content: "Older input" }),
 	]) appendFileSync(file, JSON.stringify(message) + "\n");
 	assert.ok(renderPr(payload, { home, now: 5000, ...plain }).includes("widget#1"));
 	appendFileSync(file, JSON.stringify(event("user.message", 6000, { content: "Next task" })) + "\n");
@@ -75,11 +75,43 @@ test("merge detection, not remote merge time or checkedAt, defines dismissal; sh
 	assert.equal(readState(id, home).prs.find((pr) => pr.url === url(1)).generation, 1);
 }));
 
+test("a prompt dismisses confirmed earlier merges even when polling discovers them afterward", async () => fixture((home) => {
+	for (const sharedCache of [false, true]) {
+		const id = `delayed-merge-${sharedCache}`;
+		const file = transcript(home, id, [event("user.message", 3000, { content: "Status?" })]);
+		const tracker = new SessionTracker(id);
+		for (const number of [1, 2, 3, 4, 5]) tracker.add(url(number));
+		const stale = structuredClone(tracker.snapshot());
+		writeState(stale, home);
+		const statuses = [
+			{ state: "MERGED", mergedAt: new Date(2000).toISOString() },
+			{ state: "MERGED", mergedAt: new Date(3500).toISOString() },
+			{ state: "MERGED" },
+			{ state: "OPEN" },
+			{ state: "MERGED", mergedAt: new Date(3000).toISOString() },
+		];
+		const options = { home, now: 4000, ...plain };
+		if (sharedCache) cache(home, statuses.map((info, i) => [i + 1, info]), 4000);
+		else options.fetchPrStatus = (reference) => statuses[Number(reference.split("/").at(-1)) - 1];
+		const output = renderPr({ session_id: id }, options);
+		assert.ok(!output.includes("widget#1"), output);
+		for (const number of [2, 3, 4, 5]) assert.ok(output.includes(`widget#${number}`), output);
+		const state = readState(id, home);
+		assert.ok(state.ignored.includes(url(1)), "late detection must persist the dismissal");
+		const delayedWriter = new SessionTracker(id, stale);
+		reconcilePrStates(delayedWriter, state);
+		writeState(delayedWriter.snapshot(), home);
+		assert.ok(!renderPr({ session_id: id }, { ...options, now: 4500 }).includes("widget#1"));
+		appendFileSync(file, JSON.stringify(event("user.message", 5000, { content: "Continue" })) + "\n");
+		assert.deepEqual(syncSession({ session_id: id }, { ...options, now: 6000 }).state.prs.map((pr) => pr.url), [url(4)]);
+	}
+}));
+
 test("legacy merge badges are revalidated before receiving a fresh observation boundary", async () => fixture((home) => {
 	const tracker = new SessionTracker("legacy");
 	tracker.add(url(1));
 	Object.assign(tracker.state.prs[0], { mergedAt: 10, checkedAt: 9000, status: `${OCTICONS.merged} Merged` });
-	tracker.lastUserInputAt = 500;
+	tracker.lastUserInputAt = 5;
 	const legacy = tracker.snapshot();
 	delete legacy.mergeStateVersion;
 	writeState(legacy, home);
@@ -89,13 +121,37 @@ test("legacy merge badges are revalidated before receiving a fresh observation b
 	assert.equal(result.state.prs[0].mergedObservedAt, 1000);
 	assert.equal(result.state.prs[0].checkedAt, 1000);
 	const current = new SessionTracker("legacy", result.state);
-	current.observe(event("user.message", 750));
+	current.observe(event("user.message", 8));
 	assert.equal(current.state.prs.length, 1);
 	current.observe(event("user.message", 1001));
 	assert.equal(current.state.prs.length, 0);
 	writeState(current.snapshot(), home);
 	result = syncSession({ session_id: "legacy" }, { home, now: 2000, fetchPrStatus: () => ({ state: "MERGED" }) });
 	assert.equal(result.state.prs.length, 0);
+}));
+
+test("collector dismisses late merge confirmations against an already received prompt", async () => fixture(async (home) => {
+	const id = "collector-delayed-merge";
+	let handler;
+	const collector = await collect({
+		sessionId: id,
+		on(fn) { handler = fn; return () => {}; },
+		async getEvents() { return [event("user.message", 1000, { content: `Work on ${url(1)}` })]; },
+		rpc: { metadata: { async activity() { return { hasActiveWork: true }; } } },
+	}, { home, interval: 100000 });
+	try {
+		handler(event("user.message", 3000, { content: "Status?" }));
+		const external = readState(id, home);
+		Object.assign(external.prs[0], {
+			mergedAt: 2000, mergedObservedAt: 4000, checkedAt: 4000, status: `${OCTICONS.merged} Merged`,
+		});
+		writeState(external, home);
+		handler(event("assistant.turn_start", 5000));
+		assert.equal(readState(id, home).prs.length, 0);
+		writeState(external, home);
+		handler(event("session.idle", 6000));
+		assert.equal(readState(id, home).prs.length, 0);
+	} finally { collector.stop(); }
 }));
 
 test("revision reconciliation rejects stale saves while explicit re-add and reopen survive older tombstones", () => {

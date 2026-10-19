@@ -36,7 +36,7 @@ This plugin also ships four composable terminal statuslines for GitHub Copilot C
 
 | Extension | What it shows |
 |---|---|
-| [`pr-statusline`](extensions/pr-statusline/) | Open session PRs on GitHub and follow checks, conflicts, approvals, and review threads. Background-agent PRs can appear in the agent summary; confirmed merged pills clear after your next message following detection. |
+| [`pr-statusline`](extensions/pr-statusline/) | Open session PRs on GitHub and follow checks, conflicts, approvals, and review threads. Background-agent PRs can appear in the agent summary; confirmed merged pills clear on your next message after the merge, even if detection is delayed. |
 | [`issue-statusline`](extensions/issue-statusline/) | Separate clickable pill for each GitHub issue the active session is working on: priority or bug labels, linked open PR indicator, assignee handle, comment count, and a purple `Closed` badge that dismisses on your next prompt. |
 | [`subagent-statusline`](extensions/subagent-statusline/) | Overall session subagent counts (`starting`, `exploring`, `in PR`, `merged`, and `failed`). Settled counts dismiss on the next real user message after detection without hiding ongoing agents. Use `/tasks` to inspect individual agents. |
 | [`worktree-statusline`](extensions/worktree-statusline/) | Checkout-grouped rows with full paths, native `[⎇ branch*+%]` labels, upstream `↑`/`↓` divergence counts and missing base commits, followed by related PRs and issues. Hides Copilot's own checkout label and empty historical rows; supports detached HEADs and one overall subagent summary. |
