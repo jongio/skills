@@ -19,8 +19,10 @@ async function fixture(run) {
 	const home = realpathSync.native(mkdtempSync(join(tmpdir(), "concurrent-clear-")));
 	const children = [];
 	try { await run(home, children); } finally {
-		for (const child of children) if (child.exitCode === null) child.kill();
-		await Promise.all(children.map((child) => child.exitCode === null ? once(child, "exit") : null));
+		const running = children.filter((child) => child.exitCode === null && child.signalCode === null);
+		const exits = running.map((child) => once(child, "exit"));
+		for (const child of running) child.kill();
+		await Promise.all(exits);
 		rmSync(home, { recursive: true, force: true });
 	}
 }
