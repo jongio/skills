@@ -79,6 +79,12 @@
       "source": "./skills/git-tidy",
       "description": "Content-aware Git work triage across local and remote branches, worktrees, stashes, remote refs, tags, remotes, merge and rebase artifacts, ignored-but-tracked files, large history blobs, and maintenance. Leads with plain decisions and concrete actions while exact proof stays available on demand; analysis and revalidation are read-only, coverage gaps fail closed, and every action requires separate explicit approval or an established handoff.",
       "version": "1.0.0"
+    },
+    {
+      "name": "test-doctor",
+      "source": "./skills/test-doctor",
+      "description": "Audit test correctness, coverage, reliability, and maintenance; optionally repair material gaps without gaming the suite.",
+      "version": "1.0.0"
     }
   ]
 }

@@ -87,7 +87,7 @@ test('process boundary rejects malformed options and spawn failures', async () =
   );
 });
 
-test('filesystem hashing rejects unsupported and bounded entries', async () => {
+test('filesystem hashing rejects unsupported and bounded entries', async (context) => {
   const root = await mkdtemp(path.join(tmpdir(), "git-tidy-hash-errors-"));
   try {
     await assert.rejects(
@@ -100,12 +100,22 @@ test('filesystem hashing rejects unsupported and bounded entries', async () => {
       hashFilesystemEntry(file, { maxBytes: 1 }),
       (error) => error.code === "HASH_LIMIT",
     );
-    const link = path.join(root, "link");
-    await symlink("large", link);
-    await assert.rejects(
-      hashFilesystemEntry(link, { maxBytes: 1 }),
-      (error) => error.code === "HASH_LIMIT",
-    );
+    await context.test('symlink targets obey the byte limit', async (context) => {
+      const link = path.join(root, "link");
+      try {
+        await symlink("large", link);
+      } catch (error) {
+        if (process.platform === "win32" && error.code === "EPERM") {
+          context.skip("symbolic links require Windows Developer Mode or elevated privileges");
+          return;
+        }
+        throw error;
+      }
+      await assert.rejects(
+        hashFilesystemEntry(link, { maxBytes: 1 }),
+        (error) => error.code === "HASH_LIMIT",
+      );
+    });
     const controller = new AbortController();
     controller.abort();
     await assert.rejects(
@@ -551,14 +561,13 @@ test('requires initialization before boundary reads', async () => {
   }
 });
 
-test('hashes regular files and symlinks without Git object writes or following links', async () => {
+test('hashes regular files and symlinks without Git object writes or following links', async (context) => {
   const fixture = await createRepoFixture('filesystem-hash');
   try {
     const content = Buffer.from([0x00, 0xff, 0x0a, 0x41]);
     const regularPath = await fixture.write('payload.bin', content);
     const secret = Buffer.alloc(1024, 0x5a);
     await fixture.write('target.bin', secret);
-    const linkPath = await fixture.makeSymlink('payload-link', 'target.bin');
     const before = fixture.git(['count-objects', '-v']).stdout;
 
     const regular = await hashFilesystemEntry(regularPath, {
@@ -570,26 +579,38 @@ test('hashes regular files and symlinks without Git object writes or following l
       { kind: 'regular', size: content.length, oid: blobOid('sha1', content) },
     );
 
-    const linkTarget = Buffer.from('target.bin');
-    const link = await hashFilesystemEntry(linkPath, {
-      objectFormat: 'sha1',
-      maxBytes: linkTarget.length,
+    await context.test('symlinks hash the target path without following it', async (context) => {
+      let linkPath;
+      try {
+        linkPath = await fixture.makeSymlink('payload-link', 'target.bin');
+      } catch (error) {
+        if (process.platform === "win32" && error.code === "EPERM") {
+          context.skip("symbolic links require Windows Developer Mode or elevated privileges");
+          return;
+        }
+        throw error;
+      }
+      const linkTarget = Buffer.from('target.bin');
+      const link = await hashFilesystemEntry(linkPath, {
+        objectFormat: 'sha1',
+        maxBytes: linkTarget.length,
+      });
+      assert.deepEqual(
+        {
+          kind: link.kind,
+          size: link.size,
+          oid: link.oid,
+          targetRawBase64: link.targetRawBase64,
+        },
+        {
+          kind: 'symlink',
+          size: linkTarget.length,
+          oid: blobOid('sha1', linkTarget),
+          targetRawBase64: linkTarget.toString('base64'),
+        },
+      );
+      assert.notEqual(link.oid, blobOid('sha1', secret));
     });
-    assert.deepEqual(
-      {
-        kind: link.kind,
-        size: link.size,
-        oid: link.oid,
-        targetRawBase64: link.targetRawBase64,
-      },
-      {
-        kind: 'symlink',
-        size: linkTarget.length,
-        oid: blobOid('sha1', linkTarget),
-        targetRawBase64: linkTarget.toString('base64'),
-      },
-    );
-    assert.notEqual(link.oid, blobOid('sha1', secret));
 
     const sha256 = await hashFilesystemEntry(regularPath, {
       objectFormat: 'sha256',

@@ -306,3 +306,22 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 8b9f53f5047451c6d08df7282ba6cc605aecf314711667cef918dd2966a3a094
+
+## test-doctor (7d6140526ca4)
+
+Prompt: "Create a square thumbnail for the test-doctor agent skill. Audit test correctness, coverage, reliability, and maintenance; optionally repair material gaps without gaming the suite. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+
+Provider: placeholder
+model: deterministic-local-v1
+SHA-256: 7d6140526ca40be2d5d16947ef02e1169fd1db733f22766d3e2e2f7e8903861a
+
+## test-doctor (eee52286e4e0)
+
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One rounded dark slate diagnostic console is the hero surface. Inside it, abstract test cards transform left to right from amber warning badges and a broken branching path into an orderly teal and green grid of test cards with green check badges, linked by subtle dashed arrows. A single magnifying glass inspects a branching test path to suggest meaningful coverage rather than raw counts. A small medical cross badge on the console conveys diagnosis and repair. A tiny GitHub Octocat mark sits upper-right with a dotted tether to the console, never the subject. Teal, mint green, slate and warm amber palette. Clean modern rounded shapes, soft long shadows, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and pills instead of labels. No words, letters, numerals, fake text, photorealism, 3D, extra floating panels, stethoscope tubes, or clutter."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: eee52286e4e00b060b7bce6ace5aadca68e2263286734b6740f18bdea4bca768

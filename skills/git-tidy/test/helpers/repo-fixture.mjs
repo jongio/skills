@@ -4,6 +4,7 @@ import { realpathSync } from 'node:fs';
 import {
   lstat,
   mkdir,
+  open,
   readFile,
   readdir,
   readlink,
@@ -148,6 +149,11 @@ export async function createRepoFixture(label) {
       const absolute = assertInside(root, relativePath);
       await mkdir(path.dirname(absolute), { recursive: true });
       await writeFile(absolute, content);
+      if (process.platform === 'win32') {
+        // Settle first-open metadata before tests take file identity snapshots.
+        const handle = await open(absolute, 'r');
+        await handle.close();
+      }
       return absolute;
     },
 

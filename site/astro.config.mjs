@@ -10,4 +10,15 @@ export default defineConfig({
   site: "https://jongio.github.io",
   base: "/skills/",
   integrations: [preact()],
+  vite: {
+    optimizeDeps: {
+      // Discover ClientRouter's runtime before the toolbar loads, avoiding a stale prebundle.
+      include: [
+        "astro/virtual-modules/transitions-router.js",
+        "astro/virtual-modules/transitions-events.js",
+        "astro/virtual-modules/transitions-types.js",
+        "astro/virtual-modules/transitions-swap-functions.js",
+      ],
+    },
+  },
 });

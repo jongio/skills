@@ -84,6 +84,7 @@ test("renderer creates the complete portable skill shape", () => {
     "LICENSE",
     "package.json",
     "package-lock.json",
+    ".npmrc",
     ".vally.yaml",
     "test/skill.test.mjs",
     `evals/${manifest.name}/eval.yaml`,
@@ -92,6 +93,7 @@ test("renderer creates the complete portable skill shape", () => {
     assert.ok(files.has(path), path);
   }
   const skill = files.get("SKILL.md");
+  assert.equal(files.get(".npmrc"), "min-release-age=7\n");
   const keys = [...skill.matchAll(/^([a-z][a-z-]*):/gm)].map((match) => match[1]);
   assert.deepEqual(keys.slice(0, 2), ["name", "description"]);
   assert.ok(Buffer.isBuffer(files.get("thumbnail.png")));

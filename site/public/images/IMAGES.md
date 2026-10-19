@@ -32,6 +32,7 @@ validate all catalog mappings and generate byte-identical public copies.
 | `thumb-eli5.png` | `eli5` card/detail | Byte parity with the skill copy is asserted by a test. |
 | `thumb-naming-is-hard.png` | `naming-is-hard` card/detail | Candidate names screened across registries. |
 | `thumb-repo-ready.png` | `repo-ready` card/detail | Repository health checklist with gap indicators. |
+| `thumb-test-doctor.png` | `test-doctor` card/detail | Test diagnostic console transforms amber gaps into verified green test cards; generated source and provider provenance live with the skill. |
 
 ## Statusline diagrams
 
