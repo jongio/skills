@@ -198,6 +198,8 @@ Use **setup** to hide a component without dismissing its tracked items. Hidden
 components can be enabled again later; hiding does not clear their history.
 Refresh keeps entries tracked even when GitHub reports them closed or missing;
 normal subsequent footer updates still apply the existing lifecycle rules.
+Remote observations are applied to the latest locked tracking state, preserving
+activity and dismissals recorded while those queries run.
 Git comparisons use local refs; refresh does not fetch remote Git branches.
 
 After installing updated runtime files, **restart Copilot** to reload an

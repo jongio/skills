@@ -239,6 +239,90 @@ test("default GitHub issue refresh reports a fetch failure and releases its shar
 	assert.equal(readIssueCache(home)[issueUrl(2)].refreshingUntil, 0);
 }));
 
+test("refresh merges observations into current PR, issue and agent state without erasing interleaved tracking changes", async (t) => fixture((home) => {
+	const id = "interleaved";
+	seed(home, id);
+	const initialPrs = new SessionTracker(id, readState(id, home));
+	initialPrs.add(prUrl(4));
+	writeState(initialPrs.snapshot(), home);
+	const initialIssues = new IssueTracker(id, readIssues(id, home));
+	initialIssues.add(issueUrl(5));
+	writeIssues(initialIssues.snapshot(), home);
+	const initialAgents = new SubagentTracker(id, readAgents(id, home));
+	initialAgents.linkPr("old-agent", prUrl(1));
+	initialAgents.ensureAgent("settled-agent");
+	initialAgents.linkPr("settled-agent", prUrl(4));
+	writeAgents(initialAgents.snapshot(), home);
+	const calls = mockGithub(t, (kind, number) => {
+		if (kind === "pullRequest" && number === 1) {
+			const prs = new SessionTracker(id, readState(id, home));
+			prs.manage("remove", prUrl(1));
+			prs.add(prUrl(9));
+			Object.assign(prs.state.prs.find((pr) => pr.url === prUrl(4)), {
+				status: "newer merged status", checkedAt: 5000, mergedAt: 5000, mergedObservedAt: 5000,
+			});
+			prs.state.transcriptOffset = 999;
+			prs.calls.set("new-pr-call", { command: "new work" });
+			writeState(prs.snapshot(), home);
+			const issues = new IssueTracker(id, readIssues(id, home));
+			issues.manage("remove", issueUrl(2));
+			issues.add(issueUrl(9));
+			Object.assign(issues.state.issues.find((issue) => issue.url === issueUrl(5)), {
+				status: "newer closed status", checkedAt: 5000, closedAt: 5000,
+			});
+			issues.state.transcriptOffset = 999;
+			issues.calls.set("new-issue-call", { command: "new work" });
+			writeIssues(issues.snapshot(), home);
+			const agents = new SubagentTracker(id, readAgents(id, home));
+			agents.agents.delete("old-agent");
+			agents.ensureAgent("new-agent");
+			agents.agents.get("settled-agent").status = "failed";
+			agents.transcriptOffset = 999;
+			agents.taskCalls.set("new-task-call", "new-agent");
+			writeAgents(agents.snapshot(), home);
+		}
+		return { state: "OPEN", title: "older observation" };
+	});
+	assert.match(refreshSessionStatusline({ session_id: id }, { home, now: 2000 }), /^Refreshed/);
+	assert.ok(calls.length >= 4);
+	const prs = readState(id, home);
+	assert.deepEqual(prs.prs.map((pr) => pr.url), [prUrl(4), prUrl(9)]);
+	assert.ok(prs.ignored.includes(prUrl(1)));
+	assert.equal(prs.prs[0].mergedAt, 5000);
+	assert.equal(prs.prs[0].status, "newer merged status");
+	assert.equal(prs.transcriptOffset, 999);
+	assert.ok(prs.calls["new-pr-call"]);
+	const issues = readIssues(id, home);
+	assert.deepEqual(issues.issues.map((issue) => issue.url), [issueUrl(5), issueUrl(9)]);
+	assert.ok(issues.ignored.includes(issueUrl(2)));
+	assert.equal(issues.issues[0].closedAt, 5000);
+	assert.equal(issues.issues[0].status, "newer closed status");
+	assert.equal(issues.transcriptOffset, 999);
+	assert.ok(issues.calls["new-issue-call"]);
+	const agents = readAgents(id, home);
+	assert.deepEqual(Object.keys(agents.agents), ["settled-agent", "new-agent"]);
+	assert.equal(agents.agents["settled-agent"].status, "failed");
+	assert.equal(agents.transcriptOffset, 999);
+	assert.equal(agents.taskCalls["new-task-call"], "new-agent");
+}));
+
+test("a clear during remote refresh remains authoritative for every component", async () => fixture((home) => {
+	const id = "clear-during-refresh";
+	seed(home, id);
+	assert.match(refreshSessionStatusline({ session_id: id }, {
+		home, now: 1000,
+		fetchPrStatus: () => {
+			clearSessionStatusline({ session_id: id }, { home, now: 2000 });
+			return { state: "OPEN" };
+		},
+		fetchIssueStatus: () => ({ state: "OPEN" }),
+	}), /^Refreshed/);
+	assert.deepEqual(readState(id, home).prs, []);
+	assert.deepEqual(readIssues(id, home).issues, []);
+	assert.deepEqual(readAgents(id, home).agents, {});
+	for (const read of [readState, readIssues, readAgents]) assert.equal(read(id, home).clearedAt, 2000);
+}));
+
 test("refresh does not remove tracked closed or missing items", async () => fixture((home) => {
 	seed(home, "closed");
 	assert.match(refreshSessionStatusline({ session_id: "closed" }, {

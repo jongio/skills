@@ -114,10 +114,16 @@ export function readState(sessionId, home = configHome()) {
 }
 
 export function writeState(state, home = configHome()) {
-	return withStateLock(statePath(state.sessionId, home), () => {
-		const current = readState(state.sessionId, home);
+	return updateState(state.sessionId, (current) => {
 		if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return current;
-		atomicWriteJson(statePath(state.sessionId, home), state);
+		return state;
+	}, home);
+}
+
+export function updateState(sessionId, update, home = configHome()) {
+	return withStateLock(statePath(sessionId, home), () => {
+		const state = update(readState(sessionId, home));
+		atomicWriteJson(statePath(sessionId, home), state);
 		return state;
 	});
 }

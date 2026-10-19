@@ -1,14 +1,15 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { withStateLock } from "../state-lock.mjs";
 import {
-	configHome, readState, refreshTrackedPrStatuses, SessionTracker, syncSession as syncPrs, transcriptPathFor, writeState,
+	configHome, readState, refreshTrackedPrStatuses, SessionTracker, syncSession as syncPrs, transcriptPathFor, updateState, writeState,
 } from "./tracker.mjs";
 import {
-	IssueTracker, readState as readIssues, refreshTrackedIssueStatuses, syncSession as syncIssues, writeState as writeIssues,
+	IssueTracker, readState as readIssues, refreshTrackedIssueStatuses, syncSession as syncIssues, updateState as updateIssues, writeState as writeIssues,
 } from "../issue-statusline/tracker.mjs";
 import {
-	readState as readAgents, SubagentTracker, syncSession as syncAgents, writeState as writeAgents,
+	readState as readAgents, SubagentTracker, syncSession as syncAgents, updateState as updateAgents, writeState as writeAgents,
 } from "../subagent-statusline/tracker.mjs";
 import { readPrCache } from "./github.mjs";
 import {
@@ -81,6 +82,9 @@ export function refreshSessionStatusline(payload, {
 	const prs = new SessionTracker(id, readState(id, home));
 	const issues = new IssueTracker(id, readIssues(id, home));
 	const agents = new SubagentTracker(id, readAgents(id, home));
+	const previousPrs = structuredClone(prs.state.prs);
+	const previousIssues = structuredClone(issues.state.issues);
+	const previousAgents = structuredClone(agents.snapshot());
 	const failures = [];
 	const onError = (error) => failures.push(error.message);
 	// Agent-linked PRs need fresh remote state even when their detailed pills are hidden.
@@ -92,15 +96,33 @@ export function refreshSessionStatusline(payload, {
 	for (const [label, refresh] of [
 		["PRs", () => {
 			refreshTrackedPrStatuses(remotePrs, { home, now, fetchPrStatus, force: true, onError });
-			writeState(prs.snapshot(), home);
+			const saved = updateState(id, (current) => {
+				current ??= prs.snapshot();
+				if ((current.clearedAt ?? 0) !== prs.state.clearedAt) return current;
+				return { ...current, prs: mergeObservations(current.prs, previousPrs, remotePrs.state.prs), updatedAt: Date.now() };
+			}, home);
+			prs.state.prs = saved.prs;
 		}],
 		["Issues", () => {
 			refreshTrackedIssueStatuses(issues, { home, now, fetchIssueStatus, force: true, onError });
-			writeIssues(issues.snapshot(), home);
+			updateIssues(id, (current) => {
+				current ??= issues.snapshot();
+				if ((current.clearedAt ?? 0) !== issues.state.clearedAt) return current;
+				return { ...current, issues: mergeObservations(current.issues, previousIssues, issues.state.issues), updatedAt: Date.now() };
+			}, home);
 		}],
 		["Subagents", () => {
 			agents.syncWithPrCache(readPrCache(home), now);
-			writeAgents(agents.snapshot(), home);
+			updateAgents(id, (current) => {
+				current ??= previousAgents;
+				if ((current.clearedAt ?? 0) !== agents.clearedAt) return current;
+				return {
+					...current, updatedAt: Date.now(),
+					dismissed: current.dismissed === previousAgents.dismissed ? agents.dismissed : current.dismissed,
+					agents: Object.fromEntries(mergeObservations(Object.values(current.agents),
+						Object.values(previousAgents.agents), [...agents.agents.values()]).map((agent) => [agent.id, agent])),
+				};
+			}, home);
 		}],
 		["Worktrees", () => {
 			const { contexts, catchingUp } = sessionContexts(payload, { home, run, force: true });
@@ -118,4 +140,25 @@ export function refreshSessionStatusline(payload, {
 	return failures.length
 		? `Session statusline refresh incomplete:\n${failures.join("\n")}`
 		: "Refreshed this session's tracked statusline entries. Tracking and enabled components are unchanged.";
+}
+
+function mergeObservations(current, previous, refreshed) {
+	const key = (item) => item.url ?? item.id;
+	const before = new Map(previous.map((item) => [key(item), item]));
+	const after = new Map(refreshed.map((item) => [key(item), item]));
+	const lifecycle = ["generation", "checkedAt", "status", "closedAt", "mergedAt", "mergedObservedAt",
+		"mergedPrs", "settlementObservedAt", "settlementDismissed"];
+	return current.map((item) => {
+		const old = before.get(key(item)), fresh = after.get(key(item));
+		if (!old || !fresh || lifecycle.some((field) => !isDeepStrictEqual(item[field], old[field]))) return item;
+		const fields = [...new Set([...Object.keys(old), ...Object.keys(fresh)])]
+			.filter((field) => !isDeepStrictEqual(old[field], fresh[field]));
+		if (fields.some((field) => !isDeepStrictEqual(item[field], old[field]))) return item;
+		const updated = { ...item };
+		for (const field of fields) {
+			if (Object.hasOwn(fresh, field)) updated[field] = fresh[field];
+			else delete updated[field];
+		}
+		return updated;
+	});
 }
