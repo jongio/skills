@@ -54,7 +54,8 @@
     "repo-maintenance",
     "test-doctor",
     "pr",
-    "go"
+    "go",
+    "retro"
   ],
   "repository": "https://github.com/jongio/skills"
 }

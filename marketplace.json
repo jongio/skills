@@ -97,6 +97,12 @@
       "source": "./skills/go",
       "description": "Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge.",
       "version": "1.0.0"
+    },
+    {
+      "name": "retro",
+      "source": "./skills/retro",
+      "description": "Close out a session with an evidence-backed task and feedback audit, source-skill improvements, and safely approved branch and worktree cleanup",
+      "version": "1.0.0"
     }
   ]
 }
