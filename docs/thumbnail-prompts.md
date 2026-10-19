@@ -325,3 +325,14 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: eee52286e4e00b060b7bce6ace5aadca68e2263286734b6740f18bdea4bca768
+
+## pr (da5d5e3f1686)
+
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One rounded dark navy pull-request review panel is the hero surface. Inside it, an uncommitted code diff card and amber preflight warning badges on the left transform left to right through a checklist rail of four verification badges into a clean merged pull-request branch node with a green check badge on the right, joined by smooth dashed guide lines. A tiny GitHub Octocat mark sits upper-right with a dotted tether to the panel, never the subject. Deep navy, GitHub green, purple merge accent, and warm amber palette. Clean modern rounded shapes, soft long shadows, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and rounded pills instead of labels. No words, letters, numerals, fake text, photorealism, 3D, extra floating panels, or clutter."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: da5d5e3f168687410a4d977f975181e907924a06fe455afb8035a6c1b4adecd4

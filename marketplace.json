@@ -85,6 +85,12 @@
       "source": "./skills/test-doctor",
       "description": "Audit test correctness, coverage, reliability, and maintenance; optionally repair material gaps without gaming the suite.",
       "version": "1.0.0"
+    },
+    {
+      "name": "pr",
+      "source": "./skills/pr",
+      "description": "A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge.",
+      "version": "1.0.0"
     }
   ]
 }
