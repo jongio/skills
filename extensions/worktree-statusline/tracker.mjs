@@ -164,11 +164,12 @@ function readSessionDirectory(payload, { home }) {
 	const identity = `${resolve(transcript)}:${stat.ino}:${stat.birthtimeMs}`;
 	const valid = previous?.version === 3 && previous.identity === identity &&
 		Number.isSafeInteger(previous.offset) && previous.offset >= 0 && previous.offset <= stat.size;
+	const baseline = previous?.clearedContext ?? previous;
 	const tracker = new WorktreeTracker(valid ? previous : {
-		clearedAt: previous?.clearedAt, dismissed: Boolean(previous?.clearedAt), cwd: previous?.clearedAt ? previous.cwd : null,
-		agentCwds: previous?.clearedAt ? previous.agentCwds : {},
-		sequence: previous?.clearedAt ? previous.sequence : 0,
-		appliedSequence: previous?.clearedAt ? previous.appliedSequence : 0,
+		clearedAt: previous?.clearedAt, dismissed: Boolean(previous?.clearedAt), cwd: previous?.clearedAt ? baseline.cwd : null,
+		agentCwds: previous?.clearedAt ? baseline.agentCwds : {},
+		sequence: previous?.clearedAt ? baseline.sequence : 0,
+		appliedSequence: previous?.clearedAt ? baseline.appliedSequence : 0,
 	});
 	let offset = valid ? previous.offset : 0;
 	let skipPartial = valid && previous.skipPartial === true;
@@ -206,6 +207,7 @@ function readSessionDirectory(payload, { home }) {
 		}
 		writeJson(cachePath, {
 			version: 3, identity, offset, skipPartial, cwd: tracker.cwd, clearedAt: tracker.clearedAt, dismissed: tracker.dismissed,
+			clearedContext: previous?.clearedContext,
 			pending: Object.fromEntries(tracker.pending),
 			sequence: tracker.sequence, appliedSequence: tracker.appliedSequence,
 			directories: [...tracker.directories], agentCwds: Object.fromEntries(tracker.agentCwds),

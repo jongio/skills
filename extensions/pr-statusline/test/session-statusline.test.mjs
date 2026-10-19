@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -257,6 +257,73 @@ for (const reindexed of [false, true]) {
 		assert.equal(location.agentCwds.child.cwd, second);
 	}));
 }
+
+for (const agentId of [null, "child"]) {
+	test(`re-indexing after post-clear relative ${agentId ? "agent" : "root"} work starts from the clear-time directory baseline`, async () => fixture((home) => {
+		const id = "relative-replay";
+		const payload = { session_id: id, cwd: home };
+		const agentDirectory = join(home, "agent");
+		const file = transcript(home, id, [
+			event("session.start", 1000, { cwd: home }),
+			{ ...event("session.context_changed", 1100, { cwd: agentDirectory }), agentId: "child" },
+		]);
+		clearSessionStatusline(payload, { home, now: 2000 });
+		appendFileSync(file, [
+			event("tool.execution_start", 3000, { toolCallId: "relative", toolName: "bash", arguments: { command: "cd nested" } }),
+			event("tool.execution_complete", 3100, { toolCallId: "relative", success: true }),
+		].map((item) => JSON.stringify({ ...item, ...(agentId ? { agentId } : {}) })).join("\n") + "\n");
+		const before = sessionDirectory(payload, { home });
+		const expected = join(agentId ? agentDirectory : home, "nested");
+		assert.deepEqual(before.directories, [expected]);
+		assert.equal(agentId ? before.agentCwds.child.cwd : before.cwd, expected);
+		const replacement = `${file}.replacement`;
+		writeFileSync(replacement, readFileSync(file));
+		renameSync(replacement, file);
+		assert.deepEqual(sessionDirectory(payload, { home }), before);
+	}));
+}
+
+test("clear reports incomplete worktree replay instead of skipping unread root and agent directory context", async () => fixture((home) => {
+	const id = "large-clear";
+	const payload = { session_id: id, cwd: home };
+	const latestRoot = join(home, "latest-root"), latestAgent = join(home, "latest-agent");
+	const file = transcript(home, id, [
+		event("session.start", 1000, { cwd: home }),
+		{ ...event("session.context_changed", 1100, { cwd: join(home, "old-agent") }), agentId: "child" },
+	]);
+	appendFileSync(file, (JSON.stringify(event("assistant.message", 1150, { content: "x".repeat(1000) })) + "\n").repeat(5000));
+	appendFileSync(file, [
+		event("session.context_changed", 1200, { cwd: latestRoot }),
+		{ ...event("session.context_changed", 1300, { cwd: latestAgent }), agentId: "child" },
+	].map(JSON.stringify).join("\n") + "\n");
+	assert.throws(() => clearSessionStatusline(payload, { home, now: 2000 }), /history is still catching up/);
+	for (const read of [readState, readIssues, readAgents]) assert.equal(read(id, home).clearedAt, 0);
+	assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedAt, 0);
+	assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+	appendFileSync(file, [
+		event("tool.execution_start", 3000, { toolCallId: "root", toolName: "bash", arguments: { command: "cd root-child" } }),
+		event("tool.execution_complete", 3100, { toolCallId: "root", success: true }),
+		{ ...event("tool.execution_start", 3200, { toolCallId: "agent", toolName: "bash", arguments: { command: "cd agent-child" } }), agentId: "child" },
+		{ ...event("tool.execution_complete", 3300, { toolCallId: "agent", success: true }), agentId: "child" },
+	].map(JSON.stringify).join("\n") + "\n");
+	const location = sessionDirectory(payload, { home });
+	assert.equal(location.cwd, join(latestRoot, "root-child"));
+	assert.equal(location.agentCwds.child.cwd, join(latestAgent, "agent-child"));
+	assert.deepEqual(location.directories, [join(latestRoot, "root-child"), join(latestAgent, "agent-child")]);
+}));
+
+test("clear waits for a complete transcript record before capturing its directory baseline", async () => fixture((home) => {
+	const id = "partial-clear";
+	const payload = { session_id: id, cwd: home };
+	const latest = join(home, "latest");
+	const file = transcript(home, id, [event("session.start", 1000, { cwd: home })]);
+	appendFileSync(file, JSON.stringify(event("session.context_changed", 1200, { cwd: latest })));
+	assert.throws(() => clearSessionStatusline(payload, { home, now: 2000 }), /history is still catching up/);
+	assert.equal(readState(id, home).clearedAt, 0);
+	appendFileSync(file, "\n");
+	assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+	assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedContext.cwd, latest);
+}));
 
 test("clear without a transcript suppresses payload directory fallback and remains repeatable", async () => fixture((home) => {
 	const payload = { session_id: "empty", cwd: home };
