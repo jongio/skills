@@ -346,3 +346,14 @@ model: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 delivery: Direct authenticated Azure OpenAI HTTPS response saved as a local PNG; no additional provider call during ingestion.
 SHA-256: 6abb40542164c5e4c0843b3e79046a4d57e1c1232f006557aa137a71a48f884d
+
+## retro (0484ad91bd4d)
+
+Prompt: "Create a polished flat vector diagram thumbnail for a session retrospective agent skill. Exactly 1024x1024 pixels, pure white background, centered composition, generous white margins. One large rounded navy workspace panel holds the whole scene. Within the panel, show a clear left-to-right transformation: on the left, three overlapping conversation cards with abstract dash marks and one small amber unresolved badge; in the center, a large teal circular review arrow surrounding a magnifying glass over a checklist; on the right, a neatly aligned completed checklist with green circular check badges and a small improved skill card with an upward arrow. Along the lower edge, show a simple branching line tidying into a single preserved green path, with a tiny shield badge to suggest safe cleanup. Use teal and soft indigo accents, restrained warm amber only for unfinished items, rounded modern shapes, soft long shadows, subtle dashed guide lines, and two tiny sparkles. Include a small GitHub Octocat mark in the upper-right of the hero panel with a dotted tether, never as the main subject. Make the review-to-completion transformation legible when reduced to 175 pixels. Diagram treatment only: no words, letters, numerals, readable characters, fake text, captions, logos other than the small Octocat mark, photorealism, 3D rendering, clutter, destructive trash imagery, or floating disconnected branches."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 0484ad91bd4dd73793e42f8ec09b58f3158b7c8b201601ed1e0b1e629974a230
