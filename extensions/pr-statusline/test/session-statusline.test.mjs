@@ -225,6 +225,20 @@ test("refresh reports partial failures explicitly and leaves failed items tracke
 	assert.equal(readIssues("failure", home).issues.length, 1);
 }));
 
+test("default GitHub issue refresh reports a fetch failure and releases its shared-cache lock", async (t) => fixture((home) => {
+	seed(home, "default-failure");
+	mockGithub(t, (kind) => {
+		if (kind === "issue") throw new Error("GitHub unavailable");
+		return { state: "OPEN" };
+	});
+	const result = refreshSessionStatusline({ session_id: "default-failure" }, { home, now: 2000 });
+	assert.match(result, /^Session statusline refresh incomplete:/);
+	assert.match(result, /example\/widget#2: GitHub unavailable/);
+	assert.equal(readIssues("default-failure", home).issues.length, 1);
+	assert.equal(readIssues("default-failure", home).issues[0].checkedAt, undefined);
+	assert.equal(readIssueCache(home)[issueUrl(2)].refreshingUntil, 0);
+}));
+
 test("refresh does not remove tracked closed or missing items", async () => fixture((home) => {
 	seed(home, "closed");
 	assert.match(refreshSessionStatusline({ session_id: "closed" }, {

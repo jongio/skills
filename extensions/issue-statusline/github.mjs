@@ -255,10 +255,10 @@ export function refreshTrackedIssueStatuses(tracker, {
 				failure = error;
 				info = null;
 			}
-			if (force && !info) {
-				onError(new Error(`Could not refresh ${issue.label}: ${failure?.message ?? "GitHub returned no status."}`));
-				continue;
-			}
+		}
+		if (force && !info) {
+			onError(new Error(`Could not refresh ${issue.label}: ${failure?.message ?? "GitHub returned no status."}`));
+			continue;
 		}
 
 		if (info && typeof info === "object") {
