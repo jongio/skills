@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@microsoft/vally-cli": "0.18.0",
-    "skills": "1.7.1"
+    "skills": "1.7.2"
   },
   "allowScripts": {
     "@vscode/deviceid": false,
