@@ -1,7 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { withStateLock } from "../state-lock.mjs";
 import {
 	configHome, readState, refreshTrackedPrStatuses, SessionTracker, syncSession as syncPrs, transcriptPathFor, updateState, writeState,
 } from "./tracker.mjs";
@@ -13,19 +12,13 @@ import {
 } from "../subagent-statusline/tracker.mjs";
 import { readPrCache } from "./github.mjs";
 import {
-	checkoutDivergence, readJson, sessionContexts, sessionDirectory, writeJson,
+	checkoutDivergence, readJson, sessionContexts, transcriptIdentity, withSessionDirectory, writeJson,
 } from "../worktree-statusline/tracker.mjs";
 import { resolveLinkedCheckouts } from "../worktree-statusline/worktrees.mjs";
 
 export function clearSessionStatusline(payload, { home = configHome(), now = Date.now() } = {}) {
 	const id = payload?.session_id;
 	const transcript = transcriptPathFor(id, home, payload?.transcript_path);
-	let offset = 0;
-	try {
-		offset = statSync(transcript).size;
-	} catch (error) {
-		if (error.code !== "ENOENT") throw error;
-	}
 	const pr = new SessionTracker(id, syncPrs(payload, { home, now, fetchPrStatus: false }).state);
 	const issue = new IssueTracker(id, syncIssues(payload, { home, now, fetchIssueStatus: false }).state);
 	const agents = syncAgents(payload, { home, now }).tracker ?? new SubagentTracker(id);
@@ -37,42 +30,57 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 	}
 	const [repository, branch, cwd, name] = ["repository", "branch", "cwd", "name"]
 		.map((key) => new RegExp(`^${key}:\\s*(.+?)\\s*$`, "m").exec(workspace)?.[1] ?? null);
-	sessionDirectory(payload, { home });
 	const path = join(home, "worktree-statusline", `${id}.json`);
-	const worktree = readJson(path);
-	const clearedAt = Math.max(now, ...[pr.state.clearedAt, issue.state.clearedAt, agents.clearedAt, worktree?.clearedAt ?? 0].map((time) => time + 1));
-	pr.state.clearedPrs = [...new Set([...pr.state.clearedPrs, ...pr.state.prs.map((entry) => entry.url)])];
-	pr.state.clearedWorkspace = [repository, branch, cwd, name];
-	pr.state.prs = [];
-	pr.state.ignoredRevisions = Object.fromEntries(Object.entries(pr.state.ignoredRevisions)
-		.filter(([url]) => pr.state.ignored.includes(url)));
-	pr.state.clearedAt = clearedAt;
-	pr.state.transcriptOffset = offset;
-	delete pr.state.simulate;
-	pr.calls.clear();
-	pr.pending.clear();
-	pr.background.clear();
-	issue.state.issues = [];
-	issue.state.clearedWorkspace = [repository, branch, name];
-	issue.state.clearedAt = clearedAt;
-	issue.state.transcriptOffset = offset;
-	issue.calls.clear();
-	agents.clear();
-	agents.clearedAt = clearedAt;
-	agents.transcriptOffset = offset;
-	agents.simulated = false;
-	writeState(pr.snapshot(), home);
-	writeIssues(issue.snapshot(), home);
-	writeAgents(agents.snapshot(), home);
-	withStateLock(path, () => {
+	return withSessionDirectory({ ...payload, transcript_path: transcript }, (location) => {
 		const latest = readJson(path);
-		if ((latest?.clearedAt ?? 0) > clearedAt) return;
+		let stat;
+		try {
+			stat = statSync(transcript);
+		} catch (error) {
+			if (error.code !== "ENOENT") throw error;
+		}
+		const offset = stat?.size ?? 0;
+		if (location.catchingUp || (stat && (latest?.offset !== offset || latest?.identity !== transcriptIdentity(transcript, stat)))) {
+			throw new Error("Worktree history is still catching up. Run /session-statusline clear again after replay completes.");
+		}
+		if (!stat) {
+			pr.state.transcriptOffset = 0;
+			issue.state.transcriptOffset = 0;
+			agents.transcriptOffset = 0;
+		}
+		const clearedAt = Math.max(now, ...[pr.state.clearedAt, issue.state.clearedAt, agents.clearedAt, latest?.clearedAt ?? 0].map((time) => time + 1));
+		const clearedContext = {
+			cwd: latest?.cwd ?? payload.cwd ?? null, agentCwds: latest?.agentCwds ?? {},
+			sequence: latest?.sequence ?? 0, appliedSequence: latest?.appliedSequence ?? 0,
+			observedThroughAt: Number.isFinite(latest?.observedThroughAt) ? latest.observedThroughAt : 0,
+		};
+		pr.state.clearedPrs = [...new Set([...pr.state.clearedPrs, ...pr.state.prs.map((entry) => entry.url)])];
+		pr.state.clearedWorkspace = [repository, branch, cwd, name];
+		pr.state.prs = [];
+		pr.state.ignoredRevisions = Object.fromEntries(Object.entries(pr.state.ignoredRevisions)
+			.filter(([url]) => pr.state.ignored.includes(url)));
+		pr.state.clearedAt = clearedAt;
+		delete pr.state.simulate;
+		pr.calls.clear();
+		pr.pending.clear();
+		pr.background.clear();
+		issue.state.issues = [];
+		issue.state.clearedWorkspace = [repository, branch, name];
+		issue.state.clearedAt = clearedAt;
+		issue.calls.clear();
+		agents.clear();
+		agents.clearedAt = clearedAt;
+		agents.simulated = false;
+		writeState(pr.snapshot(), home);
+		writeIssues(issue.snapshot(), home);
+		writeAgents(agents.snapshot(), home);
 		writeJson(path, {
-			...latest, version: 3, offset, clearedAt, dismissed: true, cwd: latest?.cwd ?? payload.cwd ?? null, directories: [],
-			pending: {}, agentCwds: latest?.agentCwds ?? {}, agentDirectories: {}, skipPartial: false,
+			...latest, ...clearedContext, version: 3, offset,
+			clearedAt: Math.max(clearedAt, clearedContext.observedThroughAt), dismissed: true, clearedContext, directories: [],
+			pending: {}, agentDirectories: {}, skipPartial: false,
 		});
-	});
-	return "Cleared this session's PR, issue, subagent, and worktree entries. Component settings and transcripts are unchanged.";
+		return "Cleared this session's PR, issue, subagent, and worktree entries. Component settings and transcripts are unchanged.";
+	}, { home });
 }
 
 export function refreshSessionStatusline(payload, {

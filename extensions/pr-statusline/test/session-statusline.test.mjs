@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import fs from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -258,13 +259,288 @@ for (const reindexed of [false, true]) {
 	}));
 }
 
+for (const agentId of [null, "child"]) {
+	test(`re-indexing after post-clear relative ${agentId ? "agent" : "root"} work starts from the clear-time directory baseline`, async () => fixture((home) => {
+		const id = "relative-replay";
+		const payload = { session_id: id, cwd: home };
+		const agentDirectory = join(home, "agent");
+		const file = transcript(home, id, [
+			event("session.start", 1000, { cwd: home }),
+			{ ...event("session.context_changed", 1100, { cwd: agentDirectory }), agentId: "child" },
+		]);
+		clearSessionStatusline(payload, { home, now: 2000 });
+		appendFileSync(file, [
+			event("tool.execution_start", 3000, { toolCallId: "relative", toolName: "bash", arguments: { command: "cd nested" } }),
+			event("tool.execution_complete", 3100, { toolCallId: "relative", success: true }),
+		].map((item) => JSON.stringify({ ...item, ...(agentId ? { agentId } : {}) })).join("\n") + "\n");
+		const before = sessionDirectory(payload, { home });
+		const expected = join(agentId ? agentDirectory : home, "nested");
+		assert.deepEqual(before.directories, [expected]);
+		assert.equal(agentId ? before.agentCwds.child.cwd : before.cwd, expected);
+		const replacement = `${file}.replacement`;
+		writeFileSync(replacement, readFileSync(file));
+		renameSync(replacement, file);
+		assert.deepEqual(sessionDirectory(payload, { home }), before);
+	}));
+}
+
+test("clear reports incomplete worktree replay instead of skipping unread root and agent directory context", async () => fixture((home) => {
+	const id = "large-clear";
+	const payload = { session_id: id, cwd: home };
+	const latestRoot = join(home, "latest-root"), latestAgent = join(home, "latest-agent");
+	const file = transcript(home, id, [
+		event("session.start", 1000, { cwd: home }),
+		{ ...event("session.context_changed", 1100, { cwd: join(home, "old-agent") }), agentId: "child" },
+	]);
+	appendFileSync(file, (JSON.stringify(event("assistant.message", 1150, { content: "x".repeat(1000) })) + "\n").repeat(5000));
+	appendFileSync(file, [
+		event("session.context_changed", 1200, { cwd: latestRoot }),
+		{ ...event("session.context_changed", 1300, { cwd: latestAgent }), agentId: "child" },
+	].map(JSON.stringify).join("\n") + "\n");
+	assert.throws(() => clearSessionStatusline(payload, { home, now: 2000 }), /history is still catching up/);
+	for (const read of [readState, readIssues, readAgents]) assert.equal(read(id, home).clearedAt, 0);
+	assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedAt, 0);
+	assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+	appendFileSync(file, [
+		event("tool.execution_start", 3000, { toolCallId: "root", toolName: "bash", arguments: { command: "cd root-child" } }),
+		event("tool.execution_complete", 3100, { toolCallId: "root", success: true }),
+		{ ...event("tool.execution_start", 3200, { toolCallId: "agent", toolName: "bash", arguments: { command: "cd agent-child" } }), agentId: "child" },
+		{ ...event("tool.execution_complete", 3300, { toolCallId: "agent", success: true }), agentId: "child" },
+	].map(JSON.stringify).join("\n") + "\n");
+	const location = sessionDirectory(payload, { home });
+	assert.equal(location.cwd, join(latestRoot, "root-child"));
+	assert.equal(location.agentCwds.child.cwd, join(latestAgent, "agent-child"));
+	assert.deepEqual(location.directories, [join(latestRoot, "root-child"), join(latestAgent, "agent-child")]);
+}));
+
+test("clear waits for a complete transcript record before capturing its directory baseline", async () => fixture((home) => {
+	const id = "partial-clear";
+	const payload = { session_id: id, cwd: home };
+	const latest = join(home, "latest");
+	const file = transcript(home, id, [event("session.start", 1000, { cwd: home })]);
+	appendFileSync(file, JSON.stringify(event("session.context_changed", 1200, { cwd: latest })));
+	assert.throws(() => clearSessionStatusline(payload, { home, now: 2000 }), /history is still catching up/);
+	assert.equal(readState(id, home).clearedAt, 0);
+	appendFileSync(file, "\n");
+	assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+	assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedContext.cwd, latest);
+}));
+
+for (const agentId of [null, "child"]) {
+	test(`clear rejects a partial ${agentId ? "agent" : "root"} directory record appended during component synchronization`, async (t) => fixture((home) => {
+		const id = "append-during-clear";
+		const payload = { session_id: id, cwd: home };
+		const latest = join(home, "latest");
+		const file = transcript(home, id, [
+			event("session.start", 1000, { cwd: home }),
+			{ ...event("session.context_changed", 1100, { cwd: join(home, "agent") }), agentId: "child" },
+		]);
+		const component = agentId ? "issue-statusline" : "pr-statusline";
+		const stateFile = join(home, component, `${id}.json`);
+		const rename = fs.renameSync;
+		let appended = false;
+		t.mock.method(fs, "renameSync", (from, to) => {
+			rename(from, to);
+			if (to === stateFile && !appended) {
+				appendFileSync(file, JSON.stringify({
+					...event("session.context_changed", 1500, { cwd: latest }), ...(agentId ? { agentId } : {}),
+				}));
+				appended = true;
+			}
+		});
+		syncBuiltinESMExports();
+		t.after(() => {
+			t.mock.restoreAll();
+			syncBuiltinESMExports();
+		});
+		assert.throws(() => clearSessionStatusline(payload, { home, now: 2000 }), /history is still catching up/);
+		assert.equal(appended, true);
+		for (const read of [readState, readIssues, readAgents]) assert.equal(read(id, home).clearedAt, 0);
+		assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedAt, 0);
+		appendFileSync(file, "\n");
+		assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+		appendFileSync(file, [
+			event("tool.execution_start", 3000, { toolCallId: "relative", toolName: "bash", arguments: { command: "cd nested" } }),
+			event("tool.execution_complete", 3100, { toolCallId: "relative", success: true }),
+		].map((item) => JSON.stringify({ ...item, ...(agentId ? { agentId } : {}) })).join("\n") + "\n");
+		const location = sessionDirectory(payload, { home });
+		assert.equal(agentId ? location.agentCwds.child.cwd : location.cwd, join(latest, "nested"));
+		assert.deepEqual(location.directories, [join(latest, "nested")]);
+	}));
+}
+
+test("clear rejects a transcript replaced after replay and before dismissal", async (t) => fixture((home) => {
+	const id = "replace-during-clear";
+	const payload = { session_id: id, cwd: home };
+	const file = transcript(home, id, [event("session.start", 1000, { cwd: home })]);
+	const cache = join(home, "worktree-statusline", `${id}.json`);
+	const rename = fs.renameSync;
+	let replaced = false;
+	t.mock.method(fs, "renameSync", (from, to) => {
+		rename(from, to);
+		if (to === cache && !replaced) {
+			const replacement = `${file}.replacement`;
+			writeFileSync(replacement, readFileSync(file));
+			rename(replacement, file);
+			replaced = true;
+		}
+	});
+	syncBuiltinESMExports();
+	t.after(() => {
+		t.mock.restoreAll();
+		syncBuiltinESMExports();
+	});
+	assert.throws(() => clearSessionStatusline(payload, { home, now: 2000 }), /history is still catching up/);
+	assert.equal(replaced, true);
+	for (const read of [readState, readIssues, readAgents]) assert.equal(read(id, home).clearedAt, 0);
+	assert.equal(readJson(cache).clearedAt, 0);
+	assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+	assert.equal(readJson(cache).clearedContext.cwd, home);
+}));
+
+for (const kind of ["PR message", "repository context", "issue message", "subagent start"]) {
+	test(`clear preserves component cursors for a complete ${kind} arriving between synchronization steps`, async (t) => fixture((home) => {
+		const id = "complete-interleaving";
+		const payload = { session_id: id, cwd: home };
+		const file = transcript(home, id, [event("session.start", 1000, { cwd: home, repository: "example/widget" })]);
+		seed(home, id);
+		const components = ["pr-statusline", "issue-statusline", "subagent-statusline"];
+		const stateFiles = new Map(components.map((component) => [join(home, component, `${id}.json`), component]));
+		const trigger = kind === "PR message" || kind === "repository context" ? "issue-statusline" : "subagent-statusline";
+		const incoming = kind === "repository context"
+			? event("session.context_changed", 3000, { repository: "example/second" })
+			: kind === "subagent start"
+				? event("subagent.started", 3000, { agentId: "new-agent" })
+				: event("user.message", 3000, { content: kind === "PR message" ? prUrl(9) : issueUrl(9) });
+		const consumed = new Map();
+		const rename = fs.renameSync;
+		let appended = false;
+		t.mock.method(fs, "renameSync", (from, to) => {
+			rename(from, to);
+			const component = stateFiles.get(to);
+			if (component) {
+				const state = readJson(to);
+				if (!state.clearedAt) consumed.set(component, state.transcriptOffset);
+			}
+			if (component === trigger && !appended) {
+				appendFileSync(file, JSON.stringify(incoming) + "\n");
+				appended = true;
+			}
+		});
+		syncBuiltinESMExports();
+		t.after(() => {
+			t.mock.restoreAll();
+			syncBuiltinESMExports();
+		});
+		assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+		assert.equal(appended, true);
+		for (const [index, read] of [readState, readIssues, readAgents].entries()) {
+			assert.equal(read(id, home).transcriptOffset, consumed.get(components[index]));
+		}
+		if (kind === "repository context") {
+			appendFileSync(file, JSON.stringify(event("user.message", 4000, { content: "Work on PR #42 and issue #43" })) + "\n");
+			assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url),
+				["https://github.com/example/second/pull/42"]);
+			assert.deepEqual(syncIssues(payload, { home, fetchIssueStatus: false }).state.issues.map((issue) => issue.url),
+				["https://github.com/example/second/issues/43"]);
+		} else if (kind === "PR message") {
+			assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url), [prUrl(9)]);
+		} else if (kind === "issue message") {
+			assert.deepEqual(syncIssues(payload, { home, fetchIssueStatus: false }).state.issues.map((issue) => issue.url), [issueUrl(9)]);
+		} else {
+			assert.deepEqual([...syncAgents(payload, { home }).tracker.agents.keys()], ["new-agent"]);
+		}
+	}));
+}
+
+for (const agentId of [null, "child"]) {
+	test(`clear excludes a concurrent complete relative ${agentId ? "agent" : "root"} command from baseline replay without losing component activity`, async (t) => fixture((home) => {
+		const id = "baseline-interleaving";
+		const payload = { session_id: id, cwd: home };
+		const agentDirectory = join(home, "agent");
+		const file = transcript(home, id, [
+			event("session.start", 1000, { cwd: home, repository: "example/widget" }),
+			{ ...event("session.context_changed", 1100, { cwd: agentDirectory }), agentId: "child" },
+		]);
+		seed(home, id);
+		const stateFile = join(home, "issue-statusline", `${id}.json`);
+		const rename = fs.renameSync;
+		let appended = false;
+		t.mock.method(fs, "renameSync", (from, to) => {
+			rename(from, to);
+			if (to === stateFile && !appended) {
+				appendFileSync(file, [
+					...[
+						event("tool.execution_start", 3000, { toolCallId: "concurrent", toolName: "bash", arguments: { command: "cd nested" } }),
+						event("tool.execution_complete", 3100, { toolCallId: "concurrent", success: true }),
+					].map((item) => ({ ...item, ...(agentId ? { agentId } : {}) })),
+					event("user.message", 3200, { content: prUrl(9) }),
+				].map(JSON.stringify).join("\n") + "\n");
+				appended = true;
+			}
+		});
+		syncBuiltinESMExports();
+		t.after(() => {
+			t.mock.restoreAll();
+			syncBuiltinESMExports();
+		});
+		assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+		assert.equal(appended, true);
+		const before = sessionDirectory(payload, { home });
+		assert.equal(before.cwd, null);
+		assert.deepEqual(before.directories, []);
+		const replacement = `${file}.replacement`;
+		writeFileSync(replacement, readFileSync(file));
+		renameSync(replacement, file);
+		assert.deepEqual(sessionDirectory(payload, { home }), before);
+		assert.equal(readState(id, home).clearedAt, 2000);
+		assert.equal(readIssues(id, home).clearedAt, 2000);
+		assert.equal(readAgents(id, home).clearedAt, 2000);
+		assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedAt, 3100);
+		assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url), [prUrl(9)]);
+		appendFileSync(file, [
+			event("tool.execution_start", 4000, { toolCallId: "later", toolName: "bash", arguments: { command: "cd later" } }),
+			event("tool.execution_complete", 4100, { toolCallId: "later", success: true }),
+		].map((item) => JSON.stringify({ ...item, ...(agentId ? { agentId } : {}) })).join("\n") + "\n");
+		const location = sessionDirectory(payload, { home });
+		const expected = join(agentId ? agentDirectory : home, "nested", "later");
+		assert.equal(agentId ? location.agentCwds.child.cwd : location.cwd, expected);
+		assert.deepEqual(location.directories, [expected]);
+	}));
+}
+
+for (const kind of ["file", "directory"]) {
+	test(`clear consistently normalizes padded transcript ${kind} paths for replay and validation`, async () => fixture((home) => {
+		const id = "normalized-path";
+		const file = transcript(home, id, [event("session.start", 1000, { cwd: home })]);
+		const explicitPath = kind === "file" ? file : join(home, "session-state", id);
+		const payload = { session_id: id, cwd: home, transcript_path: ` ${explicitPath} ` };
+		seed(home, id);
+		assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+		const resolved = { ...payload, transcript_path: file };
+		assert.deepEqual(sessionDirectory(resolved, { home }).directories, []);
+		appendFileSync(file, [
+			event("tool.execution_start", 3000, { toolCallId: "new", toolName: "bash", arguments: { command: "cd nested" } }),
+			event("tool.execution_complete", 3100, { toolCallId: "new", success: true }),
+		].map(JSON.stringify).join("\n") + "\n");
+		assert.equal(sessionDirectory(resolved, { home }).cwd, join(home, "nested"));
+		assert.match(clearSessionStatusline(payload, { home, now: 4000 }), /^Cleared/);
+		assert.deepEqual(sessionDirectory(resolved, { home }).directories, []);
+	}));
+}
+
 test("clear without a transcript suppresses payload directory fallback and remains repeatable", async () => fixture((home) => {
 	const payload = { session_id: "empty", cwd: home };
+	seed(home, "empty");
+	for (const [read, write] of [[readState, writeState], [readIssues, writeIssues], [readAgents, writeAgents]]) {
+		write({ ...read("empty", home), transcriptOffset: 123 }, home);
+	}
 	clearSessionStatusline(payload, { home, now: 1000 });
 	clearSessionStatusline(payload, { home, now: 1000 });
 	assert.deepEqual(sessionDirectory(payload, { home }).directories, []);
 	assert.equal(sessionDirectory(payload, { home }).cwd, null);
 	assert.equal(readState("empty", home).clearedAt, 1001);
+	for (const read of [readState, readIssues, readAgents]) assert.equal(read("empty", home).transcriptOffset, 0);
 }));
 
 test("refresh bypasses per-item TTLs, shared caches and in-flight locks, preserves tracking and settings, and updates agent-only PRs", async (t) => fixture((home) => {

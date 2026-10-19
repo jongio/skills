@@ -35,6 +35,7 @@ export function commandDirectory(command, base) {
 export class WorktreeTracker {
 	constructor(previous = {}) {
 		this.clearedAt = previous.clearedAt ?? 0;
+		this.observedThroughAt = Number.isFinite(previous.observedThroughAt) ? previous.observedThroughAt : 0;
 		this.dismissed = Boolean(previous.dismissed);
 		this.cwd = previous.cwd ?? null;
 		this.pending = new Map(Object.entries(previous.pending ?? {}));
@@ -51,7 +52,9 @@ export class WorktreeTracker {
 	}
 
 	observe(event) {
-		if (this.clearedAt && event.timestamp && Date.parse(event.timestamp) <= this.clearedAt) return;
+		const timestamp = event.timestamp ? Date.parse(event.timestamp) : NaN;
+		if (this.clearedAt && timestamp <= this.clearedAt) return;
+		if (Number.isFinite(timestamp)) this.observedThroughAt = Math.max(this.observedThroughAt, timestamp);
 		const data = event.data ?? {};
 		const agentId = event.agentId || data.agentId || null;
 		const sequence = ++this.sequence;
@@ -125,11 +128,19 @@ export function writeJson(path, value) {
 	}
 }
 
-export function sessionDirectory(payload, { home = configHome() } = {}) {
+export function sessionDirectory(payload, options = {}) {
+	return withSessionDirectory(payload, (location) => location, options);
+}
+
+export function withSessionDirectory(payload, action, { home = configHome() } = {}) {
 	const id = payload?.session_id;
-	if (!id) return readSessionDirectory(payload, { home });
+	if (!id) return action(readSessionDirectory(payload, { home }));
 	if (typeof id !== "string" || !/^[\w-]{1,128}$/.test(id)) throw new Error("A valid session_id is required.");
-	return withStateLock(join(home, "worktree-statusline", `${id}.json`), () => readSessionDirectory(payload, { home }));
+	return withStateLock(join(home, "worktree-statusline", `${id}.json`), () => action(readSessionDirectory(payload, { home })));
+}
+
+export function transcriptIdentity(path, stat) {
+	return `${resolve(path)}:${stat.ino}:${stat.birthtimeMs}`;
 }
 
 function readSessionDirectory(payload, { home }) {
@@ -161,14 +172,16 @@ function readSessionDirectory(payload, { home }) {
 		throw error;
 	}
 	if (!stat.isFile()) throw new Error("Expected a session transcript file.");
-	const identity = `${resolve(transcript)}:${stat.ino}:${stat.birthtimeMs}`;
+	const identity = transcriptIdentity(transcript, stat);
 	const valid = previous?.version === 3 && previous.identity === identity &&
 		Number.isSafeInteger(previous.offset) && previous.offset >= 0 && previous.offset <= stat.size;
+	const baseline = previous?.clearedContext ?? previous;
 	const tracker = new WorktreeTracker(valid ? previous : {
-		clearedAt: previous?.clearedAt, dismissed: Boolean(previous?.clearedAt), cwd: previous?.clearedAt ? previous.cwd : null,
-		agentCwds: previous?.clearedAt ? previous.agentCwds : {},
-		sequence: previous?.clearedAt ? previous.sequence : 0,
-		appliedSequence: previous?.clearedAt ? previous.appliedSequence : 0,
+		clearedAt: previous?.clearedAt, dismissed: Boolean(previous?.clearedAt), cwd: previous?.clearedAt ? baseline.cwd : null,
+		agentCwds: previous?.clearedAt ? baseline.agentCwds : {},
+		sequence: previous?.clearedAt ? baseline.sequence : 0,
+		appliedSequence: previous?.clearedAt ? baseline.appliedSequence : 0,
+		observedThroughAt: previous?.clearedAt ? baseline.observedThroughAt : 0,
 	});
 	let offset = valid ? previous.offset : 0;
 	let skipPartial = valid && previous.skipPartial === true;
@@ -206,6 +219,8 @@ function readSessionDirectory(payload, { home }) {
 		}
 		writeJson(cachePath, {
 			version: 3, identity, offset, skipPartial, cwd: tracker.cwd, clearedAt: tracker.clearedAt, dismissed: tracker.dismissed,
+			observedThroughAt: tracker.observedThroughAt,
+			clearedContext: previous?.clearedContext,
 			pending: Object.fromEntries(tracker.pending),
 			sequence: tracker.sequence, appliedSequence: tracker.appliedSequence,
 			directories: [...tracker.directories], agentCwds: Object.fromEntries(tracker.agentCwds),

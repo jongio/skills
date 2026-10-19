@@ -194,6 +194,13 @@ track entries again, including previously cleared references. A new successful
 shell command or directory context can restore the current worktree entry.
 Root and subagent directory context is retained for resolving new relative
 commands without making those dismissed directories visible again.
+Re-indexing restarts from that clear-time context, not the latest directory.
+If bounded worktree replay is still catching up, clear reports a retry instead
+of discarding unread directory changes or committing a dismissal boundary.
+Each component retains its own consumed transcript cursor; validation of the
+worktree EOF does not skip records that other components have not processed.
+Worktree replay excludes all directory events included in its baseline without
+advancing the PR, issue, or subagent activity boundaries.
 Existing per-component list/add/remove/clear commands remain available.
 
 Use **setup** to hide a component without dismissing its tracked items. Hidden
