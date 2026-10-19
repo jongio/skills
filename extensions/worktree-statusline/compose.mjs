@@ -464,6 +464,12 @@ export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 		mkdirSync(home, { recursive: true });
 		const extRoot = join(home, "extensions");
 		const parentDir = dirname(extensionDir);
+		const lockSrc = join(parentDir, "state-lock.mjs");
+		const lockDst = join(extRoot, "state-lock.mjs");
+		if (existsSync(lockSrc) && resolve(lockSrc) !== resolve(lockDst)) {
+			mkdirSync(extRoot, { recursive: true });
+			copyFileSync(lockSrc, lockDst);
+		}
 		const candidateIds = includeSiblings ? new Set([extensionId, ...PREFERRED_ORDER]) : new Set([extensionId]);
 		for (const id of candidateIds) {
 			const srcDir = id === extensionId ? extensionDir : join(parentDir, id);

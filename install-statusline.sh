@@ -32,6 +32,8 @@ GIT_REF="${COPILOT_STATUSLINE_REF:-main}"
 BASE_URL="https://raw.githubusercontent.com/$REPO_SLUG/$GIT_REF"
 mkdir -p "$TEMP_ROOT/scripts"
 curl -fsSL "$BASE_URL/scripts/setup-statusline.mjs" -o "$TEMP_ROOT/scripts/setup-statusline.mjs"
+mkdir -p "$TEMP_ROOT/extensions"
+curl -fsSL "$BASE_URL/extensions/state-lock.mjs" -o "$TEMP_ROOT/extensions/state-lock.mjs"
 
 for file in extension.mjs collector.mjs session-statusline.mjs tracker.mjs github.mjs provenance.mjs lifecycle.mjs render.mjs compose.mjs copilot-extension.json; do
   mkdir -p "$TEMP_ROOT/extensions/pr-statusline"

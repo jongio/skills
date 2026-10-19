@@ -14,6 +14,7 @@ $homeDir = if ($env:COPILOT_HOME) { $env:COPILOT_HOME } else { Join-Path $HOME '
 $target = Join-Path $homeDir 'extensions\issue-statusline'
 $composerPath = Join-Path $homeDir 'statusline-compose.mjs'
 New-Item -ItemType Directory -Path $target -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\state-lock.mjs') -Destination (Join-Path $homeDir 'extensions\state-lock.mjs') -Force
 foreach ($file in @('extension.mjs', 'tracker.mjs', 'github.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')) {
 	Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $target $file) -Force
 }

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
+import { withStateLock } from "../state-lock.mjs";
 import { repositoryKey } from "./grouping.mjs";
 
 const MAX_READ_BYTES = 4 * 1024 * 1024;
@@ -124,6 +125,13 @@ export function writeJson(path, value) {
 }
 
 export function sessionDirectory(payload, { home = configHome() } = {}) {
+	const id = payload?.session_id;
+	if (!id) return readSessionDirectory(payload, { home });
+	if (typeof id !== "string" || !/^[\w-]{1,128}$/.test(id)) throw new Error("A valid session_id is required.");
+	return withStateLock(join(home, "worktree-statusline", `${id}.json`), () => readSessionDirectory(payload, { home }));
+}
+
+function readSessionDirectory(payload, { home }) {
 	const fallback = absoluteDirectory(payload?.cwd, null);
 	const id = payload?.session_id;
 	if (!id) return { cwd: fallback, directories: fallback ? [fallback] : [], catchingUp: false };

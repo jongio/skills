@@ -1,6 +1,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { withStateLock } from "../state-lock.mjs";
 import { mergePrProvenance, normalizePrProvenance, sourceProvenance } from "./provenance.mjs";
 import { dismissMergedPrs, initializeMergedPrs, normalizePrMergeState, reconcilePrStates } from "./lifecycle.mjs";
 import {
@@ -163,9 +164,12 @@ export function readState(sessionId, home = configHome()) {
 }
 
 export function writeState(state, home = configHome()) {
-	const current = readState(state.sessionId, home);
-	if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return;
-	atomicWriteJson(statePath(state.sessionId, home), state);
+	return withStateLock(statePath(state.sessionId, home), () => {
+		const current = readState(state.sessionId, home);
+		if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return current;
+		atomicWriteJson(statePath(state.sessionId, home), state);
+		return state;
+	});
 }
 
 export class SessionTracker {
@@ -687,7 +691,7 @@ export function syncSession(payload, {
 
 	if (initializeMergedPrs(tracker, now)) changed = true;
 	if (dismissMergedPrs(tracker)) changed = true;
-	const state = changed ? tracker.snapshot() : previous;
-	if (changed && state) writeState(state, home);
+	let state = changed ? tracker.snapshot() : previous;
+	if (changed && state) state = writeState(state, home);
 	return { state, liveTranscript: hasTranscript || hasWorkspace };
 }

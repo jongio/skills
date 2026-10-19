@@ -253,6 +253,8 @@ When updating an existing install, copy every runtime file listed in
 `worktree-statusline/grouping.mjs`, `worktree-statusline/worktrees.mjs` and
 `pr-statusline/provenance.mjs`, plus `pr-statusline/lifecycle.mjs` and
 `subagent-statusline/settlement.mjs`.
+Copy the shared `extensions/state-lock.mjs` to
+`$COPILOT_HOME/extensions/state-lock.mjs`.
 Copy `pr-statusline/compose.mjs` to
 `$COPILOT_HOME/statusline-compose.mjs` too. Preserve existing
 `statusline-config.json` and `settings.json`; no dependency install is required.

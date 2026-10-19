@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { withStateLock } from "../state-lock.mjs";
 import { dismissSettledAgents, observeSettlement } from "./settlement.mjs";
 
 const INITIAL_HEAD_BYTES = 64 * 1024;
@@ -113,9 +114,12 @@ export function readState(sessionId, home = configHome()) {
 }
 
 export function writeState(state, home = configHome()) {
-	const current = readState(state.sessionId, home);
-	if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return;
-	atomicWriteJson(statePath(state.sessionId, home), state);
+	return withStateLock(statePath(state.sessionId, home), () => {
+		const current = readState(state.sessionId, home);
+		if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return current;
+		atomicWriteJson(statePath(state.sessionId, home), state);
+		return state;
+	});
 }
 
 function readSharedPrCache(home) {
@@ -519,6 +523,9 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	}
 
 	if (tracker.syncWithPrCache(prCache, now)) changed = true;
-	if (changed) writeState(tracker.snapshot(), home);
+	if (changed) {
+		const saved = writeState(tracker.snapshot(), home);
+		if ((saved.clearedAt ?? 0) > tracker.clearedAt) return { tracker: new SubagentTracker(sessionId, saved) };
+	}
 	return { tracker };
 }

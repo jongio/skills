@@ -108,6 +108,7 @@ export function configureStatuslines({
 	mkdirSync(home, { recursive: true });
 	const extRoot = join(home, "extensions");
 	mkdirSync(extRoot, { recursive: true });
+	copyFileSync(join(repoRoot, "extensions", "state-lock.mjs"), join(extRoot, "state-lock.mjs"));
 	const composerPath = join(home, "statusline-compose.mjs");
 	const configPath = join(home, "statusline-config.json");
 	const settingsPath = join(home, "settings.json");

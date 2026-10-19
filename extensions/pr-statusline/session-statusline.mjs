@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { withStateLock } from "../state-lock.mjs";
 import {
 	configHome, readState, refreshTrackedPrStatuses, SessionTracker, syncSession as syncPrs, transcriptPathFor, writeState,
 } from "./tracker.mjs";
@@ -62,9 +63,13 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 	writeState(pr.snapshot(), home);
 	writeIssues(issue.snapshot(), home);
 	writeAgents(agents.snapshot(), home);
-	writeJson(path, {
-		...worktree, version: 3, offset, clearedAt, dismissed: true, cwd: worktree?.cwd ?? payload.cwd ?? null, directories: [],
-		pending: {}, agentCwds: {}, agentDirectories: {}, skipPartial: false,
+	withStateLock(path, () => {
+		const latest = readJson(path);
+		if ((latest?.clearedAt ?? 0) > clearedAt) return;
+		writeJson(path, {
+			...latest, version: 3, offset, clearedAt, dismissed: true, cwd: latest?.cwd ?? payload.cwd ?? null, directories: [],
+			pending: {}, agentCwds: {}, agentDirectories: {}, skipPartial: false,
+		});
 	});
 	return "Cleared this session's PR, issue, subagent, and worktree entries. Component settings and transcripts are unchanged.";
 }

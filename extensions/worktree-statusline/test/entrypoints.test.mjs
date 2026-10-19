@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { configureStatuslines } from "../../../scripts/setup-statusline.mjs";
-import { discoverRenderers, getEnabledStatuslines } from "../compose.mjs";
+import { discoverRenderers, ensurePluginStatuslineRegistered, getEnabledStatuslines } from "../compose.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const ids = ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"];
@@ -128,5 +128,16 @@ test("PR-only and worktree-only installs start their SDK entry points without en
 		assert.equal(result.status, 0, result.stderr);
 		assert.match(result.stdout, /handlers passed/);
 		assert.deepEqual(getEnabledStatuslines(isolated), [id]);
+	}
+}));
+
+test("plugin auto-registration installs the shared state helper for every standalone component", () => fixture((home) => {
+	for (const id of ids) {
+		const isolated = join(home, id);
+		ensurePluginStatuslineRegistered(id, join(root, "extensions", id), { home: isolated });
+		assert.equal(existsSync(join(isolated, "extensions", "state-lock.mjs")), true);
+		const tracker = pathToFileURL(join(isolated, "extensions", id, "tracker.mjs")).href;
+		const result = node(isolated, ["--input-type=module", "-e", `await import(${JSON.stringify(tracker)});`]);
+		assert.equal(result.status, 0, result.stderr);
 	}
 }));

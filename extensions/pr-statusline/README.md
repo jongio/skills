@@ -86,7 +86,7 @@ set up the copilot statusline from jongio/skills and ask me which of PRs, issues
 
 ### Option 4: Manual setup (macOS / Linux / Windows)
 
-1. Copy every runtime file in `EXTENSION_CATALOG` for all four packages to `~/.copilot/extensions/<id>/`, preserving package directories. This includes the unified PR entry point's sibling dependencies. Copy `extensions/pr-statusline/compose.mjs` to `~/.copilot/statusline-compose.mjs`.
+1. Copy every runtime file in `EXTENSION_CATALOG` for all four packages to `~/.copilot/extensions/<id>/`, preserving package directories. This includes the unified PR entry point's sibling dependencies. Copy the shared `extensions/state-lock.mjs` to `~/.copilot/extensions/state-lock.mjs` and `extensions/pr-statusline/compose.mjs` to `~/.copilot/statusline-compose.mjs`.
 2. Add the following to `~/.copilot/settings.json`:
 
 ```json
@@ -205,6 +205,10 @@ already-running SDK collector and register the new command. Clear and refresh
 themselves require no restart once the updated extension is loaded. Recovery
 commands are registered by the unified PR SDK entry point; PR installs include
 its sibling runtime dependencies even when those footer components are hidden.
+State writes and worktree replay use per-session, cross-process locks. A lock
+timeout reports its exact path rather than overwriting potentially active state.
+If a process crashed while holding a lock, stop the session's collectors before
+removing only that reported `.lock` directory, then restart Copilot.
 
 ## Validate
 
