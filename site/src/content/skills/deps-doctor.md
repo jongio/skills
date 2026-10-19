@@ -1,6 +1,6 @@
 ---
 title: deps-doctor
-tagline: "Audit, update, and secure dependencies across every package manager in a repo, without ever opening an empty dependency pull request."
+tagline: "Find outdated, vulnerable, unused, and undeclared dependencies; apply updates and fix compatibility problems."
 useWhen: "When dependencies are outdated, a CVE needs remediating, a package graph has unused or undeclared entries, a major bump needs a forward compatibility fix, or a supply-chain review is due before adopting a release."
 repoPath: skills/deps-doctor
 thumb: images/thumb-deps-doctor.png
@@ -14,9 +14,8 @@ install:
 
 ## What it does
 
-`deps-doctor` finds every dependency surface in a repository, brings it current,
-and treats a dependency update as a supply-chain decision rather than a version
-bump.
+`deps-doctor` reviews dependency files and actual usage, proposes updates, and
+checks that the project still works after changes.
 
 - Detects npm, pnpm, Yarn, pip, Pipenv, Poetry, uv, Go modules, Cargo, Bundler,
   Composer, NuGet, Maven, Gradle, Swift Package Manager, pub, and Hex.
@@ -29,19 +28,15 @@ bump.
   works the scope the bot leaves uncovered.
 - Reconciles declared packages against real imports, keeping dependencies that
   are reached only through configuration or runtime loading.
-- Resolves installs with lifecycle scripts disabled, reviews every package whose
-  version or source changed, then installs for real.
-- Withholds releases published inside the minimum release age window, and
-  prefers a package-manager setting that protects every future install over a
-  one-time manual date check.
-- Ranks vulnerabilities by exploitation evidence, so a High in CISA's Known
-  Exploited Vulnerabilities catalog outranks an unexploited Critical.
+- Reviews changed packages before allowing their install scripts to run.
+- Defers releases that are too new under the configured minimum release age.
+- Prioritizes vulnerabilities with evidence of exploitation, not severity alone.
 - Screens new direct dependencies for typosquatting, install hooks, non-registry
   sources, maintainership, license, and registry provenance.
 - Fixes breaking changes forward and resolves peer dependency conflicts by
   version selection, never with a force flag and never by downgrading.
-- Proves the regenerated lockfile installs in a clean room the way CI will.
-- Stops at the no-op boundary: no branch, no commit, no empty pull request.
+- Checks that a clean install from the updated lockfile works.
+- Makes no branch, commit, or pull request when there is nothing to change.
 
 ## Use it
 

@@ -31,9 +31,17 @@ const session = await joinSession({
 	commands: [
 		{
 			name: "statusline-setup",
-			description: "Choose which Copilot CLI statuslines are enabled (Pull Requests, Issues, Subagents)",
+			description: "Choose which Copilot CLI statuslines are enabled (Pull Requests, Issues, Subagents, Branch/Worktree)",
 			handler: async ({ args }) => {
 				await runInteractiveStatuslinePicker(session, { args });
+			},
+		},
+		{
+			name: "session-worktree",
+			description: "Show the active session branch, worktree, and full working directory",
+			handler: async () => {
+				const { describeSessionDirectory } = await import("../worktree-statusline/tracker.mjs");
+				await session.log(describeSessionDirectory({ session_id: session.sessionId }));
 			},
 		},
 		{
@@ -84,13 +92,13 @@ const session = await joinSession({
 	tools: [
 		{
 			name: "statusline_setup",
-			description: "Configure which Copilot CLI statusline extensions are enabled (Pull Requests, GitHub Issues, Subagents). Omit arguments to open the interactive picker.",
+			description: "Configure which Copilot CLI statusline extensions are enabled (Pull Requests, GitHub Issues, Subagents, Branch/Worktree). Omit arguments to open the interactive picker.",
 			parameters: {
 				type: "object",
 				properties: {
 					selection: {
 						type: "string",
-						description: "Optional selection string such as 'all', 'none', or space-separated 'prs issues subagents'. Leave empty to open the interactive checkbox dialog.",
+						description: "Optional selection string such as 'all', 'none', or space-separated 'prs issues subagents worktrees'. Leave empty to open the interactive checkbox dialog.",
 					},
 				},
 				additionalProperties: false,
@@ -141,4 +149,3 @@ collector = await collect(session);
 if (firstRun && session.capabilities?.ui?.elicitation) {
 	runInteractiveStatuslinePicker(session).catch(() => {});
 }
-

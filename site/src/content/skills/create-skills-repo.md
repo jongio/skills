@@ -1,6 +1,6 @@
 ---
 title: create-skills-repo
-tagline: "Create or safely upgrade a complete cross-agent skills marketplace repository with manifests, Vally, secure CI, Dependabot, and a GitHub Pages catalog."
+tagline: "Create a repository for publishing agent skills, with installation support, automated checks, and a browsable catalog."
 useWhen: "When you want a new repository for publishing agent skills, or need to bring an existing skills repository up to the same marketplace, CI, eval, and catalog standards."
 repoPath: skills/create-skills-repo
 thumb: images/thumb-create-skills-repo.png
@@ -16,20 +16,19 @@ install:
 
 `create-skills-repo` scaffolds or upgrades a complete skills marketplace:
 
-- Canonical `skills/` content wrapped by every supported host manifest.
-- A reusable `create-skill` workflow plus a functional `example-skill`.
-- Vally tooling, deterministic validation, secure lint and eval workflows, and Dependabot.
-- A default-on Astro catalog generated through `create-gh-pages-site`.
-- Committed configuration and managed-file hashes for reproducible, conflict-safe upgrades.
+- A shared `skills/` collection with installation support for multiple agents.
+- A working example and a `create-skill` workflow for adding your own skills.
+- Automated checks and behavior evaluations, plus Dependabot configuration.
+- A GitHub Pages catalog where people can browse and install your skills.
+- Upgrade support that identifies files you have customized.
 
-Create, sync, and upgrade render into staging first. Unmanaged files are preserved, and
-user-modified managed files become explicit conflicts instead of being overwritten.
+Before applying changes, it shows a preview. Your own files are preserved, and
+customized generated files are flagged for review instead of being overwritten.
 
 ## Safety
 
-Local files are previewed before application. GitHub repository creation, metadata,
-Pages, and environment settings are shown as exact operations and require separate
-approval before execution.
+Creating a GitHub repository or changing its metadata, Pages, or environment
+settings requires separate approval.
 
 ## Use it
 
@@ -40,3 +39,6 @@ approval before execution.
 /create-skills-repo sync
 /create-skills-repo check
 ```
+
+Use `create` for a new collection, `upgrade` for updated tooling and templates,
+`sync` to refresh generated listings, and `check` to inspect without applying changes.
