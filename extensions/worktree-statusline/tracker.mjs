@@ -345,7 +345,7 @@ export function checkoutDivergence(context, prs = [], { run = spawnSync } = {}) 
 	return { upstream: result, base: base?.ref && base.ref === upstream?.ref ? result : compare(base) };
 }
 
-export function gitContext(cwd, { run = spawnSync } = {}) {
+export function gitContext(cwd, { run = spawnSync, contextCache } = {}) {
 	if (!cwd) return null;
 	try {
 		if (!statSync(cwd).isDirectory()) return null;
@@ -353,6 +353,9 @@ export function gitContext(cwd, { run = spawnSync } = {}) {
 		if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
 		throw error;
 	}
+	const directoryKey = contextCache ? checkoutKey(cwd) : null;
+	const existing = contextCache?.get(directoryKey);
+	if (existing) return { ...existing, cwd };
 	const options = gitOptions();
 	const result = run("git", ["-C", cwd, "rev-parse", "--show-toplevel", "--git-common-dir", "--absolute-git-dir"], options);
 	if (result.error) throw result.error;
@@ -362,6 +365,13 @@ export function gitContext(cwd, { run = spawnSync } = {}) {
 	}
 	const [root, commonDir, gitDir] = result.stdout.trim().split(/\r?\n/);
 	if (!root || !commonDir || !gitDir) throw new Error("Incomplete Git context.");
+	const rootKey = contextCache ? checkoutKey(root) : null;
+	const cachedRoot = contextCache?.get(rootKey);
+	if (cachedRoot) {
+		const context = { ...cachedRoot, cwd };
+		contextCache.set(directoryKey, context);
+		return context;
+	}
 	const branch = run("git", ["-C", cwd, "symbolic-ref", "--quiet", "--short", "HEAD"], options);
 	if (branch.error) throw branch.error;
 	let label = branch.stdout.trim();
@@ -384,10 +394,16 @@ export function gitContext(cwd, { run = spawnSync } = {}) {
 	const status = run("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=normal", "--ignore-submodules=none"], options);
 	if (status.error) throw status.error;
 	if (status.status !== 0) throw new Error("Cannot read Git status.");
-	return { cwd, root, branch: label, worktree, commonDir: checkoutKey(common), remoteUrls, ...refs, dirty: dirtyMarkers(status.stdout) };
+	const context = { cwd, root, branch: label, worktree, commonDir: checkoutKey(common), remoteUrls, ...refs, dirty: dirtyMarkers(status.stdout) };
+	if (contextCache) {
+		contextCache.set(rootKey, context);
+		contextCache.set(directoryKey, context);
+	}
+	return context;
 }
 
 export function sessionContexts(payload, options = {}) {
+	const contextCache = options.contextCache ?? new Map();
 	const location = sessionDirectory(payload, options);
 	const contexts = new Map();
 	const refreshedDirectories = new Set();
@@ -410,7 +426,7 @@ export function sessionContexts(payload, options = {}) {
 		const count = Math.min(directories.length, MAX_GIT_DIRECTORIES - reserved);
 		for (let i = 0; i < count; i++) {
 			const cwd = directories[(cursor + i) % directories.length];
-			records.set(cwd, gitContext(cwd, options));
+			records.set(cwd, gitContext(cwd, { ...options, contextCache }));
 			refreshedDirectories.add(cwd);
 		}
 		remainingGitDirectories -= count;

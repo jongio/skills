@@ -29,7 +29,14 @@ npm install
 npm run dev      # http://localhost:4321/skills/
 npm run build    # outputs to dist/
 npm run preview  # serve the production build at the /skills/ base
+npm run bench    # repeatable catalog discovery timings and built-asset sizes
 ```
+
+Production builds generate responsive WebP thumbnails from the canonical skill
+PNGs without changing those source files or their public PNG mirrors. Each build
+also enforces gzip budgets of 100 KiB per JS chunk, 300 KiB total JS and 50 KiB
+total CSS, plus 200 KiB per generated image. The check rejects raw thumbnail PNG
+references in rendered HTML.
 
 ## Base path
 

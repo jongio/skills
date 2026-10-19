@@ -104,6 +104,64 @@ network calls. Existing active PR/issue entries gain metadata on normal status
 refresh, or immediately when it is already available in the shared cache.
 Old settled entries without provable associations stay session-wide.
 
+## Performance measurements
+
+Run `node scripts/benchmark-statuslines.mjs` from the repository root. An optional
+integer argument selects the sample count (at least three). The benchmark reports
+median and p95 timings for all four renderers, cold transcript replay, the combined
+footer, and command-line invocation including Node startup. It also reports Git
+subprocess counts for one directory and 16 directories in the same checkout.
+Fixtures and GitHub caches are isolated in a temporary directory and removed
+afterward; results do not include live GitHub API latency.
+
+### PR regression gate
+
+The **Statusline performance** workflow runs on every PR, but only runs expensive
+measurements when statusline runtime, tests, manifests, installation scripts or
+the gate itself change. Documentation, screenshots and site-only changes get an
+explicit successful no-op. Maintainers can require the stable
+**Statusline performance result** check in branch protection; this does not
+configure branch protection automatically.
+
+On both Windows and Linux, correctness tests finish before any measurement.
+The candidate's common harness runs against the PR event's exact base commit and
+GitHub test-merge commit, in separate processes on the same runner. The contributor
+head is recorded as provenance. The base does not need its own benchmark script.
+All four statuslines and the combined footer are measured, including warm caches,
+cold transcript replay, and Node CLI startup.
+
+Seven-sample medians block only when slower by **both more than 20% and more than
+25 ms**. Initially failing timing cases get exactly one fresh confirmation, in
+reverse order (candidate then base); persistent breaches block, non-reproducing
+ones are marked unstable. p95 is diagnostic only. Git calls must not increase
+against base and must stay within candidate ceilings of **4** for one directory
+and **19** for 16 directories in one checkout. Functional, subprocess, malformed
+report, missing-baseline and cancelled-job failures do not receive timing retries.
+
+Each OS publishes a summary and explicitly named JSON metric artifacts retained
+for three days. These contain raw samples, median/p95, case IDs, revisions,
+harness digest, Node/Git versions and decisions, including confirmation evidence.
+Synthetic caches are isolated, and direct or shell-wrapped `gh` commands fail
+instead of contacting GitHub. This guard is not a general-purpose network sandbox.
+No dependencies, secrets, PR-comment permissions or cache service are needed.
+
+For a local comparison, prepare a separate base checkout and run:
+
+```powershell
+node .\scripts\compare-statusline-performance.mjs --baseline-root C:\path\to\base --candidate-root . --output-dir C:\path\to\metrics
+```
+
+Local comparisons default revision labels to each checkout's HEAD; commit or
+otherwise account for working-tree changes when interpreting them. CI checks
+exact revision labels and checkout HEADs. One local OS pass does not establish
+hosted Windows/Linux qualification.
+
+Git context reads are shared only within a single render. Different directories
+still resolve their checkout roots independently, so nested repositories are not
+conflated. Branch, remote configuration and file-status reads are reused for the
+same checkout, including the payload's current directory. The next render reads
+live Git state again; no cross-refresh TTL hides file or branch changes.
+
 Terminal footer support for multiple lines still requires testing in the actual
 Copilot CLI host. Tests verify emitted text, not the host's presentation,
 wrapping or available footer height.
