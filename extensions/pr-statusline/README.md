@@ -176,6 +176,36 @@ Using `Azure/azure-dev` as an example checkout:
 /session-prs clear
 ```
 
+## Session recovery and setup
+
+The unified SDK extension provides a separate command from Copilot's built-in
+`/statusline` and `/footer`, which are left untouched:
+
+| Command | Effect |
+| --- | --- |
+| `/session-statusline refresh` | Immediately re-query tracked PRs, issues, agent-linked PRs, and Git checkout/worktree data, bypassing status TTLs and applicable shared/in-flight caches. Keeps tracking and component selections; reports incomplete refreshes and individual failures explicitly. |
+| `/session-statusline clear` | Dismiss this session's current PR, issue, subagent, and worktree entries. Does not delete transcripts, affect other sessions, or change component selections. |
+| `/session-statusline setup` | Open the component picker. Optional selections such as `all`, `none`, or `prs issues` also work. `/statusline-setup` remains a compatibility alias. |
+
+**Clear is not refresh or hide.** Clear saves a session-specific replay boundary,
+so old transcript events, unchanged workspace metadata, and collector saves do
+not immediately restore dismissed entries. New activity after that boundary can
+track entries again, including previously cleared references. A new successful
+shell command or directory context can restore the current worktree entry.
+Existing per-component list/add/remove/clear commands remain available.
+
+Use **setup** to hide a component without dismissing its tracked items. Hidden
+components can be enabled again later; hiding does not clear their history.
+Refresh keeps entries tracked even when GitHub reports them closed or missing;
+normal subsequent footer updates still apply the existing lifecycle rules.
+Git comparisons use local refs; refresh does not fetch remote Git branches.
+
+After installing updated runtime files, **restart Copilot** to reload an
+already-running SDK collector and register the new command. Clear and refresh
+themselves require no restart once the updated extension is loaded. Recovery
+commands are registered by the unified PR SDK entry point; PR installs include
+its sibling runtime dependencies even when those footer components are hidden.
+
 ## Validate
 
 ```powershell

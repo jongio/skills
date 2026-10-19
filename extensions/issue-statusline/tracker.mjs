@@ -149,6 +149,8 @@ export function readState(sessionId, home = configHome()) {
 }
 
 export function writeState(state, home = configHome()) {
+	const current = readState(state.sessionId, home);
+	if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return;
 	atomicWriteJson(statePath(state.sessionId, home), state);
 }
 
@@ -158,6 +160,8 @@ export class IssueTracker {
 		this.state = {
 			version: 1,
 			sessionId,
+			clearedAt: previous?.clearedAt ?? 0,
+			clearedWorkspace: previous?.clearedWorkspace ?? null,
 			issues: [...(previous?.issues ?? [])],
 			ignored: [...(previous?.ignored ?? [])],
 			updatedAt: previous?.updatedAt ?? Date.now(),
@@ -194,6 +198,7 @@ export class IssueTracker {
 	}
 
 	observe(event) {
+		if (this.state.clearedAt && event.timestamp && Date.parse(event.timestamp) <= this.state.clearedAt) return;
 		const data = event.data ?? {};
 		if (event.type === "session.start" || event.type === "session.resume" || event.type === "session.context_changed") {
 			const context = data.context ?? data;
@@ -366,6 +371,8 @@ function inspectWorkspaceMetadata(tracker, sessionDir) {
 		const repo = /^repository:\s*(\S+)\s*$/m.exec(raw)?.[1];
 		const branch = /^branch:\s*(\S+)\s*$/m.exec(raw)?.[1];
 		const name = /^name:\s*(.+?)\s*$/m.exec(raw)?.[1];
+		if (tracker.state.clearedAt && JSON.stringify([repo ?? null, branch ?? null, name ?? null]) ===
+			JSON.stringify(tracker.state.clearedWorkspace)) return false;
 		if (repo && !tracker.repository) {
 			tracker.repository = repo;
 			changed = true;
@@ -390,8 +397,10 @@ export function refreshTrackedIssueStatuses(tracker, {
 	now = Date.now(),
 	fetchIssueStatus = queryIssueStatusWithGh,
 	issueCacheTtlMs,
+	force = false,
+	onError,
 } = {}) {
-	return refreshTrackedIssueStatusesImpl(tracker, { home, now, fetchIssueStatus, issueCacheTtlMs });
+	return refreshTrackedIssueStatusesImpl(tracker, { home, now, fetchIssueStatus, issueCacheTtlMs, force, onError });
 }
 
 export function syncSession(payload, {
@@ -429,7 +438,9 @@ export function syncSession(payload, {
 	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new IssueTracker(
 		sessionId,
-		reset && previous ? { issues: previous.issues, ignored: previous.ignored } : previous,
+		reset && previous ? { issues: previous.issues, ignored: previous.ignored,
+			clearedAt: previous.clearedAt, clearedWorkspace: previous.clearedWorkspace,
+			...(previous.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.state.transcriptOffset;
 	let changed = (hasTranscript || hasWorkspace) && (!previous || reset);
@@ -468,6 +479,7 @@ export function syncSession(payload, {
 	if (changed) {
 		try {
 			const latest = readState(sessionId, home);
+			if ((latest?.clearedAt ?? 0) > tracker.state.clearedAt) return { state: latest };
 			if (latest && (!previous || latest.updatedAt > (previous.updatedAt ?? 0))) {
 				const byUrl = new Map(tracker.state.issues.map((i) => [i.url, i]));
 				tracker.state.ignored = [...latest.ignored];

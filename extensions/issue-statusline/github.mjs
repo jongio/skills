@@ -206,6 +206,8 @@ export function refreshTrackedIssueStatuses(tracker, {
 	now = Date.now(),
 	fetchIssueStatus = queryIssueStatusWithGh,
 	issueCacheTtlMs = ISSUE_OPEN_TTL_MS,
+	force = false,
+	onError = (error) => { throw error; },
 } = {}) {
 	if (typeof fetchIssueStatus !== "function") return false;
 	const useSharedCache = fetchIssueStatus === queryIssueStatusWithGh;
@@ -215,26 +217,28 @@ export function refreshTrackedIssueStatuses(tracker, {
 
 	for (const issue of [...tracker.state.issues]) {
 		const cached = cache?.[issue.url];
-		if (updateIssueContext(issue, cached?.info, (cached?.checkedAt ?? 0) < (issue.checkedAt ?? 0))) changed = true;
-		if (issue.simulated || issue.closedAt) continue;
-		if (typeof issue.status === "string" && issue.status.includes(ICONS.comment) &&
+		if (!force && updateIssueContext(issue, cached?.info, (cached?.checkedAt ?? 0) < (issue.checkedAt ?? 0))) changed = true;
+		if (issue.simulated || (!force && issue.closedAt)) continue;
+		if (!force && typeof issue.status === "string" && issue.status.includes(ICONS.comment) &&
 				Number.isFinite(issue.checkedAt) && issue.checkedAt > 0 && now - issue.checkedAt < issueCacheTtlMs) {
 			continue;
 		}
 
 		let info = null;
+		let failure = null;
 		if (useSharedCache) {
 			const entry = cache[issue.url];
-			if (entry && ("info" in entry) && issue.checkedAt !== 0 && now - entry.checkedAt < (entry.ttlMs ?? issueCacheTtlMs)) {
+			if (!force && entry && ("info" in entry) && issue.checkedAt !== 0 && now - entry.checkedAt < (entry.ttlMs ?? issueCacheTtlMs)) {
 				info = entry.info;
-			} else if (entry?.refreshingUntil && entry.refreshingUntil > now) {
+			} else if (!force && entry?.refreshingUntil && entry.refreshingUntil > now) {
 				continue;
 			} else {
 				cache[issue.url] = { ...(entry ?? {}), refreshingUntil: now + 8000 };
 				writeIssueCache(cache, home);
 				try {
 					info = fetchIssueStatus(issue.url);
-				} catch {
+				} catch (error) {
+					failure = error;
 					info = null;
 				}
 				const stateName = String(info?.state ?? "").toUpperCase();
@@ -247,22 +251,27 @@ export function refreshTrackedIssueStatuses(tracker, {
 		} else {
 			try {
 				info = fetchIssueStatus(issue.url);
-			} catch {
+			} catch (error) {
+				failure = error;
 				info = null;
+			}
+			if (force && !info) {
+				onError(new Error(`Could not refresh ${issue.label}: ${failure?.message ?? "GitHub returned no status."}`));
+				continue;
 			}
 		}
 
 		if (info && typeof info === "object") {
 			if (updateIssueContext(issue, info)) changed = true;
 			const stateName = String(info.state ?? "").toUpperCase();
-			if (stateName === "NOT_FOUND" || (stateName === "CLOSED" && String(info.stateReason ?? "").toUpperCase() === "NOT_PLANNED")) {
+			if (!force && (stateName === "NOT_FOUND" || (stateName === "CLOSED" && String(info.stateReason ?? "").toUpperCase() === "NOT_PLANNED"))) {
 				tracker.manage("remove", issue.url);
 				changed = true;
 				continue;
 			}
 			if (stateName === "CLOSED") {
 				const remoteClosedAt = info.closedAt ? Date.parse(info.closedAt) : NaN;
-				if (!issue.closedAt && Number.isFinite(remoteClosedAt) && tracker.lastUserInputAt > 0 && remoteClosedAt < tracker.lastUserInputAt) {
+				if (!force && !issue.closedAt && Number.isFinite(remoteClosedAt) && tracker.lastUserInputAt > 0 && remoteClosedAt < tracker.lastUserInputAt) {
 					tracker.manage("remove", issue.url);
 					changed = true;
 					continue;
@@ -281,6 +290,10 @@ export function refreshTrackedIssueStatuses(tracker, {
 					changed = true;
 				}
 				continue;
+			}
+			if (stateName === "OPEN" && issue.closedAt) {
+				delete issue.closedAt;
+				changed = true;
 			}
 			if (typeof info.title === "string" && info.title && issue.title !== info.title) {
 				issue.title = info.title;

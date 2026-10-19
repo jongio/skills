@@ -113,6 +113,8 @@ export function readState(sessionId, home = configHome()) {
 }
 
 export function writeState(state, home = configHome()) {
+	const current = readState(state.sessionId, home);
+	if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return;
 	atomicWriteJson(statePath(state.sessionId, home), state);
 }
 
@@ -128,6 +130,7 @@ export class SubagentTracker {
 	constructor(sessionId, previous = null) {
 		statePath(sessionId);
 		this.sessionId = sessionId;
+		this.clearedAt = previous?.clearedAt ?? 0;
 		this.repository = previous?.repository ?? null;
 		this.host = previous?.host ?? "github.com";
 		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
@@ -203,6 +206,7 @@ export class SubagentTracker {
 	}
 
 	observe(event) {
+		if (this.clearedAt && event.timestamp && Date.parse(event.timestamp) <= this.clearedAt) return;
 		const data = event.data ?? {};
 		const ts = event.timestamp ? Date.parse(event.timestamp) : NaN;
 		const eventTime = Number.isFinite(ts) ? ts : Date.now();
@@ -417,6 +421,7 @@ export class SubagentTracker {
 			version: 1,
 			mergeStateVersion: 1,
 			sessionId: this.sessionId,
+			clearedAt: this.clearedAt,
 			repository: this.repository,
 			host: this.host,
 			lastUserInputAt: this.lastUserInputAt,
@@ -484,7 +489,8 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new SubagentTracker(
 		sessionId,
-		reset && previous?.simulated ? { agents: previous.agents, simulated: true } : (reset ? null : previous),
+		reset ? { ...(previous?.simulated ? { agents: previous.agents, simulated: true } : {}), clearedAt: previous?.clearedAt,
+			...(previous?.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.transcriptOffset;
 	let changed = Boolean(previous && previous.mergeStateVersion !== 1) || (hasTranscript && (!previous || reset));

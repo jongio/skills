@@ -33,6 +33,8 @@ export function commandDirectory(command, base) {
 
 export class WorktreeTracker {
 	constructor(previous = {}) {
+		this.clearedAt = previous.clearedAt ?? 0;
+		this.dismissed = Boolean(previous.dismissed);
 		this.cwd = previous.cwd ?? null;
 		this.pending = new Map(Object.entries(previous.pending ?? {}));
 		this.sequence = previous.sequence ?? 0;
@@ -48,6 +50,7 @@ export class WorktreeTracker {
 	}
 
 	observe(event) {
+		if (this.clearedAt && event.timestamp && Date.parse(event.timestamp) <= this.clearedAt) return;
 		const data = event.data ?? {};
 		const agentId = event.agentId || data.agentId || null;
 		const sequence = ++this.sequence;
@@ -55,6 +58,7 @@ export class WorktreeTracker {
 			const context = data.context ?? data;
 			const cwd = absoluteDirectory(context.cwd, null);
 			if (cwd) {
+				this.dismissed = false;
 				this.directories.add(cwd);
 				if (agentId) {
 					this.agentCwds.set(agentId, { cwd, sequence });
@@ -71,7 +75,7 @@ export class WorktreeTracker {
 			if (!SHELL_TOOL.test(name) || !data.toolCallId) return;
 			const base = agentId ? this.agentCwds.get(agentId)?.cwd : this.cwd;
 			const explicit = absoluteDirectory(args.cwd ?? args.workdir ?? args.workingDirectory, base);
-			const cwd = commandDirectory(args.command, explicit ?? base) ?? explicit;
+			const cwd = commandDirectory(args.command, explicit ?? base) ?? explicit ?? (this.dismissed ? base : null);
 			if (cwd) {
 				this.pending.set(data.toolCallId, { cwd, sequence, agentId });
 				if (this.pending.size > 128) this.pending.delete(this.pending.keys().next().value);
@@ -82,6 +86,7 @@ export class WorktreeTracker {
 			this.pending.delete(data.toolCallId);
 			const exitCode = data.result?.structuredContent?.exitCode;
 			if (pending && data.success === true && (exitCode === undefined || exitCode === 0)) {
+				this.dismissed = false;
 				this.directories.add(pending.cwd);
 				if (pending.agentId) {
 					this.rememberAgentDirectory(pending.agentId, pending.cwd);
@@ -123,19 +128,6 @@ export function sessionDirectory(payload, { home = configHome() } = {}) {
 	const id = payload?.session_id;
 	if (!id) return { cwd: fallback, directories: fallback ? [fallback] : [], catchingUp: false };
 	if (typeof id !== "string" || !/^[\w-]{1,128}$/.test(id)) throw new Error("A valid session_id is required.");
-	let transcript = payload.transcript_path || join(home, "session-state", id, "events.jsonl");
-	let stat;
-	try {
-		stat = statSync(transcript);
-		if (stat.isDirectory()) {
-			transcript = join(transcript, "events.jsonl");
-			stat = statSync(transcript);
-		}
-	} catch (error) {
-		if (error.code === "ENOENT") return { cwd: fallback, directories: fallback ? [fallback] : [], catchingUp: false };
-		throw error;
-	}
-	if (!stat.isFile()) throw new Error("Expected a session transcript file.");
 	const cachePath = join(home, "worktree-statusline", `${id}.json`);
 	let previous;
 	try {
@@ -145,10 +137,27 @@ export function sessionDirectory(payload, { home = configHome() } = {}) {
 		console.error("[worktree-statusline] Rebuilding malformed session cache from the transcript.");
 		previous = null;
 	}
+	let transcript = payload.transcript_path || join(home, "session-state", id, "events.jsonl");
+	let stat;
+	try {
+		stat = statSync(transcript);
+		if (stat.isDirectory()) {
+			transcript = join(transcript, "events.jsonl");
+			stat = statSync(transcript);
+		}
+	} catch (error) {
+		if (error.code === "ENOENT") return previous?.clearedAt
+			? { cwd: null, directories: [], catchingUp: false }
+			: { cwd: fallback, directories: fallback ? [fallback] : [], catchingUp: false };
+		throw error;
+	}
+	if (!stat.isFile()) throw new Error("Expected a session transcript file.");
 	const identity = `${resolve(transcript)}:${stat.ino}:${stat.birthtimeMs}`;
 	const valid = previous?.version === 3 && previous.identity === identity &&
 		Number.isSafeInteger(previous.offset) && previous.offset >= 0 && previous.offset <= stat.size;
-	const tracker = new WorktreeTracker(valid ? previous : {});
+	const tracker = new WorktreeTracker(valid ? previous : {
+		clearedAt: previous?.clearedAt, dismissed: Boolean(previous?.clearedAt), cwd: previous?.clearedAt ? previous.cwd : null,
+	});
 	let offset = valid ? previous.offset : 0;
 	let skipPartial = valid && previous.skipPartial === true;
 	let catchingUp = false;
@@ -184,7 +193,7 @@ export function sessionDirectory(payload, { home = configHome() } = {}) {
 			closeSync(fd);
 		}
 		writeJson(cachePath, {
-			version: 3, identity, offset, skipPartial, cwd: tracker.cwd,
+			version: 3, identity, offset, skipPartial, cwd: tracker.cwd, clearedAt: tracker.clearedAt, dismissed: tracker.dismissed,
 			pending: Object.fromEntries(tracker.pending),
 			sequence: tracker.sequence, appliedSequence: tracker.appliedSequence,
 			directories: [...tracker.directories], agentCwds: Object.fromEntries(tracker.agentCwds),
@@ -192,7 +201,8 @@ export function sessionDirectory(payload, { home = configHome() } = {}) {
 		});
 	}
 	return {
-		cwd: tracker.cwd ?? fallback, directories: [...tracker.directories], catchingUp,
+		cwd: tracker.dismissed ? null : tracker.cwd ?? (tracker.clearedAt ? null : fallback),
+		directories: [...tracker.directories], catchingUp,
 		agentDirectories: Object.fromEntries([...tracker.agentDirectories].map(([id, paths]) => [id, [...paths]])),
 		agentCwds: Object.fromEntries(tracker.agentCwds),
 	};
@@ -294,14 +304,20 @@ function mappedTarget(remote, branch, remotes = []) {
 		? { target: refs[0].replace(/^refs\/(?:remotes|heads)\//, ""), ref: refs[0] } : { target };
 }
 
-export function checkoutDivergence(context, prs = [], { run = spawnSync } = {}) {
+export function checkoutDivergence(context, prs = [], { run = spawnSync, force = false } = {}) {
 	const read = (args) => {
 		if (context.gitRefreshed === false) return null;
 		try {
 			const result = run("git", ["-C", context.root, ...args], gitOptions());
 			if (!result.error && result.status === 1 && args[0] === "symbolic-ref") return "";
+			if (force && (result.error || result.status !== 0 || typeof result.stdout !== "string")) {
+				throw result.error ?? new Error(`Cannot compare Git refs for ${context.root}: ${result.stderr || `exit ${result.status}`}`);
+			}
 			return !result.error && result.status === 0 && typeof result.stdout === "string" ? result.stdout.trim() : null;
-		} catch { return null; }
+		} catch (error) {
+			if (force) throw error;
+			return null;
+		}
 	};
 	const remotes = context.remotes ?? [];
 	const config = context.upstream;
@@ -338,6 +354,9 @@ export function checkoutDivergence(context, prs = [], { run = spawnSync } = {}) 
 		const output = entry.ref ? read(["rev-list", "--left-right", "--count", `HEAD...${entry.ref}`, "--"]) : null;
 		const counts = /^(\d+)\s+(\d+)$/.exec(output ?? "");
 		const values = counts ? counts.slice(1).map(Number) : [];
+		if (force && entry.ref && (!values.length || !values.every(Number.isSafeInteger))) {
+			throw new Error(`Invalid Git divergence counts for ${context.root}.`);
+		}
 		return { target: entry.target, ahead: values.length && values.every(Number.isSafeInteger) ? values[0] : null,
 			behind: values.length && values.every(Number.isSafeInteger) ? values[1] : null };
 	};
@@ -423,7 +442,7 @@ export function sessionContexts(payload, options = {}) {
 		const records = new Map(Object.entries(cached?.records ?? {}).filter(([cwd]) => directories.includes(cwd)));
 		const cursor = Number.isSafeInteger(cached?.cursor) && cached.cursor >= 0 ? cached.cursor % (directories.length || 1) : 0;
 		const reserved = options.reserveGitDirectories === 4 ? 4 : 0;
-		const count = Math.min(directories.length, MAX_GIT_DIRECTORIES - reserved);
+		const count = options.force ? directories.length : Math.min(directories.length, MAX_GIT_DIRECTORIES - reserved);
 		for (let i = 0; i < count; i++) {
 			const cwd = directories[(cursor + i) % directories.length];
 			records.set(cwd, gitContext(cwd, { ...options, contextCache }));

@@ -163,6 +163,8 @@ export function readState(sessionId, home = configHome()) {
 }
 
 export function writeState(state, home = configHome()) {
+	const current = readState(state.sessionId, home);
+	if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return;
 	atomicWriteJson(statePath(state.sessionId, home), state);
 }
 
@@ -173,6 +175,9 @@ export class SessionTracker {
 			version: 1,
 			mergeStateVersion: previous?.mergeStateVersion,
 			sessionId,
+			clearedAt: previous?.clearedAt ?? 0,
+			clearedWorkspace: previous?.clearedWorkspace ?? null,
+			clearedPrs: [...(previous?.clearedPrs ?? [])],
 			prs: [...(previous?.prs ?? [])],
 			ignored: [...(previous?.ignored ?? [])],
 			ignoredRevisions: { ...previous?.ignoredRevisions },
@@ -229,6 +234,8 @@ export class SessionTracker {
 	}
 
 	observe(event, history = false) {
+		if (this.state.clearedAt && ((Date.parse(event.timestamp) || 0) <= this.state.clearedAt) &&
+			(history || event.timestamp)) return;
 		const data = event.data ?? {};
 		const agentId = event.agentId || data.agentId || null;
 		const prSource = agentId ? { agentId } : { root: true };
@@ -497,6 +504,8 @@ function inspectWorkspaceMetadata(tracker, sessionDir, { home, now, useGh }) {
 		const branch = /^branch:\s*(\S+)\s*$/m.exec(raw)?.[1];
 		const cwd = /^cwd:\s*(.+?)\s*$/m.exec(raw)?.[1];
 		const name = /^name:\s*(.+?)\s*$/m.exec(raw)?.[1];
+		if (tracker.state.clearedAt && JSON.stringify([repo ?? null, branch ?? null, cwd ?? null, name ?? null]) ===
+			JSON.stringify(tracker.state.clearedWorkspace)) return false;
 		if (repo && !tracker.repository) {
 			tracker.repository = repo;
 			changed = true;
@@ -564,8 +573,10 @@ export function refreshTrackedPrStatuses(tracker, {
 	now = Date.now(),
 	fetchPrStatus = queryPrStatusWithGh,
 	prCacheTtlMs,
+	force = false,
+	onError,
 } = {}) {
-	return refreshTrackedPrStatusesImpl(tracker, { home, now, fetchPrStatus, prCacheTtlMs });
+	return refreshTrackedPrStatusesImpl(tracker, { home, now, fetchPrStatus, prCacheTtlMs, force, onError });
 }
 
 export function syncSession(payload, {
@@ -604,7 +615,10 @@ export function syncSession(payload, {
 	const tracker = new SessionTracker(
 		sessionId,
 		reset && previous ? { prs: previous.prs, ignored: previous.ignored,
-			ignoredRevisions: previous.ignoredRevisions, simulate: previous.simulate } : previous,
+			ignoredRevisions: previous.ignoredRevisions, simulate: previous.simulate, clearedAt: previous.clearedAt,
+			clearedWorkspace: previous.clearedWorkspace, clearedPrs: previous.clearedPrs,
+			...(previous.clearedAt ? { repository: previous.repository, host: previous.host,
+				lastUserInputAt: previous.lastUserInputAt, userRepos: previous.userRepos } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.state.transcriptOffset;
 	let changed = Boolean(previous && previous.mergeStateVersion !== tracker.state.mergeStateVersion) ||
@@ -646,7 +660,8 @@ export function syncSession(payload, {
 
 	const remoteRepo = payload?.remote?.repository;
 	const remotePr = payload?.remote?.pull_request_number;
-	if (remoteRepo && /^[1-9]\d*$/.test(String(remotePr))) {
+	if (remoteRepo && /^[1-9]\d*$/.test(String(remotePr)) &&
+		!tracker.state.clearedPrs.includes(pullRequest(`${remoteRepo}#${remotePr}`).url)) {
 		const before = tracker.state.prs.length;
 		tracker.add(`${remoteRepo}#${remotePr}`);
 		if (tracker.state.prs.length !== before) changed = true;

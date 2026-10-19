@@ -2,6 +2,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { collect } from "./collector.mjs";
+import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
 import {
 	ensurePluginStatuslineRegistered,
 	runInteractiveStatuslinePicker,
@@ -29,6 +30,27 @@ function manage(action, reference) {
 
 const session = await joinSession({
 	commands: [
+		{
+			name: "session-statusline",
+			description: "Refresh tracked session data, clear session entries, or set up enabled statusline components",
+			handler: async ({ args = "" }) => {
+				const [action, ...selection] = args.trim().split(/\s+/);
+				try {
+					if (action === "setup") {
+						await runInteractiveStatuslinePicker(session, { args: selection.join(" ") });
+					} else if ((action === "clear" || action === "refresh") && !selection.length) {
+						if (!collector) throw new Error("Session statusline is still loading; retry shortly.");
+						const payload = { session_id: session.sessionId };
+						await session.log(action === "clear" ? clearSessionStatusline(payload) : refreshSessionStatusline(payload));
+						collector.reload();
+					} else {
+						await session.log("Usage: /session-statusline [refresh | clear | setup [all | none | prs issues subagents worktrees]]");
+					}
+				} catch (error) {
+					await session.log(`Session statusline ${action || "command"} failed: ${error.message}`);
+				}
+			},
+		},
 		{
 			name: "statusline-setup",
 			description: "Choose which Copilot CLI statuslines are enabled (Pull Requests, Issues, Subagents, Branch/Worktree)",

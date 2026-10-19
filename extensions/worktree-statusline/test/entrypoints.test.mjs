@@ -72,6 +72,9 @@ function extensionScript(entry, full) {
 		await command("session-worktree")({});
 		assert.match(logs.pop(), /No Git checkout found/);
 		if (${full}) {
+			assert.equal(configuration.commands.some(item => ["statusline", "footer"].includes(item.name)), false);
+			await command("session-statusline")({ args: "invalid" });
+			assert.match(logs.pop(), /Usage:.*refresh.*clear.*setup/);
 			const tool = name => configuration.tools.find(item => item.name === name).handler;
 			assert.deepEqual(JSON.parse(tool("session_prs")({ action: "list" })), []);
 			assert.throws(() => tool("session_prs")({ action: "add", reference: "invalid" }));
@@ -90,6 +93,15 @@ function extensionScript(entry, full) {
 			await command("session-issues")({ args: "list" });
 			assert.match(logs.pop(), /example\\/widget#2/);
 			assert.equal(JSON.parse(tool("session_issues")({ action: "clear" })).length, 0);
+			await command("session-statusline")({ args: "clear" });
+			assert.match(logs.pop(), /Cleared this session/);
+			await command("session-statusline")({ args: "refresh" });
+			assert.match(logs.pop(), /^Refreshed this session/);
+			await command("session-statusline")({ args: "setup none" });
+			const { getEnabledStatuslines } = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "pr-statusline", "compose.mjs")).href)});
+			assert.deepEqual(getEnabledStatuslines(process.env.COPILOT_HOME), []);
+			await command("statusline-setup")({ args: "prs" });
+			assert.deepEqual(getEnabledStatuslines(process.env.COPILOT_HOME), ["pr-statusline"]);
 			const result = JSON.parse(await tool("statusline_setup")({ selection: "none" }));
 			assert.deepEqual(result.enabled, []);
 		}
