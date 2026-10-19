@@ -17,7 +17,7 @@
     {
       "name": "statuslines",
       "source": "./extensions",
-      "description": "Install only the composable PR, Issue, and Subagent statusline extensions for GitHub Copilot CLI without installing skills.",
+      "description": "Install only the composable PR, Issue, Subagent, and Branch/Worktree statusline extensions for GitHub Copilot CLI without installing skills.",
       "version": "1.0.0"
     },
     {

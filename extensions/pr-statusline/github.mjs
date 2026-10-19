@@ -2,10 +2,39 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isMergedPr, observeMergedPr } from "./lifecycle.mjs";
 
 export const PR_RUNNING_TTL_MS = 20_000;
 export const PR_SETTLED_TTL_MS = 45_000;
 export const PR_CLOSED_TTL_MS = 120_000;
+
+export function prContextFields(info) {
+	if (!info || typeof info !== "object") return {};
+	const headRepositoryUrl = info.headRepository?.url ?? info.headRepositoryUrl;
+	const baseRepositoryUrl = info.baseRepository?.url ?? info.baseRepositoryUrl;
+	const issueUrls = info.closingIssuesReferences?.nodes?.map((issue) => issue?.url) ?? info.issueUrls;
+	return {
+		...("headRefName" in info ? { headRefName: typeof info.headRefName === "string" ? info.headRefName : null } : {}),
+		...("baseRefName" in info ? { baseRefName: typeof info.baseRefName === "string" ? info.baseRefName : null } : {}),
+		...("baseRepository" in info || "baseRepositoryUrl" in info
+			? { baseRepositoryUrl: typeof baseRepositoryUrl === "string" ? baseRepositoryUrl : null } : {}),
+		...("headRepository" in info || "headRepositoryUrl" in info
+			? { headRepositoryUrl: typeof headRepositoryUrl === "string" ? headRepositoryUrl : null } : {}),
+		...(Array.isArray(issueUrls) ? { issueUrls: issueUrls.filter((url) => typeof url === "string") } : {}),
+	};
+}
+
+function updatePrContext(pr, info, onlyMissing = false) {
+	let changed = false;
+	for (const [key, value] of Object.entries(prContextFields(info))) {
+		if (onlyMissing && key in pr) continue;
+		if (JSON.stringify(pr[key]) !== JSON.stringify(value)) {
+			pr[key] = value;
+			changed = true;
+		}
+	}
+	return changed;
+}
 
 export function atomicWriteJson(filePath, data) {
 	mkdirSync(dirname(filePath), { recursive: true });
@@ -178,6 +207,11 @@ const PR_STATUS_GRAPHQL = `query($owner:String!,$name:String!,$number:Int!){
 	repository(owner:$owner,name:$name){
 		pullRequest(number:$number){
 			title
+			headRefName
+			headRepository{url}
+			baseRefName
+			baseRepository{url}
+			closingIssuesReferences(first:100){nodes{url}}
 			state
 			mergedAt
 			isDraft
@@ -229,6 +263,11 @@ const BRANCH_PR_GRAPHQL = `query($owner:String!,$name:String!,$head:String!){
 			nodes{
 				url
 				title
+				headRefName
+				headRepository{url}
+				baseRefName
+				baseRepository{url}
+				closingIssuesReferences(first:100){nodes{url}}
 				state
 				isDraft
 				reviewDecision
@@ -286,6 +325,7 @@ function normalizeGraphqlPr(pr) {
 		}
 	}
 	return {
+		...prContextFields(pr),
 		...(pr.url ? { url: pr.url } : {}),
 		...(typeof pr.title === "string" && pr.title ? { title: pr.title } : {}),
 		state: pr.state,
@@ -300,7 +340,7 @@ function normalizeGraphqlPr(pr) {
 	};
 }
 
-export function queryPrStatusWithGh(url) {
+export function queryPrStatusWithGh(url, { run = runGhWithFallback } = {}) {
 	let parsed;
 	try {
 		parsed = new URL(url);
@@ -323,7 +363,7 @@ export function queryPrStatusWithGh(url) {
 		"-f",
 		`query=${PR_STATUS_GRAPHQL}`,
 	];
-	const res = runGhWithFallback(args);
+	const res = run(args);
 	if (res.status !== 0) {
 		const stderr = String(res.stderr ?? "");
 		if (/Could not resolve to a PullRequest/i.test(stderr)) {
@@ -341,10 +381,10 @@ export function queryPrStatusWithGh(url) {
 	}
 }
 
-export function queryBranchPrWithGh(repository, branch) {
+export function queryBranchPrWithGh(repository, branch, { run = runGhWithFallback } = {}) {
 	const [owner, repo] = String(repository ?? "").split("/");
 	if (!owner || !repo || !branch) return null;
-	const res = runGhWithFallback([
+	const res = run([
 		"api",
 		"graphql",
 		"-F",
@@ -379,13 +419,18 @@ export function refreshTrackedPrStatuses(tracker, {
 	let changed = false;
 
 	for (const pr of [...tracker.state.prs]) {
-		if (pr.simulated || pr.mergedAt) continue;
+		const cached = cache?.[pr.url];
+		if (updatePrContext(pr, cached?.info, (cached?.checkedAt ?? 0) < (pr.checkedAt ?? 0))) changed = true;
+		if (pr.simulated) continue;
 		const hasOcticonFormat = typeof pr.status === "string" &&
 			pr.status.includes(OCTICONS.approved) &&
 			pr.status.includes(OCTICONS.comment);
-		const defaultTtl = pr.status?.includes(OCTICONS.running) ? PR_RUNNING_TTL_MS : PR_SETTLED_TTL_MS;
+		const merged = isMergedPr(pr);
+		const defaultTtl = merged ? PR_CLOSED_TTL_MS :
+			(pr.status?.includes(OCTICONS.running) ? PR_RUNNING_TTL_MS : PR_SETTLED_TTL_MS);
 		const effectiveTtl = prCacheTtlMs ?? defaultTtl;
-		if (hasOcticonFormat && Number.isFinite(pr.checkedAt) && pr.checkedAt > 0 && now - pr.checkedAt < effectiveTtl) continue;
+		if ((hasOcticonFormat || merged) && Number.isFinite(pr.checkedAt) && pr.checkedAt > 0 &&
+				now - pr.checkedAt < effectiveTtl && !((cached?.checkedAt ?? 0) > pr.checkedAt)) continue;
 
 		let info = null;
 		if (useSharedCache) {
@@ -432,6 +477,7 @@ export function refreshTrackedPrStatuses(tracker, {
 		}
 
 		if (info && typeof info === "object") {
+			if (updatePrContext(pr, info)) changed = true;
 			const stateName = String(info.state ?? "").toUpperCase();
 			if (stateName === "CLOSED" || stateName === "NOT_FOUND") {
 				tracker.manage("remove", pr.url);
@@ -440,16 +486,7 @@ export function refreshTrackedPrStatuses(tracker, {
 			}
 			if (stateName === "MERGED") {
 				const remoteMergedAt = info.mergedAt ? Date.parse(info.mergedAt) : NaN;
-				if (!pr.mergedAt && Number.isFinite(remoteMergedAt) && tracker.lastUserInputAt > 0 && remoteMergedAt < tracker.lastUserInputAt) {
-					tracker.manage("remove", pr.url);
-					changed = true;
-					continue;
-				}
-				const effectiveMergedAt = Number.isFinite(remoteMergedAt) ? remoteMergedAt : now;
-				if (!pr.mergedAt) {
-					pr.mergedAt = effectiveMergedAt;
-					changed = true;
-				}
+				if (observeMergedPr(pr, Math.max(now, tracker.lastUserInputAt), remoteMergedAt)) changed = true;
 				const mergedStatus = `${OCTICONS.merged} Merged`;
 				if (pr.status !== mergedStatus) {
 					pr.status = mergedStatus;
@@ -460,6 +497,11 @@ export function refreshTrackedPrStatuses(tracker, {
 					changed = true;
 				}
 				continue;
+			}
+			if (stateName === "OPEN" && (Number.isFinite(pr.mergedAt) || Number.isFinite(pr.mergedObservedAt))) {
+				delete pr.mergedAt;
+				delete pr.mergedObservedAt;
+				changed = true;
 			}
 			if (typeof info.title === "string" && info.title && pr.title !== info.title) {
 				pr.title = info.title;
@@ -479,4 +521,3 @@ export function refreshTrackedPrStatuses(tracker, {
 	if (cacheDirty && cache) writePrCache(cache, home);
 	return changed;
 }
-

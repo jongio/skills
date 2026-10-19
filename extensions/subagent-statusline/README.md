@@ -1,14 +1,24 @@
 # Subagent Statusline
 
-A composable GitHub Copilot CLI status line that tracks **subagent state counts** (`starting`, `exploring`, `in PR`, `merged`, and `failed`) for the active session, with a clickable OSC 8 link to your repository's pull requests page. Coexists side-by-side with [`pr-statusline`](../pr-statusline) and [`issue-statusline`](../issue-statusline) via `~/.copilot/statusline-compose.mjs`.
+A composable GitHub Copilot CLI status line that tracks **subagent state counts** (`starting`, `exploring`, `in PR`, `merged`, and `failed`) for the active session. The padded summary has no terminal hyperlink; use `/tasks` to inspect individual agents. Coexists with [`pr-statusline`](../pr-statusline) and [`issue-statusline`](../issue-statusline) via `~/.copilot/statusline-compose.mjs`, or appears once on the unlabeled summary row when [`worktree-statusline`](../worktree-statusline) groups checkouts.
 
-![Subagent Statusline in isolation](screenshots/subagent-statusline.png)
+![Subagent summary examples and the command to inspect individual agents](../../site/public/screenshots/subagent-statusline.svg)
+
+![Illustrative grouped footer with branch/worktree rows and a single overall subagent summary](../../site/public/screenshots/statusline-worktree-grouped.svg)
+
+The summary is not repeated per checkout. PR details owned only by active
+subagents can collapse into these counts, while root-worked and unknown-owner
+PRs remain detailed. See the [worktree association rules](../worktree-statusline/README.md#association-rules).
+Each checkout can independently show its upstream/base divergence even when
+subagent-only PR details are compacted. These commit counts are separate from
+the overall agent counts and use locally fetched refs.
+See the [divergence legend](../worktree-statusline/README.md#upstream-and-base-divergence).
 
 ## Install (Windows, macOS, and Linux)
 
 ### Option 1: Install as a Copilot Plugin or Interactive Script (Recommended)
 
-Install via the `jongio/skills` Copilot plugin, or run a single command to choose whether you want **Pull Requests**, **GitHub Issues**, and/or **Subagents**:
+Install via the `jongio/skills` Copilot plugin, or run a single command to choose **Pull Requests**, **GitHub Issues**, **Subagents**, and/or **Branch and Worktree**:
 
 **Copilot CLI Plugin:**
 
@@ -39,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusli
 ### Option 2: Ask Copilot
 
 ```text
-set up the copilot statusline from jongio/skills and ask me whether I want PRs, issues, and/or subagents
+set up the copilot statusline from jongio/skills and ask me which of PRs, issues, subagents, and worktrees I want
 ```
 
 ### Option 3: Standalone extension installer
@@ -59,24 +69,27 @@ set up the copilot statusline from jongio/skills and ask me whether I want PRs, 
 ## What appears in the pill
 
 - `   1 starting  1 exploring  1 in PR  1 merged ` (Amber: subagents actively starting or exploring)
-- `   3 in PR  1 merged ` (Green: all active subagents have open PRs)
+- `   3 in PR  1 merged ` (Amber: active subagent PRs remain in progress)
 - `   1 in PR  1 failed ` (Red: at least one subagent exited with an error)
 - `   4 merged ` (Purple: all subagent PRs merged; dismisses on your next prompt)
 
 - **Auto-hides when idle:** Outputs nothing (0 lines) when the session has no active or merged subagents.
-- **Clickable link:** The pill links via OSC 8 (`https://github.com/<owner>/<repo>/pulls`) to your repository's pull requests page, and you can run `/tasks` in the Copilot CLI console at any time to inspect individual subagent timelines.
+- **Inspection:** Run `/tasks` in the Copilot CLI console for individual subagent timelines. With the SDK extension loaded, `/session-subagents list` shows counts and `/session-subagents clear` dismisses the tracked summary.
 - **State lifecycle:**
   - ` N starting` (`U+F252`): Implementation subagents currently running that have not opened a PR yet.
   - ` N exploring` (`U+F422` / Unicode `◎`): Read-only `explore` and `research` subagents currently investigating.
   - ` N in PR` (`U+E726`): Subagents that have opened or worked on an open pull request.
   - ` N merged` (`U+E727`): Subagents whose pull requests have merged.
   - ` N failed` (`U+F057`): Subagents that failed with an error.
-- **Purple Merged dismissal:** Once all subagent PRs have merged (`starting === 0`, `exploring === 0`, and `inPr === 0`), the pill turns GitHub Merged purple (`  4 merged`) and automatically dismisses itself on your next prompt in that session.
+- **Merged dismissal:** Each settled contribution remains visible until the next
+  real user message after its settlement is detected. Other active agents don't
+  keep old merged counts visible. Active PRs and ongoing agents remain; an agent
+  still running after its merged count is dismissed returns to its running count.
+  Cache polls don't reset the observation time. Legacy settled caches without a
+  reliable boundary get one fresh observation boundary on load.
 
 ## Validate
 
 ```powershell
-node .\extensions\subagent-statusline\test\smoke.test.mjs
-node .\scripts\validate-extensions.mjs
-node .\scripts\lint.mjs
+node --test .\extensions\subagent-statusline\test\smoke.test.mjs
 ```

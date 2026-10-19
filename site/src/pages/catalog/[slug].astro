@@ -1,6 +1,8 @@
 ---
 import Layout from "../../layouts/Layout.astro";
 import { getCollection, render } from "astro:content";
+import { Image } from "astro:assets";
+import { thumbnailFor } from "../../thumbnails";
 
 export async function getStaticPaths() {
   const skills = await getCollection("skills");
@@ -17,7 +19,17 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
   <p style="margin:0 0 1rem;"><a href={`${base}catalog/`}>← All skills</a></p>
 
   <header class="skill-head">
-    <img class="skill-hero" src={`${base}${skill.data.thumb}`} alt={`${skill.data.title} preview`} />
+    <Image
+      class="skill-hero"
+      src={thumbnailFor(skill.data.thumb)}
+      alt={`${skill.data.title} illustration`}
+      widths={[512, 768, 1024]}
+      sizes="(max-width: 760px) calc(100vw - 72px), 688px"
+      width={1024}
+      height={1024}
+      format="webp"
+      quality={80}
+    />
     <h1>{skill.data.title}</h1>
     <p class="muted lede">{skill.data.tagline}</p>
     <p class="usewhen"><strong>Use when:</strong> {skill.data.useWhen}</p>
@@ -32,7 +44,7 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
   <section class="card install-section">
     <h2>Install</h2>
     <p class="muted" style="margin:0 0 1rem;">
-      Install just <code>{skill.id}</code> (via the Copilot marketplace or Skills CLI), or install the entire <code>jongio/skills</code> collection in one command.
+      Choose this skill or the full collection. Add the Copilot marketplace once; it does not need to be added again for each skill.
     </p>
 
     <div class="install-split">
@@ -49,8 +61,6 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
         <p class="install-label">Or via Skills CLI (terminal):</p>
         <pre><code>{`npx skills add jongio/skills --skill ${skill.id} -g --agent github-copilot`}</code></pre>
 
-        <p class="install-label">Or ask your agent:</p>
-        <pre><code>{`install ${skill.id} from jongio/skills`}</code></pre>
       </div>
 
       <div class="install-box">
@@ -68,7 +78,7 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
       </div>
     </div>
 
-    <p class="muted" style="margin:0.9rem 0 0;">After any install, reload with <code>/skills reload</code> or start a new session.</p>
+    <p class="muted" style="margin:0.9rem 0 0;">In Copilot CLI, use <code>/skills reload</code> for newly installed skills. Start a new session if you installed the collection's statusline extensions.</p>
   </section>
 
   <article class="prose">
@@ -80,7 +90,7 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
   .skill-head { margin-bottom: 1.5rem; }
   .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; }
   .skill-hero {
-    width: 100%; aspect-ratio: 16 / 9; object-fit: contain;
+    width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: contain;
     border: 1px solid var(--border); border-radius: var(--radius);
     background: var(--panel); margin-bottom: 1.1rem; display: block;
     padding: 1rem;

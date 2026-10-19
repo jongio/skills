@@ -9,7 +9,7 @@ import { render } from "../render.mjs";
 import { collect } from "../collector.mjs";
 
 const home = mkdtempSync(join(tmpdir(), "pr-statusline-test-"));
-const event = (type, data = {}, agentId) => ({ type, data, agentId });
+const event = (type, data = {}, agentId) => ({ type, data, agentId, timestamp: new Date(1000).toISOString() });
 const start = (id, command, toolName = "powershell", extra = {}) => event("tool.execution_start", {
 	toolCallId: id,
 	toolName,
@@ -236,7 +236,7 @@ try {
 		{ home, links: false, now: 2000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
 	assert.match(secondRender, /^\uE726 acme\/app#42/);
-	// Merging a PR via gh pr merge turns it purple ("\uE727 Merged"), then dismisses it on the next user input
+	// A merge command invalidates status; only GitHub's MERGED response turns the pill purple.
 	appendFileSync(
 		transcriptFile,
 		[
@@ -244,48 +244,53 @@ try {
 			JSON.stringify({ ...result("merge-42", "Merged pull request #42"), timestamp: new Date(4500).toISOString() }),
 		].join("\n") + "\n",
 	);
+	mockPrStatuses["https://github.com/acme/app/pull/42"] = { state: "MERGED", mergedAt: new Date(4500).toISOString() };
 	const afterMergeRender = render(
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
-		{ home, links: false, now: 3000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
+		{ home, links: false, now: 4500, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
 	assert.ok(afterMergeRender.includes("\uE727 acme/app#42 (https://github.com/acme/app/pull/42) Merged"), "merged PR should turn into purple Merged pill");
 	const coloredMergedRender = render(
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
-		{ home, links: true, color: true, now: 3000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
+		{ home, links: true, color: true, now: 4500, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
 	assert.ok(coloredMergedRender.includes("\x1b[1;38;2;237;224;255;48;2;88;44;142m \uE727 \x1b]8;;https://github.com/acme/app/pull/42\x07acme/app#42\x1b]8;;\x07\x1b[0m\x1b[1;38;2;237;224;255;48;2;88;44;142m Merged \x1b[0m"), "merged PR uses purple badge");
 	// Scheduled prompt does NOT dismiss the merged PR
 	appendFileSync(transcriptFile, `${JSON.stringify(event("user.message", { content: "[Scheduled prompt #1]\nCheck CI" }))}\n`);
 	const afterScheduledRender = render(
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
-		{ home, links: false, now: 3500, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
+		{ home, links: false, now: 4600, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
 	assert.ok(afterScheduledRender.includes("\uE727 acme/app#42 (https://github.com/acme/app/pull/42) Merged"), "scheduled prompt should not dismiss merged PR");
-	// Historical user.message earlier than mergedAt does NOT dismiss the merged PR
+	// Historical input before merge detection doesn't dismiss the merged PR.
 	const stateBeforeOldInput = readState("transcript-session", home);
 	const mergedPr = stateBeforeOldInput.prs.find((p) => p.url.endsWith("/pull/42"));
+	assert.equal(mergedPr.mergedObservedAt, 4500);
 	mergedPr.mergedAt = 5000;
 	writeState(stateBeforeOldInput, home);
 	appendFileSync(transcriptFile, `${JSON.stringify({ ...event("user.message", { content: "Older message" }), timestamp: new Date(4000).toISOString() })}\n`);
 	const afterOlderInputRender = render(
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
-		{ home, links: false, now: 3600, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
+		{ home, links: false, now: 4700, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
-	assert.ok(afterOlderInputRender.includes("\uE727 acme/app#42 (https://github.com/acme/app/pull/42) Merged"), "user message older than mergedAt should not dismiss merged PR");
-	// Next real user input at or after mergedAt dismisses the merged PR
+	assert.ok(afterOlderInputRender.includes("\uE727 acme/app#42 (https://github.com/acme/app/pull/42) Merged"), "user message older than merge detection should not dismiss merged PR");
+	// The next real user input after detection dismisses the merged PR.
 	appendFileSync(transcriptFile, `${JSON.stringify({ ...event("user.message", { content: "What should we work on next?" }), timestamp: new Date(6000).toISOString() })}\n`);
 	const afterNextUserInputRender = render(
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
-		{ home, links: false, now: 3800, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
+		{ home, links: false, now: 6100, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
 	assert.ok(!afterNextUserInputRender.includes("#42"), "merged PR should be dismissed after the user's next input");
 	// Corrupt cache recovers automatically when transcript exists
 	writeFileSync(statePath("transcript-session", home), "{corrupt");
 	const recoveredRender = render(
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
-		{ home, links: false, now: 4000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
+		{ home, links: false, now: 7000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
-	assert.match(recoveredRender, /^\uE726 acme\/app#55/);
+	assert.ok(recoveredRender.includes("acme/app#42"), "cache recovery rechecks GitHub before starting a new observation boundary");
+	appendFileSync(transcriptFile, `${JSON.stringify({ ...event("user.message", { content: "Continue" }), timestamp: new Date(8000).toISOString() })}\n`);
+	assert.match(render({ session_id: "transcript-session", transcript_path: transcriptDir },
+		{ home, links: false, now: 8100, fetchPrStatus: (url) => mockPrStatuses[url] ?? null }), /^\uE726 acme\/app#55/);
 
 	let handler;
 	let unsubscribed = false;
@@ -336,4 +341,3 @@ try {
 } finally {
 	rmSync(home, { recursive: true, force: true });
 }
-

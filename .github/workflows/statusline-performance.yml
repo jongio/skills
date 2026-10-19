@@ -1,0 +1,113 @@
+name: Statusline performance
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: statusline-performance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    name: Detect statusline changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.scope.outputs.changed }}
+      base: ${{ steps.scope.outputs.base }}
+      head: ${{ steps.scope.outputs.head }}
+      candidate: ${{ steps.scope.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Detect relevant changes and validate test-merge parents
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: node scripts/compare-statusline-performance.mjs --detect
+
+  measure:
+    name: Measure (${{ matrix.os }})
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Check out exact base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.detect.outputs.base }}
+          path: baseline
+          persist-credentials: false
+      - name: Check out exact test-merge candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.detect.outputs.candidate }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Statusline correctness and gate contracts
+        shell: pwsh
+        working-directory: candidate
+        run: node --test "extensions/*-statusline/test/*.test.mjs" test/statusline-performance.test.mjs test/distribution-manifests.test.mjs
+      - name: Compare identical workloads sequentially
+        shell: pwsh
+        working-directory: candidate
+        env:
+          BASE_SHA: ${{ needs.detect.outputs.base }}
+          HEAD_SHA: ${{ needs.detect.outputs.head }}
+          CANDIDATE_SHA: ${{ needs.detect.outputs.candidate }}
+          METRICS_DIR: ${{ runner.temp }}/statusline-performance
+        run: |
+          node scripts/compare-statusline-performance.mjs --baseline-root ../baseline --candidate-root . --output-dir "$env:METRICS_DIR" --base-sha "$env:BASE_SHA" --candidate-sha "$env:CANDIDATE_SHA" --head-sha "$env:HEAD_SHA"
+      - name: Upload only performance metrics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: statusline-performance-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/statusline-performance/base.json
+            ${{ runner.temp }}/statusline-performance/candidate.json
+            ${{ runner.temp }}/statusline-performance/confirmation-base.json
+            ${{ runner.temp }}/statusline-performance/confirmation-candidate.json
+            ${{ runner.temp }}/statusline-performance/comparison.json
+          if-no-files-found: warn
+          retention-days: 3
+
+  result:
+    name: Statusline performance result
+    if: ${{ always() }}
+    needs: [detect, measure]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Require detection and both applicable OS results
+        env:
+          DETECTION_RESULT: ${{ needs.detect.result }}
+          CHANGED: ${{ needs.detect.outputs.changed }}
+          MEASUREMENT_RESULT: ${{ needs.measure.result }}
+        run: node scripts/compare-statusline-performance.mjs --result

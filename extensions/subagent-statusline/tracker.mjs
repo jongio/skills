@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { dismissSettledAgents, observeSettlement } from "./settlement.mjs";
 
 const INITIAL_HEAD_BYTES = 64 * 1024;
 const INITIAL_TAIL_BYTES = 16 * 1024 * 1024;
@@ -136,6 +137,16 @@ export class SubagentTracker {
 		this.dismissed = Boolean(previous?.dismissed);
 		this.simulated = Boolean(previous?.simulated);
 		this.agents = new Map(Object.entries(previous?.agents ?? {}));
+		if (!this.simulated && previous?.mergeStateVersion !== 1) {
+			for (const [id, agent] of this.agents) {
+				if (!agent.mergedPrs?.length) continue;
+				const recovered = { ...agent, mergedPrs: [] };
+				delete recovered.settlementObservedAt;
+				delete recovered.settlementDismissed;
+				this.agents.set(id, recovered);
+				this.dismissed = false;
+			}
+		}
 		this.taskCalls = new Map(Object.entries(previous?.taskCalls ?? {}));
 		this.agentToolCalls = new Map(Object.entries(previous?.agentToolCalls ?? {}));
 	}
@@ -167,15 +178,20 @@ export class SubagentTracker {
 		return entry;
 	}
 
-	linkPr(agentId, prUrl, isMerged = false) {
+	linkPr(agentId, prUrl, isMerged = false, observedAt = Date.now()) {
 		const normalized = normalizePrUrl(prUrl);
 		if (!normalized) return;
 		const agent = this.ensureAgent(agentId);
 		if (!agent || isReadonlyAgentType(agent.agentType || agent.name)) return;
-		if (!agent.prs.includes(normalized)) agent.prs.push(normalized);
+		if (!agent.prs.includes(normalized)) {
+			agent.prs.push(normalized);
+			delete agent.settlementObservedAt;
+			delete agent.settlementDismissed;
+		}
 		if (isMerged && !agent.mergedPrs.includes(normalized)) {
 			agent.mergedPrs.push(normalized);
 		}
+		observeSettlement(agent, observedAt);
 		this.dismissed = false;
 	}
 
@@ -197,7 +213,7 @@ export class SubagentTracker {
 			if (context.repositoryHost) this.host = context.repositoryHost;
 		}
 
-		if (event.type === "user.message" && !event.agentId) {
+		if (event.type === "user.message" && !event.agentId && !data.agentId) {
 			const content = String(data.content ?? "");
 			const source = String(data.source ?? "");
 			const isAutomated = source.startsWith("skill-") ||
@@ -207,14 +223,7 @@ export class SubagentTracker {
 				content.trimStart().startsWith("[Scheduled prompt");
 			if (!isAutomated) {
 				if (eventTime >= this.lastUserInputAt) this.lastUserInputAt = eventTime;
-				const counts = this.counts();
-				if (!this.simulated && counts.total > 0 && counts.starting === 0 && counts.exploring === 0 && counts.inPr === 0 &&
-						this.latestSettlementTime() <= eventTime) {
-					this.dismissed = true;
-					this.agents.clear();
-					this.taskCalls.clear();
-					this.agentToolCalls.clear();
-				}
+				dismissSettledAgents(this, eventTime);
 			}
 		}
 
@@ -256,6 +265,7 @@ export class SubagentTracker {
 			if (agent) {
 				agent.status = data.cancelled ? "cancelled" : "completed";
 				agent.completedAt = eventTime;
+				observeSettlement(agent, eventTime);
 			}
 		}
 
@@ -265,6 +275,7 @@ export class SubagentTracker {
 			if (agent) {
 				agent.status = "failed";
 				agent.completedAt = eventTime;
+				observeSettlement(agent, eventTime);
 			}
 		}
 
@@ -291,8 +302,6 @@ export class SubagentTracker {
 			}
 
 			if (event.agentId && this.agents.has(event.agentId)) {
-				const isMerge = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+merge\b/.test(command) ||
-					/(?:^|[_-])merge_pull_request$/.test(name);
 				const isPrCmd = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+(?:view|checks|create|edit|review|comment|merge|ready)\b/.test(command) ||
 					/(?:^|[_-])(?:create_pull_request|update_pull_request|merge_pull_request)$/.test(name);
 				if (isPrCmd) {
@@ -300,11 +309,13 @@ export class SubagentTracker {
 						(args.owner && args.repo ? `${args.owner}/${args.repo}` : this.repository);
 					const numMatch = /\bgh(?:\s+\S+)*\s+pr\s+(?:view|checks|edit|review|comment|merge|ready)\s+([1-9]\d*)\b/.exec(command)?.[1] ??
 						args.pullNumber ?? args.pull_number;
-					for (const prUrl of extractPrUrls(command)) this.linkPr(event.agentId, prUrl, isMerge);
+					const targetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
+					const targets = extractPrUrls(targetText);
 					if (explicitRepo && /^[1-9]\d*$/.test(String(numMatch))) {
-						this.linkPr(event.agentId, `https://${this.host}/${explicitRepo}/pull/${numMatch}`, isMerge);
+						targets.push(`https://${this.host}/${explicitRepo}/pull/${numMatch}`);
 					}
-					this.agentToolCalls.set(data.toolCallId, { agentId: event.agentId, isMerge });
+					for (const prUrl of targets) this.linkPr(event.agentId, prUrl);
+					this.agentToolCalls.set(data.toolCallId, { agentId: event.agentId, targets });
 				}
 			}
 		}
@@ -322,26 +333,19 @@ export class SubagentTracker {
 					if (agent.status === "starting" && agent.executionMode !== "background") {
 						agent.status = "completed";
 						agent.completedAt = eventTime;
+						observeSettlement(agent, eventTime);
 					}
 				} else if (agent.status === "starting") {
 					agent.status = "failed";
 					agent.completedAt = eventTime;
+					observeSettlement(agent, eventTime);
 				}
 			}
 			const subCall = this.agentToolCalls.get(data.toolCallId);
 			this.agentToolCalls.delete(data.toolCallId);
 			if (subCall && data.success) {
 				for (const prUrl of extractPrUrls(text)) {
-					this.linkPr(subCall.agentId, prUrl, subCall.isMerge);
-				}
-				if (subCall.isMerge) {
-					const agent = this.agents.get(subCall.agentId);
-					if (agent) {
-						for (const prUrl of agent.prs) {
-							if (!agent.mergedPrs.includes(prUrl)) agent.mergedPrs.push(prUrl);
-						}
-						agent.completedAt = Math.max(agent.completedAt || 0, eventTime);
-					}
+					this.linkPr(subCall.agentId, prUrl, false, eventTime);
 				}
 			}
 		}
@@ -355,10 +359,16 @@ export class SubagentTracker {
 				const stateName = String(cached?.info?.state ?? "").toUpperCase();
 				if (stateName === "MERGED" && !agent.mergedPrs.includes(prUrl)) {
 					agent.mergedPrs.push(prUrl);
-					const mergedTime = cached?.info?.mergedAt ? Date.parse(cached.info.mergedAt) : NaN;
-					agent.completedAt = Math.max(agent.completedAt || 0, Number.isFinite(mergedTime) ? mergedTime : now);
 					changed = true;
 				}
+				if (stateName === "OPEN" && agent.mergedPrs.includes(prUrl)) {
+					agent.mergedPrs = agent.mergedPrs.filter((url) => url !== prUrl);
+					delete agent.settlementObservedAt;
+					delete agent.settlementDismissed;
+					this.dismissed = false;
+					changed = true;
+				}
+				if (observeSettlement(agent, Math.max(now, this.lastUserInputAt))) changed = true;
 			}
 		}
 		return changed;
@@ -372,17 +382,18 @@ export class SubagentTracker {
 		return maxTime;
 	}
 
-	counts() {
+	counts(agents = this.agents.values()) {
 		let starting = 0;
 		let exploring = 0;
 		let inPr = 0;
 		let merged = 0;
 		let done = 0;
 		let failed = 0;
-		for (const agent of this.agents.values()) {
+		for (const agent of agents) {
+			if (agent.settlementDismissed && agent.status !== "starting") continue;
 			const hasMerged = agent.mergedPrs?.length > 0 && agent.mergedPrs.length >= agent.prs.length;
 			const hasOpenPr = agent.prs?.length > 0 && !hasMerged;
-			if (hasMerged) merged++;
+			if (hasMerged && !agent.settlementDismissed) merged++;
 			else if (hasOpenPr) inPr++;
 			else if (agent.status === "starting") {
 				if (isExploreAgentType(agent.agentType) || isExploreAgentType(agent.name)) exploring++;
@@ -404,6 +415,7 @@ export class SubagentTracker {
 	snapshot() {
 		return {
 			version: 1,
+			mergeStateVersion: 1,
 			sessionId: this.sessionId,
 			repository: this.repository,
 			host: this.host,
@@ -444,7 +456,7 @@ function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = f
 	return startOffset + lastNewline + 1;
 }
 
-export function syncSession(payload, { home = configHome() } = {}) {
+export function syncSession(payload, { home = configHome(), now = Date.now() } = {}) {
 	const sessionId = payload?.session_id;
 	const transcriptFile = transcriptPathFor(sessionId, home, payload?.transcript_path);
 	let stat = null;
@@ -475,10 +487,10 @@ export function syncSession(payload, { home = configHome() } = {}) {
 		reset && previous?.simulated ? { agents: previous.agents, simulated: true } : (reset ? null : previous),
 	);
 	let offset = reset ? 0 : tracker.transcriptOffset;
-	let changed = hasTranscript && (!previous || reset);
+	let changed = Boolean(previous && previous.mergeStateVersion !== 1) || (hasTranscript && (!previous || reset));
 
 	const prCache = readSharedPrCache(home);
-	if (tracker.syncWithPrCache(prCache)) changed = true;
+	if (tracker.syncWithPrCache(prCache, now)) changed = true;
 
 	if (hasTranscript && stat.size > offset) {
 		const fd = openSync(transcriptFile, "r");
@@ -500,7 +512,7 @@ export function syncSession(payload, { home = configHome() } = {}) {
 		}
 	}
 
-	if (tracker.syncWithPrCache(prCache)) changed = true;
+	if (tracker.syncWithPrCache(prCache, now)) changed = true;
 	if (changed) writeState(tracker.snapshot(), home);
 	return { tracker };
 }

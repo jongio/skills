@@ -6,6 +6,7 @@ import {
 	ICONS,
 	ISSUE_CLOSED_TTL_MS,
 	ISSUE_OPEN_TTL_MS,
+	issueContextFields,
 	queryIssueStatusWithGh,
 	refreshTrackedIssueStatuses as refreshTrackedIssueStatusesImpl,
 	summarizeIssueStatus,
@@ -136,6 +137,7 @@ export function readState(sessionId, home = configHome()) {
 	}
 	state.issues = state.issues.map((item) => ({
 		...issueReference(item.url),
+		...issueContextFields(item),
 		...(typeof item.title === "string" && item.title ? { title: item.title } : {}),
 		...(typeof item.status === "string" && item.status ? { status: item.status } : {}),
 		...(Number.isFinite(item.checkedAt) ? { checkedAt: item.checkedAt } : {}),

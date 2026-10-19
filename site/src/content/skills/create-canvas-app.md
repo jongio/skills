@@ -1,6 +1,6 @@
 ---
 title: create-canvas-app
-tagline: "Build GitHub Copilot canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable per-user storage, optional multiplayer state shared through a private GitHub repo, Primer theming, the official Lucide icon set, a one-command generator, and deep links into the app."
+tagline: "Build interactive dashboards, boards, and editors that Copilot can open and update beside your conversation."
 useWhen: "When you want to create, scaffold, or improve an interactive canvas — a side-panel UI the agent can open and drive: dashboards, editors, trackers, boards, or document/preview surfaces."
 repoPath: skills/create-canvas-app
 thumb: images/thumb-create-canvas-app.png
@@ -14,25 +14,17 @@ install:
 
 ## What it does
 
-`create-canvas-app` turns a one-line prompt into a working **Copilot App canvas** —
-an interactive side-panel surface the agent can open and drive. It ships a
-no-build **Preact + htm** kit so there's no bundler to fight, with the pieces a real
-canvas needs already wired:
+`create-canvas-app` creates an interactive side panel in the Copilot app. Use it
+for a project board, document preview, editor, or dashboard the agent can update
+as you work.
 
-- **Live state over SSE** — the canvas and the agent stay in sync in real time.
-- **Durable per-user storage** — state survives reloads and sessions.
-- **Shared, multiplayer state (optional)** — back a canvas with a JSON file in a
-  private GitHub repo so a team edits **one** live document and sees each other's
-  changes within seconds. GitHub is both the store and the access control — no
-  server to run. Writes are optimistic-locked; set a `stateSchema` and a bad remote
-  edit is rejected instead of corrupting everyone's board.
-- **Primer theming** — matches GitHub light/dark out of the box.
-- **Official GitHub Lucide icons** — the same icon set the product uses.
-- **Host AI, no API keys** — call the Copilot app's own model from an action with
-  `ctx.ai(…)` (silent generation) or hand work to the main agent with `ctx.askAgent(…)`.
-- **Deep links into github-app:** open a session (or any documented app surface) from a
-  canvas with a validated `ghapp://` link that the app routes into its confirmation-gated pipeline.
-- **A generator** that stamps a working canvas in one command, plus tests.
+- The panel updates live when you or the agent changes its state.
+- Saved state survives reloads and later sessions.
+- Optional team sharing keeps one document in a private GitHub repository.
+- Light and dark themes match GitHub.
+- Buttons can use the app's AI or hand a task back to the agent, without a separate API key.
+
+The generated Preact + htm app runs without a build step and includes tests.
 
 ## When to reach for it
 
@@ -42,8 +34,8 @@ shipping web apps unrelated to Copilot canvases.
 
 ## Use it
 
-Once installed, just describe the canvas you want from the Copilot composer:
+In the Copilot app, describe what the panel should display and which actions you need:
 
 ```text
-/create-canvas-app a customized stock ticker
+/create-canvas-app a project board with tasks grouped by status and a button to summarize blockers
 ```
