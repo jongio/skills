@@ -287,7 +287,7 @@ try {
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
 		{ home, links: false, now: 7000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
-	assert.ok(recoveredRender.includes("acme/app#42"), "cache recovery rechecks GitHub before starting a new observation boundary");
+	assert.ok(!recoveredRender.includes("acme/app#42"), "cache recovery rechecks GitHub and dismisses merges before the latest prompt");
 	appendFileSync(transcriptFile, `${JSON.stringify({ ...event("user.message", { content: "Continue" }), timestamp: new Date(8000).toISOString() })}\n`);
 	assert.match(render({ session_id: "transcript-session", transcript_path: transcriptDir },
 		{ home, links: false, now: 8100, fetchPrStatus: (url) => mockPrStatuses[url] ?? null }), /^\uE726 acme\/app#55/);

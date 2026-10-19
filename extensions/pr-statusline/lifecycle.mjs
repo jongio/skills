@@ -47,7 +47,8 @@ export function dismissMergedPrs(tracker) {
 	let changed = false;
 	for (const pr of [...tracker.state.prs]) {
 		if (!pr.simulated && isMergedPr(pr) && Number.isFinite(pr.mergedObservedAt) &&
-			tracker.lastUserInputAt > pr.mergedObservedAt) {
+			(tracker.lastUserInputAt > pr.mergedObservedAt ||
+				tracker.lastUserInputAt > pr.mergedAt)) {
 			tracker.manage("remove", pr.url);
 			changed = true;
 		}
