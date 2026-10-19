@@ -35,6 +35,10 @@ export async function collect(session, { home, interval = 15000, report = consol
 	let stopped = false;
 	let polling = false;
 	let lastComparable = previous ? serializeComparable(tracker.snapshot()) : null;
+	const reload = () => {
+		const disk = readState(session.sessionId, home);
+		if (disk) reconcilePrStates(tracker, disk);
+	};
 	const save = (activity, { force = false } = {}) => {
 		let diskComparable = null;
 		try {
@@ -77,6 +81,7 @@ export async function collect(session, { home, interval = 15000, report = consol
 		if (loading) queued.push(event);
 		else {
 			try {
+				reload();
 				tracker.observe(event);
 				save();
 			} catch (error) {
@@ -85,7 +90,9 @@ export async function collect(session, { home, interval = 15000, report = consol
 		}
 	});
 	try {
-		for (const event of await session.getEvents()) {
+		const events = await session.getEvents();
+		reload();
+		for (const event of events) {
 			if (RELEVANT_EVENT_TYPE.test(String(event?.type ?? ""))) {
 				tracker.observe(event, true);
 			}
@@ -115,10 +122,12 @@ export async function collect(session, { home, interval = 15000, report = consol
 	return {
 		tracker,
 		manage(action, reference) {
+			reload();
 			const prs = tracker.manage(action, reference);
 			save(null, { force: true });
 			return prs;
 		},
+		reload,
 		stop() {
 			stopped = true;
 			clearInterval(timer);

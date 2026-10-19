@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { withStateLock } from "../state-lock.mjs";
 import { dismissSettledAgents, observeSettlement } from "./settlement.mjs";
 
 const INITIAL_HEAD_BYTES = 64 * 1024;
@@ -113,7 +114,18 @@ export function readState(sessionId, home = configHome()) {
 }
 
 export function writeState(state, home = configHome()) {
-	atomicWriteJson(statePath(state.sessionId, home), state);
+	return updateState(state.sessionId, (current) => {
+		if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return current;
+		return state;
+	}, home);
+}
+
+export function updateState(sessionId, update, home = configHome()) {
+	return withStateLock(statePath(sessionId, home), () => {
+		const state = update(readState(sessionId, home));
+		atomicWriteJson(statePath(sessionId, home), state);
+		return state;
+	});
 }
 
 function readSharedPrCache(home) {
@@ -128,6 +140,7 @@ export class SubagentTracker {
 	constructor(sessionId, previous = null) {
 		statePath(sessionId);
 		this.sessionId = sessionId;
+		this.clearedAt = previous?.clearedAt ?? 0;
 		this.repository = previous?.repository ?? null;
 		this.host = previous?.host ?? "github.com";
 		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
@@ -203,6 +216,7 @@ export class SubagentTracker {
 	}
 
 	observe(event) {
+		if (this.clearedAt && event.timestamp && Date.parse(event.timestamp) <= this.clearedAt) return;
 		const data = event.data ?? {};
 		const ts = event.timestamp ? Date.parse(event.timestamp) : NaN;
 		const eventTime = Number.isFinite(ts) ? ts : Date.now();
@@ -417,6 +431,7 @@ export class SubagentTracker {
 			version: 1,
 			mergeStateVersion: 1,
 			sessionId: this.sessionId,
+			clearedAt: this.clearedAt,
 			repository: this.repository,
 			host: this.host,
 			lastUserInputAt: this.lastUserInputAt,
@@ -484,7 +499,8 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new SubagentTracker(
 		sessionId,
-		reset && previous?.simulated ? { agents: previous.agents, simulated: true } : (reset ? null : previous),
+		reset ? { ...(previous?.simulated ? { agents: previous.agents, simulated: true } : {}), clearedAt: previous?.clearedAt,
+			...(previous?.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.transcriptOffset;
 	let changed = Boolean(previous && previous.mergeStateVersion !== 1) || (hasTranscript && (!previous || reset));
@@ -513,6 +529,9 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	}
 
 	if (tracker.syncWithPrCache(prCache, now)) changed = true;
-	if (changed) writeState(tracker.snapshot(), home);
+	if (changed) {
+		const saved = writeState(tracker.snapshot(), home);
+		if ((saved.clearedAt ?? 0) > tracker.clearedAt) return { tracker: new SubagentTracker(sessionId, saved) };
+	}
 	return { tracker };
 }

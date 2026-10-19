@@ -24,21 +24,24 @@ export function parseWorktrees(output) {
 	return records;
 }
 
-function inventory(context, run) {
+function inventory(context, run, force) {
 	try {
 		const result = run("git", ["-C", context.root, "worktree", "list", "--porcelain", "-z"], {
 			encoding: "utf8", timeout: 1500, maxBuffer: 256 * 1024, windowsHide: true,
 			env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0" },
 		});
-		if (result.error || result.status !== 0 || typeof result.stdout !== "string") return { available: false, records: [] };
+		if (result.error || result.status !== 0 || typeof result.stdout !== "string") {
+			throw result.error ?? new Error(`Cannot list worktrees for ${context.root}: ${result.stderr || `exit ${result.status}`}`);
+		}
 		return { available: true, records: parseWorktrees(result.stdout) };
-	} catch {
+	} catch (error) {
+		if (force) throw error;
 		return { available: false, records: [] };
 	}
 }
 
 export function resolveLinkedCheckouts(payload, checkouts, prs, {
-	home = configHome(), now = Date.now(), run = spawnSync,
+	home = configHome(), now = Date.now(), run = spawnSync, force = false,
 } = {}) {
 	if (!/^[\w-]{1,128}$/.test(payload?.session_id ?? "")) return [];
 	const requests = [];
@@ -59,7 +62,10 @@ export function resolveLinkedCheckouts(payload, checkouts, prs, {
 	try {
 		cache = readJson(path);
 	} catch (error) {
-		if (!(error instanceof SyntaxError)) return [];
+		if (!(error instanceof SyntaxError)) {
+			if (force) throw error;
+			return [];
+		}
 		console.error("[worktree-statusline] Rebuilding malformed linked worktree cache.");
 	}
 	if (cache?.version !== 1 || !cache.repositories || !cache.contexts ||
@@ -67,15 +73,15 @@ export function resolveLinkedCheckouts(payload, checkouts, prs, {
 		cache = { version: 1, repositories: {}, contexts: {}, cursor: 0, contextCursor: 0 };
 	}
 	const fresh = (entry) => Number.isFinite(entry?.checkedAt) && entry.checkedAt <= now && now - entry.checkedAt < CACHE_TTL_MS;
-	let budget = Math.max(0, checkouts[0]?.remainingGitDirectories ?? 0);
+	let budget = force ? Infinity : Math.max(0, checkouts[0]?.remainingGitDirectories ?? 0);
 	const known = [...repositories];
 	const start = Number.isSafeInteger(cache.cursor) && cache.cursor >= 0 ? cache.cursor % known.length : 0;
 	let visited = 0;
 	let queries = 0;
-	while (visited < known.length && queries < MAX_REPOSITORY_QUERIES && budget > 0) {
+	while (visited < known.length && (force || queries < MAX_REPOSITORY_QUERIES) && budget > 0) {
 		const [key, context] = known[(start + visited++) % known.length];
-		if (fresh(cache.repositories[key])) continue;
-		cache.repositories[key] = { ...inventory(context, run), checkedAt: now };
+		if (!force && fresh(cache.repositories[key])) continue;
+		cache.repositories[key] = { ...inventory(context, run, force), checkedAt: now };
 		queries++;
 		budget--;
 	}
@@ -104,13 +110,15 @@ export function resolveLinkedCheckouts(payload, checkouts, prs, {
 	const refreshed = new Set();
 	if (paths.length) {
 		const offset = Number.isSafeInteger(cache.contextCursor) && cache.contextCursor >= 0 ? cache.contextCursor % paths.length : 0;
-		const count = Math.min(paths.length, MAX_CHECKOUT_CHECKS, budget);
+		const count = force ? paths.length : Math.min(paths.length, MAX_CHECKOUT_CHECKS, budget);
 		for (let i = 0; i < count; i++) {
 			const [key, candidate] = paths[(offset + i) % paths.length];
 			let context = null;
 			try {
 				context = gitContext(candidate.root, { run });
-			} catch {
+				if (force && !context) throw new Error(`Cannot refresh checkout ${candidate.root}.`);
+			} catch (error) {
+				if (force) throw error;
 				// Leave this PR unassigned when live Git verification fails.
 			}
 			cache.contexts[key] = { checkedAt: now, context };
@@ -126,13 +134,15 @@ export function resolveLinkedCheckouts(payload, checkouts, prs, {
 			context.branch !== candidate.branch || !matchesRepository(context, candidate.repository)) continue;
 		try {
 			if (statSync(context.root).isDirectory()) found.push({ ...context, root: resolve(context.root), gitRefreshed: refreshed.has(key) });
-		} catch {
+		} catch (error) {
+			if (force) throw error;
 			// Removed or inaccessible checkouts stay on the unassigned row.
 		}
 	}
 	try {
 		writeJson(path, cache);
-	} catch {
+	} catch (error) {
+		if (force) throw error;
 		// Cache persistence is best-effort; verified in-memory matches remain usable.
 	}
 	return found;

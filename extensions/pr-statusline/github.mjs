@@ -411,6 +411,8 @@ export function refreshTrackedPrStatuses(tracker, {
 	now = Date.now(),
 	fetchPrStatus = queryPrStatusWithGh,
 	prCacheTtlMs,
+	force = false,
+	onError = (error) => { throw error; },
 } = {}) {
 	if (typeof fetchPrStatus !== "function") return false;
 	const useSharedCache = fetchPrStatus === queryPrStatusWithGh;
@@ -420,7 +422,7 @@ export function refreshTrackedPrStatuses(tracker, {
 
 	for (const pr of [...tracker.state.prs]) {
 		const cached = cache?.[pr.url];
-		if (updatePrContext(pr, cached?.info, (cached?.checkedAt ?? 0) < (pr.checkedAt ?? 0))) changed = true;
+		if (!force && updatePrContext(pr, cached?.info, (cached?.checkedAt ?? 0) < (pr.checkedAt ?? 0))) changed = true;
 		if (pr.simulated) continue;
 		const hasOcticonFormat = typeof pr.status === "string" &&
 			pr.status.includes(OCTICONS.approved) &&
@@ -429,10 +431,11 @@ export function refreshTrackedPrStatuses(tracker, {
 		const defaultTtl = merged ? PR_CLOSED_TTL_MS :
 			(pr.status?.includes(OCTICONS.running) ? PR_RUNNING_TTL_MS : PR_SETTLED_TTL_MS);
 		const effectiveTtl = prCacheTtlMs ?? defaultTtl;
-		if ((hasOcticonFormat || merged) && Number.isFinite(pr.checkedAt) && pr.checkedAt > 0 &&
+		if (!force && (hasOcticonFormat || merged) && Number.isFinite(pr.checkedAt) && pr.checkedAt > 0 &&
 				now - pr.checkedAt < effectiveTtl && !((cached?.checkedAt ?? 0) > pr.checkedAt)) continue;
 
 		let info = null;
+		let failure = null;
 		if (useSharedCache) {
 			const entry = cache[pr.url];
 			const entrySummary = entry?.info ? summarizePrStatus(entry.info) : null;
@@ -446,16 +449,17 @@ export function refreshTrackedPrStatuses(tracker, {
 			);
 			const cacheFresh = entry && (validSummary || entry.info === null) && pr.checkedAt !== 0 &&
 				now - entry.checkedAt < (prCacheTtlMs ?? entry.ttlMs ?? defaultTtl);
-			if (cacheFresh) {
+			if (!force && cacheFresh) {
 				info = entry.info;
-			} else if (entry?.refreshingUntil && entry.refreshingUntil > now) {
+			} else if (!force && entry?.refreshingUntil && entry.refreshingUntil > now) {
 				continue;
 			} else {
 				cache[pr.url] = { ...(entry ?? {}), refreshingUntil: now + 8000 };
 				writePrCache(cache, home);
 				try {
 					info = fetchPrStatus(pr.url);
-				} catch {
+				} catch (error) {
+					failure = error;
 					info = null;
 				}
 				const stateName = String(info?.state ?? "").toUpperCase();
@@ -471,15 +475,20 @@ export function refreshTrackedPrStatuses(tracker, {
 		} else {
 			try {
 				info = fetchPrStatus(pr.url);
-			} catch {
+			} catch (error) {
+				failure = error;
 				info = null;
 			}
+		}
+		if (force && !info) {
+			onError(new Error(`Could not refresh ${pr.label}: ${failure?.message ?? "GitHub returned no status."}`));
+			continue;
 		}
 
 		if (info && typeof info === "object") {
 			if (updatePrContext(pr, info)) changed = true;
 			const stateName = String(info.state ?? "").toUpperCase();
-			if (stateName === "CLOSED" || stateName === "NOT_FOUND") {
+			if (!force && (stateName === "CLOSED" || stateName === "NOT_FOUND")) {
 				tracker.manage("remove", pr.url);
 				changed = true;
 				continue;

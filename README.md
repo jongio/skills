@@ -57,7 +57,7 @@ summary appears below the checkout rows. See the
 [worktree guide](extensions/worktree-statusline/README.md) for association and
 visibility rules. Disabling worktree grouping restores horizontal composition.
 
-Installing `statuslines@jongio-skills` (statuslines only) or `jongio-skills@jongio-skills` (all skills and statuslines) from the `jongio/skills` marketplace auto-registers the statuslines and opens an interactive checkbox picker on first session start (and adds `/statusline-setup` so you can toggle **Pull Requests**, **GitHub Issues**, **Subagents**, and **Branch and Worktree** anytime), or you can run the standalone setup script:
+Installing `statuslines@jongio-skills` (statuslines only) or `jongio-skills@jongio-skills` (all skills and statuslines) from the `jongio/skills` marketplace auto-registers the statuslines and opens an interactive checkbox picker on first session start. Use `/session-statusline setup` (or the compatibility alias `/statusline-setup`) to toggle **Pull Requests**, **GitHub Issues**, **Subagents**, and **Branch and Worktree** anytime. `/session-statusline refresh` forces fresh tracked data; `/session-statusline clear` dismisses this session's entries without changing enabled components or deleting transcripts. See [session recovery and setup](extensions/pr-statusline/README.md#session-recovery-and-setup), including the collector restart requirement after upgrading. Or run the standalone setup script:
 
 ```text
 # Install just the statuslines (no skills) in Copilot CLI:

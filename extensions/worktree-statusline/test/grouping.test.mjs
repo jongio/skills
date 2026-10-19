@@ -64,6 +64,8 @@ test("repository identity normalizes SSH/HTTPS and rejects branch-only or malfor
 test("remote shell and PowerShell installer runtime lists match the canonical catalog", () => {
 	const shell = readFileSync(join(repoRoot, "install-statusline.sh"), "utf8");
 	const powershell = readFileSync(join(repoRoot, "install-statusline.ps1"), "utf8");
+	assert.match(shell, /curl[^\r\n]+extensions\/state-lock\.mjs/);
+	assert.match(powershell, /Invoke-WebRequest[^\r\n]+extensions\/state-lock\.mjs/);
 	for (const { id, files } of EXTENSION_CATALOG) {
 		const shellList = new RegExp(`for file in ([^;\\r\\n]+); do\\r?\\n\\s*mkdir -p "\\$TEMP_ROOT/extensions/${id}"`).exec(shell)?.[1];
 		assert.ok(shellList, `${id} shell manifest`);

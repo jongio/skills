@@ -86,7 +86,7 @@ set up the copilot statusline from jongio/skills and ask me which of PRs, issues
 
 ### Option 4: Manual setup (macOS / Linux / Windows)
 
-1. Copy every runtime file in `EXTENSION_CATALOG` for all four packages to `~/.copilot/extensions/<id>/`, preserving package directories. This includes the unified PR entry point's sibling dependencies. Copy `extensions/pr-statusline/compose.mjs` to `~/.copilot/statusline-compose.mjs`.
+1. Copy every runtime file in `EXTENSION_CATALOG` for all four packages to `~/.copilot/extensions/<id>/`, preserving package directories. This includes the unified PR entry point's sibling dependencies. Copy the shared `extensions/state-lock.mjs` to `~/.copilot/extensions/state-lock.mjs` and `extensions/pr-statusline/compose.mjs` to `~/.copilot/statusline-compose.mjs`.
 2. Add the following to `~/.copilot/settings.json`:
 
 ```json
@@ -175,6 +175,44 @@ Using `Azure/azure-dev` as an example checkout:
 /session-prs remove Azure/azure-dev#4812
 /session-prs clear
 ```
+
+## Session recovery and setup
+
+The unified SDK extension provides a separate command from Copilot's built-in
+`/statusline` and `/footer`, which are left untouched:
+
+| Command | Effect |
+| --- | --- |
+| `/session-statusline refresh` | Immediately re-query tracked PRs, issues, agent-linked PRs, and Git checkout/worktree data, bypassing status TTLs and applicable shared/in-flight caches. Keeps tracking and component selections; reports incomplete refreshes and individual failures explicitly. |
+| `/session-statusline clear` | Dismiss this session's current PR, issue, subagent, and worktree entries. Does not delete transcripts, affect other sessions, or change component selections. |
+| `/session-statusline setup` | Open the component picker. Optional selections such as `all`, `none`, or `prs issues` also work. `/statusline-setup` remains a compatibility alias. |
+
+**Clear is not refresh or hide.** Clear saves a session-specific replay boundary,
+so old transcript events, unchanged workspace metadata, and collector saves do
+not immediately restore dismissed entries. New activity after that boundary can
+track entries again, including previously cleared references. A new successful
+shell command or directory context can restore the current worktree entry.
+Root and subagent directory context is retained for resolving new relative
+commands without making those dismissed directories visible again.
+Existing per-component list/add/remove/clear commands remain available.
+
+Use **setup** to hide a component without dismissing its tracked items. Hidden
+components can be enabled again later; hiding does not clear their history.
+Refresh keeps entries tracked even when GitHub reports them closed or missing;
+normal subsequent footer updates still apply the existing lifecycle rules.
+Remote observations are applied to the latest locked tracking state, preserving
+activity and dismissals recorded while those queries run.
+Git comparisons use local refs; refresh does not fetch remote Git branches.
+
+After installing updated runtime files, **restart Copilot** to reload an
+already-running SDK collector and register the new command. Clear and refresh
+themselves require no restart once the updated extension is loaded. Recovery
+commands are registered by the unified PR SDK entry point; PR installs include
+its sibling runtime dependencies even when those footer components are hidden.
+State writes and worktree replay use per-session, cross-process locks. A lock
+timeout reports its exact path rather than overwriting potentially active state.
+If a process crashed while holding a lock, stop the session's collectors before
+removing only that reported `.lock` directory, then restart Copilot.
 
 ## Validate
 

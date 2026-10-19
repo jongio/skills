@@ -14,7 +14,7 @@ export const EXTENSION_CATALOG = [
 		noFlag: "--no-prs",
 		label: "Pull Requests (pr-statusline)",
 		description: "Track session PRs across repos/worktrees with CI checks, approvals, review threads, and purple Merged pills",
-		files: ["extension.mjs", "collector.mjs", "tracker.mjs", "github.mjs", "provenance.mjs", "lifecycle.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
+		files: ["extension.mjs", "collector.mjs", "session-statusline.mjs", "tracker.mjs", "github.mjs", "provenance.mjs", "lifecycle.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
 	},
 	{
 		id: "issue-statusline",
@@ -108,6 +108,7 @@ export function configureStatuslines({
 	mkdirSync(home, { recursive: true });
 	const extRoot = join(home, "extensions");
 	mkdirSync(extRoot, { recursive: true });
+	copyFileSync(join(repoRoot, "extensions", "state-lock.mjs"), join(extRoot, "state-lock.mjs"));
 	const composerPath = join(home, "statusline-compose.mjs");
 	const configPath = join(home, "statusline-config.json");
 	const settingsPath = join(home, "settings.json");

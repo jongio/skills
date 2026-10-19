@@ -40,9 +40,11 @@ try {
 	$baseUrl = "https://raw.githubusercontent.com/$repoSlug/$gitRef"
 	New-Item -ItemType Directory -Path (Join-Path $tempRoot 'scripts') -Force | Out-Null
 	Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/scripts/setup-statusline.mjs" -OutFile (Join-Path $tempRoot 'scripts\setup-statusline.mjs')
+	New-Item -ItemType Directory -Path (Join-Path $tempRoot 'extensions') -Force | Out-Null
+	Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/extensions/state-lock.mjs" -OutFile (Join-Path $tempRoot 'extensions\state-lock.mjs')
 
 	$manifest = @{
-		'pr-statusline'       = @('extension.mjs', 'collector.mjs', 'tracker.mjs', 'github.mjs', 'provenance.mjs', 'lifecycle.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
+		'pr-statusline'       = @('extension.mjs', 'collector.mjs', 'session-statusline.mjs', 'tracker.mjs', 'github.mjs', 'provenance.mjs', 'lifecycle.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 		'issue-statusline'    = @('extension.mjs', 'tracker.mjs', 'github.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 		'subagent-statusline' = @('extension.mjs', 'tracker.mjs', 'settlement.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 		'worktree-statusline' = @('extension.mjs', 'tracker.mjs', 'render.mjs', 'grouping.mjs', 'worktrees.mjs', 'compose.mjs', 'copilot-extension.json')
