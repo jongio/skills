@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
+import fs from "node:fs";
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -323,6 +324,78 @@ test("clear waits for a complete transcript record before capturing its director
 	appendFileSync(file, "\n");
 	assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
 	assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedContext.cwd, latest);
+}));
+
+for (const agentId of [null, "child"]) {
+	test(`clear rejects a partial ${agentId ? "agent" : "root"} directory record appended during component synchronization`, async (t) => fixture((home) => {
+		const id = "append-during-clear";
+		const payload = { session_id: id, cwd: home };
+		const latest = join(home, "latest");
+		const file = transcript(home, id, [
+			event("session.start", 1000, { cwd: home }),
+			{ ...event("session.context_changed", 1100, { cwd: join(home, "agent") }), agentId: "child" },
+		]);
+		const component = agentId ? "issue-statusline" : "pr-statusline";
+		const stateFile = join(home, component, `${id}.json`);
+		const rename = fs.renameSync;
+		let appended = false;
+		t.mock.method(fs, "renameSync", (from, to) => {
+			rename(from, to);
+			if (to === stateFile && !appended) {
+				appendFileSync(file, JSON.stringify({
+					...event("session.context_changed", 1500, { cwd: latest }), ...(agentId ? { agentId } : {}),
+				}));
+				appended = true;
+			}
+		});
+		syncBuiltinESMExports();
+		t.after(() => {
+			t.mock.restoreAll();
+			syncBuiltinESMExports();
+		});
+		assert.throws(() => clearSessionStatusline(payload, { home, now: 2000 }), /history is still catching up/);
+		assert.equal(appended, true);
+		for (const read of [readState, readIssues, readAgents]) assert.equal(read(id, home).clearedAt, 0);
+		assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedAt, 0);
+		appendFileSync(file, "\n");
+		assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+		appendFileSync(file, [
+			event("tool.execution_start", 3000, { toolCallId: "relative", toolName: "bash", arguments: { command: "cd nested" } }),
+			event("tool.execution_complete", 3100, { toolCallId: "relative", success: true }),
+		].map((item) => JSON.stringify({ ...item, ...(agentId ? { agentId } : {}) })).join("\n") + "\n");
+		const location = sessionDirectory(payload, { home });
+		assert.equal(agentId ? location.agentCwds.child.cwd : location.cwd, join(latest, "nested"));
+		assert.deepEqual(location.directories, [join(latest, "nested")]);
+	}));
+}
+
+test("clear rejects a transcript replaced after replay and before dismissal", async (t) => fixture((home) => {
+	const id = "replace-during-clear";
+	const payload = { session_id: id, cwd: home };
+	const file = transcript(home, id, [event("session.start", 1000, { cwd: home })]);
+	const cache = join(home, "worktree-statusline", `${id}.json`);
+	const rename = fs.renameSync;
+	let replaced = false;
+	t.mock.method(fs, "renameSync", (from, to) => {
+		rename(from, to);
+		if (to === cache && !replaced) {
+			const replacement = `${file}.replacement`;
+			writeFileSync(replacement, readFileSync(file));
+			rename(replacement, file);
+			replaced = true;
+		}
+	});
+	syncBuiltinESMExports();
+	t.after(() => {
+		t.mock.restoreAll();
+		syncBuiltinESMExports();
+	});
+	assert.throws(() => clearSessionStatusline(payload, { home, now: 2000 }), /history is still catching up/);
+	assert.equal(replaced, true);
+	for (const read of [readState, readIssues, readAgents]) assert.equal(read(id, home).clearedAt, 0);
+	assert.equal(readJson(cache).clearedAt, 0);
+	assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+	assert.equal(readJson(cache).clearedContext.cwd, home);
 }));
 
 test("clear without a transcript suppresses payload directory fallback and remains repeatable", async () => fixture((home) => {

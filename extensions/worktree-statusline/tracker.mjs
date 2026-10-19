@@ -125,11 +125,19 @@ export function writeJson(path, value) {
 	}
 }
 
-export function sessionDirectory(payload, { home = configHome() } = {}) {
+export function sessionDirectory(payload, options = {}) {
+	return withSessionDirectory(payload, (location) => location, options);
+}
+
+export function withSessionDirectory(payload, action, { home = configHome() } = {}) {
 	const id = payload?.session_id;
-	if (!id) return readSessionDirectory(payload, { home });
+	if (!id) return action(readSessionDirectory(payload, { home }));
 	if (typeof id !== "string" || !/^[\w-]{1,128}$/.test(id)) throw new Error("A valid session_id is required.");
-	return withStateLock(join(home, "worktree-statusline", `${id}.json`), () => readSessionDirectory(payload, { home }));
+	return withStateLock(join(home, "worktree-statusline", `${id}.json`), () => action(readSessionDirectory(payload, { home })));
+}
+
+export function transcriptIdentity(path, stat) {
+	return `${resolve(path)}:${stat.ino}:${stat.birthtimeMs}`;
 }
 
 function readSessionDirectory(payload, { home }) {
@@ -161,7 +169,7 @@ function readSessionDirectory(payload, { home }) {
 		throw error;
 	}
 	if (!stat.isFile()) throw new Error("Expected a session transcript file.");
-	const identity = `${resolve(transcript)}:${stat.ino}:${stat.birthtimeMs}`;
+	const identity = transcriptIdentity(transcript, stat);
 	const valid = previous?.version === 3 && previous.identity === identity &&
 		Number.isSafeInteger(previous.offset) && previous.offset >= 0 && previous.offset <= stat.size;
 	const baseline = previous?.clearedContext ?? previous;
