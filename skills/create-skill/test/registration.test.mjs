@@ -49,6 +49,10 @@ test("create plan covers skill files and every discovered registration surface",
     assert.ok(updates.has(join(root, "marketplace.json")));
     assert.ok(updates.has(join(root, "plugin.json")));
     assert.match(
+      updates.get(join(root, ".github", "dependabot.yml")),
+      /directory: \/skills\/release-notes-helper\n    cooldown:\n      default-days: 7\n/,
+    );
+    assert.match(
       updates.get(join(root, "site", "src", "content", "skills", `${manifest.name}.md`)),
       new RegExp(
         `repoPath: skills/${manifest.name}[\\s\\S]*thumb: images/thumb-${manifest.name}\\.png`,

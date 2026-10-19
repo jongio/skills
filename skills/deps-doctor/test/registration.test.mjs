@@ -462,6 +462,11 @@ assert.deepEqual(
 // The reverse direction: a fixture nobody mounts is dead weight that will drift
 // out of step with the stimulus it was written for.
 const fixturesDir = path.join(evalDir, "fixtures");
+const generatedFixtureOutput = /^fixtures\/broad-surface\/(?:bin|obj)\//;
+assert.ok(
+  referenced.every((file) => !generatedFixtureOutput.test(file)),
+  "eval inputs must not depend on generated .NET fixture outputs",
+);
 const shippedFixtures = existsSync(fixturesDir)
   ? (await readdir(fixturesDir, { recursive: true, withFileTypes: true }))
       .filter((entry) => entry.isFile())
@@ -471,6 +476,7 @@ const shippedFixtures = existsSync(fixturesDir)
           .split(path.sep)
           .join("/"),
       )
+      .filter((file) => !generatedFixtureOutput.test(file))
   : [];
 const referencedSet = new Set(referenced);
 const orphanFixtures = shippedFixtures.filter((file) => !referencedSet.has(file));

@@ -37,6 +37,7 @@ This plugin also ships three composable terminal statuslines for GitHub Copilot 
 | [`pr-statusline`](extensions/pr-statusline/) | Color-coded PR status pills in the Copilot CLI footer for every pull request the active session is working on across repositories and worktrees: clickable `owner/repo#number` OSC 8 links, CI check progress (`passed/total`), merge conflict alerts, review approvals, resolved review threads, and a purple `Merged` badge that dismisses on your next prompt. |
 | [`issue-statusline`](extensions/issue-statusline/) | Separate clickable pill for each GitHub issue the active session is working on: priority or bug labels, linked open PR indicator, assignee handle, comment count, and a purple `Closed` badge that dismisses on your next prompt. |
 | [`subagent-statusline`](extensions/subagent-statusline/) | Live session subagent counter pill (`starting`, `in PR`, `merged`, and `failed`) that turns purple when all subagent PRs merge and dismisses on your next prompt. |
+| [`test-doctor`](skills/test-doctor/) | Audit test correctness, coverage, reliability, and maintenance; optionally repair material gaps without gaming the suite. |
 
 ![Three Composable Statusline Types Side-by-Side](extensions/pr-statusline/screenshots/statusline-composed.png)
 

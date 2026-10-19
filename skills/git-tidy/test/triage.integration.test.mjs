@@ -940,7 +940,7 @@ test("argument parsing and CLI failures are strict", async () => {
   }
 });
 
-test("extended proof paths fail closed and guarded plans stay inert", async () => {
+test("extended proof paths fail closed and guarded plans stay inert", async (context) => {
   const fixture = await committedFixture("triage-extended");
   try {
     fixture.git(["branch", "topic"]);
@@ -952,7 +952,25 @@ test("extended proof paths fail closed and guarded plans stay inert", async () =
     fixture.git(["add", "tracked.txt"]);
     await fixture.write("tracked.txt", "unstaged\n");
     await fixture.write("untracked.txt", "untracked\n");
-    await fixture.makeSymlink("untracked-link", "tracked.txt");
+    await context.test("untracked symlinks retain symlink mode in evidence", async (context) => {
+      try {
+        await fixture.makeSymlink("untracked-link", "tracked.txt");
+      } catch (error) {
+        if (process.platform === "win32" && error.code === "EPERM") {
+          context.skip("symbolic links require Windows Developer Mode or elevated privileges");
+          return;
+        }
+        throw error;
+      }
+      const evidence = await collectEvidence(fixture.root, {
+        scope: "worktrees",
+        depth: "proof",
+      });
+      assert.ok(evidence.changeUnits.some(
+        ({ sourceComponent, newMode }) =>
+          sourceComponent === "untracked" && newMode === "120000",
+      ));
+    });
     const dirty = await collectEvidence(fixture.root, {
       scope: "worktrees",
       depth: "proof",

@@ -303,6 +303,7 @@ export function renderSkillFiles(manifest, options = {}) {
     ["LICENSE", renderLicense(manifest)],
     ["package.json", renderPackage(manifest)],
     [".gitignore", "node_modules/\nvally-results/\n"],
+    [".npmrc", "min-release-age=7\n"],
     [".vally.yaml", 'paths:\n  skills: "."\n  evals: "evals"\n  results: "vally-results"\n'],
     [`test/skill.test.mjs`, renderTest(manifest)],
     [`evals/${manifest.name}/eval.yaml`, renderEval(manifest)],

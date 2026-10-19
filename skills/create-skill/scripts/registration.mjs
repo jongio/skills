@@ -112,6 +112,8 @@ function addDependabotEntry(text, manifest, skillsRelative) {
   }
   const suffix = `  - package-ecosystem: npm
     directory: ${directory}
+    cooldown:
+      default-days: 7
     schedule:
       interval: weekly
     open-pull-requests-limit: 2
