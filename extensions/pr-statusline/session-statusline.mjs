@@ -37,9 +37,12 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 	}
 	const [repository, branch, cwd, name] = ["repository", "branch", "cwd", "name"]
 		.map((key) => new RegExp(`^${key}:\\s*(.+?)\\s*$`, "m").exec(workspace)?.[1] ?? null);
-	sessionDirectory(payload, { home });
+	const location = sessionDirectory(payload, { home });
 	const path = join(home, "worktree-statusline", `${id}.json`);
 	const worktree = readJson(path);
+	if (location.catchingUp || (worktree?.offset ?? 0) < offset) {
+		throw new Error("Worktree history is still catching up. Run /session-statusline clear again after replay completes.");
+	}
 	const clearedAt = Math.max(now, ...[pr.state.clearedAt, issue.state.clearedAt, agents.clearedAt, worktree?.clearedAt ?? 0].map((time) => time + 1));
 	pr.state.clearedPrs = [...new Set([...pr.state.clearedPrs, ...pr.state.prs.map((entry) => entry.url)])];
 	pr.state.clearedWorkspace = [repository, branch, cwd, name];
@@ -67,9 +70,13 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 	withStateLock(path, () => {
 		const latest = readJson(path);
 		if ((latest?.clearedAt ?? 0) > clearedAt) return;
+		const clearedContext = {
+			cwd: latest?.cwd ?? payload.cwd ?? null, agentCwds: latest?.agentCwds ?? {},
+			sequence: latest?.sequence ?? 0, appliedSequence: latest?.appliedSequence ?? 0,
+		};
 		writeJson(path, {
-			...latest, version: 3, offset, clearedAt, dismissed: true, cwd: latest?.cwd ?? payload.cwd ?? null, directories: [],
-			pending: {}, agentCwds: latest?.agentCwds ?? {}, agentDirectories: {}, skipPartial: false,
+			...latest, ...clearedContext, version: 3, offset, clearedAt, dismissed: true, clearedContext, directories: [],
+			pending: {}, agentDirectories: {}, skipPartial: false,
 		});
 	});
 	return "Cleared this session's PR, issue, subagent, and worktree entries. Component settings and transcripts are unchanged.";
