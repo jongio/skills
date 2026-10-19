@@ -509,6 +509,26 @@ for (const agentId of [null, "child"]) {
 	}));
 }
 
+for (const kind of ["file", "directory"]) {
+	test(`clear consistently normalizes padded transcript ${kind} paths for replay and validation`, async () => fixture((home) => {
+		const id = "normalized-path";
+		const file = transcript(home, id, [event("session.start", 1000, { cwd: home })]);
+		const explicitPath = kind === "file" ? file : join(home, "session-state", id);
+		const payload = { session_id: id, cwd: home, transcript_path: ` ${explicitPath} ` };
+		seed(home, id);
+		assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+		const resolved = { ...payload, transcript_path: file };
+		assert.deepEqual(sessionDirectory(resolved, { home }).directories, []);
+		appendFileSync(file, [
+			event("tool.execution_start", 3000, { toolCallId: "new", toolName: "bash", arguments: { command: "cd nested" } }),
+			event("tool.execution_complete", 3100, { toolCallId: "new", success: true }),
+		].map(JSON.stringify).join("\n") + "\n");
+		assert.equal(sessionDirectory(resolved, { home }).cwd, join(home, "nested"));
+		assert.match(clearSessionStatusline(payload, { home, now: 4000 }), /^Cleared/);
+		assert.deepEqual(sessionDirectory(resolved, { home }).directories, []);
+	}));
+}
+
 test("clear without a transcript suppresses payload directory fallback and remains repeatable", async () => fixture((home) => {
 	const payload = { session_id: "empty", cwd: home };
 	seed(home, "empty");

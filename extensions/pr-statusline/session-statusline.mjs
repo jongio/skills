@@ -31,7 +31,7 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 	const [repository, branch, cwd, name] = ["repository", "branch", "cwd", "name"]
 		.map((key) => new RegExp(`^${key}:\\s*(.+?)\\s*$`, "m").exec(workspace)?.[1] ?? null);
 	const path = join(home, "worktree-statusline", `${id}.json`);
-	return withSessionDirectory(payload, (location) => {
+	return withSessionDirectory({ ...payload, transcript_path: transcript }, (location) => {
 		const latest = readJson(path);
 		let stat;
 		try {
