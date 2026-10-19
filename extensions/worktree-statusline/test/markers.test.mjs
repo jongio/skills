@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -22,7 +22,7 @@ test("porcelain markers distinguish status columns and skip literal rename and c
 });
 
 test("live native markers cover clean, each state, combinations and staged then unstaged changes", async () => {
-	const home = mkdtempSync(join(tmpdir(), "checkout-markers-"));
+	const home = realpathSync.native(mkdtempSync(join(tmpdir(), "checkout-markers-")));
 	try {
 		const root = join(home, "repo ; $literal");
 		mkdirSync(root);

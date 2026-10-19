@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -25,7 +25,7 @@ const issueUrl = (number) => `https://github.com/org/one/issues/${number}`;
 const event = (type, data, agentId) => ({ type, data, agentId });
 
 async function fixture(run) {
-	const root = mkdtempSync(join(tmpdir(), "statusline-grouping-"));
+	const root = realpathSync.native(mkdtempSync(join(tmpdir(), "statusline-grouping-")));
 	try {
 		return await run(root);
 	} finally {

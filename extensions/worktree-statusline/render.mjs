@@ -9,10 +9,11 @@ function makePill(content, color) {
 }
 
 export function renderEntries(payload, { home, color = true, reserveGitDirectories = 0, deferCheckoutDivergence = false, run } = {}) {
+	const contextCache = new Map();
 	const { contexts, catchingUp, agentCheckouts, agentCurrentCheckouts, focusKey, remainingGitDirectories } =
-		sessionContexts(payload, { home, reserveGitDirectories, run });
+		sessionContexts(payload, { home, reserveGitDirectories, run, contextCache });
 	if (catchingUp) return [{ text: makePill("branch/worktree syncing session", color) }];
-	const current = typeof payload?.cwd === "string" && isAbsolute(payload.cwd) ? gitContext(payload.cwd, { run }) : null;
+	const current = typeof payload?.cwd === "string" && isAbsolute(payload.cwd) ? gitContext(payload.cwd, { run, contextCache }) : null;
 	const currentKey = current ? checkoutKey(current.root) : null;
 	return contexts.map((context) => checkoutEntry(context, currentKey, {
 		color, agentCheckouts, agentCurrentCheckouts, remainingGitDirectories, focused: checkoutKey(context.root) === focusKey,

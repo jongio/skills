@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +20,7 @@ const plain = { color: false, links: false, nerdFont: false };
 const identity = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"];
 
 async function fixture(run) {
-	const root = mkdtempSync(join(tmpdir(), "checkout-divergence-"));
+	const root = realpathSync.native(mkdtempSync(join(tmpdir(), "checkout-divergence-")));
 	try { await run(root); } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
