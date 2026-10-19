@@ -45,14 +45,21 @@ Before any merge:
    all required approvals, passing CI, and repository merge rules against the
    final head. Re-read the head immediately before the authorized merge.
 
-Use one literal command with the verified number, repository, and full SHA:
+For a non-queued PR, select exactly one repository-allowed and user-authorized
+merge method: `--merge`, `--squash`, or `--rebase`. If the method is unknown,
+ask before choosing one. `--match-head-commit` pins the head; it does not
+select a merge method. Do not rely on an interactive prompt in an agent shell.
+Use one literal command with the verified number, repository, full SHA, and
+the selected method. For example, only when squash is allowed and authorized:
 
 ```text
-gh pr merge NUMBER -R OWNER/REPO --match-head-commit FULL_SHA
+gh pr merge NUMBER -R OWNER/REPO --match-head-commit FULL_SHA --squash
 ```
 
 Alternatively, use structured `merge_pull_request` with `sha` set to that
-same full SHA when available. Do not bypass a denial with wrappers, scripts,
+same full SHA and the authorized merge method when available. Follow a required
+merge queue without bypassing it, and do not call a queued result merged.
+Do not bypass a denial with wrappers, scripts,
 raw APIs, admin, or deferred auto-merge. On denial, continue `/pr` to remediate
 or wait and retry. The hook does not wait for human reviews.
 

@@ -130,6 +130,22 @@ test("cleanup uses existing proof with independent approval and fresh identities
   ]);
 });
 
+test("non-interactive merge example pins the head and selects exactly one method", () => {
+  const commands = safety.match(/^gh pr merge .+$/gm) ?? [];
+  assert.equal(commands.length, 1);
+  const args = commands[0].split(/\s+/);
+  assert.equal(args.filter((arg) => ["--merge", "--squash", "--rebase"].includes(arg)).length, 1);
+  assert.equal(args[args.indexOf("--match-head-commit") + 1], "FULL_SHA");
+  assert.equal(args[args.indexOf("-R") + 1], "OWNER/REPO");
+  assert.equal(args[3], "NUMBER");
+  assert.doesNotMatch(commands[0], /--auto|--admin|[;&|]/);
+  includesAll(safety, [
+    "repository-allowed and user-authorized merge method",
+    "`--match-head-commit` pins the head; it does not select a merge method",
+    "ask before choosing one",
+  ]);
+});
+
 test("local documentation links resolve inside the skill package", async () => {
   const documents = [
     ["../SKILL.md", skill],
