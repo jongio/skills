@@ -159,6 +159,105 @@ test("collector restart skips cleared SDK history, including old reopen commands
 	} finally { collector.stop(); }
 }));
 
+test("a running collector retains context discovered by clear before saving or tracking new shorthand references", async () => fixture(async (home) => {
+	const id = "collector-context";
+	const payload = { session_id: id, cwd: home };
+	const file = transcript(home, id, [
+		event("session.start", 1000, { cwd: home }),
+		event("user.message", 1100, { content: prUrl(1) }),
+	]);
+	let handler;
+	const collector = await collect({
+		sessionId: id, on(fn) { handler = fn; return () => {}; },
+		getEvents: async () => [],
+		rpc: { metadata: { activity: async () => ({ hasActiveWork: false }) } },
+	}, { home, interval: 100000 });
+	try {
+		assert.equal(collector.tracker.repository, null);
+		writeFileSync(join(home, "session-state", id, "workspace.yaml"), "repository: example/widget\n");
+		clearSessionStatusline(payload, { home, now: 2000 });
+		const retained = readState(id, home);
+		assert.equal(retained.repository, "example/widget");
+		assert.equal(retained.lastUserInputAt, 1100);
+		assert.deepEqual(retained.userRepos, ["example/widget"]);
+		writeState({ ...retained, host: "github.enterprise.test" }, home);
+		handler(event("session.idle", 2100));
+		const saved = readState(id, home);
+		assert.equal(saved.repository, retained.repository);
+		assert.equal(saved.host, "github.enterprise.test");
+		assert.equal(saved.lastUserInputAt, retained.lastUserInputAt);
+		assert.deepEqual(saved.userRepos, retained.userRepos);
+		const fresh = event("user.message", 3000, { content: "Work on PR #42" });
+		appendFileSync(file, JSON.stringify(fresh) + "\n");
+		handler(fresh);
+		assert.deepEqual(readState(id, home).prs.map((pr) => pr.url), ["https://github.enterprise.test/example/widget/pull/42"]);
+	} finally { collector.stop(); }
+}));
+
+for (const activity of ["context", "shell"]) {
+	test(`post-clear subagent ${activity} activity does not expose the retained root checkout before new successful root work`, async () => fixture((home) => {
+		const id = `agent-${activity}`;
+		const payload = { session_id: id, cwd: home };
+		const agentDirectory = join(home, "agent-checkout");
+		mkdirSync(agentDirectory);
+		const file = transcript(home, id, [event("session.start", 1000, { cwd: home })]);
+		clearSessionStatusline(payload, { home, now: 2000 });
+		const agentEvents = activity === "context"
+			? [event("session.context_changed", 3000, { cwd: agentDirectory })]
+			: [
+				event("tool.execution_start", 3000, { toolCallId: "agent-work", toolName: "bash", arguments: { command: "git status", cwd: agentDirectory } }),
+				event("tool.execution_complete", 3100, { toolCallId: "agent-work", success: true }),
+			];
+		appendFileSync(file, agentEvents.map((item) => JSON.stringify({ ...item, agentId: "child" })).join("\n") + "\n");
+		let location = sessionDirectory(payload, { home });
+		assert.equal(location.cwd, null);
+		assert.deepEqual(location.directories, [agentDirectory]);
+		assert.deepEqual(sessionContexts(payload, { home, run: fakeGit }).contexts.map((context) => context.root), [agentDirectory]);
+		appendFileSync(file, [
+			event("tool.execution_start", 3200, { toolCallId: "failed-root", toolName: "bash", arguments: { command: "git status" } }),
+			event("tool.execution_complete", 3300, { toolCallId: "failed-root", success: false }),
+		].map(JSON.stringify).join("\n") + "\n");
+		assert.equal(sessionDirectory(payload, { home }).cwd, null);
+		appendFileSync(file, JSON.stringify(event("tool.execution_start", 3400, {
+			toolCallId: "root-work", toolName: "bash", arguments: { command: "git status" },
+		})) + "\n");
+		assert.equal(sessionDirectory(payload, { home }).cwd, null);
+		appendFileSync(file, JSON.stringify(event("tool.execution_complete", 3500, { toolCallId: "root-work", success: true })) + "\n");
+		location = sessionDirectory(payload, { home });
+		assert.equal(location.cwd, home);
+		assert.deepEqual(location.directories, [agentDirectory, home]);
+	}));
+}
+
+for (const reindexed of [false, true]) {
+	test(`clear preserves hidden agent directory context for new relative commands${reindexed ? " after cache re-indexing" : ""}`, async () => fixture((home) => {
+		const id = "relative-agent";
+		const payload = { session_id: id, cwd: home };
+		const first = join(home, "first"), second = join(home, "second");
+		mkdirSync(first);
+		mkdirSync(second);
+		const file = transcript(home, id, [
+			event("session.start", 1000, { cwd: home }),
+			{ ...event("session.context_changed", 1100, { cwd: first }), agentId: "child" },
+		]);
+		clearSessionStatusline(payload, { home, now: 2000 });
+		const cache = join(home, "worktree-statusline", `${id}.json`);
+		if (reindexed) writeJson(cache, { ...readJson(cache), version: 2 });
+		let location = sessionDirectory(payload, { home });
+		assert.equal(location.cwd, null);
+		assert.deepEqual(location.directories, []);
+		assert.equal(location.agentCwds.child?.cwd, first);
+		appendFileSync(file, [
+			event("tool.execution_start", 3000, { toolCallId: "relative", toolName: "bash", arguments: { command: "cd ../second" } }),
+			event("tool.execution_complete", 3100, { toolCallId: "relative", success: true }),
+		].map((item) => JSON.stringify({ ...item, agentId: "child" })).join("\n") + "\n");
+		location = sessionDirectory(payload, { home });
+		assert.equal(location.cwd, null);
+		assert.deepEqual(location.directories, [second]);
+		assert.equal(location.agentCwds.child.cwd, second);
+	}));
+}
+
 test("clear without a transcript suppresses payload directory fallback and remains repeatable", async () => fixture((home) => {
 	const payload = { session_id: "empty", cwd: home };
 	clearSessionStatusline(payload, { home, now: 1000 });
@@ -304,6 +403,32 @@ test("refresh merges observations into current PR, issue and agent state without
 	assert.equal(agents.agents["settled-agent"].status, "failed");
 	assert.equal(agents.transcriptOffset, 999);
 	assert.equal(agents.taskCalls["new-task-call"], "new-agent");
+}));
+
+test("refresh does not apply settlement observations based on stale agent PR membership", async (t) => fixture((home) => {
+	const id = "interleaved-link";
+	seed(home, id);
+	const initial = new SubagentTracker(id, readAgents(id, home));
+	initial.linkPr("old-agent", prUrl(1));
+	initial.agents.get("old-agent").status = "completed";
+	writeAgents(initial.snapshot(), home);
+	mockGithub(t, (kind, number) => {
+		if (kind === "pullRequest" && number === 1) {
+			const latest = new SubagentTracker(id, readAgents(id, home));
+			latest.linkPr("old-agent", prUrl(4));
+			writeAgents(latest.snapshot(), home);
+			return { state: "MERGED", mergedAt: new Date(1500).toISOString() };
+		}
+		return { state: "OPEN" };
+	});
+	assert.match(refreshSessionStatusline({ session_id: id }, { home, now: 2000 }), /^Refreshed/);
+	const latest = new SubagentTracker(id, readAgents(id, home));
+	const agent = latest.agents.get("old-agent");
+	assert.deepEqual(agent.prs, [prUrl(1), prUrl(4)]);
+	assert.equal(agent.settlementObservedAt, undefined);
+	latest.observe(event("user.message", 3000, { content: "continue working" }));
+	assert.equal(agent.settlementDismissed, undefined);
+	assert.equal(latest.counts().inPr, 1);
 }));
 
 test("a clear during remote refresh remains authoritative for every component", async () => fixture((home) => {

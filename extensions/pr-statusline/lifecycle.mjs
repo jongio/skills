@@ -58,6 +58,10 @@ export function dismissMergedPrs(tracker) {
 export function reconcilePrStates(tracker, disk) {
 	if ((disk.clearedAt ?? 0) > (tracker.state.clearedAt ?? 0)) {
 		Object.assign(tracker.state, disk);
+		tracker.repository = disk.repository ?? null;
+		tracker.host = disk.host ?? "github.com";
+		tracker.lastUserInputAt = Number.isFinite(disk.lastUserInputAt) ? disk.lastUserInputAt : 0;
+		tracker.userRepos = new Set(Array.isArray(disk.userRepos) ? disk.userRepos : []);
 		tracker.calls = new Map(Object.entries(disk.calls ?? {}));
 		tracker.pending = new Map(Object.entries(disk.pending ?? {}));
 		tracker.background = new Set(disk.background ?? []);

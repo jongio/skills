@@ -76,7 +76,8 @@ export class WorktreeTracker {
 			if (!SHELL_TOOL.test(name) || !data.toolCallId) return;
 			const base = agentId ? this.agentCwds.get(agentId)?.cwd : this.cwd;
 			const explicit = absoluteDirectory(args.cwd ?? args.workdir ?? args.workingDirectory, base);
-			const cwd = commandDirectory(args.command, explicit ?? base) ?? explicit ?? (this.dismissed ? base : null);
+			const cwd = commandDirectory(args.command, explicit ?? base) ?? explicit ??
+				(this.clearedAt && !this.directories.has(base) ? base : null);
 			if (cwd) {
 				this.pending.set(data.toolCallId, { cwd, sequence, agentId });
 				if (this.pending.size > 128) this.pending.delete(this.pending.keys().next().value);
@@ -165,6 +166,9 @@ function readSessionDirectory(payload, { home }) {
 		Number.isSafeInteger(previous.offset) && previous.offset >= 0 && previous.offset <= stat.size;
 	const tracker = new WorktreeTracker(valid ? previous : {
 		clearedAt: previous?.clearedAt, dismissed: Boolean(previous?.clearedAt), cwd: previous?.clearedAt ? previous.cwd : null,
+		agentCwds: previous?.clearedAt ? previous.agentCwds : {},
+		sequence: previous?.clearedAt ? previous.sequence : 0,
+		appliedSequence: previous?.clearedAt ? previous.appliedSequence : 0,
 	});
 	let offset = valid ? previous.offset : 0;
 	let skipPartial = valid && previous.skipPartial === true;
@@ -208,8 +212,9 @@ function readSessionDirectory(payload, { home }) {
 			agentDirectories: Object.fromEntries([...tracker.agentDirectories].map(([id, paths]) => [id, [...paths]])),
 		});
 	}
+	const cwd = tracker.clearedAt && !tracker.directories.has(tracker.cwd) ? null : tracker.cwd;
 	return {
-		cwd: tracker.dismissed ? null : tracker.cwd ?? (tracker.clearedAt ? null : fallback),
+		cwd: tracker.dismissed ? null : cwd ?? (tracker.clearedAt ? null : fallback),
 		directories: [...tracker.directories], catchingUp,
 		agentDirectories: Object.fromEntries([...tracker.agentDirectories].map(([id, paths]) => [id, [...paths]])),
 		agentCwds: Object.fromEntries(tracker.agentCwds),

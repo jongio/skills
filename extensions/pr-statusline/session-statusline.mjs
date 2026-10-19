@@ -69,7 +69,7 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 		if ((latest?.clearedAt ?? 0) > clearedAt) return;
 		writeJson(path, {
 			...latest, version: 3, offset, clearedAt, dismissed: true, cwd: latest?.cwd ?? payload.cwd ?? null, directories: [],
-			pending: {}, agentCwds: {}, agentDirectories: {}, skipPartial: false,
+			pending: {}, agentCwds: latest?.agentCwds ?? {}, agentDirectories: {}, skipPartial: false,
 		});
 	});
 	return "Cleared this session's PR, issue, subagent, and worktree entries. Component settings and transcripts are unchanged.";
@@ -146,7 +146,7 @@ function mergeObservations(current, previous, refreshed) {
 	const key = (item) => item.url ?? item.id;
 	const before = new Map(previous.map((item) => [key(item), item]));
 	const after = new Map(refreshed.map((item) => [key(item), item]));
-	const lifecycle = ["generation", "checkedAt", "status", "closedAt", "mergedAt", "mergedObservedAt",
+	const lifecycle = ["generation", "checkedAt", "status", "closedAt", "mergedAt", "mergedObservedAt", "prs",
 		"mergedPrs", "settlementObservedAt", "settlementDismissed"];
 	return current.map((item) => {
 		const old = before.get(key(item)), fresh = after.get(key(item));

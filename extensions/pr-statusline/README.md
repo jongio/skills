@@ -192,6 +192,8 @@ so old transcript events, unchanged workspace metadata, and collector saves do
 not immediately restore dismissed entries. New activity after that boundary can
 track entries again, including previously cleared references. A new successful
 shell command or directory context can restore the current worktree entry.
+Root and subagent directory context is retained for resolving new relative
+commands without making those dismissed directories visible again.
 Existing per-component list/add/remove/clear commands remain available.
 
 Use **setup** to hide a component without dismissing its tracked items. Hidden
