@@ -6,10 +6,10 @@ interface Props {
   description?: string;
   wide?: boolean;
 }
-const { title = "jongio/skills", description = "Jon Gallant's collection of cross-agent skills for AI coding agents — GitHub Copilot, Claude, and Codex.", wide = false } = Astro.props;
+const { title = "jongio/skills", description = "Reusable skills for AI coding tasks and a Copilot CLI footer for branches, worktrees, pull requests, issues, and background agents.", wide = false } = Astro.props;
 const base = import.meta.env.BASE_URL;
 const repo = "jongio/skills";
-const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.github.io");
+const ogImage = new URL(`${base}images/og.png`, Astro.site ?? "https://jongio.github.io");
 ---
 
 <!doctype html>
@@ -46,12 +46,16 @@ const ogImage = new URL(`${base}images/og.svg`, Astro.site ?? "https://jongio.gi
            solid fills use a darker blue (4.63:1). Darkening --accent itself
            would fix buttons but drop link contrast to 4.08:1. */
         --accent-solid: #1f6feb;
+        --feature-worktree: #79b8ff; --feature-pr: #3fb950;
+        --feature-issue: #d29922; --feature-subagent: #bc8cff;
         --radius: 12px;
       }
       :root[data-theme="light"] {
         --bg: #fff; --panel: #f6f8fa; --border: #d0d7de;
         --fg: #1f2328; --muted: #59636e; --accent: #0969da;
         --accent-solid: #0969da;
+        --feature-worktree: #0969da; --feature-pr: #1a7f37;
+        --feature-issue: #9a6700; --feature-subagent: #8250df;
       }
       * { box-sizing: border-box; }
       body {

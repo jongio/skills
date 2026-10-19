@@ -79,10 +79,15 @@ test("create plan covers skill files and every discovered registration surface",
   }
 });
 
-test("README registration escapes Markdown table separators", () => {
+test("README registration targets the skill table and escapes Markdown separators", () => {
   const root = mkdtempSync(join(tmpdir(), "create-skill-readme-"));
   try {
     createRepositoryFixture(root);
+    const readmePath = join(root, "README.md");
+    writeFileSync(
+      readmePath,
+      `${readFileSync(readmePath, "utf8")}\n## Extensions\n\n| Extension | Description |\n| --- | --- |\n| [\`footer\`](extensions/footer/) | A statusline. |\n`,
+    );
     const profile = discoverRepository(root);
     const pipeManifest = createSkillManifest({
       name: "table-safe-skill",
@@ -92,6 +97,8 @@ test("README registration escapes Markdown table separators", () => {
       author: "Example Author",
     });
     const updates = buildRegistrationUpdates(profile, pipeManifest, placeholderArt());
+    const readme = updates.get(readmePath);
+    assert.ok(readme.indexOf("table-safe-skill") < readme.indexOf("## Extensions"));
     assert.match(
       updates.get(join(root, "README.md")),
       /Generate A \\\| B release notes safely/,

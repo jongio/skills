@@ -14,7 +14,7 @@ export const EXTENSION_CATALOG = [
 		noFlag: "--no-prs",
 		label: "Pull Requests (pr-statusline)",
 		description: "Track session PRs across repos/worktrees with CI checks, approvals, review threads, and purple Merged pills",
-		files: ["extension.mjs", "collector.mjs", "tracker.mjs", "github.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
+		files: ["extension.mjs", "collector.mjs", "tracker.mjs", "github.mjs", "provenance.mjs", "lifecycle.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
 	},
 	{
 		id: "issue-statusline",
@@ -30,7 +30,15 @@ export const EXTENSION_CATALOG = [
 		noFlag: "--no-subagents",
 		label: "Subagents (subagent-statusline)",
 		description: "Show session subagent state counts (starting, exploring, in PR, merged, failed)",
-		files: ["extension.mjs", "tracker.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
+		files: ["extension.mjs", "tracker.mjs", "settlement.mjs", "render.mjs", "compose.mjs", "copilot-extension.json"],
+	},
+	{
+		id: "worktree-statusline",
+		flag: "--worktrees",
+		noFlag: "--no-worktrees",
+		label: "Branch and Worktree (worktree-statusline)",
+		description: "Show the session's active branch and checkout, following directory changes during the session",
+		files: ["extension.mjs", "tracker.mjs", "render.mjs", "grouping.mjs", "worktrees.mjs", "compose.mjs", "copilot-extension.json"],
 	},
 ];
 
@@ -121,9 +129,13 @@ export function configureStatuslines({
 	const sourceComposer = join(repoRoot, "extensions", "pr-statusline", "compose.mjs");
 	copyFileSync(sourceComposer, composerPath);
 
-	// Copy selected extensions into ~/.copilot/extensions/<id>
+	// The unified PR entry point exposes commands backed by sibling trackers.
+	const requiredRuntime = new Set(validEnabled);
+	if (requiredRuntime.has("pr-statusline")) {
+		for (const item of EXTENSION_CATALOG) requiredRuntime.add(item.id);
+	}
 	for (const item of EXTENSION_CATALOG) {
-		if (!validEnabled.includes(item.id)) continue;
+		if (!requiredRuntime.has(item.id)) continue;
 		const srcDir = join(repoRoot, "extensions", item.id);
 		const dstDir = join(extRoot, item.id);
 		mkdirSync(dstDir, { recursive: true });
@@ -203,17 +215,19 @@ async function main() {
 		console.log([
 			"Usage: node scripts/setup-statusline.mjs [options]",
 			"",
-			"Interactive by default (prompts for PRs, Issues, and Subagents).",
+			"Interactive by default (prompts for PRs, Issues, Subagents, and Branch/Worktree).",
 			"",
 			"Options:",
-			"  --all          Enable all three statuslines without prompting",
+			"  --all          Enable all four statuslines without prompting",
 			"  --prs          Enable Pull Requests statusline (pr-statusline)",
 			"  --issues       Enable GitHub Issues statusline (issue-statusline)",
 			"  --subagents    Enable Subagents statusline (subagent-statusline)",
+			"  --worktrees    Enable Branch and Worktree statusline (worktree-statusline)",
 			"  --merge        Merge enabled flag(s) with existing statusline-config.json",
 			"  --no-prs       Disable Pull Requests statusline",
 			"  --no-issues    Disable GitHub Issues statusline",
 			"  --no-subagents Disable Subagents statusline",
+			"  --no-worktrees Disable Branch and Worktree statusline",
 		].join("\n"));
 		return;
 	}

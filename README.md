@@ -22,6 +22,7 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`dns-doctor`](skills/dns-doctor/) | Audit DNS delegation, records, DNSSEC, CAA, web routing, TLS, CDN behavior, mail authentication, takeover exposure, and zone hygiene, then apply exact provider changes only after explicit user approval. |
 | [`deps-doctor`](skills/deps-doctor/) | Audit, update, and secure dependencies across npm, pnpm, Yarn, pip, Poetry, uv, Go, Cargo, Bundler, Composer, NuGet, Maven, Gradle, Swift, pub, and Hex, plus Docker base images, GitHub Actions, Terraform, and dev container features. Ranks vulnerabilities by exploitation evidence, withholds releases too new to have been vetted, fixes breaking changes forward instead of rolling back, and never opens an empty dependency pull request. |
 | [`git-tidy`](skills/git-tidy/) | Content-aware Git work triage across branches, worktrees, stashes, remote refs, tags, remotes, artifacts, ignored tracking, large blobs, and maintenance. Leads with plain decisions and concrete actions while exact proof stays available on demand; analysis is read-only and every action requires separate approval. |
+| [`test-doctor`](skills/test-doctor/) | Audit test correctness, coverage, reliability, and maintenance; optionally repair material gaps without gaming the suite. |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:
@@ -30,18 +31,32 @@ turns a one-line prompt into a working canvas:
 
 ## Copilot CLI Statusline Extensions
 
-This plugin also ships three composable terminal statuslines for GitHub Copilot CLI under [`extensions/`](extensions/) (exposed to Agent Plugins 1.0 hosts via `com.github.copilot/extensions/`):
+This plugin also ships four composable terminal statuslines for GitHub Copilot CLI under [`extensions/`](extensions/) (exposed to Agent Plugins 1.0 hosts via `com.github.copilot/extensions/`):
 
 | Extension | What it shows |
 |---|---|
-| [`pr-statusline`](extensions/pr-statusline/) | Color-coded PR status pills in the Copilot CLI footer for every pull request the active session is working on across repositories and worktrees: clickable `owner/repo#number` OSC 8 links, CI check progress (`passed/total`), merge conflict alerts, review approvals, resolved review threads, and a purple `Merged` badge that dismisses on your next prompt. |
+| [`pr-statusline`](extensions/pr-statusline/) | Open session PRs on GitHub and follow checks, conflicts, approvals, and review threads. Background-agent PRs can appear in the agent summary; confirmed merged pills clear after your next message following detection. |
 | [`issue-statusline`](extensions/issue-statusline/) | Separate clickable pill for each GitHub issue the active session is working on: priority or bug labels, linked open PR indicator, assignee handle, comment count, and a purple `Closed` badge that dismisses on your next prompt. |
-| [`subagent-statusline`](extensions/subagent-statusline/) | Live session subagent counter pill (`starting`, `in PR`, `merged`, and `failed`) that turns purple when all subagent PRs merge and dismisses on your next prompt. |
-| [`test-doctor`](skills/test-doctor/) | Audit test correctness, coverage, reliability, and maintenance; optionally repair material gaps without gaming the suite. |
+| [`subagent-statusline`](extensions/subagent-statusline/) | Overall session subagent counts (`starting`, `exploring`, `in PR`, `merged`, and `failed`). Settled counts dismiss on the next real user message after detection without hiding ongoing agents. Use `/tasks` to inspect individual agents. |
+| [`worktree-statusline`](extensions/worktree-statusline/) | Checkout-grouped rows with full paths, native `[⎇ branch*+%]` labels, upstream `↑`/`↓` divergence counts and missing base commits, followed by related PRs and issues. Hides Copilot's own checkout label and empty historical rows; supports detached HEADs and one overall subagent summary. |
 
-![Three Composable Statusline Types Side-by-Side](extensions/pr-statusline/screenshots/statusline-composed.png)
+![Illustrative grouped footer: Branch and Worktree, Pull Requests, Issues, and one overall Subagent summary](site/public/screenshots/statusline-worktree-grouped.svg)
 
-Installing `statuslines@jongio-skills` (statuslines only) or `jongio-skills@jongio-skills` (all skills and statuslines) from the `jongio/skills` marketplace auto-registers the statuslines and opens an interactive checkbox picker on first session start (and adds `/statusline-setup` so you can toggle **Pull Requests**, **GitHub Issues**, and **Subagents** anytime), or you can run the standalone setup script:
+With **Branch and Worktree** enabled, each checkout row starts with a blue,
+non-linked `path [⎇ branch*+%]` pill, followed by its PRs and linked issues.
+`*` means unstaged changes, `+` staged changes, and `%` untracked files (not a
+percentage). For example, `origin/feat/login↑1↓2` means one local-only commit
+and two upstream commits missing locally; `origin/main↓3` means three missing
+base commits. Zero counts are hidden, and `target?` means a known comparison is
+unavailable. Counts use locally fetched refs, not a background network fetch.
+The base is the matched PR's target, otherwise the remote default branch;
+it is not a guess about where the branch was originally created.
+Copilot's own checkout label is hidden; one overall subagent
+summary appears below the checkout rows. See the
+[worktree guide](extensions/worktree-statusline/README.md) for association and
+visibility rules. Disabling worktree grouping restores horizontal composition.
+
+Installing `statuslines@jongio-skills` (statuslines only) or `jongio-skills@jongio-skills` (all skills and statuslines) from the `jongio/skills` marketplace auto-registers the statuslines and opens an interactive checkbox picker on first session start (and adds `/statusline-setup` so you can toggle **Pull Requests**, **GitHub Issues**, **Subagents**, and **Branch and Worktree** anytime), or you can run the standalone setup script:
 
 ```text
 # Install just the statuslines (no skills) in Copilot CLI:

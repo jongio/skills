@@ -40,7 +40,10 @@ function addReadmeRow(text, manifest, skillsRelative) {
   if (text.includes(marker) || text.includes(`](${skillsRelative}/${manifest.name}/)`)) return text;
   const lines = text.split(/\r?\n/);
   const rowIndexes = lines
-    .map((line, index) => (/^\|\s*\[`[^`]+`\]\([^)]+\)\s*\|/.test(line) ? index : -1))
+    .map((line, index) => {
+      const entry = line.match(/^\|\s*\[`[^`]+`\]\(([^)]+)\)\s*\|/);
+      return entry?.[1].startsWith(`${skillsRelative}/`) ? index : -1;
+    })
     .filter((index) => index >= 0);
   if (rowIndexes.length === 0) throw new Error("README skill catalog table could not be identified");
   const insertion = rowIndexes.at(-1) + 1;

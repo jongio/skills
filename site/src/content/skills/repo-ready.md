@@ -1,6 +1,6 @@
 ---
 title: repo-ready
-tagline: "Scaffold and maintain the standard community health files every GitHub repository needs: .gitignore, .gitattributes, LICENSE, CONTRIBUTING, issue templates, CI workflows, dependabot, editorconfig, and repo metadata."
+tagline: "Add the license, contribution guide, issue forms, CI, and other setup files your repository is missing."
 useWhen: "When you're starting a new repo and need all the standard files, or when you want to audit an existing repo for missing community health files and GitHub settings."
 repoPath: skills/repo-ready
 thumb: images/thumb-repo-ready.png
@@ -14,14 +14,13 @@ install:
 
 ## What it does
 
-`repo-ready` makes sure your repo has every file GitHub expects for a
-well-maintained project. It detects your stack, interviews you once for the
-decisions that matter (license, audience, contacts), and generates everything
-in one pass.
+`repo-ready` checks your repository's setup and proposes files suited to its
+stack. It asks about decisions it cannot infer, such as the license and intended
+audience, then generates the agreed files.
 
-- **Stack detection** for 15+ ecosystems (Node.js, Python, Go, Rust, .NET,
-  Java, Ruby, Docker, Terraform, and more) from lockfiles and manifests.
-- **Guided license selection** from 12+ SPDX licenses with recommendations
+- **Stack detection** across ecosystems including Node.js, Python, Go, Rust, .NET,
+  Java, Ruby, Docker, and Terraform, using lockfiles and manifests.
+- **Guided license selection** with recommendations
   based on your project type and audience.
 - **YAML issue forms** (not legacy Markdown templates) with structured fields
   for bug reports and feature requests.

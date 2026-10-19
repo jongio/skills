@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");
 
-const PREFERRED_ORDER = ["pr-statusline", "issue-statusline", "subagent-statusline"];
+const PREFERRED_ORDER = ["worktree-statusline", "pr-statusline", "issue-statusline", "subagent-statusline"];
 
 const NERD_FONT_TO_UNICODE = new Map([
 	["\uE726", "\uE0A0"],
@@ -353,6 +353,12 @@ export function parseQuickSetupTokens(rawArgs = "") {
 		subagents: "subagent-statusline",
 		"--subagents": "subagent-statusline",
 		"subagent-statusline": "subagent-statusline",
+		branch: "worktree-statusline",
+		branches: "worktree-statusline",
+		worktree: "worktree-statusline",
+		worktrees: "worktree-statusline",
+		"--worktrees": "worktree-statusline",
+		"worktree-statusline": "worktree-statusline",
 	};
 	const picked = new Set();
 	for (const tok of tokens) {
@@ -409,6 +415,12 @@ export async function runInteractiveStatuslinePicker(session, {
 						description: "Show session subagent phase counters (starting, exploring, in PR, merged, failed)",
 						default: current.has("subagent-statusline"),
 					},
+					worktrees: {
+						type: "boolean",
+						title: "Branch and Worktree (worktree-statusline)",
+						description: "Follow the session's active Git branch and checkout directory",
+						default: current.has("worktree-statusline"),
+					},
 					nerdFontIcons: {
 						type: "boolean",
 						title: "Use Nerd Font icons",
@@ -425,6 +437,7 @@ export async function runInteractiveStatuslinePicker(session, {
 		if (response.content.prs !== false) selected.push("pr-statusline");
 		if (response.content.issues !== false) selected.push("issue-statusline");
 		if (response.content.subagents !== false) selected.push("subagent-statusline");
+		if (response.content.worktrees === true) selected.push("worktree-statusline");
 		const pickedIconMode = typeof response.content.nerdFontIcons === "boolean"
 			? (response.content.nerdFontIcons ? "nerdfont" : "unicode")
 			: undefined;
@@ -437,7 +450,7 @@ export async function runInteractiveStatuslinePicker(session, {
 	}
 
 	const current = getEnabledStatuslines(home);
-	const msg = `Current statuslines: ${current.join(", ") || "none"}. Run /statusline-setup [all | none | prs issues subagents] to change.`;
+	const msg = `Current statuslines: ${current.join(", ") || "none"}. Run /statusline-setup [all | none | prs issues subagents worktrees] to change.`;
 	await session?.log?.(msg);
 	return { cancelled: false, enabled: current, message: msg };
 }
@@ -568,23 +581,56 @@ export async function composeStatusLine(payload, {
 	const renderers = discoverRenderers(home);
 	if (!renderers.length) return "";
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: true });
-	const outputs = await Promise.all(
-		renderers.map(async ({ path }) => {
+	const options = {
+		home, now, links, color, nerdFont: useNerdFont,
+		deferCheckoutDivergence: true,
+		reserveGitDirectories: renderers.some(({ name }) => name === "pr-statusline") ? 4 : 0,
+	};
+	const modules = await Promise.all(renderers.map(async ({ name, path }) => {
+		try {
+			return { name, path, mod: await import(pathToFileURL(path).href) };
+		} catch {
+			return { name, path, mod: {} };
+		}
+	}));
+	const checkoutModule = modules.find(({ name }) => name === "worktree-statusline")?.mod;
+	const grouped = typeof checkoutModule?.renderEntries === "function" && typeof checkoutModule?.composeGroups === "function";
+	const agentModule = modules.find(({ name }) => name === "subagent-statusline")?.mod;
+	const structured = grouped || (typeof agentModule?.renderEntries === "function" && typeof agentModule?.renderGroup === "function");
+	const blocks = await Promise.all(
+		modules.map(async ({ name, path, mod }) => {
 			try {
-				if (selfPath && typeof selfRender === "function" && resolve(path) === resolve(selfPath)) {
-					return await selfRender(payload, { home, now, links, color, nerdFont: useNerdFont });
+				if (structured && PREFERRED_ORDER.includes(name) && typeof mod.renderEntries === "function") {
+					return { name, entries: await mod.renderEntries(payload, options), renderGroup: mod.renderGroup };
 				}
-				const mod = await import(pathToFileURL(path).href);
+				if (selfPath && typeof selfRender === "function" && resolve(path) === resolve(selfPath)) {
+					return { name, entries: [{ text: await selfRender(payload, options) }] };
+				}
 				if (typeof mod.render === "function") {
-					return await mod.render(payload, { home, now, links, color, nerdFont: useNerdFont });
+					return { name, entries: [{ text: await mod.render(payload, options) }] };
 				}
 			} catch {
 				// Ignore broken renderer module so sibling statusline extensions still render.
 			}
-			return "";
+			return { name, entries: [] };
 		}),
 	);
-	const joined = joinOutputsHorizontally(outputs, { color });
+	if (grouped && typeof checkoutModule.resolveCheckoutEntries === "function") {
+		const checkoutBlock = blocks.find((block) => block.name === "worktree-statusline");
+		const prs = blocks.find((block) => block.name === "pr-statusline")?.entries ?? [];
+		checkoutBlock.entries = await checkoutModule.resolveCheckoutEntries(payload, checkoutBlock.entries, prs, options);
+	}
+	const agentBlock = blocks.find((block) => block.name === "subagent-statusline");
+	const agentSummary = agentBlock?.renderGroup?.(agentBlock.entries, options) ?? "";
+	const agentPrUrls = new Set(agentSummary ? agentBlock.entries.flatMap((entry) => entry.prUrls ?? []) : []);
+	for (const entry of blocks.find((block) => block.name === "pr-statusline")?.entries ?? []) {
+		entry.compact = entry.provenance?.root === false && entry.provenance?.unknown === false && agentPrUrls.has(entry.url);
+	}
+	const joined = grouped
+		? checkoutModule.composeGroups(blocks, options)
+		: joinOutputsHorizontally(blocks.map((block) => block.renderGroup
+			? block.renderGroup(block.entries, options)
+			: block.entries.filter((entry) => !entry.compact).map((entry) => entry.text).join(color ? " " : " · ")), { color });
 	return useNerdFont ? joined : toUnicodeIcons(joined);
 }
 

@@ -1,6 +1,6 @@
 ---
 title: dns-doctor
-tagline: "Audit DNS, web routing, TLS, mail authentication, and takeover exposure, then apply exact provider changes only after explicit approval."
+tagline: "Find why a domain, website, or email setup is failing, then review fixes before any provider changes."
 useWhen: "When a domain does not resolve, redirects incorrectly, has mail-authentication gaps, needs DNSSEC or CAA review, requires a full health audit, or needs an approved DNS fix."
 repoPath: skills/dns-doctor
 thumb: images/thumb-dns-doctor.png
@@ -27,13 +27,10 @@ be verified.
 - Requires provider binding or claimability evidence before calling an alias a
   critical takeover.
 - Produces dependency-ordered remediation and exact post-change checks.
-- Caches a sanitized per-domain baseline and highlights added, changed, and
-  resolved findings on later scans through a deterministic, atomic local cache
-  engine.
+- Compares later scans with a saved baseline so you can see new and resolved problems.
 - Ends each report with ordered next steps and asks whether to stop or begin
   approval-gated remediation.
-- Applies provider changes through official SDKs or APIs only after showing the
-  exact mutation and receiving explicit user approval.
+- Shows the exact DNS or provider change and asks for approval before applying it.
 
 ## Use it
 

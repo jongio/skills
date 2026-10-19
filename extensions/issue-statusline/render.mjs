@@ -64,7 +64,7 @@ function formatIssueItem(issue, _currentRepo, { links, color, nerdFont = true })
 	return makePill(content, level, { color });
 }
 
-export function render(payload, {
+export function renderEntries(payload, {
 	home,
 	now = Date.now(),
 	links = true,
@@ -73,16 +73,18 @@ export function render(payload, {
 	fetchIssueStatus,
 	issueCacheTtlMs,
 } = {}) {
-	if (!payload?.session_id) return "";
+	if (!payload?.session_id) return [];
 	const { state } = syncSession(payload, { home, now, fetchIssueStatus, issueCacheTtlMs });
-	if (!state || !state.issues.length) return "";
+	if (!state || !state.issues.length) return [];
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: false });
 	const currentRepo = state.repository || null;
-	const allPills = state.issues.map((item) => formatIssueItem(item, currentRepo, { links, color, nerdFont: useNerdFont }));
-	if (!color) {
-		return allPills.map((p) => p.mid).join(" · ");
-	}
-	return allPills.map((p) => p.mid).join(" ");
+	return state.issues.map((item) => ({
+		...item, text: formatIssueItem(item, currentRepo, { links, color, nerdFont: useNerdFont }).mid,
+	}));
+}
+
+export function render(payload, options = {}) {
+	return renderEntries(payload, options).map((entry) => entry.text).join((options.color ?? options.links ?? true) ? " " : " · ");
 }
 
 async function main() {

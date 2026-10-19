@@ -22,7 +22,9 @@ test("test-doctor is registered in every applicable distribution surface", async
     read(".github", "workflows", "skill-eval.yml"),
     read("site", "public", "images", "IMAGES.md"),
   ]);
-  assert.match(readme, /\|\s*\[`test-doctor`\]\(skills\/test-doctor\/\)/);
+  const skillsSection = readme.split(/^## Skills\r?$/m)[1]?.split(/^## /m)[0];
+  assert.ok(skillsSection, "README must contain a Skills section");
+  assert.match(skillsSection, /\|\s*\[`test-doctor`\]\(skills\/test-doctor\/\)/);
   const entries = marketplace.plugins.filter(({ name }) => name === "test-doctor");
   assert.equal(entries.length, 1);
   assert.equal(entries[0].source, "./skills/test-doctor");
