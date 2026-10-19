@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,7 @@ const event = (type, time, data = {}, agentId) => ({ type, timestamp: new Date(t
 const plain = { color: false, links: false, nerdFont: false };
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 async function fixture(run) {
-	const home = mkdtempSync(join(tmpdir(), "merged-lifecycle-"));
+	const home = realpathSync.native(mkdtempSync(join(tmpdir(), "merged-lifecycle-")));
 	try { await run(home); } finally { rmSync(home, { recursive: true, force: true }); }
 }
 function transcript(home, id, events) {

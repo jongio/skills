@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { render } from "../render.mjs";
 
 test("one render shares checkout reads but the next render sees live changes", () => {
-	const home = mkdtempSync(join(tmpdir(), "worktree-performance-"));
+	const home = realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-performance-")));
 	try {
 		const checkout = join(home, "repo");
 		mkdirSync(checkout);
@@ -43,7 +43,7 @@ test("one render shares checkout reads but the next render sees live changes", (
 });
 
 test("nested directories share expensive reads without merging nested repositories", () => {
-	const home = mkdtempSync(join(tmpdir(), "worktree-performance-nested-"));
+	const home = realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-performance-nested-")));
 	try {
 		const checkout = join(home, "repo");
 		mkdirSync(checkout);

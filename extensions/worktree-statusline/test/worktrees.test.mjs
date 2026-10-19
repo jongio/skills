@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,7 @@ const pr = (number, branch, repository = remote) => ({
 });
 
 async function fixture(run) {
-	const root = mkdtempSync(join(tmpdir(), "linked-checkout-test-"));
+	const root = realpathSync.native(mkdtempSync(join(tmpdir(), "linked-checkout-test-")));
 	try {
 		await run(root);
 	} finally {

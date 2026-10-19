@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -299,6 +299,28 @@ test("offline guard blocks direct, executable-path and caught GitHub commands in
 		assert.notEqual(result.status, 0);
 		assert.match(result.stderr, /benchmark (?:forbids|blocked)/);
 	}
+});
+
+test("Git-backed fixtures work when the temporary directory is a filesystem alias", { timeout: 60000 }, (t) => {
+	const directory = mkdtempSync(join(tmpdir(), "statusline-temp-alias-"));
+	t.after(() => rmSync(directory, { recursive: true, force: true }));
+	const target = join(directory, "actual temporary directory");
+	const alias = join(directory, "temp-alias");
+	mkdirSync(target);
+	symlinkSync(target, alias, "junction");
+	const { NODE_TEST_CONTEXT: _parentTestContext, ...env } = process.env;
+	const result = spawnSync(process.execPath, [
+		"--test", "--test-reporter=tap", "--test-name-pattern", "one render shares checkout reads|nested directories share|repositories without a first commit",
+		join(root, "extensions", "worktree-statusline", "test", "performance.test.mjs"),
+		join(root, "extensions", "worktree-statusline", "test", "smoke.test.mjs"),
+	], {
+		encoding: "utf8", timeout: 45000, windowsHide: true,
+		env: { ...env, TEMP: alias, TMP: alias, TMPDIR: alias },
+	});
+	assert.ifError(result.error);
+	assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+	assert.match(result.stdout, /^# tests 3\r?$/m);
+	assert.match(result.stdout, /^# pass 3\r?$/m);
 });
 
 test("workflow keeps a stable gate, two OS targets, exact revisions and explicit metric uploads", () => {

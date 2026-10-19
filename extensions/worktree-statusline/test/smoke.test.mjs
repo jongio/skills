@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -22,7 +22,7 @@ const plain = { color: false, links: false, nerdFont: false };
 const pill = (content) => `\x1b[1;38;2;219;234;254;48;2;30;64;115m ${content} \x1b[0m`;
 
 function fixture(run) {
-	const root = mkdtempSync(join(tmpdir(), "worktree-statusline-test-"));
+	const root = realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-statusline-test-")));
 	try {
 		return run(root);
 	} finally {
@@ -233,7 +233,7 @@ test("a separate Git directory is not misclassified as a linked worktree", () =>
 }));
 
 test("end-to-end rendering follows session checkout and preserves unknown renderers on an unlabeled fallback row", async () => {
-	const root = mkdtempSync(join(tmpdir(), "worktree-statusline-render-"));
+	const root = realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-statusline-render-")));
 	try {
 		const repository = checkout(root);
 		const target = join(root, "active-worktree");
@@ -366,7 +366,7 @@ test("setup, plugin registration, picker and compositor mirrors expose the fourt
 		assert.equal(readFileSync(join(repoRoot, "extensions", item.id, "compose.mjs"), "utf8"), canonical);
 		for (const file of item.files) assert.ok(existsSync(join(repoRoot, "extensions", item.id, file)), `${item.id}/${file}`);
 	}
-	const home = mkdtempSync(join(tmpdir(), "worktree-statusline-setup-"));
+	const home = realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-statusline-setup-")));
 	try {
 		ensurePluginStatuslineRegistered("pr-statusline", join(repoRoot, "extensions", "pr-statusline"), { home, includeSiblings: true });
 		assert.ok(existsSync(join(home, "extensions", "worktree-statusline", "render.mjs")));
