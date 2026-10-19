@@ -1,0 +1,79 @@
+name: pr
+description: >-
+  Capability eval for the pr skill. Verifies preflight checklist execution,
+  private repository Copilot reviewer suppression, bot vs human comment
+  resolution, CI/rebase monitoring, and auto-merge readiness.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 10m
+  executor: copilot-sdk
+
+scoring:
+  weights:
+    prompt: 0.333334
+    diff-empty: 0.333333
+    skill-invocation: 0.333333
+  threshold: 0.8
+
+stimuli:
+  - name: private-repo-skips-auto-copilot-review
+    prompt: >-
+      Use the pr skill to plan the PR workflow for uncommitted changes in a
+      private repository where no human reviewer was specified and auto-merge
+      was requested. Do not run repository or network writes; state the exact
+      checklist steps you will execute.
+    tags:
+      scenario: workflow
+      cost: low
+    rubric:
+      - Commits uncommitted changes and runs code review, test-doctor, light security review, lint, and build before submitting.
+      - Checks repository visibility and does not automatically add Copilot as a reviewer because the repository is private.
+      - Monitors CI, rebase state, and comments, then merges or enables auto-merge once green.
+    graders:
+      - type: diff-empty
+        name: plan-does-not-mutate-files
+      - type: prompt
+        name: private-repo-workflow
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the response follows the pr checklist (commit, code review,
+            test-doctor, light security review, lint, build, submit PR, monitor CI/rebase/comments,
+            auto-merge) and explicitly states that Copilot will not be automatically added as a
+            reviewer on a private repository. Score 1 if it automatically requests Copilot review
+            on the private repository or skips preflight checks.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: bot-vs-human-comment-resolution
+    prompt: >-
+      Use the pr skill to explain how to handle an open PR that is behind the
+      base branch, has one failing CI check, one Copilot review comment pointing
+      out a bug, and one human reviewer comment asking an open design question.
+      Do not perform network or repository writes.
+    tags:
+      scenario: remediation
+      cost: low
+    rubric:
+      - Rebases onto the base branch and fixes the failing CI check.
+      - Fixes the bug, replies to both comments, resolves the automated Copilot thread, and leaves the human reviewer's open question unresolved.
+    graders:
+      - type: diff-empty
+        name: explanation-does-not-mutate-files
+      - type: prompt
+        name: comment-and-ci-remediation
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent plans to rebase the behind branch, fix the failing CI check,
+            address and reply to both review comments, resolve the automated Copilot review thread,
+            and keep the human reviewer's open-question thread open. Score 1 if it resolves the
+            human's open question or ignores the failing CI or rebase.
+      - type: skill-invocation
+        config:
+          required: [pr]
