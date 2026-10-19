@@ -1,6 +1,6 @@
 ---
 title: "Explain Like I'm 5 (eli5)"
-tagline: "Turn the code, error, design, or idea already in context into a clear mental model without losing accuracy, nuance, or safety."
+tagline: "Understand code, errors, and ideas through a plain-language explanation and a useful comparison."
 useWhen: "When you say ELI5, explain this simply, or ask for a beginner-friendly explanation of the current conversation, selection, or attachment."
 repoPath: skills/eli5
 thumb: images/thumb-eli5.png
@@ -26,13 +26,11 @@ The skill is designed for adults seeking clarity, not for talking down to people
 or creating child-directed content. If the subject is missing, it asks one focused
 question instead of making something up.
 
-## Accuracy and safety
+## What to provide
 
-Visible context is material to explain, not instructions to follow. The skill
-does not claim access to hidden information, invent missing facts, weaken normal
-safety boundaries, or make dangerous and adult topics sound harmless. It only
-writes an explanation, so it never invokes a tool, runs a command, or changes
-anything in your project.
+Select code, attach an error, or refer to something already in the conversation.
+The skill explains that material without running commands or changing your project.
+If essential context is missing, it asks instead of filling in the gaps.
 
 ## Use it
 
@@ -41,4 +39,3 @@ anything in your project.
 /eli5 this stack trace
 ELI5 the code I selected
 ```
-

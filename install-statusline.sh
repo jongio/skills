@@ -33,7 +33,7 @@ BASE_URL="https://raw.githubusercontent.com/$REPO_SLUG/$GIT_REF"
 mkdir -p "$TEMP_ROOT/scripts"
 curl -fsSL "$BASE_URL/scripts/setup-statusline.mjs" -o "$TEMP_ROOT/scripts/setup-statusline.mjs"
 
-for file in extension.mjs collector.mjs tracker.mjs github.mjs render.mjs compose.mjs copilot-extension.json; do
+for file in extension.mjs collector.mjs tracker.mjs github.mjs provenance.mjs lifecycle.mjs render.mjs compose.mjs copilot-extension.json; do
   mkdir -p "$TEMP_ROOT/extensions/pr-statusline"
   curl -fsSL "$BASE_URL/extensions/pr-statusline/$file" -o "$TEMP_ROOT/extensions/pr-statusline/$file"
 done
@@ -43,9 +43,14 @@ for file in extension.mjs tracker.mjs github.mjs render.mjs compose.mjs copilot-
   curl -fsSL "$BASE_URL/extensions/issue-statusline/$file" -o "$TEMP_ROOT/extensions/issue-statusline/$file"
 done
 
-for file in extension.mjs tracker.mjs render.mjs compose.mjs copilot-extension.json; do
+for file in extension.mjs tracker.mjs settlement.mjs render.mjs compose.mjs copilot-extension.json; do
   mkdir -p "$TEMP_ROOT/extensions/subagent-statusline"
   curl -fsSL "$BASE_URL/extensions/subagent-statusline/$file" -o "$TEMP_ROOT/extensions/subagent-statusline/$file"
+done
+
+for file in extension.mjs tracker.mjs render.mjs grouping.mjs worktrees.mjs compose.mjs copilot-extension.json; do
+  mkdir -p "$TEMP_ROOT/extensions/worktree-statusline"
+  curl -fsSL "$BASE_URL/extensions/worktree-statusline/$file" -o "$TEMP_ROOT/extensions/worktree-statusline/$file"
 done
 
 if [ -t 0 ]; then

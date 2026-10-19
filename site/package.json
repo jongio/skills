@@ -9,7 +9,8 @@
     "predev": "npm run sync:thumbnails",
     "dev": "astro dev",
     "prebuild": "npm run sync:thumbnails",
-    "build": "astro build",
+    "build": "astro build && node scripts/check-performance.mjs",
+    "bench": "node scripts/benchmark.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },

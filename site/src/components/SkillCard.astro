@@ -1,4 +1,7 @@
 ---
+import { Image } from "astro:assets";
+import { thumbnailFor } from "../thumbnails";
+
 interface Props {
   href: string;
   skillId: string;
@@ -7,7 +10,6 @@ interface Props {
   thumb: string;
 }
 const { href, skillId, title, tagline, thumb } = Astro.props;
-const base = import.meta.env.BASE_URL;
 // The install command uses the skill id, not the display title. The title is
 // human-readable and may differ from the id it is installed by.
 const install = `/plugin install ${skillId}@jongio-skills`;
@@ -17,7 +19,18 @@ const search = `${title} ${tagline}`.toLowerCase();
 
 <article class="skill-card" data-search={search}>
   <a class="skill-card__link" href={href}>
-    <img class="skill-thumb" src={`${base}${thumb}`} alt={`${title} preview`} loading="lazy" />
+    <Image
+      class="skill-thumb"
+      src={thumbnailFor(thumb)}
+      alt={`${title} illustration`}
+      widths={[256, 512, 768]}
+      sizes="(max-width: 560px) calc(100vw - 42px), (max-width: 900px) 50vw, 280px"
+      width={512}
+      height={512}
+      format="webp"
+      quality={80}
+      loading="lazy"
+    />
     <div class="skill-body">
       <h3>{title}</h3>
       <p class="skill-tagline muted">{tagline}</p>
