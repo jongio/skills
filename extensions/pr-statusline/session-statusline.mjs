@@ -52,6 +52,7 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 		const clearedContext = {
 			cwd: latest?.cwd ?? payload.cwd ?? null, agentCwds: latest?.agentCwds ?? {},
 			sequence: latest?.sequence ?? 0, appliedSequence: latest?.appliedSequence ?? 0,
+			observedThroughAt: Number.isFinite(latest?.observedThroughAt) ? latest.observedThroughAt : 0,
 		};
 		pr.state.clearedPrs = [...new Set([...pr.state.clearedPrs, ...pr.state.prs.map((entry) => entry.url)])];
 		pr.state.clearedWorkspace = [repository, branch, cwd, name];
@@ -74,7 +75,8 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 		writeIssues(issue.snapshot(), home);
 		writeAgents(agents.snapshot(), home);
 		writeJson(path, {
-			...latest, ...clearedContext, version: 3, offset, clearedAt, dismissed: true, clearedContext, directories: [],
+			...latest, ...clearedContext, version: 3, offset,
+			clearedAt: Math.max(clearedAt, clearedContext.observedThroughAt), dismissed: true, clearedContext, directories: [],
 			pending: {}, agentDirectories: {}, skipPartial: false,
 		});
 		return "Cleared this session's PR, issue, subagent, and worktree entries. Component settings and transcripts are unchanged.";

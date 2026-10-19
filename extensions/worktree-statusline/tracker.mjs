@@ -35,6 +35,7 @@ export function commandDirectory(command, base) {
 export class WorktreeTracker {
 	constructor(previous = {}) {
 		this.clearedAt = previous.clearedAt ?? 0;
+		this.observedThroughAt = Number.isFinite(previous.observedThroughAt) ? previous.observedThroughAt : 0;
 		this.dismissed = Boolean(previous.dismissed);
 		this.cwd = previous.cwd ?? null;
 		this.pending = new Map(Object.entries(previous.pending ?? {}));
@@ -51,7 +52,9 @@ export class WorktreeTracker {
 	}
 
 	observe(event) {
-		if (this.clearedAt && event.timestamp && Date.parse(event.timestamp) <= this.clearedAt) return;
+		const timestamp = event.timestamp ? Date.parse(event.timestamp) : NaN;
+		if (this.clearedAt && timestamp <= this.clearedAt) return;
+		if (Number.isFinite(timestamp)) this.observedThroughAt = Math.max(this.observedThroughAt, timestamp);
 		const data = event.data ?? {};
 		const agentId = event.agentId || data.agentId || null;
 		const sequence = ++this.sequence;
@@ -178,6 +181,7 @@ function readSessionDirectory(payload, { home }) {
 		agentCwds: previous?.clearedAt ? baseline.agentCwds : {},
 		sequence: previous?.clearedAt ? baseline.sequence : 0,
 		appliedSequence: previous?.clearedAt ? baseline.appliedSequence : 0,
+		observedThroughAt: previous?.clearedAt ? baseline.observedThroughAt : 0,
 	});
 	let offset = valid ? previous.offset : 0;
 	let skipPartial = valid && previous.skipPartial === true;
@@ -215,6 +219,7 @@ function readSessionDirectory(payload, { home }) {
 		}
 		writeJson(cachePath, {
 			version: 3, identity, offset, skipPartial, cwd: tracker.cwd, clearedAt: tracker.clearedAt, dismissed: tracker.dismissed,
+			observedThroughAt: tracker.observedThroughAt,
 			clearedContext: previous?.clearedContext,
 			pending: Object.fromEntries(tracker.pending),
 			sequence: tracker.sequence, appliedSequence: tracker.appliedSequence,

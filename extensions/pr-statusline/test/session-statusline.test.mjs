@@ -453,6 +453,62 @@ for (const kind of ["PR message", "repository context", "issue message", "subage
 	}));
 }
 
+for (const agentId of [null, "child"]) {
+	test(`clear excludes a concurrent complete relative ${agentId ? "agent" : "root"} command from baseline replay without losing component activity`, async (t) => fixture((home) => {
+		const id = "baseline-interleaving";
+		const payload = { session_id: id, cwd: home };
+		const agentDirectory = join(home, "agent");
+		const file = transcript(home, id, [
+			event("session.start", 1000, { cwd: home, repository: "example/widget" }),
+			{ ...event("session.context_changed", 1100, { cwd: agentDirectory }), agentId: "child" },
+		]);
+		seed(home, id);
+		const stateFile = join(home, "issue-statusline", `${id}.json`);
+		const rename = fs.renameSync;
+		let appended = false;
+		t.mock.method(fs, "renameSync", (from, to) => {
+			rename(from, to);
+			if (to === stateFile && !appended) {
+				appendFileSync(file, [
+					...[
+						event("tool.execution_start", 3000, { toolCallId: "concurrent", toolName: "bash", arguments: { command: "cd nested" } }),
+						event("tool.execution_complete", 3100, { toolCallId: "concurrent", success: true }),
+					].map((item) => ({ ...item, ...(agentId ? { agentId } : {}) })),
+					event("user.message", 3200, { content: prUrl(9) }),
+				].map(JSON.stringify).join("\n") + "\n");
+				appended = true;
+			}
+		});
+		syncBuiltinESMExports();
+		t.after(() => {
+			t.mock.restoreAll();
+			syncBuiltinESMExports();
+		});
+		assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+		assert.equal(appended, true);
+		const before = sessionDirectory(payload, { home });
+		assert.equal(before.cwd, null);
+		assert.deepEqual(before.directories, []);
+		const replacement = `${file}.replacement`;
+		writeFileSync(replacement, readFileSync(file));
+		renameSync(replacement, file);
+		assert.deepEqual(sessionDirectory(payload, { home }), before);
+		assert.equal(readState(id, home).clearedAt, 2000);
+		assert.equal(readIssues(id, home).clearedAt, 2000);
+		assert.equal(readAgents(id, home).clearedAt, 2000);
+		assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedAt, 3100);
+		assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url), [prUrl(9)]);
+		appendFileSync(file, [
+			event("tool.execution_start", 4000, { toolCallId: "later", toolName: "bash", arguments: { command: "cd later" } }),
+			event("tool.execution_complete", 4100, { toolCallId: "later", success: true }),
+		].map((item) => JSON.stringify({ ...item, ...(agentId ? { agentId } : {}) })).join("\n") + "\n");
+		const location = sessionDirectory(payload, { home });
+		const expected = join(agentId ? agentDirectory : home, "nested", "later");
+		assert.equal(agentId ? location.agentCwds.child.cwd : location.cwd, expected);
+		assert.deepEqual(location.directories, [expected]);
+	}));
+}
+
 test("clear without a transcript suppresses payload directory fallback and remains repeatable", async () => fixture((home) => {
 	const payload = { session_id: "empty", cwd: home };
 	seed(home, "empty");
