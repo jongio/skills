@@ -22,7 +22,8 @@ test("skill includes workflow, safety, and exit criteria", () => {
 test("workflow remains concise and covers preflight, review routing, monitoring, and merge", () => {
   assert.ok(skill.split("\n").length <= 60, "keep SKILL.md short and sweet");
   assert.doesNotMatch(skill, /devx|devy/i);
-  assert.match(skill, /test-doctor/);
+  assert.match(skill, /commit intended uncommitted changes first/i);
+  assert.match(skill, /npx skills add jongio\/skills --skill test-doctor/);
   assert.match(skill, /light security review/i);
   assert.match(skill, /linter and build/i);
   assert.match(skill, /Never automatically add Copilot as a reviewer on \*\*private\*\* repositories/);

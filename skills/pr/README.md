@@ -5,10 +5,10 @@ A concise checklist workflow for taking changes from local commit and preflight 
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill pr
+npx skills add jongio/skills --skill pr --skill test-doctor
 ```
 
-Reload your agent skills, then invoke `/pr`.
+Reload your agent skills, then invoke `/pr`. (`test-doctor` is used during the preflight test check.)
 
 ## Development
 
