@@ -43,6 +43,11 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 		if (location.catchingUp || (stat && (latest?.offset !== offset || latest?.identity !== transcriptIdentity(transcript, stat)))) {
 			throw new Error("Worktree history is still catching up. Run /session-statusline clear again after replay completes.");
 		}
+		if (!stat) {
+			pr.state.transcriptOffset = 0;
+			issue.state.transcriptOffset = 0;
+			agents.transcriptOffset = 0;
+		}
 		const clearedAt = Math.max(now, ...[pr.state.clearedAt, issue.state.clearedAt, agents.clearedAt, latest?.clearedAt ?? 0].map((time) => time + 1));
 		const clearedContext = {
 			cwd: latest?.cwd ?? payload.cwd ?? null, agentCwds: latest?.agentCwds ?? {},
@@ -54,7 +59,6 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 		pr.state.ignoredRevisions = Object.fromEntries(Object.entries(pr.state.ignoredRevisions)
 			.filter(([url]) => pr.state.ignored.includes(url)));
 		pr.state.clearedAt = clearedAt;
-		pr.state.transcriptOffset = offset;
 		delete pr.state.simulate;
 		pr.calls.clear();
 		pr.pending.clear();
@@ -62,11 +66,9 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 		issue.state.issues = [];
 		issue.state.clearedWorkspace = [repository, branch, name];
 		issue.state.clearedAt = clearedAt;
-		issue.state.transcriptOffset = offset;
 		issue.calls.clear();
 		agents.clear();
 		agents.clearedAt = clearedAt;
-		agents.transcriptOffset = offset;
 		agents.simulated = false;
 		writeState(pr.snapshot(), home);
 		writeIssues(issue.snapshot(), home);

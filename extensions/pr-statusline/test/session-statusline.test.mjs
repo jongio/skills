@@ -398,13 +398,73 @@ test("clear rejects a transcript replaced after replay and before dismissal", as
 	assert.equal(readJson(cache).clearedContext.cwd, home);
 }));
 
+for (const kind of ["PR message", "repository context", "issue message", "subagent start"]) {
+	test(`clear preserves component cursors for a complete ${kind} arriving between synchronization steps`, async (t) => fixture((home) => {
+		const id = "complete-interleaving";
+		const payload = { session_id: id, cwd: home };
+		const file = transcript(home, id, [event("session.start", 1000, { cwd: home, repository: "example/widget" })]);
+		seed(home, id);
+		const components = ["pr-statusline", "issue-statusline", "subagent-statusline"];
+		const stateFiles = new Map(components.map((component) => [join(home, component, `${id}.json`), component]));
+		const trigger = kind === "PR message" || kind === "repository context" ? "issue-statusline" : "subagent-statusline";
+		const incoming = kind === "repository context"
+			? event("session.context_changed", 3000, { repository: "example/second" })
+			: kind === "subagent start"
+				? event("subagent.started", 3000, { agentId: "new-agent" })
+				: event("user.message", 3000, { content: kind === "PR message" ? prUrl(9) : issueUrl(9) });
+		const consumed = new Map();
+		const rename = fs.renameSync;
+		let appended = false;
+		t.mock.method(fs, "renameSync", (from, to) => {
+			rename(from, to);
+			const component = stateFiles.get(to);
+			if (component) {
+				const state = readJson(to);
+				if (!state.clearedAt) consumed.set(component, state.transcriptOffset);
+			}
+			if (component === trigger && !appended) {
+				appendFileSync(file, JSON.stringify(incoming) + "\n");
+				appended = true;
+			}
+		});
+		syncBuiltinESMExports();
+		t.after(() => {
+			t.mock.restoreAll();
+			syncBuiltinESMExports();
+		});
+		assert.match(clearSessionStatusline(payload, { home, now: 2000 }), /^Cleared/);
+		assert.equal(appended, true);
+		for (const [index, read] of [readState, readIssues, readAgents].entries()) {
+			assert.equal(read(id, home).transcriptOffset, consumed.get(components[index]));
+		}
+		if (kind === "repository context") {
+			appendFileSync(file, JSON.stringify(event("user.message", 4000, { content: "Work on PR #42 and issue #43" })) + "\n");
+			assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url),
+				["https://github.com/example/second/pull/42"]);
+			assert.deepEqual(syncIssues(payload, { home, fetchIssueStatus: false }).state.issues.map((issue) => issue.url),
+				["https://github.com/example/second/issues/43"]);
+		} else if (kind === "PR message") {
+			assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url), [prUrl(9)]);
+		} else if (kind === "issue message") {
+			assert.deepEqual(syncIssues(payload, { home, fetchIssueStatus: false }).state.issues.map((issue) => issue.url), [issueUrl(9)]);
+		} else {
+			assert.deepEqual([...syncAgents(payload, { home }).tracker.agents.keys()], ["new-agent"]);
+		}
+	}));
+}
+
 test("clear without a transcript suppresses payload directory fallback and remains repeatable", async () => fixture((home) => {
 	const payload = { session_id: "empty", cwd: home };
+	seed(home, "empty");
+	for (const [read, write] of [[readState, writeState], [readIssues, writeIssues], [readAgents, writeAgents]]) {
+		write({ ...read("empty", home), transcriptOffset: 123 }, home);
+	}
 	clearSessionStatusline(payload, { home, now: 1000 });
 	clearSessionStatusline(payload, { home, now: 1000 });
 	assert.deepEqual(sessionDirectory(payload, { home }).directories, []);
 	assert.equal(sessionDirectory(payload, { home }).cwd, null);
 	assert.equal(readState("empty", home).clearedAt, 1001);
+	for (const read of [readState, readIssues, readAgents]) assert.equal(read("empty", home).transcriptOffset, 0);
 }));
 
 test("refresh bypasses per-item TTLs, shared caches and in-flight locks, preserves tracking and settings, and updates agent-only PRs", async (t) => fixture((home) => {

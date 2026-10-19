@@ -197,6 +197,8 @@ commands without making those dismissed directories visible again.
 Re-indexing restarts from that clear-time context, not the latest directory.
 If bounded worktree replay is still catching up, clear reports a retry instead
 of discarding unread directory changes or committing a dismissal boundary.
+Each component retains its own consumed transcript cursor; validation of the
+worktree EOF does not skip records that other components have not processed.
 Existing per-component list/add/remove/clear commands remain available.
 
 Use **setup** to hide a component without dismissing its tracked items. Hidden
