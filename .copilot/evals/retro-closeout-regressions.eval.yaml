@@ -9,7 +9,7 @@ defaults:
   executor: copilot-sdk
 agent_environment:
   skills:
-    - ..\..\skills\retro
+    - ../../skills/retro
 # No aggregate threshold: every required grader must pass.
 scoring: {}
 stimuli:
