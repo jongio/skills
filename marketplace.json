@@ -109,6 +109,12 @@
       "source": "./skills/doc-doctor",
       "description": "Check changed documentation against code and fix material gaps.",
       "version": "1.0.0"
+    },
+    {
+      "name": "backlog-groom",
+      "source": "./skills/backlog-groom",
+      "description": "Groom GitHub backlogs across issue and source repositories, with or without Projects, using scoped evidence and approved changes.",
+      "version": "1.0.0"
     }
   ]
 }

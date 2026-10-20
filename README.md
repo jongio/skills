@@ -27,6 +27,7 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`go`](skills/go/) | Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge. |
 | [`retro`](skills/retro/) | Close out a session with an evidence-backed task and feedback audit, source-skill improvements, and safely approved branch and worktree cleanup |
 | [`doc-doctor`](skills/doc-doctor/) | Check changed documentation against code and fix material gaps. |
+| [`backlog-groom`](skills/backlog-groom/) | Groom GitHub backlogs across issue and source repositories, with or without Projects, using scoped evidence and approved changes. |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:

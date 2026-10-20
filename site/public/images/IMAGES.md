@@ -22,6 +22,7 @@ validate all catalog mappings and generate byte-identical public copies.
 
 | File | Used by | Notes |
 | --- | --- | --- |
+| `thumb-backlog-groom.png` | `backlog-groom` card/detail | Azure GPT Image 2 planning console with multi-repository issues, evidence checks, and pending work. |
 | `thumb-create-canvas-app.png` | `create-canvas-app` card/detail | Canvas extension panel beside the Copilot composer. |
 | `thumb-create-gh-pages-site.png` | `create-gh-pages-site` card/detail | Astro site scaffold deploying to GitHub Pages. |
 | `thumb-create-skill.png` | `create-skill` card/detail | Azure OpenAI generated thumbnail for complete skill authoring and registration. |
