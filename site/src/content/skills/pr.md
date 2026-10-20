@@ -21,7 +21,7 @@ Expects Copilot review unless an explicitly authorized, verified private-owner
 exception applies; posted feedback remains in scope. Every expected review must
 complete on the full current head OID, with `COMMENTED` distinct from approval.
 Merges require authorization and all gates satisfied, use a literal head-pinned
-command, and verify actual merged state rather than enabling auto-merge.
+command, and verify actual merged state rather than enabling GitHub auto-merge.
 
 ## Install with required skills
 
@@ -36,4 +36,25 @@ npx skills add jongio/skills --skill pr --skill test-doctor --skill doc-doctor -
 
 ```text
 /pr
+/pr --merge=approval
+/pr --merge=auto
 ```
+
+By default, `pr` asks for final merge approval with the PR, repository, full head
+OID, and strategy after readiness gates pass. Choose `--merge=auto` (or "auto
+merge") to skip only that final prompt; `--merge=approval` (or "ask me before
+merging") requires it. A validated `go` handoff preserves the choice, and a later
+explicit user choice overrides it. Choices apply only to the current invocation;
+standing policies and reviewer approvals do not override the default.
+Changed heads or strategies require fresh confirmation in approval mode.
+Declined or unavailable confirmation leaves the PR awaiting approval, not merged.
+Auto mode preserves all CI, review, feedback, and other approval gates and does
+not enable GitHub's `--auto` queue.
+Both modes default to squash merging and deleting the PR branch afterward,
+unless explicitly overridden. Merge without `--delete-branch`, then perform
+separate cleanup with atomic expected-OID guards using the original PR head.
+Verify the head repository and branch, and leave checked-out local branches alone.
+For required merge queues, verify the queue strategy matches the authorized
+strategy and wait for confirmed merge, not just queue admission, before cleanup.
+Verify local and remote deletion separately; failed guards or unavailable safe
+cleanup are reported as pending rather than retried unconditionally or claimed done.

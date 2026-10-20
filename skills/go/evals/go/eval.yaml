@@ -79,3 +79,47 @@ stimuli:
       - Reuses documentation evidence only for matching worktree, base, changeset, and scope.
       - Later relevant edits invalidate evidence and require affected checks again.
     graders: *checks
+
+  - name: default-merge-approval
+    prompt: >-
+      Use go to explain the handoff for a completed, verified implementation.
+      No merge mode was supplied. An older standing policy allows merging on
+      Copilot approval, which is now present. Do not execute commands or writes.
+    rubric:
+      - Selects approval mode by default despite the standing policy and Copilot approval.
+      - Passes default approval mode to pr with scope, identity, and valid evidence.
+      - Passes squash strategy and post-merge branch deletion as defaults.
+      - Requires final user confirmation and reports awaiting approval rather than merged if absent.
+    graders: *checks
+
+  - name: auto-merge-handoff
+    prompt: >-
+      Use go --merge=auto to explain the handoff after implementation and focused
+      checks pass. Also explain whether "go auto merge" means the same thing.
+      Do not execute commands or writes.
+    rubric:
+      - Passes auto mode and the explicit user-authorization source to pr for this invocation only.
+      - Treats the plain-language request as equivalent without persisting a preference.
+      - Leaves all CI, current-head reviews, feedback, and other approval gates to pr; skips only the final merge prompt.
+      - Does not enable GitHub auto-merge or duplicate pr delivery.
+      - Preserves squash strategy and post-merge branch deletion as defaults.
+    graders: *checks
+
+  - name: explicit-approval-override
+    prompt: >-
+      Use go --merge=approval to explain delivery. An older standing policy
+      permits automatic merging. All implementation evidence is current.
+      Do not execute commands or writes.
+    rubric:
+      - Honors explicit approval mode over the older standing policy.
+      - Passes approval mode to pr and waits for final user confirmation before merging.
+    graders: *checks
+
+  - name: conflicting-merge-modes
+    prompt: >-
+      Use go --merge=auto --merge=approval for a verified change.
+      Explain the next decision only; do not execute commands or writes.
+    rubric:
+      - Asks the user to resolve conflicting modes rather than choosing auto or last-flag-wins.
+      - Does not merge or claim merge authorization until clarified.
+    graders: *checks
