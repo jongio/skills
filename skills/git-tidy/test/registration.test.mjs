@@ -219,7 +219,11 @@ test("git-tidy has cross-platform built-in coverage", () => {
 test("shared registration changes select every skill for contract tests", () => {
   assert.match(
     lintWorkflow,
-    /grep -Eq '\^\(README\\\.md\|marketplace\\\.json\|plugin\\\.json\)\$'[\s\S]*DIRS=\$\(find skills -maxdepth 2 -name "SKILL\.md"/,
+    /grep -Eq '\^\(README\\\.md\|marketplace\\\.json\|plugin\\\.json\)\$'[\s\S]*DIRS=\$\(all_skill_dirs\)/,
+  );
+  assert.match(
+    lintWorkflow,
+    /all_skill_dirs\(\) \{[\s\S]*for spec in skills\/\*\/SKILL\.md; do[\s\S]*\[ -f "\$spec" \][\s\S]*printf '%s\\n' "\$\{spec%\/SKILL\.md\}"/,
   );
   assert.match(
     lintWorkflow,
