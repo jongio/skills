@@ -68,10 +68,11 @@ message is a lead to verify, not completion evidence by itself.
 
 ### 2. Reconcile every request and correction
 
-Build a compact obligation ledger in host task/session storage, or in the
-response when that is unavailable. In audit mode, keep the ledger in the
-response without persisting it. Do not add a tracking file to the user's
-repository unless requested. Use these columns:
+Build a compact obligation ledger in host task/session storage in fix mode,
+or in working context when storage is unavailable. In audit mode, keep the
+ledger in working context without persisting it. Do not print the full ledger
+unless the user requests detail. Do not add a tracking file to the user's
+repository unless requested. Use these columns internally:
 
 | Request / correction | Source | Acceptance evidence | Status | Next action |
 | --- | --- | --- | --- | --- |
@@ -222,13 +223,13 @@ evidence, and actions. Obtain separate explicit approval, revalidate immediately
 before execution, and verify the postcondition. Keep anything active, dirty,
 unproven, unapproved, or still needed. Declined cleanup means retained, not
 deleted. Do not remove the current or primary worktree during its own retro.
-Present eligible candidates in the closing summary and ask for confirmation
+Summarize eligible candidates in the closing summary and ask for confirmation
 of that exact action set using the host's confirmation tool. Do not merely
 mention that approval would be required. In audit mode, label cleanup as
 proposed; an affirmative answer authorizes only the stated cleanup actions,
 not unrelated fix-mode work. Without an answer or on decline, retain them.
-If no candidate is eligible, list the assessed entries and retention reasons,
-or the successfully inventoried scope with no entries. If proof is missing,
+If no candidate is eligible, summarize assessed entries by retention reason,
+or state the successfully inventoried scope with no entries. If proof is missing,
 report cleanup as blocked and ask only for the missing scope/access decision,
 not permission to delete unproven work.
 
@@ -248,20 +249,48 @@ Lead with one verdict:
 - **Incomplete**: any open or blocked work, missing session evidence,
   pending agent/review/check, or unverified action remains.
 
-End with a concise summary containing all three sections, even when one has
-no entries:
+Keep the default summary at most 200 words, excluding a required exact approval
+preview. Use the verdict, one short paragraph or up to three bullets, then the
+fix recommendation below. Do not print the full ledger, source-by-source audit,
+per-skill no-change explanations, repeated safety rules, or routine paths/OIDs.
+Provide those details only on request or in a required approval preview.
+Preserve the full audit internally; brevity must not weaken evidence checks.
 
-- **Actions recommended / taken**: in audit mode, list recommendations; in
-  fix mode, separate verified actions taken from proposals not performed.
-  Include task/feedback reconciliation and used-skill changes and validation.
-- **Remaining work**: list each open item, blocker, pending decision, or
-  explicit deferral with its next action and owner when known. Say "None"
-  only when the ledger and evidence support it.
-- **Branches and worktrees**: identify repository, branch, path, disposition,
-  and reason for each scoped entry. Separate verified cleanup performed,
-  eligible cleanup awaiting confirmation, and retained/blocked entries.
-  Include exact OIDs, preservation evidence, and proposed actions for the
-  confirmation preview; never present an unproven candidate as safe to delete.
+Cover these three topics without mandatory headings or empty sections:
+
+- Actions recommended / taken: summarize the material findings in audit mode,
+  or verified actions taken in fix mode; separate proposals from completed work.
+  Summarize used-skill outcomes, highlighting any change or source blocker.
+- Remaining work: expose every distinct open item, blocker, pending decision,
+  and explicit deferral with its next action and owner when known. Group related
+  items, not different blockers. Say "None" only when the evidence supports it.
+  If these cannot fit within 200 words, exceed the target only enough to keep
+  every actionable item and coverage gap visible.
+- Branches and worktrees: summarize counts and dispositions by reason, including
+  verified cleanup, eligible candidates awaiting confirmation, and retained or
+  blocked work. Name a specific branch/path only when needed for the next action.
+  Keep exact repository identities, paths, branches, OIDs, preservation evidence,
+  and proposed actions in the separate confirmation preview before approval;
+  never present an unproven candidate as safe to delete.
+
+End every summary with exactly one evidence-based recommendation:
+
+- **Run `/retro fix`**: at least one concrete in-scope gap or justified skill
+  improvement can be advanced now. Name the work it would do and any independent
+  blockers it cannot resolve. In fix mode, finish such authorized work now rather
+  than using this recommendation to postpone it.
+- **Not yet - `/retro fix` is blocked**: outstanding work exists, but none can
+  advance until missing evidence, source access, credentials, a user decision,
+  or an external result arrives. Name the prerequisite and owner/next action.
+  Do not suggest that rerunning fix will remove the blocker.
+- **No need to run `/retro fix`**: no actionable remediation remains. User-approved
+  deferrals, intentionally retained worktrees, or cleanup awaiting its separate
+  confirmation alone are not reasons to run fix. State the reason briefly;
+  preserve an Incomplete verdict for any pending approval or unresolved blocker.
+
+For example: **Incomplete.** Export and Unicode checks passed; the dated filename
+is still missing. Used skills need no changes; the current worktree is retained.
+**Run `/retro fix`** to implement the dated filename and its regression check.
 
 Show the summary before requesting any pending cleanup confirmation. A pending
 approval is remaining work, not completed cleanup or an explicit deferral.
@@ -297,3 +326,5 @@ blocked; do not retry through a wrapper or a weaker tool.
   exact candidates are retained with reasons.
 - PR review gates, source-repository policies, and read-only audit mode are preserved.
 - The final verdict reflects actual persisted state, not intent or tool success.
+- The default closeout is summary-first and ends with a justified fix recommendation,
+  not a full audit dump or a reflexive instruction to rerun fix.
