@@ -95,6 +95,18 @@ test("body-only findings get evidence-backed disposition without fake thread res
   assert.match(text, /all actionable feedback \(including review-body-only findings\) is addressed/i);
 });
 
+test("review replies identify every fix tersely with actual commit links", () => {
+  const comments = skill.split("**Comments**:")[1]?.split("\n")[0];
+  assert.ok(comments);
+  assert.match(comments, /all actionable findings.*reply to each.*including Copilot/i);
+  assert.match(comments, /each fixed finding.*clickable link to the actual fixing commit/i);
+  assert.match(comments, /one short sentence or bullet per fix/i);
+  assert.match(comments, /group related body-only findings.*each fix identifiable/i);
+  assert.match(comments, /no long validation summaries or verbose resolution reports/i);
+  assert.match(comments, /unfixed or disputed.*concise, evidence-backed disposition.*never invent a fixing commit/i);
+  assert.match(comments, /replying does not replace thread resolution or review\/merge gates/i);
+});
+
 test("eval spec covers private repo reviewer rules, comment resolution, and balanced grader weights", () => {
   assert.doesNotMatch(evalSpec, /devx|devy/i);
   const cases = [...evalSpec.matchAll(/^  - name: (.+)$/gm)].map(([, name]) => name);
@@ -105,6 +117,7 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "clean-headline-hides-body-only-finding",
     "deduplicate-and-revalidate-review-body-findings",
     "bot-vs-human-comment-resolution",
+    "terse-fix-replies-with-commit-links",
     "documentation-preflight-reuse",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
@@ -125,6 +138,20 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
       `${requiredGrader} failure must prevent passing threshold`,
     );
   }
+});
+
+test("reply eval checks actual fix attribution, body-only grouping, and disputed findings", () => {
+  const section = evalSpec.split("  - name: terse-fix-replies-with-commit-links\n")[1]
+    ?.split("\n  - name: ")[0];
+  assert.ok(section);
+  const scenario = section.replace(/\s+/g, " ");
+  assert.match(scenario, /https:\/\/github\.com\/sample-owner\/sample-repo\/commit\/a{40}/);
+  assert.match(scenario, /https:\/\/github\.com\/sample-owner\/sample-repo\/commit\/b{40}/);
+  assert.match(scenario, /body-only.*R30/i);
+  assert.match(scenario, /disputed.*no fixing commit/i);
+  assert.match(scenario, /one short sentence or bullet per fix/i);
+  assert.match(scenario, /Score 1.*omits.*invent.*verbose/i);
+  assert.match(scenario, /No commands, edits, agents, or network calls/);
 });
 
 test("progress eval preserves gate integrity and distinguishes approval waiting", () => {

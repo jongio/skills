@@ -38,6 +38,14 @@ reconciled, older findings are checked against the current head, and body-only
 findings receive a PR reply identifying the review and heading rather than a
 claim that a nonexistent thread was resolved.
 
+Reply to every actionable comment and finding, including Copilot review bodies.
+For each fix, use one short sentence or bullet with a clickable link to the actual
+fixing commit and a brief description; omit long validation summaries and verbose
+resolution reports. Related body-only fixes may share a reply if each remains
+identifiable by review ID and heading. Unfixed or disputed findings get a concise,
+evidence-backed disposition, never an invented fixing commit. Replies do not
+replace resolving addressed bot threads or the existing review and merge gates.
+
 ## Review and merge gates
 
 Copilot review is expected by default. Only an explicit user-authorized exception
