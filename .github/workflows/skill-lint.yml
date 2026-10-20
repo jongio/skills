@@ -7,6 +7,7 @@ on:
     paths: &skill_lint_paths
       - "skills/**/SKILL.md"
       - "skills/**/package.json"
+      - "skills/**/package-lock.json"
       - "skills/**/.npmrc"
       - "skills/**/test/**"
       - "skills/**/*.yaml"
@@ -20,11 +21,7 @@ on:
       - "skills/**/references/**"
       - "skills/**/scripts/**"
       - "docs/specs/git-tidy/**"
-      - "site/src/content/skills/**"
-      - "site/public/images/**"
-      - "site/package.json"
-      - "site/package-lock.json"
-      - "site/.npmrc"
+      - "site/**"
       - ".github/tools/vally/**"
       - ".github/dependabot.yml"
       - "README.md"
@@ -60,14 +57,96 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: skill-lint-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  lint:
+  detect:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
+    outputs:
+      dirs: ${{ steps.skills.outputs.dirs }}
+      dns_doctor: ${{ steps.skills.outputs.dns_doctor }}
+      git_tidy: ${{ steps.skills.outputs.git_tidy }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Determine skills to lint
+        id: skills
+        env:
+          # Routed through env for the same reason the steps below do it: no
+          # workflow context value is interpolated straight into a shell script.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # Lint only skills with changes in this PR. Keep this list in step
+            # with the `paths` filter above: a path that triggers the workflow
+            # but is missing here selects no skill, so the job runs and lints
+            # nothing while still reporting success.
+            CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
+            if printf '%s\n' "$CHANGED" \
+              | grep -Eq '^(README\.md|marketplace\.json|plugin\.json)$' ||
+               printf '%s\n' "$CHANGED" | grep -Eq '^(\.github/(tools/vally/|workflows/|dependabot\.yml$)|test/)'; then
+              DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
+            else
+              DIRS=$(printf '%s\n' "$CHANGED" \
+                | grep -E '^skills/[^/]+/(SKILL\.md|package(-lock)?\.json|\.npmrc|.*\.ya?ml|evals/|test/|references/|scripts/)' \
+                | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u || true)
+              if printf '%s\n' "$CHANGED" | grep -Eq '^docs/specs/git-tidy/'; then
+                DIRS=$(printf '%s\n%s\n' "$DIRS" "skills/git-tidy" \
+                  | sed '/^$/d' | sort -u)
+              fi
+            fi
+          else
+            # Push to main or manual dispatch: lint all skills
+            DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
+          fi
+          while IFS= read -r dir; do
+            [ -z "$dir" ] && continue
+            if [[ ! "$dir" =~ ^skills/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+              echo "::error::Refusing non-canonical skill directory."
+              exit 1
+            fi
+          done <<< "$DIRS"
+          for skill in dns-doctor git-tidy; do
+            selected=false
+            if grep -Fxq "skills/$skill" <<< "$DIRS"; then
+              selected=true
+            fi
+            echo "${skill//-/_}=$selected" >> "$GITHUB_OUTPUT"
+          done
+          if [ -z "$DIRS" ]; then
+            printf 'dirs=\n' >> "$GITHUB_OUTPUT"
+            echo "No skill directories to lint"
+          else
+            {
+              echo "dirs<<EOF"
+              echo "$DIRS"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            echo "Will lint: $DIRS"
+          fi
+
+  lint:
+    needs: detect
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require successful change detection
+        if: needs.detect.result != 'success'
+        run: |
+          echo "::error::Skill change detection did not succeed."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           persist-credentials: false
 
       # Node 24, not 22. Vally declares `npm>=11.11.1`, and Node 22 still
@@ -87,61 +166,10 @@ jobs:
       - name: Validate distribution manifests
         run: node --test test/*.test.mjs
 
-      - name: Determine skills to lint
-        id: skills
-        env:
-          # Routed through env for the same reason the steps below do it: no
-          # workflow context value is interpolated straight into a shell script.
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            # Lint only skills with changes in this PR. Keep this list in step
-            # with the `paths` filter above: a path that triggers the workflow
-            # but is missing here selects no skill, so the job runs and lints
-            # nothing while still reporting success.
-            CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
-            if printf '%s\n' "$CHANGED" \
-              | grep -Eq '^(README\.md|marketplace\.json|plugin\.json)$' ||
-               printf '%s\n' "$CHANGED" | grep -Eq '^\.github/tools/vally/'; then
-              DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
-            else
-              DIRS=$(printf '%s\n' "$CHANGED" \
-                | grep -E '^skills/[^/]+/(SKILL\.md|package\.json|\.npmrc|.*\.ya?ml|evals/|test/|references/|scripts/)' \
-                | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u || true)
-              if printf '%s\n' "$CHANGED" | grep -Eq '^docs/specs/git-tidy/'; then
-                DIRS=$(printf '%s\n%s\n' "$DIRS" "skills/git-tidy" \
-                  | sed '/^$/d' | sort -u)
-              fi
-            fi
-          else
-            # Push to main or manual dispatch: lint all skills
-            DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
-          fi
-          while IFS= read -r dir; do
-            [ -z "$dir" ] && continue
-            if [[ ! "$dir" =~ ^skills/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
-              echo "::error::Refusing non-canonical skill directory."
-              exit 1
-            fi
-          done <<< "$DIRS"
-          if [ -z "$DIRS" ]; then
-            printf 'dirs=\n' >> "$GITHUB_OUTPUT"
-            echo "No skill directories to lint"
-          else
-            {
-              echo "dirs<<EOF"
-              echo "$DIRS"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-            echo "Will lint: $DIRS"
-          fi
-
       - name: Lint skills (spec-compliance)
-        if: steps.skills.outputs.dirs != ''
+        if: needs.detect.outputs.dirs != ''
         env:
-          SKILL_DIRS: ${{ steps.skills.outputs.dirs }}
+          SKILL_DIRS: ${{ needs.detect.outputs.dirs }}
         run: |
           FAILED=0
           while IFS= read -r dir; do
@@ -154,9 +182,9 @@ jobs:
           exit $FAILED
 
       - name: Validate eval specs
-        if: steps.skills.outputs.dirs != ''
+        if: needs.detect.outputs.dirs != ''
         env:
-          SKILL_DIRS: ${{ steps.skills.outputs.dirs }}
+          SKILL_DIRS: ${{ needs.detect.outputs.dirs }}
         run: |
           while IFS= read -r dir; do
             while IFS= read -r -d '' spec; do
@@ -168,9 +196,9 @@ jobs:
           done <<< "$SKILL_DIRS"
 
       - name: Run deterministic skill tests
-        if: steps.skills.outputs.dirs != ''
+        if: needs.detect.outputs.dirs != ''
         env:
-          SKILL_DIRS: ${{ steps.skills.outputs.dirs }}
+          SKILL_DIRS: ${{ needs.detect.outputs.dirs }}
         run: |
           while IFS= read -r dir; do
             if [ -f "$dir/package.json" ] && npm pkg get scripts.test --prefix "$dir" | grep -qv '{}'; then
@@ -197,6 +225,8 @@ jobs:
   # fails there and nowhere else. That regression is only observable on this
   # matrix, so the suite runs on all three.
   dns-doctor-tests:
+    needs: detect
+    if: needs.detect.outputs.dns_doctor == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -220,6 +250,8 @@ jobs:
         run: npm run test:coverage
 
   git-tidy-tests:
+    needs: detect
+    if: needs.detect.outputs.git_tidy == 'true'
     strategy:
       fail-fast: false
       matrix:

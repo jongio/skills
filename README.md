@@ -239,7 +239,7 @@ skills/
     kit/  scripts/  docs/     Skill-specific assets
 docs/                         Specs, test plans, thumbnail prompts
 site/                         Astro catalog published to GitHub Pages
-.github/workflows/            skill-lint (every push), skill-eval (agent evals)
+.github/workflows/            skill-lint (matching PRs/main pushes), skill-eval (agent evals)
 ```
 
 ### Adding a skill
@@ -248,8 +248,16 @@ A skill is more than its folder: CI enforces that every skill is registered
 everywhere the catalog advertises it. The root distribution test covers every
 skill and host manifest. Skills with additional registration contracts enforce
 them in local tests. On pull requests, `skill-lint.yml` runs Vally lint, strict
-eval-spec lint, and deterministic tests for affected skills. Pushes to the
-default branch cover every skill. The workflow always builds the catalog site.
+eval-spec lint, and deterministic tests for affected skills, including
+lockfile-only changes. Any change under `site/` triggers the workflow, which
+always builds the catalog site. Matching pushes to the default branch and
+manual runs cover every skill.
+
+DNS Doctor and Git Tidy run their three-OS coverage matrices only when selected
+by the shared change-detection job. Shared workflow, Vally tooling, Dependabot,
+root test, README, or marketplace/plugin manifest edits select all skills;
+Git Tidy spec edits select Git Tidy. New commits cancel superseded Skill Lint
+runs for the same PR, but not running push or manual jobs.
 
 1. `skills/<name>/` with `SKILL.md` (500-line ceiling; overflow goes to
    `references/`), `README.md`, `package.json`, `test/`, and `evals/<name>/eval.yaml`.
@@ -269,7 +277,7 @@ Copy the newest skill rather than the oldest; it reflects the current convention
 
 ### Investigating nightly eval failures
 
-Skill Eval remains limited to trusted scheduled and manual runs; pull requests
+Skill Eval runs nightly at 03:17 UTC and supports trusted manual runs; pull requests
 run model-free lint and deterministic tests. Model-backed runs use the owner's
 Copilot allowance and require an approved scope before dispatch.
 

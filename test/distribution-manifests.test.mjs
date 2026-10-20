@@ -668,6 +668,8 @@ test("CI runs distribution parity for every manifest change", () => {
     "gemini-extension.json",
     "skills/**/*.yaml",
     "skills/**/*.yml",
+    "skills/**/package-lock.json",
+    "site/**",
     ".github/tools/vally/**",
     "test/**",
     "mcp.json",
@@ -707,6 +709,123 @@ test("CI runs distribution parity for every manifest change", () => {
     "skill-lint.yml must select nested YAML and YML skill files",
   );
   assert.match(lintWorkflow, /\| sort -u \|\| true\)/);
+});
+
+test("skill lint shares detection, scopes matrices, and cancels only superseded PR runs", () => {
+  assert.match(lintWorkflow, /^    paths: &skill_lint_paths$/m);
+  assert.match(lintWorkflow, /^    paths: \*skill_lint_paths$/m);
+  assert.match(
+    lintWorkflow,
+    /^  group: skill-lint-\$\{\{ github\.event_name \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}$/m,
+  );
+  assert.match(
+    lintWorkflow,
+    /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m,
+  );
+  const jobs = getJobBlocks(lintWorkflow);
+  for (const output of ["dirs", "dns_doctor", "git_tidy"]) {
+    assert.ok(jobs.detect.includes(`${output}: \${{ steps.skills.outputs.${output} }}`));
+  }
+  assert.match(jobs.detect, /fetch-depth: 0/);
+  assert.match(jobs.lint, /^    needs: detect$/m);
+  assert.match(jobs.lint, /^    if: \$\{\{ !cancelled\(\) \}\}$/m);
+  const detectionGate = getStepBlocks(jobs.lint)[0];
+  assert.match(detectionGate.join("\n"), /if: needs\.detect\.result != 'success'/);
+  assert.match(getRunScripts(detectionGate.join("\n"))[0], /^exit 1$/m);
+  assert.equal((jobs.lint.match(/SKILL_DIRS: \$\{\{ needs\.detect\.outputs\.dirs \}\}/g) ?? []).length, 3);
+  for (const [job, output] of [["dns-doctor-tests", "dns_doctor"], ["git-tidy-tests", "git_tidy"]]) {
+    assert.match(jobs[job], /^    needs: detect$/m);
+    assert.ok(jobs[job].includes(`    if: needs.detect.outputs.${output} == 'true'`));
+    assert.match(jobs[job], /os: \[ubuntu-latest, windows-latest, macos-latest\]/);
+    assert.match(jobs[job], /run: npm run test:coverage/);
+  }
+  const build = getStepBlocks(jobs.lint).find((lines) => lines.some((line) => line.includes("name: Build catalog site")));
+  assert.ok(build);
+  assert.doesNotMatch(build.join("\n"), /^\s+if:/m, "site-only changes must still build");
+});
+
+const selectionBash = process.platform === "win32"
+  ? path.join(process.env.ProgramFiles ?? "C:\\Program Files", "Git", "bin", "bash.exe")
+  : "bash";
+
+test("skill CI detection selects lockfiles, site edits, shared changes, and both matrices correctly", {
+  skip: process.platform === "win32" && !existsSync(selectionBash) && "requires Git Bash on Windows",
+}, async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), "skill-ci-selection-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const all = ["skills/dns-doctor", "skills/git-tidy", "skills/other"];
+  for (const skill of all) {
+    await mkdir(path.join(directory, skill), { recursive: true });
+    await writeFile(path.join(directory, skill, "SKILL.md"), "fixture\n");
+  }
+  const step = getStepBlocks(lintWorkflow).find((lines) =>
+    lines.some((line) => line.includes("- name: Determine skills to lint")),
+  );
+  assert.ok(step);
+  const [script] = getRunScripts(step.join("\n"));
+  const outputFile = path.join(directory, "outputs");
+  const run = async (event, changed, failDiff = false) => {
+    await writeFile(outputFile, "");
+    const result = spawnSync(selectionBash, ["-euo", "pipefail", "-c", `
+      git() {
+        [ "$1" = diff ] && [ "$2" = --name-only ] && [ "$3" = "$BASE_SHA" ] && [ "$4" = HEAD ] || return 99
+        [ "$FAIL_DIFF" = false ] || return 128
+        printf '%s\\n' "$DIFF_PATHS"
+      }
+      ${script}
+    `], {
+      cwd: directory,
+      encoding: "utf8",
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        EVENT_NAME: event,
+        BASE_SHA: "fixture-base",
+        DIFF_PATHS: changed.join("\n"),
+        FAIL_DIFF: String(failDiff),
+        GITHUB_OUTPUT: outputFile.replaceAll("\\", "/"),
+      },
+    });
+    assert.ifError(result.error);
+    return { ...result, output: await readFile(outputFile, "utf8") };
+  };
+  const cases = [
+    ["pull_request", ["skills/dns-doctor/package-lock.json"], [all[0]]],
+    ["pull_request", ["skills/git-tidy/package-lock.json"], [all[1]]],
+    ["pull_request", ["skills/other/package-lock.json"], [all[2]]],
+    ["pull_request", ["skills/dns-doctor/.npmrc", "skills/dns-doctor/test/cache.test.mjs"], [all[0]]],
+    ["pull_request", ["skills/dns-doctor/scripts/cache.mjs", "skills/git-tidy/references/cleanup.md"], all.slice(0, 2)],
+    ["pull_request", ["skills/other/evals/other/nested/case.yml"], [all[2]]],
+    ["pull_request", ["docs/specs/git-tidy/test-plan.md"], [all[1]]],
+    ...["site/src/components/Card.astro", "site/src/styles/global.css", "site/scripts/check-performance.mjs",
+      "site/astro.config.mjs", "site/package-lock.json", "docs/unrelated.md"]
+      .map((file) => ["pull_request", [file], []]),
+    ...[".github/tools/vally/package-lock.json", ".github/workflows/skill-lint.yml",
+      ".github/dependabot.yml", "test/distribution-manifests.test.mjs", "README.md",
+      "marketplace.json", "plugin.json"]
+      .map((file) => ["pull_request", [file], all]),
+    ["pull_request", [], []],
+    ["push", [], all],
+    ["workflow_dispatch", [], all],
+  ];
+  for (const [event, changed, expected] of cases) {
+    const result = await run(event, changed);
+    const label = `${event}: ${changed.join(", ")}`;
+    assert.equal(result.status, 0, `${label}\n${result.stderr}`);
+    const dirs = result.output.match(/dirs<<EOF\n([\s\S]*?)\nEOF\n/)?.[1].split("\n") ?? [];
+    assert.deepEqual(dirs, expected, label);
+    assert.match(result.output, new RegExp(`^dns_doctor=${expected.includes(all[0])}$`, "m"), label);
+    assert.match(result.output, new RegExp(`^git_tidy=${expected.includes(all[1])}$`, "m"), label);
+    if (expected.length === 0) assert.match(result.output, /^dirs=$/m, label);
+  }
+  for (const [changed, failDiff] of [
+    [["skills/unsafe;name/package-lock.json"], false],
+    [[], true],
+  ]) {
+    const result = await run("pull_request", changed, failDiff);
+    assert.notEqual(result.status, 0, "invalid paths and failed Git discovery must fail closed");
+    assert.equal(result.output, "", "failed detection must not emit success outputs");
+  }
 });
 
 test("every workflow uses least privilege and bounded jobs", () => {
@@ -911,6 +1030,7 @@ test("skill eval is trusted, discovered, bounded, and token scoped", () => {
   );
   assert.match(workflow, /^  workflow_dispatch:\s*$/m);
   assert.match(workflow, /^  schedule:\s*$/m);
+  assert.match(workflow, /^    - cron: "17 3 \* \* \*"$/m);
   assert.match(workflow, /^\s+group:\s*skill-eval\s*$/m);
   assert.match(workflow, /^\s+max-parallel:\s*2\s*$/m);
   assert.doesNotMatch(

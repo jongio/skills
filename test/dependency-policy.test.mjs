@@ -34,7 +34,7 @@ test("CI selects skill policy edits and shared Vally changes for lint", async ()
   const workflow = await read(".github/workflows/skill-lint.yml");
   assert.ok(workflow.includes('"skills/**/.npmrc"'));
   const skillPattern = workflow.match(/grep -E '(\^skills\/[^']+)'/);
-  const sharedPattern = workflow.match(/grep -Eq '(\^\\\.github\/tools\/vally\/)'/);
+  const sharedPattern = workflow.match(/grep -Eq '(\^\(\\\.github\/[^']+)'/);
   assert.ok(skillPattern);
   assert.ok(sharedPattern);
   const selectSkill = new RegExp(skillPattern[1]);
@@ -42,6 +42,7 @@ test("CI selects skill policy edits and shared Vally changes for lint", async ()
   for (const path of await activeRoots()) {
     if (path.startsWith("skills/")) {
       assert.ok(selectSkill.test(`${path}/.npmrc`), path);
+      assert.ok(selectSkill.test(`${path}/package-lock.json`), path);
     }
   }
   assert.ok(selectAll.test(".github/tools/vally/package-lock.json"));
