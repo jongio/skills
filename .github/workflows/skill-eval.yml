@@ -17,8 +17,8 @@ on:
         default: false
         type: boolean
   schedule:
-    # Nightly at 03:00 UTC
-    - cron: "0 3 * * *"
+    # Nightly at 03:17 UTC, away from the top-of-hour scheduling peak.
+    - cron: "17 3 * * *"
 
 # copilot-requests lets the built-in GITHUB_TOKEN authenticate the Copilot
 # SDK that vally drives, so no PAT secret is needed. In a personally-owned

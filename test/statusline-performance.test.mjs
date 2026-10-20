@@ -336,6 +336,7 @@ test("workflow keeps a stable gate, two OS targets, exact revisions and explicit
 	assert.match(workflow, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
 	assert.match(workflow, /CANDIDATE_SHA: \$\{\{ github\.sha \}\}/);
 	assert.ok(workflow.indexOf("Statusline correctness") < workflow.indexOf("Compare identical workloads"));
+	assert.match(workflow, /run: node --test --test-concurrency=1 "extensions\/\*-statusline\/test\/\*\.test\.mjs" test\/statusline-performance\.test\.mjs test\/distribution-manifests\.test\.mjs/);
 	assert.match(workflow, /retention-days: 3/);
 	assert.match(workflow, /if-no-files-found: warn/);
 	for (const file of ["base", "candidate", "confirmation-base", "confirmation-candidate", "comparison"]) {

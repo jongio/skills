@@ -244,8 +244,12 @@ unexpected filesystem/Git errors are reported by the standalone renderer.
 ## Validate
 
 ```powershell
-node --test .\extensions\worktree-statusline\test\*.test.mjs
+node --test --test-concurrency=1 .\extensions\worktree-statusline\test\*.test.mjs
 ```
+
+Run Git-backed test files sequentially, as CI does, so parallel fixture processes
+do not compete with the renderer's unchanged 1.5-second Git command budget.
+This does not change assertions, benchmark thresholds, or production timeouts.
 
 When updating an existing install, copy every runtime file listed in
 `scripts/setup-statusline.mjs`'s `EXTENSION_CATALOG` to
