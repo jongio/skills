@@ -764,13 +764,15 @@ test("skill CI detection selects lockfiles, site edits, shared changes, and both
   assert.ok(step);
   const [script] = getRunScripts(step.join("\n"));
   const outputFile = path.join(directory, "outputs");
+  const diffFile = path.join(directory, "changed-paths");
   const run = async (event, changed, failDiff = false) => {
     await writeFile(outputFile, "");
+    await writeFile(diffFile, changed.join("\n"));
     const result = spawnSync(selectionBash, ["-euo", "pipefail", "-c", `
       git() {
         [ "$1" = diff ] && [ "$2" = --name-only ] && [ "$3" = "$BASE_SHA" ] && [ "$4" = HEAD ] || return 99
         [ "$FAIL_DIFF" = false ] || return 128
-        printf '%s\\n' "$DIFF_PATHS"
+        cat "$DIFF_FILE"
       }
       ${script}
     `], {
@@ -781,7 +783,7 @@ test("skill CI detection selects lockfiles, site edits, shared changes, and both
         ...process.env,
         EVENT_NAME: event,
         BASE_SHA: "fixture-base",
-        DIFF_PATHS: changed.join("\n"),
+        DIFF_FILE: diffFile.replaceAll("\\", "/"),
         FAIL_DIFF: String(failDiff),
         GITHUB_OUTPUT: outputFile.replaceAll("\\", "/"),
       },
@@ -789,7 +791,11 @@ test("skill CI detection selects lockfiles, site edits, shared changes, and both
     assert.ifError(result.error);
     return { ...result, output: await readFile(outputFile, "utf8") };
   };
+  const largeSiteChange = Array.from({ length: 3000 }, (_, index) => `site/src/components/fixture-${index}.astro`);
   const cases = [
+    ["pull_request", [".github/workflows/skill-lint.yml", ...largeSiteChange], all],
+    ["pull_request", ["README.md", ...largeSiteChange], all],
+    ["pull_request", ["docs/specs/git-tidy/test-plan.md", ...largeSiteChange], [all[1]]],
     ["pull_request", ["skills/dns-doctor/package-lock.json"], [all[0]]],
     ["pull_request", ["skills/git-tidy/package-lock.json"], [all[1]]],
     ["pull_request", ["skills/other/package-lock.json"], [all[2]]],
@@ -810,7 +816,7 @@ test("skill CI detection selects lockfiles, site edits, shared changes, and both
   ];
   for (const [event, changed, expected] of cases) {
     const result = await run(event, changed);
-    const label = `${event}: ${changed.join(", ")}`;
+    const label = `${event}: ${changed.slice(0, 3).join(", ")} (${changed.length} files)`;
     assert.equal(result.status, 0, `${label}\n${result.stderr}`);
     const dirs = result.output.match(/dirs<<EOF\n([\s\S]*?)\nEOF\n/)?.[1].split("\n") ?? [];
     assert.deepEqual(dirs, expected, label);
@@ -826,6 +832,7 @@ test("skill CI detection selects lockfiles, site edits, shared changes, and both
     assert.notEqual(result.status, 0, "invalid paths and failed Git discovery must fail closed");
     assert.equal(result.output, "", "failed detection must not emit success outputs");
   }
+  assert.doesNotMatch(script, /-printf\b/, "discovery must not require GNU find on macOS");
 });
 
 test("every workflow uses least privilege and bounded jobs", () => {

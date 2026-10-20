@@ -84,28 +84,34 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
+          all_skill_dirs() {
+            for spec in skills/*/SKILL.md; do
+              if [ -f "$spec" ]; then
+                printf '%s\n' "${spec%/SKILL.md}"
+              fi
+            done | sort -u
+          }
           if [ "$EVENT_NAME" = "pull_request" ]; then
             # Lint only skills with changes in this PR. Keep this list in step
             # with the `paths` filter above: a path that triggers the workflow
             # but is missing here selects no skill, so the job runs and lints
             # nothing while still reporting success.
             CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
-            if printf '%s\n' "$CHANGED" \
-              | grep -Eq '^(README\.md|marketplace\.json|plugin\.json)$' ||
-               printf '%s\n' "$CHANGED" | grep -Eq '^(\.github/(tools/vally/|workflows/|dependabot\.yml$)|test/)'; then
-              DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
+            if grep -Eq '^(README\.md|marketplace\.json|plugin\.json)$' <<< "$CHANGED" ||
+               grep -Eq '^(\.github/(tools/vally/|workflows/|dependabot\.yml$)|test/)' <<< "$CHANGED"; then
+              DIRS=$(all_skill_dirs)
             else
               DIRS=$(printf '%s\n' "$CHANGED" \
                 | grep -E '^skills/[^/]+/(SKILL\.md|package(-lock)?\.json|\.npmrc|.*\.ya?ml|evals/|test/|references/|scripts/)' \
                 | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u || true)
-              if printf '%s\n' "$CHANGED" | grep -Eq '^docs/specs/git-tidy/'; then
+              if grep -Eq '^docs/specs/git-tidy/' <<< "$CHANGED"; then
                 DIRS=$(printf '%s\n%s\n' "$DIRS" "skills/git-tidy" \
                   | sed '/^$/d' | sort -u)
               fi
             fi
           else
             # Push to main or manual dispatch: lint all skills
-            DIRS=$(find skills -maxdepth 2 -name "SKILL.md" -printf '%h\n' | sort -u)
+            DIRS=$(all_skill_dirs)
           fi
           while IFS= read -r dir; do
             [ -z "$dir" ] && continue
