@@ -18,15 +18,18 @@ last completion message.
 
 - Reconcile every request, follow-up, correction, and task with current evidence.
 - Expose gaps, blockers, and explicitly deferred work; finish authorized gaps in fix mode.
-- In fix mode, improve the skills used at their verified source; ask where that source lives
-  when it cannot be established.
+- In fix mode, improve used skills in dedicated branches/worktrees in their verified
+  source repositories; ask where the source lives when it cannot be established.
+  Validate each fix, then ask whether to create a PR through the standard PR workflow.
 - Check PR completion and use the standard PR workflow in fix mode, preserving
   its current-head review gates.
 - Propose proved-safe branch/worktree cleanup through `git-tidy`, with separate
   approval and protection for active or local-only work.
 
-The final report distinguishes completed work, source-skill changes, retained
-worktrees, and anything still preventing closeout.
+The final summary lists **Actions recommended / taken**, **Remaining work**, and
+**Branches and worktrees**. Include existing checkouts used by the session, not
+only newly created ones. Eligible cleanup gets an exact confirmation prompt;
+unproven, active, or still-needed entries are retained with reasons.
 
 ## Use it
 
