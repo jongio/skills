@@ -13,6 +13,19 @@ and `doc-doctor` for the diff and affected documentation. `pr` owns the document
 pass, including when called by `go`; matching passing evidence is reused, and
 later edits invalidate affected evidence rather than triggering duplicate checks.
 
+## Progress and blocked work
+
+During long-running execution, report the current stage, elapsed time, last
+meaningful result, and next event at least every 60 seconds. Use host notifications
+or scheduling instead of tight polling. Distinguish running checks from external
+review/CI waits and approval/input blockers; identify the exact pending decision
+and state when execution is paused. Wall-clock waiting is not active execution,
+and an unknown completion time is not an ETA.
+
+If a stage exceeds its documented runtime budget or stalls, inspect bounded
+evidence and report the blocker. Do not restart expensive checks, weaken gates,
+or redesign the workflow without authorization.
+
 ## Review feedback
 
 The workflow reads full submitted review bodies and PR conversation comments,
@@ -55,8 +68,8 @@ npm run eval:lint
 Deterministic tests check portable skill shape, instruction contracts, and
 registration. Synthetic capability scenarios cover owner-specific exceptions,
 exact-head review completion, authorized pinned merges, documentation preflight,
-and feedback including body-only findings; linting them does not establish agent
-behavior.
+progress and approval waits, and feedback including body-only findings; linting
+them does not establish agent behavior.
 
 ## License
 
