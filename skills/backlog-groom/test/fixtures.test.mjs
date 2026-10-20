@@ -25,6 +25,8 @@ test("every required synthetic scenario has one staged fixture and decisive rubr
     assert.match(block, /dest: scenario\.md/);
     assert.match(block, /Read scenario\.md/);
     assert.match(block, /type: diff-empty/);
+    assert.match(block, /type: diff-empty\n        name: diff-empty-/,
+      `${name}: CI requires the diff-empty prefix for mandatory per-trial enforcement`);
     assert.match(block, /type: prompt/);
     assert.match(block, /Score 1/i);
     assert.match(block, /rubric:/);

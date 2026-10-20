@@ -27,7 +27,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: multi-repo-preserves-workspace
+        name: diff-empty-multi-repo-preserves-workspace
       - type: prompt
         name: independently-mapped-sources
         config:
@@ -54,7 +54,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: issues-only-preserves-workspace
+        name: diff-empty-issues-only-preserves-workspace
       - type: prompt
         name: useful-without-project
         config:
@@ -81,7 +81,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: missing-source-preserves-workspace
+        name: diff-empty-missing-source-preserves-workspace
       - type: prompt
         name: separates-unavailable-and-non-code
         config:
@@ -108,7 +108,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: merged-not-selected-preserves-workspace
+        name: diff-empty-merged-not-selected-preserves-workspace
       - type: prompt
         name: truthful-partial-implementation
         config:
@@ -136,7 +136,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: changed-head-preserves-workspace
+        name: diff-empty-changed-head-preserves-workspace
       - type: prompt
         name: invalidates-stale-disposition
         config:
@@ -163,7 +163,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: closure-and-parent-preserves-workspace
+        name: diff-empty-closure-and-parent-preserves-workspace
       - type: prompt
         name: honest-shipped-and-parent
         config:
@@ -190,7 +190,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: view-populations-preserves-workspace
+        name: diff-empty-view-populations-preserves-workspace
       - type: prompt
         name: filters-before-hierarchy-edits
         config:
@@ -217,7 +217,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: ownership-and-dates-preserves-workspace
+        name: diff-empty-ownership-and-dates-preserves-workspace
       - type: prompt
         name: contextual-decisions-preserve-unknowns
         config:
@@ -244,7 +244,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: shared-fields-preserves-workspace
+        name: diff-empty-shared-fields-preserves-workspace
       - type: prompt
         name: reuses-definitions-and-values
         config:
@@ -271,7 +271,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: done-card-preserves-workspace
+        name: diff-empty-done-card-preserves-workspace
       - type: prompt
         name: no-card-driven-closure
         config:
@@ -298,7 +298,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: serialization-preserves-workspace
+        name: diff-empty-serialization-preserves-workspace
       - type: prompt
         name: identity-and-shape-safety
         config:
@@ -326,7 +326,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: resume-and-pagination-preserves-workspace
+        name: diff-empty-resume-and-pagination-preserves-workspace
       - type: prompt
         name: bounded-no-duplicate-recovery
         config:
@@ -355,7 +355,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: concurrent-view-preserves-workspace
+        name: diff-empty-concurrent-view-preserves-workspace
       - type: prompt
         name: preserves-newer-view-edits
         config:
@@ -382,7 +382,7 @@ stimuli:
           dest: scenario.md
     graders:
       - type: diff-empty
-        name: ui-blocked-preserves-workspace
+        name: diff-empty-ui-blocked-preserves-workspace
       - type: prompt
         name: honest-manual-ui-handoff
         config:
