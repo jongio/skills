@@ -29,4 +29,16 @@ npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill d
 
 ```text
 /go
+/go --merge=approval <context>
+/go --merge=auto <context>
 ```
+
+By default, `go` asks for final merge approval through `pr`. Choose
+`--merge=auto` (or "auto merge") to merge after all checks and reviews pass
+without another merge prompt; `--merge=approval` (or "ask me before merging")
+requires confirmation. The choice is passed to `pr` for this invocation only.
+Standing policies and reviewer approvals do not override the default.
+Auto mode does not enable GitHub's `--auto` queue or bypass other approval
+boundaries. Missing confirmation pauses delivery as awaiting approval, not merged.
+Both modes default to squash merging and deleting the PR branch afterward.
+Explicit requests for another strategy or keeping the branch are passed to `pr`.

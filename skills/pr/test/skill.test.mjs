@@ -45,10 +45,44 @@ test("workflow remains concise and covers preflight, review routing, monitoring,
   assert.match(skill, /exact validation commands plus results/);
   assert.match(skill, /preserve its headings, comments, checklist items, and ordering/);
   assert.match(skill, /explicit merge authorization/);
-  assert.match(skill, /gh pr merge <number> -R <owner\/repo> --squash --match-head-commit <full-head-OID>/);
-  assert.match(skill, /Never use auto-merge, `--admin`, raw API calls, or wrappers/);
+  assert.match(skill, /gh pr merge <number> -R <owner\/repo> --squash --delete-branch --match-head-commit <full-head-OID>/);
+  assert.match(skill, /Never use GitHub auto-merge.*`--admin`, raw API calls, or wrappers/);
   assert.match(skill, /Verify actual merged state afterward/);
   assert.doesNotMatch(skill, /gh pr merge --auto|Copilot never auto-requested on private repos/);
+});
+
+test("defaults to squash and branch deletion without destructive worktree cleanup", () => {
+  assert.match(skill, /Default to squash merging and deleting the PR branch after merge/);
+  assert.match(skill, /replace `--squash` or omit `--delete-branch` only.*explicitly requests/);
+  assert.match(skill, /Verify branch deletion separately/);
+  assert.match(skill, /Never force-delete.*remove worktrees.*discard local changes/);
+  assert.match(skill, /cleanup is blocked.*merged with cleanup pending/);
+});
+
+test("merge consent defaults to a fresh head-bound approval, with an invocation-only auto override", () => {
+  assert.match(skill, /Default to `--merge=approval`/);
+  assert.match(skill, /`--merge=auto`/);
+  assert.match(skill, /plain-language.*auto.merge.*ask.*before merging/i);
+  assert.match(skill, /Conflicting or unclear.*ask.*do not merge/);
+  assert.match(skill, /standing.*do not override.*default/);
+  assert.match(skill, /validated `go` handoff.*user-authorization source/);
+  assert.match(skill, /only to this invocation/);
+  assert.match(skill, /PR, repository, full head OID, and merge strategy/);
+  assert.match(skill, /new head or changed strategy invalidates.*confirmation/);
+  assert.match(skill, /Auto mode.*without another merge prompt.*all.*gates/);
+  assert.match(skill, /declined or unavailable.*awaiting merge approval.*not merged/);
+});
+
+test("merge-mode documentation exposes both options and preserves safety gates", async () => {
+  for (const file of ["../README.md", "../../../site/src/content/skills/pr.md"]) {
+    const text = await readFile(new URL(file, import.meta.url), "utf8");
+    assert.match(text, /\/pr --merge=approval/);
+    assert.match(text, /\/pr --merge=auto/);
+    assert.match(text, /default/i);
+    assert.match(text, /GitHub.*--auto/);
+    assert.match(text, /default.*squash/i);
+    assert.match(text, /delet(?:e|ing) the PR branch afterward/i);
+  }
 });
 
 test("review inventory includes full bodies rather than trusting clean summary counts", () => {
@@ -119,6 +153,12 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "bot-vs-human-comment-resolution",
     "terse-fix-replies-with-commit-links",
     "documentation-preflight-reuse",
+    "default-merge-approval",
+    "explicit-auto-merge",
+    "explicit-approval-overrides-standing-policy",
+    "changed-head-needs-fresh-approval",
+    "conflicting-merge-modes",
+    "squash-and-cleanup-defaults",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
   assert.equal((evalSpec.match(/type: skill-invocation/g) ?? []).length, cases.length);
@@ -179,7 +219,7 @@ test("review and merge evals distinguish exemptions, completion, approval, and a
   assert.match(exception, /required human review/);
   assert.match(exception, /template-preserving PR body/);
   assert.match(exception, /exact validation commands\/results/);
-  assert.match(exception, /reject auto-merge/);
+  assert.match(exception, /reject GitHub auto-merge/);
   assert.match(nonExempt, /Copilot approved the previous head/);
   assert.match(nonExempt, /COMMENTED on the new/);
   assert.match(nonExempt, /No merge authorization/);

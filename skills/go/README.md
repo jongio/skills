@@ -13,6 +13,29 @@ Invoke `/go <context>` with an issue, conversation, code, or error.
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
 Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
 
+## Merge choice
+
+The default is to ask for final merge approval once the PR is ready:
+
+```text
+/go <context>
+/go --merge=approval <context>
+/go --merge=auto <context>
+```
+
+Use `--merge=auto` (or "auto merge") to authorize merging after all CI, review,
+and feedback gates pass, without a final merge prompt. Use `--merge=approval`
+(or "ask me before merging") to require that prompt. The choice is passed to
+`pr` for this invocation only; standing policies and reviewer approvals do not
+override the default. Conflicting choices require clarification. Auto mode
+does not enable GitHub's `--auto` queue or bypass other approval boundaries.
+Without final confirmation in approval mode, delivery pauses as awaiting
+merge approval, not merged.
+
+Both modes default to **squash merge and delete the PR branch afterward**. Ask
+for another strategy or to keep the branch explicitly if needed; `go` carries
+those choices to `pr`. Unsafe local cleanup is reported, not forced.
+
 ## Development
 
 ```sh

@@ -21,7 +21,7 @@ Expects Copilot review unless an explicitly authorized, verified private-owner
 exception applies; posted feedback remains in scope. Every expected review must
 complete on the full current head OID, with `COMMENTED` distinct from approval.
 Merges require authorization and all gates satisfied, use a literal head-pinned
-command, and verify actual merged state rather than enabling auto-merge.
+command, and verify actual merged state rather than enabling GitHub auto-merge.
 
 ## Install with required skills
 
@@ -36,4 +36,20 @@ npx skills add jongio/skills --skill pr --skill test-doctor --skill doc-doctor -
 
 ```text
 /pr
+/pr --merge=approval
+/pr --merge=auto
 ```
+
+By default, `pr` asks for final merge approval with the PR, repository, full head
+OID, and strategy after readiness gates pass. Choose `--merge=auto` (or "auto
+merge") to skip only that final prompt; `--merge=approval` (or "ask me before
+merging") requires it. A validated `go` handoff preserves the choice, and a later
+explicit user choice overrides it. Choices apply only to the current invocation;
+standing policies and reviewer approvals do not override the default.
+Changed heads or strategies require fresh confirmation in approval mode.
+Declined or unavailable confirmation leaves the PR awaiting approval, not merged.
+Auto mode preserves all CI, review, feedback, and other approval gates and does
+not enable GitHub's `--auto` queue.
+Both modes default to squash merging and deleting the PR branch afterward
+(`--squash --delete-branch`), unless explicitly overridden. Cleanup is verified
+separately; blocked local cleanup is reported rather than forced or claimed done.

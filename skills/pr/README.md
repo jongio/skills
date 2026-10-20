@@ -13,6 +13,40 @@ and `doc-doctor` for the diff and affected documentation. `pr` owns the document
 pass, including when called by `go`; matching passing evidence is reused, and
 later edits invalidate affected evidence rather than triggering duplicate checks.
 
+## Merge choice
+
+The default is to ask for final merge approval once all readiness gates pass:
+
+```text
+/pr
+/pr --merge=approval
+/pr --merge=auto
+```
+
+Use `--merge=auto` (or "auto merge") to authorize merging without another merge
+prompt after all CI, reviews, approvals, and feedback gates pass. Use
+`--merge=approval` (or "ask me before merging") to require final confirmation.
+A validated `go` handoff carries the user's choice; a later explicit choice
+overrides it. Conflicting choices require clarification. This is invocation-only,
+not a saved preference; standing policies and reviewer approvals do not override
+the default.
+
+In approval mode, the final prompt identifies the PR, repository, full head OID,
+and strategy and offers "Merge this head", "Auto merge for this invocation", or
+"Not yet". Declined or unavailable confirmation pauses delivery as awaiting merge
+approval, not merged. A changed head or strategy requires fresh confirmation.
+Auto mode skips only this prompt, not publication or other approval boundaries.
+It does not enable GitHub's `--auto` queue.
+
+Both modes default to **squash merge and delete the PR branch afterward**
+(`--squash --delete-branch`). Explicitly request another strategy or keeping the
+branch to override either default. If squash is unavailable, the workflow asks
+rather than silently switching strategies. The final prompt includes cleanup.
+After confirmed merge, verify remote and local deletion separately; never delete
+the base/default branch or an advanced head, force-delete a branch, remove a
+worktree, or discard local changes. Blocked cleanup is reported as "merged with
+cleanup pending", not successful deletion.
+
 ## Progress and blocked work
 
 During long-running execution, report the current stage, elapsed time, last
@@ -59,11 +93,11 @@ head-specific review and check evidence. Required approvals and unresolved chang
 requests remain separate gates.
 
 PR bodies preserve the repository template and record exact validation commands
-and results, including checks not run. A merge also requires explicit authorization
-or an applicable user-approved standing policy and an up-to-date base, green CI,
+and results, including checks not run. A merge also requires authorization under
+the selected merge mode and an up-to-date base, green CI,
 and settled feedback. Use a literal `gh pr merge` command naming the PR, repository,
 authorized strategy, and full `--match-head-commit` OID, then verify actual merged
-state. Auto-merge, admin, API, and wrapper bypasses are not allowed.
+state. GitHub auto-merge, admin, API, and wrapper bypasses are not allowed.
 
 ## Development
 
