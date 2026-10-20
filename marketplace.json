@@ -103,6 +103,12 @@
       "source": "./skills/retro",
       "description": "Close out a session with an evidence-backed task and feedback audit, source-skill improvements, and safely approved branch and worktree cleanup",
       "version": "1.0.0"
+    },
+    {
+      "name": "doc-doctor",
+      "source": "./skills/doc-doctor",
+      "description": "Check changed documentation against code and fix material gaps.",
+      "version": "1.0.0"
     }
   ]
 }

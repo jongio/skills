@@ -55,7 +55,8 @@
     "test-doctor",
     "pr",
     "go",
-    "retro"
+    "retro",
+    "doc-doctor"
   ],
   "repository": "https://github.com/jongio/skills"
 }

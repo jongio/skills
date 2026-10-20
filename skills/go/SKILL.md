@@ -12,7 +12,7 @@ description: >-
 2. Invoke `test-doctor fix` on the touched scope to establish a baseline and write meaningful regression tests before implementation.
 3. Implement the smallest complete change, run focused checks, and finish the scoped Test Doctor assessment.
 4. Review the final diff for correctness and regressions; fix material findings and repeat affected checks until the acceptance criteria are met.
-5. Invoke `jongio/pr` (`pr` when installed, e.g. `/jongio-skills:pr`) with a merge request, plan, scope, worktree/base/changeset identity, and passing test/review evidence. It owns Git, remaining preflight, CI, review resolution, and merge; do not duplicate those stages.
+5. Invoke `jongio/pr` (`pr` when installed, e.g. `/jongio-skills:pr`) with a merge request, plan, scope, worktree/base/changeset identity, and passing test/review evidence. It owns Git, remaining preflight, CI, review resolution, and merge; do not duplicate those stages. Leave `doc-doctor` to `pr`; do not invoke it separately.
 
 ## Safety
 

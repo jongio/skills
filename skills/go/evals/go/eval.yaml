@@ -66,3 +66,16 @@ stimuli:
       - Reports the missing required skill as a blocker and stops.
       - Does not replace Test Doctor with ad-hoc checks or pretend delivery completed.
     graders: *checks
+
+  - name: documentation-single-owner
+    prompt: >-
+      Use go to explain the final handoff for a completed implementation whose
+      scoped tests and review passed. doc-doctor is installed but has not run.
+      Then explain what changes if matching documentation evidence already exists
+      and what changes if code is edited afterward. Do not execute commands or writes.
+    rubric:
+      - Leaves doc-doctor to pr preflight instead of invoking it separately in go.
+      - Runs the documentation pass once when no valid evidence exists.
+      - Reuses documentation evidence only for matching worktree, base, changeset, and scope.
+      - Later relevant edits invalidate evidence and require affected checks again.
+    graders: *checks

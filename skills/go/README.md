@@ -5,12 +5,13 @@ Plan, test, and implement the current context, then hand verified changes to pr 
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill go --skill test-doctor --skill pr
+npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill doc-doctor
 ```
 
 Invoke `/go <context>` with an issue, conversation, code, or error.
 `go` plans, tests with Test Doctor, implements, and reviews/fixes; `pr` reuses
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
+Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
 
 ## Development
 

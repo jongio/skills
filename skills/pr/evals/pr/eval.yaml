@@ -28,7 +28,7 @@ stimuli:
       scenario: workflow
       cost: low
     rubric:
-      - Commits uncommitted changes and runs code review, test-doctor, light security review, lint, and build before submitting.
+      - Commits uncommitted changes and runs code review, doc-doctor, test-doctor, light security review, lint, and build before submitting.
       - Checks repository visibility and does not automatically add Copilot as a reviewer because the repository is private.
       - Monitors CI, rebase state, and comments, then merges or enables auto-merge once green.
     graders:
@@ -41,7 +41,7 @@ stimuli:
           threshold: 0.8
           prompt: >-
             Score 5 only if the response follows the pr checklist (commit, code review,
-            test-doctor, light security review, lint, build, submit PR, monitor CI/rebase/comments,
+            doc-doctor, test-doctor, light security review, lint, build, submit PR, monitor CI/rebase/comments,
             auto-merge) and explicitly states that Copilot will not be automatically added as a
             reviewer on a private repository. Score 1 if it automatically requests Copilot review
             on the private repository or skips preflight checks.
@@ -165,6 +165,39 @@ stimuli:
             address and reply to both review comments, resolve the automated Copilot review thread,
             and keep the human reviewer's open-question thread open. Score 1 if it resolves the
             human's open question or ignores the failing CI or rebase.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: documentation-preflight-reuse
+    prompt: >-
+      Use pr to explain documentation preflight after go hands off completed
+      implementation, tests, and code review. First doc-doctor has not run;
+      then consider passing doc-doctor evidence for the same worktree, base,
+      changeset, and scope; finally consider a later CLI behavior edit.
+      Also explain what happens if doc-doctor is unavailable.
+      Do not execute commands or perform repository or network writes.
+    rubric:
+      - pr owns doc-doctor and runs it once for the diff and affected docs when no valid evidence exists.
+      - Does not ask go to run a second documentation pass.
+      - Reuses matching passing documentation evidence without rerunning it.
+      - The later edit invalidates affected evidence and requires a fresh check.
+      - Missing doc-doctor blocks preflight with installation guidance rather than silently skipping it.
+    graders:
+      - type: diff-empty
+        name: documentation-plan-does-not-write
+      - type: prompt
+        name: single-owner-documentation-check
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if pr owns the documentation pass, invokes doc-doctor
+            when necessary, reuses only identity-matching passing evidence,
+            reruns affected checks after edits, and blocks with installation
+            guidance when doc-doctor is missing. Score 1 for duplicating the pass
+            in go, reusing stale evidence, silently skipping a missing skill,
+            or performing writes.
       - type: skill-invocation
         config:
           required: [pr]

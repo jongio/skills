@@ -33,13 +33,24 @@ test("preserves approvals, reports missing dependencies, and verifies actual com
   assert.match(skill, /GitHub confirms the intended head merged, required reviews completed, and no actionable findings remain/);
 });
 
+test("delegates the documentation pass to pr rather than running it twice", () => {
+  assert.match(skill, /Leave `doc-doctor` to `pr`; do not invoke it separately/);
+  assert.doesNotMatch(skill, /Invoke `doc-doctor`/i);
+  assert.equal((pr.match(/Invoke `doc-doctor`/g) ?? []).length, 1);
+  assert.match(pr, /this check belongs here, not in `go`/);
+  assert.match(pr, /Reuse matching passing evidence.*rerun only when invalidated/);
+  assert.match(evalSpec, /^  - name: documentation-single-owner$/m);
+});
+
 test("evals distinguish matching preflight evidence from evidence invalidated by edits", () => {
   assert.match(evalSpec, /^  - name: reuse-valid-work$/m);
   assert.match(evalSpec, /^  - name: invalidate-stale-work[\s\S]*base and changeset have changed[\s\S]*Reruns affected checks/m);
 });
 
-test("catalog body makes both required skills visible beyond the generic install widget", async () => {
+test("catalog body has a copyable install command with every required skill", async () => {
   const catalog = await readFile(new URL("../../../site/src/content/skills/go.md", import.meta.url), "utf8");
   const body = catalog.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
   assert.match(body, /Requires `test-doctor` and `pr`/);
+  assert.match(body, /`doc-doctor`/);
+  assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill go --skill test-doctor --skill pr --skill doc-doctor -g --agent github-copilot\r?\n```/);
 });
