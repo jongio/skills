@@ -44,6 +44,15 @@ test("review inventory includes full bodies rather than trusting clean summary c
   assert.match(text, /"No open issues".*not proof that feedback is clear/i);
 });
 
+test("owns documentation preflight with identity-bound reuse and missing-skill blocking", () => {
+  assert.equal((skill.match(/Invoke `doc-doctor`/g) ?? []).length, 1);
+  assert.match(skill, /on the diff and affected docs/);
+  assert.match(skill, /this check belongs here, not in `go`/);
+  assert.match(skill, /same worktree, base, changeset, and scope; rerun checks invalidated by later edits/);
+  assert.match(skill, /Reuse matching passing evidence.*rerun only when invalidated/);
+  assert.match(skill, /If unavailable, stop and prompt to install.*--skill doc-doctor/);
+});
+
 test("body-only findings get evidence-backed disposition without fake thread resolution", () => {
   const text = skill.replace(/\s+/g, " ");
   assert.match(text, /Deduplicate.*review ID.*heading.*file\/line/i);
@@ -61,6 +70,7 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "clean-headline-hides-body-only-finding",
     "deduplicate-and-revalidate-review-body-findings",
     "bot-vs-human-comment-resolution",
+    "documentation-preflight-reuse",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
   assert.equal((evalSpec.match(/type: skill-invocation/g) ?? []).length, cases.length);

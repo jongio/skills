@@ -5,10 +5,13 @@ A concise checklist workflow for taking changes from local commit and preflight 
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill pr --skill test-doctor
+npx skills add jongio/skills --skill pr --skill test-doctor --skill doc-doctor
 ```
 
-Reload your agent skills, then invoke `/pr`. (`test-doctor` is used during the preflight test check.)
+Reload your agent skills, then invoke `/pr`. Preflight uses `test-doctor` for tests
+and `doc-doctor` for the diff and affected documentation. `pr` owns the documentation
+pass, including when called by `go`; matching passing evidence is reused, and
+later edits invalidate affected evidence rather than triggering duplicate checks.
 
 ## Review feedback
 
