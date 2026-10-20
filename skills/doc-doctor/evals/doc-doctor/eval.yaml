@@ -30,7 +30,6 @@ stimuli:
       - Keeps the audit scoped and distinguishes planned checks from performed verification.
     graders: &checks
       - type: diff-empty
-        name: explanation-does-not-write
       - type: prompt
         config:
           scoring: scale_1_5
