@@ -49,6 +49,15 @@ stimuli:
       - Leaves remaining preflight and delivery gates to pr and invalidates evidence after edits.
     graders: *checks
 
+  - name: invalidate-stale-work
+    prompt: >-
+      Use go for a change whose tests and review passed before a rebase and edits;
+      base and changeset have changed. Explain the handoff only; do not execute commands or writes.
+    rubric:
+      - Reruns affected checks or delegates their rerun to pr; stale evidence is not passing proof.
+      - Reuses unaffected evidence without copying pr's Git, CI, or merge implementation.
+    graders: *checks
+
   - name: missing-test-doctor
     prompt: >-
       Use go to explain the workflow for an implementation request when test-doctor

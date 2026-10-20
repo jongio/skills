@@ -13,6 +13,8 @@ install:
 
 Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge.
 
+Requires `test-doctor` and `pr`; install those skills too, or choose the full collection above.
+
 ## Use it
 
 ```text

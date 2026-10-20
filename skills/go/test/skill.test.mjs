@@ -4,6 +4,7 @@ import test from "node:test";
 
 const skill = await readFile(new URL("../SKILL.md", import.meta.url), "utf8");
 const pr = await readFile(new URL("../../pr/SKILL.md", import.meta.url), "utf8");
+const evalSpec = await readFile(new URL("../evals/go/eval.yaml", import.meta.url), "utf8");
 
 test("portable skill frontmatter contains only name and description", () => {
   const frontmatter = skill.match(/^---\n([\s\S]*?)\n---/);
@@ -30,4 +31,15 @@ test("preserves approvals, reports missing dependencies, and verifies actual com
   assert.match(skill, /approval boundaries/);
   assert.match(skill, /required skill is unavailable.*stop and report/);
   assert.match(skill, /GitHub confirms the intended head merged, required reviews completed, and no actionable findings remain/);
+});
+
+test("evals distinguish matching preflight evidence from evidence invalidated by edits", () => {
+  assert.match(evalSpec, /^  - name: reuse-valid-work$/m);
+  assert.match(evalSpec, /^  - name: invalidate-stale-work[\s\S]*base and changeset have changed[\s\S]*Reruns affected checks/m);
+});
+
+test("catalog body makes both required skills visible beyond the generic install widget", async () => {
+  const catalog = await readFile(new URL("../../../site/src/content/skills/go.md", import.meta.url), "utf8");
+  const body = catalog.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
+  assert.match(body, /Requires `test-doctor` and `pr`/);
 });
