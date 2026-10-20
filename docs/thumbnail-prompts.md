@@ -336,3 +336,13 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: da5d5e3f168687410a4d977f975181e907924a06fe455afb8035a6c1b4adecd4
+
+## go (6abb40542164)
+
+Prompt: "Flat vector illustration, pure white background, 1024x1024, centered composition. One rounded launch-control dashboard is the hero surface. Inside, a clear left-to-right workflow transforms an amber unfinished plan into a green completed repository: five large connected icon tiles show a blueprint, a test flask with checkmark, code brackets, a review magnifying glass, and a Git branch merging into a green check. Use emerald green, deep navy, pale mint, and a small amber starting accent. Clean modern rounded shapes, soft long shadows, subtle dashed connectors, tiny sparkles, plenty of white space. A small GitHub Octocat mark sits upper-right with a dotted tether to the final merge tile, never the main subject. Diagram treatment only, readable at 175 pixels. No words, letters, numerals, labels, fake text, photorealism, 3D, clutter, rockets, or floating disconnected parts."
+
+Provider: azure-openai
+model: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+delivery: Direct authenticated Azure OpenAI HTTPS response saved as a local PNG; no additional provider call during ingestion.
+SHA-256: 6abb40542164c5e4c0843b3e79046a4d57e1c1232f006557aa137a71a48f884d

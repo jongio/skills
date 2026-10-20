@@ -91,6 +91,12 @@
       "source": "./skills/pr",
       "description": "A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge.",
       "version": "1.0.0"
+    },
+    {
+      "name": "go",
+      "source": "./skills/go",
+      "description": "Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge.",
+      "version": "1.0.0"
     }
   ]
 }

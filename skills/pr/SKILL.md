@@ -8,6 +8,8 @@ description: >-
 
 Run this end-to-end checklist for the given context, current directory, or worktree:
 
+Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits.
+
 ## Workflow
 
 1. **Branch & Commit**: Check `git status`, `git diff`, and the current/base branch in the target folder or worktree; if on the default/base branch or a detached `HEAD`, create a dedicated PR branch first (`git switch -c <branch>`), remove stray debug or secret files, preserve unrelated local edits, and commit intended uncommitted changes first.
