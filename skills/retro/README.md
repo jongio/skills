@@ -39,10 +39,18 @@ update skills also selects fix mode; a question about completion selects audit.
    Include existing branches/worktrees used by the session, not just newly
    created ones. Preview eligible cleanup and explicitly ask for confirmation;
    audit mode proposes it without granting deletion permission.
-6. Report **Complete**, **Complete with explicit deferrals**, or **Incomplete**,
-   ending with **Actions recommended / taken**, **Remaining work**, and
-   **Branches and worktrees**. List cleanup performed, awaiting confirmation,
-   or retained with reasons; report pending approval as remaining work.
+6. Report **Complete**, **Complete with explicit deferrals**, or **Incomplete**
+   in a short summary (normally at most 200 words), covering material findings,
+   remaining work, and branch/worktree dispositions. Keep the full ledger and
+   routine evidence details out of the default output; show exact cleanup
+   identities and proof separately when requesting approval.
+
+Every summary ends with a concrete recommendation: **Run `/retro fix`** when
+it can advance identified in-scope work; **Not yet - `/retro fix` is blocked**
+when a prerequisite must come first; or **No need to run `/retro fix`** when
+no actionable remediation remains. Explicit deferrals, deliberately retained
+worktrees, or cleanup confirmation alone do not warrant another fix run.
+Pending approval remains unfinished, not completed cleanup.
 
 Correct skills need no edits. A source edit is not a release or installation;
 the report distinguishes those states. Missing sibling skills or unavailable

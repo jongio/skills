@@ -63,7 +63,7 @@ test("bare retro audits and fix mode explicitly opts into authorized changes", (
     "`/retro fix`: audit, complete outstanding authorized work",
     "An explicit current natural-language request to fix outstanding work or update used skills also selects fix mode",
     "A question about whether the session is done selects audit mode",
-    "In audit mode, keep the ledger in the response without persisting it",
+    "In audit mode, keep the ledger in working context without persisting it",
     "In fix mode, finish open work already authorized",
     "Do not run commands that write generated artifacts",
     "A subsequent edit invalidates checks",
@@ -216,16 +216,46 @@ test("closeout summarizes actions, remaining work, and explicit cleanup confirma
     "not unrelated fix-mode work",
     "Without an answer or on decline, retain them",
     "not permission to delete unproven work",
-    "all three sections, even when one has no entries",
-    "**Actions recommended / taken**",
-    "**Remaining work**",
-    "**Branches and worktrees**",
+    "Cover these three topics without mandatory headings or empty sections",
+    "Actions recommended / taken:",
+    "Remaining work:",
+    "Branches and worktrees:",
     "Show the summary before requesting any pending cleanup confirmation",
     "A pending approval is remaining work, not completed cleanup or an explicit deferral",
     "refresh the summary with verified outcomes",
   ]);
-  for (const heading of ["**Actions recommended / taken**", "**Remaining work**", "**Branches and worktrees**"]) {
-    assert.ok(readme.includes(heading));
+});
+
+test("default closeout stays concise without weakening audit or approval evidence", () => {
+  includesAll(skill, [
+    "Do not print the full ledger unless the user requests detail",
+    "at most 200 words, excluding a required exact approval preview",
+    "Do not print the full ledger, source-by-source audit",
+    "Preserve the full audit internally",
+    "every actionable item and coverage gap visible",
+    "separate confirmation preview before approval",
+  ]);
+  assert.doesNotMatch(skill, /keep the ledger in the response|all three sections, even when one has no entries/);
+});
+
+test("fix recommendation depends on actionable work rather than the verdict alone", () => {
+  includesAll(skill, [
+    "End every summary with exactly one evidence-based recommendation",
+    "at least one concrete in-scope gap or justified skill improvement can be advanced now",
+    "any independent blockers it cannot resolve",
+    "finish such authorized work now",
+    "outstanding work exists, but none can advance",
+    "Do not suggest that rerunning fix will remove the blocker",
+    "cleanup awaiting its separate confirmation alone are not reasons to run fix",
+    "preserve an Incomplete verdict for any pending approval or unresolved blocker",
+  ]);
+  for (const recommendation of [
+    "**Run `/retro fix`**",
+    "**Not yet - `/retro fix` is blocked**",
+    "**No need to run `/retro fix`**",
+  ]) {
+    assert.ok(skill.includes(recommendation));
+    assert.ok(readme.includes(recommendation));
   }
 });
 
@@ -263,6 +293,9 @@ test("eval roster covers each distinct closeout failure mode", () => {
     "denial-is-not-a-merge-bypass",
     "authorized-gap-is-work-not-just-advice",
     "bare-retro-is-read-only-despite-prior-approval",
+    "concise-summary-with-actionable-fix",
+    "blocked-only-does-not-warrant-fix",
+    "verified-closeout-does-not-warrant-fix",
   ]);
   assert.equal((evals.match(/^    rubric:/gm) ?? []).length, names.length);
   assert.equal((evals.match(/^      - type: prompt$/gm) ?? []).length, names.length);

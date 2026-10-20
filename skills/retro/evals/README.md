@@ -9,7 +9,9 @@ Coverage includes missed user corrections, incomplete history, running agents,
 unknown skill sources, reusable lessons versus one-off preferences, public and
 private current-head review gates, COMMENTED versus approval, outdated feedback,
 local-only work, active checkouts, changed cleanup preconditions, explicit
-deferrals, merge denials, and finishing authorized gaps.
+deferrals, merge denials, and finishing authorized gaps. Summary cases check
+the default 200-word limit and distinguish actionable fix work, blocked-only
+work needing a prerequisite, and verified closeout with no reason to run fix.
 
 ```text
 npm run eval:lint

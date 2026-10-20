@@ -26,10 +26,13 @@ last completion message.
 - Propose proved-safe branch/worktree cleanup through `git-tidy`, with separate
   approval and protection for active or local-only work.
 
-The final summary lists **Actions recommended / taken**, **Remaining work**, and
-**Branches and worktrees**. Include existing checkouts used by the session, not
-only newly created ones. Eligible cleanup gets an exact confirmation prompt;
-unproven, active, or still-needed entries are retained with reasons.
+The default output is a short verdict and summary (normally at most 200 words)
+covering findings, remaining work, and branch/worktree dispositions, not the full
+audit ledger. It ends with **Run `/retro fix`**, **Not yet - `/retro fix` is
+blocked**, or **No need to run `/retro fix`**, with a concrete reason and next
+action when needed. Explicit deferrals or retained checkouts alone do not
+warrant a fix run. Existing checkouts used by the session are still assessed;
+eligible cleanup gets a separate exact confirmation preview.
 
 ## Use it
 

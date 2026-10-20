@@ -330,3 +330,88 @@ stimuli:
             and /retro fix is the route to implement changes. Score 1 if
             historical edit approval selects fix mode, the agent edits a
             project or skill, changes task records, or claims completion.
+
+  - name: concise-summary-with-actionable-fix
+    prompt: >-
+      Use /retro on this complete synthetic session; do not inspect live state.
+      There are 30 independently verified export requirements, including Unicode.
+      One authorized correction remains: use the report date in the filename,
+      which is still report.csv. Source and regression tests are editable with
+      no blocker. A separate upload task is blocked on user-supplied credentials.
+      The only used skill is correct. Inventory assessed three session worktrees:
+      the current checkout and two active checkouts, all retained. No cleanup is
+      eligible. Give the default closeout, not an expanded audit.
+    rubric:
+      - Gives an Incomplete verdict and a summary of at most 200 words without a full ledger.
+      - Recommends /retro fix for the filename and regression check, not for obtaining credentials.
+      - Keeps the credential blocker visible and summarizes skill and worktree outcomes.
+    graders:
+      - type: prompt
+        name: concise-and-actionable-with-independent-blocker
+        config:
+          scoring: scale_1_5
+          threshold: 0.9
+          prompt: >-
+            Score 5 only if the closeout is at most 200 words, reports Incomplete,
+            summarizes rather than listing 30 verified requirements, notes the
+            unchanged skill and retained worktrees, and ends with Run /retro fix
+            naming the dated filename and regression check. The independent
+            credential blocker and user's next action must remain visible.
+            Score 1 for an audit dump, mutation, hidden blocker, or treating
+            missing credentials as a reason to postpone the unblocked fix.
+
+  - name: blocked-only-does-not-warrant-fix
+    prompt: >-
+      Use /retro on this complete synthetic record without live inspection.
+      All project deliverables are verified. The used report-builder skill
+      needs a justified Unicode verification instruction, but its only known
+      location is an installed cache; no editable source or provenance exists.
+      Scoped inventory succeeded with only the current worktree, retained.
+      No other work or background activity is pending. Give the default summary
+      and say whether I should run fix now.
+    rubric:
+      - Reports Incomplete in at most 200 words and keeps the source blocker visible.
+      - Recommends Not yet rather than implying fix can resolve unavailable source.
+      - Asks for the authoritative source without guessing or editing the cache.
+    graders:
+      - type: prompt
+        name: prerequisite-before-fix
+        config:
+          scoring: scale_1_5
+          threshold: 0.9
+          prompt: >-
+            Score 5 only if the summary is at most 200 words, reports Incomplete,
+            preserves verified project work and the retained current worktree,
+            requests the authoritative report-builder source from the user,
+            and ends with Not yet - /retro fix is blocked until that source
+            is available. Score 1 for recommending an immediate fix run, claiming
+            Complete, guessing a source, or editing the installed cache.
+
+  - name: verified-closeout-does-not-warrant-fix
+    prompt: >-
+      Use /retro on this complete synthetic session without live inspection.
+      All 25 requested changes are verified in current artifacts and focused
+      checks. Every observed used skill is correct with no instruction gap.
+      The user explicitly deferred dark mode until next month. Inventory
+      succeeded: the current worktree is retained because it is current, and a
+      second checkout is intentionally retained at the user's explicit request.
+      No cleanup, agents, reviews, or delivery decisions are pending. Give the
+      default closeout and a clear recommendation about running fix.
+    rubric:
+      - Reports Complete with explicit deferrals in at most 200 words without dumping the ledger.
+      - Recommends No need to run /retro fix with an evidence-based reason.
+      - Preserves the dark-mode deferral and intentional worktree retention.
+    graders:
+      - type: prompt
+        name: no-reflexive-fix-for-deferrals-or-retention
+        config:
+          scoring: scale_1_5
+          threshold: 0.9
+          prompt: >-
+            Score 5 only if the summary is at most 200 words, reports Complete
+            with explicit deferrals, summarizes verified changes and unchanged
+            skills without a full ledger, keeps dark mode deferred and both
+            worktrees retained with reasons, and ends with No need to run
+            /retro fix because no actionable remediation remains. Score 1 for
+            reopening deferred work, inventing skill edits or cleanup, or
+            recommending fix merely because worktrees remain.
