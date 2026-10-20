@@ -357,3 +357,14 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 0484ad91bd4dd73793e42f8ec09b58f3158b7c8b201601ed1e0b1e629974a230
+
+## doc-doctor (f19845f36ba1)
+
+Prompt: "Flat vector illustration, pure white background, exactly 1024x1024, centered composition for a documentation doctor agent skill. One large rounded dark-navy documentation editor window is the hero surface. Inside it, show a clear left-to-right transformation: on the left, slightly misaligned document cards with abstract text dashes, an amber warning badge and a broken chain-link icon; a simple cyan arrow leads to the right, where a tidy open documentation booklet aligns with a compact code panel, joined by a repaired chain link and three small circular green check badges. A large simple magnifying glass over the booklet signals careful accuracy checking; a small mint medical cross is a subtle secondary cue, not a logo. Use teal and sky-blue accents with health green and restrained amber, clean modern rounded shapes, soft long shadows, a few subtle dashed guide lines and tiny sparkles. Place a small black GitHub Octocat mark at the upper right connected to the editor by one dotted tether; it is never the main subject. Diagram treatment: no readable text; document labels are short abstract dashes and rounded pills. Strong simple silhouettes, generous white space, crisp professional composition readable when downscaled to 175 pixels. Negative list: no words, letters, numerals, fake readable labels, watermarks, photorealism, 3D rendering, clutter, extra magnifying glasses, stethoscope tubes, or floating disconnected objects."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: f19845f36ba138e723b42b32710dda6c31c43cb61e6fccfa98728b8c29bfd3a7
