@@ -26,14 +26,23 @@ update skills also selects fix mode; a question about completion selects audit.
 1. Build a request-by-request ledger with evidence and explicit statuses.
 2. Identify gaps; in fix mode, finish authorized work and validate the current
    result, not an earlier draft.
-3. Review each used skill for reusable lessons. In fix mode, update its verified source,
-   not an installed cache; ask you where the source lives when it is unknown.
+3. Review each used skill for reusable lessons. In fix mode, create a dedicated
+   branch and worktree in the skill's source repository, not an installed cache
+   or the session's application repository. Ask where the source lives when unknown.
+   After making and validating the fix, retro asks whether you want a PR and
+   runs `/pr` from that worktree only if you agree. Declining leaves the fix in
+   its worktree without committing, pushing, or deleting it.
 4. Check PR completion; in fix mode, continue the standard `/pr` workflow,
    preserving current-head expected-review gates and repository policy.
 5. Identify cleanup candidates; in fix mode, use `git-tidy` after separate approval,
    preserving current, dirty, active, unproven, and still-needed worktrees.
+   Include existing branches/worktrees used by the session, not just newly
+   created ones. Preview eligible cleanup and explicitly ask for confirmation;
+   audit mode proposes it without granting deletion permission.
 6. Report **Complete**, **Complete with explicit deferrals**, or **Incomplete**,
-   with skill changes, cleanup results, and any remaining blockers.
+   ending with **Actions recommended / taken**, **Remaining work**, and
+   **Branches and worktrees**. List cleanup performed, awaiting confirmation,
+   or retained with reasons; report pending approval as remaining work.
 
 Correct skills need no edits. A source edit is not a release or installation;
 the report distinguishes those states. Missing sibling skills or unavailable

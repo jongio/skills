@@ -156,11 +156,21 @@ Resolve the canonical, editable source before changing anything:
    If access remains unavailable, record a blocked skill improvement with a
    concise proposed change; continue independent retro work.
 
-Preview the lesson and exact source files to change. In fix mode, apply
-small, reusable improvements authorized by this retro request; obtain any
-additional approval required by the source repository or host. Preserve
-unrelated edits and stop on conflicts. Do not edit a source repository's
-default branch when its contribution policy requires a separate branch.
+Preview the lesson and exact source files to change. In fix mode, create a
+dedicated branch and worktree in the verified skill-source repository before
+editing, not in the application repository merely because that is where the
+session ran. Verify the repository's intended base ref and full OID, follow
+its contribution/worktree conventions, and choose an unused branch and path;
+never force, reset, stash, or overwrite existing work. Obtain any additional
+approval required by the source repository or host. If source Git identity,
+base, or worktree creation is unavailable, report the improvement blocked;
+do not fall back to editing the original checkout or an installed copy.
+
+Apply and validate the skill fix only in that dedicated worktree. Reuse it
+only for the same session's related fixes in that source repository, after
+verifying ownership, branch, and existing changes. Separate source repositories
+need separate worktrees. Preserve unrelated edits and stop on conflicts.
+In audit mode, only propose the worktree and PR steps; create neither.
 
 Add or adjust a focused regression test/eval case when the skill's existing
 tooling supports it. Run its applicable deterministic checks and lint.
@@ -168,6 +178,15 @@ Capability evals that spend credits or launch agents require separate consent.
 Never copy private transcripts, secrets, identities, or project-specific
 incidents into a reusable skill; encode the general lesson with synthetic
 examples instead. Do not turn a one-session preference into a global rule.
+
+After making and validating the fix, show its source repository, worktree,
+branch, change summary, and validation outcome, then ask the user whether to
+create a PR for that fix. Only after an affirmative answer, continue the
+standard `/pr` workflow from the skill-source worktree, preserving its commit,
+push, review, and merge gates. Declining or not answering leaves the changes
+and worktree retained; no commit, push, PR, merge, or cleanup is implied.
+Record an unanswered delivery decision as pending and an explicit deferral
+as deferred, not delivered. Retain the worktree while its fix or PR is pending.
 
 Report each used skill as updated (with source path and validation), unchanged
 (with reason), or blocked (with the requested source/access). Source edits are
@@ -179,6 +198,13 @@ and do not claim the installed skill changed without checking.
 Do this after task remediation and skill edits, because both may create new
 work to preserve. Inventory session-associated branches and worktrees across
 the task and any edited skill-source repositories.
+Include existing branches and worktrees used by this session, not only ones
+created here. "No code changes" or "no new branches" is not evidence that
+there is nothing to assess. Use session/repository evidence to establish
+association; a name match or absence of the session ID is not ownership proof.
+Report discovered entries with uncertain association as retained and out of
+scope pending clarification, rather than silently omitting them or widening
+cleanup authority.
 
 Delegate the cleanup decision to the installed `git-tidy` skill's proof and
 approval workflow, using a bounded target set and the
@@ -196,6 +222,15 @@ evidence, and actions. Obtain separate explicit approval, revalidate immediately
 before execution, and verify the postcondition. Keep anything active, dirty,
 unproven, unapproved, or still needed. Declined cleanup means retained, not
 deleted. Do not remove the current or primary worktree during its own retro.
+Present eligible candidates in the closing summary and ask for confirmation
+of that exact action set using the host's confirmation tool. Do not merely
+mention that approval would be required. In audit mode, label cleanup as
+proposed; an affirmative answer authorizes only the stated cleanup actions,
+not unrelated fix-mode work. Without an answer or on decline, retain them.
+If no candidate is eligible, list the assessed entries and retention reasons,
+or the successfully inventoried scope with no entries. If proof is missing,
+report cleanup as blocked and ask only for the missing scope/access decision,
+not permission to delete unproven work.
 
 ### 6. Reconcile again and give a truthful closeout
 
@@ -213,11 +248,27 @@ Lead with one verdict:
 - **Incomplete**: any open or blocked work, missing session evidence,
   pending agent/review/check, or unverified action remains.
 
-Keep the report concise but include task/feedback reconciliation, source-skill
-changes and validation, cleanup performed or retained, and every blocker or
-deferral. Distinguish "implemented" from "validated", "committed", "pushed",
-"merged", and "installed"; never imply a state not observed. Leave a clear
-next action for anything incomplete rather than claiming the session is done.
+End with a concise summary containing all three sections, even when one has
+no entries:
+
+- **Actions recommended / taken**: in audit mode, list recommendations; in
+  fix mode, separate verified actions taken from proposals not performed.
+  Include task/feedback reconciliation and used-skill changes and validation.
+- **Remaining work**: list each open item, blocker, pending decision, or
+  explicit deferral with its next action and owner when known. Say "None"
+  only when the ledger and evidence support it.
+- **Branches and worktrees**: identify repository, branch, path, disposition,
+  and reason for each scoped entry. Separate verified cleanup performed,
+  eligible cleanup awaiting confirmation, and retained/blocked entries.
+  Include exact OIDs, preservation evidence, and proposed actions for the
+  confirmation preview; never present an unproven candidate as safe to delete.
+
+Show the summary before requesting any pending cleanup confirmation. A pending
+approval is remaining work, not completed cleanup or an explicit deferral.
+After an approved cleanup attempt, refresh the summary with verified outcomes
+and any failures or retained entries; do not leave the preview as the final
+record. Distinguish "implemented" from "validated", "committed", "pushed",
+"merged", and "installed"; never imply a state not observed.
 
 ## Safety
 
@@ -239,6 +290,9 @@ blocked; do not retry through a wrapper or a weaker tool.
   blocked/deferred. Audit mode reports the remaining work without changing it.
 - Every observed used skill has an update, no-change reason, or source blocker;
   unknown sources prompted a user question instead of a guessed edit.
+- Skill fixes live in dedicated source-repository worktrees; PR delivery was
+  offered and performed only with explicit consent, or remains visibly pending
+  or deferred with the worktree retained.
 - Cleanup is proved, separately approved, revalidated, and verified, or the
   exact candidates are retained with reasons.
 - PR review gates, source-repository policies, and read-only audit mode are preserved.

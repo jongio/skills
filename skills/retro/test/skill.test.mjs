@@ -103,6 +103,29 @@ test("synthetic closeouts use supplied facts without inspecting live state", () 
   ]);
 });
 
+test("skill fixes use source-repository worktrees and opt-in PR delivery", () => {
+  includesAll(skill, [
+    "create a dedicated branch and worktree in the verified skill-source repository before editing",
+    "not in the application repository merely because that is where the session ran",
+    "Verify the repository's intended base ref and full OID",
+    "never force, reset, stash, or overwrite existing work",
+    "If source Git identity, base, or worktree creation is unavailable",
+    "do not fall back to editing the original checkout",
+    "Apply and validate the skill fix only in that dedicated worktree",
+    "Reuse it only for the same session's related fixes in that source repository",
+    "ask the user whether to create a PR for that fix",
+    "Only after an affirmative answer, continue the standard `/pr` workflow from the skill-source worktree",
+    "Declining or not answering leaves the changes and worktree retained",
+    "no commit, push, PR, merge, or cleanup is implied",
+    "In audit mode, only propose the worktree and PR steps",
+  ]);
+  includesAll(readme, [
+    "dedicated branch and worktree in the skill's source repository",
+    "asks whether you want a PR",
+    "Declining leaves the fix in its worktree",
+  ]);
+});
+
 test("unfinished authorized work is not treated as missing permission", () => {
   includesAll(skill, [
     "Separate authorization evidence from completion evidence",
@@ -179,6 +202,31 @@ test("non-interactive merge example pins the head and selects exactly one method
     "`--match-head-commit` pins the head; it does not select a merge method",
     "ask before choosing one",
   ]);
+});
+
+test("closeout summarizes actions, remaining work, and explicit cleanup confirmation", () => {
+  includesAll(skill, [
+    "Include existing branches and worktrees used by this session, not only ones created here",
+    '"No code changes" or "no new branches" is not evidence',
+    "a name match or absence of the session ID is not ownership proof",
+    "uncertain association as retained and out of scope pending clarification",
+    "ask for confirmation of that exact action set using the host's confirmation tool",
+    "Do not merely mention that approval would be required",
+    "In audit mode, label cleanup as proposed",
+    "not unrelated fix-mode work",
+    "Without an answer or on decline, retain them",
+    "not permission to delete unproven work",
+    "all three sections, even when one has no entries",
+    "**Actions recommended / taken**",
+    "**Remaining work**",
+    "**Branches and worktrees**",
+    "Show the summary before requesting any pending cleanup confirmation",
+    "A pending approval is remaining work, not completed cleanup or an explicit deferral",
+    "refresh the summary with verified outcomes",
+  ]);
+  for (const heading of ["**Actions recommended / taken**", "**Remaining work**", "**Branches and worktrees**"]) {
+    assert.ok(readme.includes(heading));
+  }
 });
 
 test("local documentation links resolve inside the skill package", async () => {
