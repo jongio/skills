@@ -40,6 +40,12 @@ PRs, agents, branches, and worktrees. A named prior session is allowed only
 when the user explicitly selects it. Never audit unrelated sessions or tidy
 an entire machine as a side effect.
 
+For a synthetic or scenario-only request, use the supplied facts as scenario
+assumptions, not permission to inspect or change live state. Read the skill and
+its references as needed, but do not query real repositories, session trackers,
+agents, or network services unless the current user explicitly requests live
+verification. Describe scenario actions without claiming they were executed.
+
 ## Workflow
 
 ### 1. Recover the evidence and declare coverage
@@ -98,6 +104,13 @@ Respect newer constraints and existing approval boundaries; a retro does not
 authorize new features, deployments, paid calls, commits, pushes, or merges.
 Ask before a material scope change or an action needing separate approval.
 Do not merely recommend a fix that you can safely make within the scope.
+
+Separate authorization evidence from completion evidence. A missing successful
+result means the authorized work is unfinished, not that permission is missing.
+In fix mode, name and carry out the concrete edit and focused regression check
+when authorized and unblocked; do not invent a new approval blocker. In a
+scenario-only request, describe those same concrete actions without performing
+them. Keep independently blocked tasks visible and the verdict Incomplete.
 
 Use the original task's established workflow. For PR work, continue the
 standard `/pr` workflow; Devy supplements it and never replaces it. Apply

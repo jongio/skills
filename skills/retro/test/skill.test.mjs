@@ -92,6 +92,28 @@ test("skill changes require real usage and verified authoritative source", () =>
   ]);
 });
 
+test("synthetic closeouts use supplied facts without inspecting live state", () => {
+  includesAll(skill, [
+    "For a synthetic or scenario-only request",
+    "supplied facts as scenario assumptions, not permission to inspect or change live state",
+    "Read the skill and its references as needed",
+    "do not query real repositories, session trackers, agents, or network services",
+    "unless the current user explicitly requests live verification",
+    "Describe scenario actions without claiming they were executed",
+  ]);
+});
+
+test("unfinished authorized work is not treated as missing permission", () => {
+  includesAll(skill, [
+    "Separate authorization evidence from completion evidence",
+    "A missing successful result means the authorized work is unfinished, not that permission is missing",
+    "name and carry out the concrete edit and focused regression check",
+    "do not invent a new approval blocker",
+    "describe those same concrete actions without performing them",
+    "Keep independently blocked tasks visible and the verdict Incomplete",
+  ]);
+});
+
 test("PR gates preserve expected reviewers, current-head completion, and exact exception", () => {
   includesAll(safety, [
     "Devy supplements the built-in `/pr` command",
@@ -110,6 +132,19 @@ test("PR gates preserve expected reviewers, current-head completion, and exact e
     "structured `merge_pull_request` with `sha`",
     "Do not bypass a denial with wrappers, scripts, raw APIs, admin, or deferred auto-merge",
     "read GitHub state to verify",
+  ]);
+});
+
+test("PR reports state independent approval gates and do not offer raw REST alternatives", () => {
+  includesAll(safety, [
+    "name required approvals separately from review completion",
+    "posted-feedback disposition",
+    "every non-exempt expected review on the current head",
+    "required approvals, passing CI, repository merge rules, merge authorization, and exact head pinning",
+    'Do not hide these independent gates behind "repository rules"',
+    "Do not offer a raw REST merge as an equivalent command after a denial",
+    "even for later use",
+    "explicit repository, full head SHA, and authorized method",
   ]);
 });
 

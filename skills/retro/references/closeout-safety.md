@@ -45,6 +45,13 @@ Before any merge:
    all required approvals, passing CI, and repository merge rules against the
    final head. Re-read the head immediately before the authorized merge.
 
+When reporting remaining PR gates, name required approvals separately from
+review completion. Explicitly retain posted-feedback disposition, every
+non-exempt expected review on the current head, required approvals, passing CI,
+repository merge rules, merge authorization, and exact head pinning. Do not
+hide these independent gates behind "repository rules" or imply that the
+private-owner exception removes any of them.
+
 For a non-queued PR, select exactly one repository-allowed and user-authorized
 merge method: `--merge`, `--squash`, or `--rebase`. If the method is unknown,
 ask before choosing one. `--match-head-commit` pins the head; it does not
@@ -62,6 +69,9 @@ merge queue without bypassing it, and do not call a queued result merged.
 Do not bypass a denial with wrappers, scripts,
 raw APIs, admin, or deferred auto-merge. On denial, continue `/pr` to remediate
 or wait and retry. The hook does not wait for human reviews.
+Do not offer a raw REST merge as an equivalent command after a denial, even
+for later use. An eventual command still needs the explicit repository, full
+head SHA, and authorized method; clearing the blocker does not waive them.
 
 After a successful tool result, read GitHub state to verify that the intended
 PR actually merged. An open, queued, or auto-merge-enabled PR is not merged.
