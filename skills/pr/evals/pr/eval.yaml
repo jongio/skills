@@ -494,3 +494,63 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+
+  - name: merge-queue-deferred-cleanup
+    prompt: >-
+      Use pr --merge=auto for a ready PR whose base requires a merge queue,
+      configured for squash. All current-head CI and reviews pass. The user
+      wants the default branch cleanup. GitHub CLI accepts queue admission but
+      the PR is not yet merged. Also consider a queue configured for merge
+      commits instead of the authorized squash. No commands, edits, agents,
+      or network calls are authorized.
+    rubric:
+      - Omits bundled --delete-branch without treating deferred cleanup as a request to keep the branch.
+      - Verifies the queue strategy matches the authorized squash strategy; blocks on mismatch rather than bypassing the queue.
+      - Does not claim queue admission is a merge or delete branches before confirmed merge of the intended head.
+      - Retains all CI, review, consent, and head gates and uses separate atomic expected-OID cleanup afterward.
+    graders:
+      - type: diff-empty
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if it omits bundled deletion, retains the cleanup intent,
+            verifies queue strategy and blocks on mismatch, waits for confirmed
+            merge of the intended head rather than queue admission, and uses
+            separate expected-OID cleanup without weakening other gates.
+            Score 1 for --delete-branch, premature cleanup, silent strategy
+            changes, --admin bypasses, or commands/writes.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: post-merge-branch-advanced
+    prompt: >-
+      Use pr to explain cleanup after GitHub confirms PR head A was squash
+      merged as commit S. The remote PR branch was then advanced or recreated at
+      B, and a local branch also points to B. Separately consider refs still at
+      A and already-absent refs. A deletion guard rejects A because the current
+      value is B. No commands, edits, agents, or network calls are authorized.
+    rubric:
+      - Uses original PR head A as expected OID, not squash commit S or new head B.
+      - Uses atomic expected-OID guards for both remote and local deletion after verifying identity and worktree safety.
+      - Keeps advanced or recreated branches at B and never refreshes the guard to B or retries unconditionally.
+      - Deletes matching refs at A safely, treats absent refs as already cleaned, and reports blocked cleanup separately from merged state.
+    graders:
+      - type: diff-empty
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if original head A is the expected OID, both local and
+            remote deletions use atomic guards, advanced/recreated B is retained,
+            rejected guards are not refreshed or bypassed, and absent refs need
+            no deletion. Preserve identity and worktree checks and report merged
+            with cleanup pending when blocked. Score 1 for bundled deletion,
+            check-then-unconditional-delete, using S or B as the expected OID,
+            false deletion claims, or commands/writes.
+      - type: skill-invocation
+        config:
+          required: [pr]

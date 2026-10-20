@@ -38,14 +38,31 @@ approval, not merged. A changed head or strategy requires fresh confirmation.
 Auto mode skips only this prompt, not publication or other approval boundaries.
 It does not enable GitHub's `--auto` queue.
 
-Both modes default to **squash merge and delete the PR branch afterward**
-(`--squash --delete-branch`). Explicitly request another strategy or keeping the
-branch to override either default. If squash is unavailable, the workflow asks
-rather than silently switching strategies. The final prompt includes cleanup.
-After confirmed merge, verify remote and local deletion separately; never delete
-the base/default branch or an advanced head, force-delete a branch, remove a
-worktree, or discard local changes. Blocked cleanup is reported as "merged with
-cleanup pending", not successful deletion.
+Both modes default to **squash merge and delete the PR branch afterward**.
+Explicitly request another strategy or keeping the branch to override either
+default. If squash is unavailable, the workflow asks rather than silently
+switching strategies. The final prompt includes cleanup.
+
+Merge without `--delete-branch`; cleanup is a separate step after GitHub confirms
+the intended head merged. For a required merge queue, first verify its configured
+strategy matches the authorized strategy. Queue admission is not a completed
+merge and never permits early cleanup or bypassing review, CI, or consent gates.
+
+Verify the head repository, remote, and branch, including fork identity. Delete
+remote and local refs only with atomic expected-OID guards using the original
+PR head OID, not the squash/merge commit:
+
+```text
+git push --force-with-lease=refs/heads/<branch>:<merged-head-OID> <verified-head-remote> :refs/heads/<branch>
+git update-ref --no-deref -d refs/heads/<branch> <merged-head-OID>
+```
+
+The local branch must be non-symbolic and not checked out in any worktree.
+Never delete a base/default branch or an advanced head, replace the expected OID
+to retry a failed guard, force-delete a branch, remove a worktree, or discard local
+changes. Verify local and remote deletion separately. Already-absent refs need no
+deletion; blocked or unavailable safe cleanup is reported as "merged with cleanup
+pending", not successful deletion.
 
 ## Progress and blocked work
 

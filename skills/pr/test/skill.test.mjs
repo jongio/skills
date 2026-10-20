@@ -45,7 +45,8 @@ test("workflow remains concise and covers preflight, review routing, monitoring,
   assert.match(skill, /exact validation commands plus results/);
   assert.match(skill, /preserve its headings, comments, checklist items, and ordering/);
   assert.match(skill, /explicit merge authorization/);
-  assert.match(skill, /gh pr merge <number> -R <owner\/repo> --squash --delete-branch --match-head-commit <full-head-OID>/);
+  assert.match(skill, /gh pr merge <number> -R <owner\/repo> --squash --match-head-commit <full-head-OID>/);
+  assert.doesNotMatch(skill, /`gh pr merge [^`]*--delete-branch/);
   assert.match(skill, /Never use GitHub auto-merge.*`--admin`, raw API calls, or wrappers/);
   assert.match(skill, /Verify actual merged state afterward/);
   assert.doesNotMatch(skill, /gh pr merge --auto|Copilot never auto-requested on private repos/);
@@ -53,10 +54,25 @@ test("workflow remains concise and covers preflight, review routing, monitoring,
 
 test("defaults to squash and branch deletion without destructive worktree cleanup", () => {
   assert.match(skill, /Default to squash merging and deleting the PR branch after merge/);
-  assert.match(skill, /replace `--squash` or omit `--delete-branch` only.*explicitly requests/);
+  assert.match(skill, /replace `--squash` only.*explicitly requests/);
   assert.match(skill, /Verify branch deletion separately/);
   assert.match(skill, /Never force-delete.*remove worktrees.*discard local changes/);
   assert.match(skill, /cleanup is blocked.*merged with cleanup pending/);
+});
+
+test("queue admission waits for confirmed merge and preserves the authorized strategy", () => {
+  assert.match(skill, /merge queue.*configured strategy.*authorized strategy/);
+  assert.match(skill, /Queue admission is not a merge/);
+  assert.match(skill, /wait for GitHub to confirm.*intended head.*before cleanup/);
+  assert.match(skill, /Never bundle.*`--delete-branch`/);
+});
+
+test("cleanup requires atomic expected-OID deletion rather than check-then-delete", () => {
+  assert.match(skill, /Verify the PR head repository, remote, and branch/);
+  assert.match(skill, /git push --force-with-lease=refs\/heads\/<branch>:<merged-head-OID> <verified-head-remote> :refs\/heads\/<branch>/);
+  assert.match(skill, /git update-ref --no-deref -d refs\/heads\/<branch> <merged-head-OID>/);
+  assert.match(skill, /original PR head OID, not the squash\/merge commit/);
+  assert.match(skill, /do not refresh the expected OID or retry.*unconditional deletion/);
 });
 
 test("merge consent defaults to a fresh head-bound approval, with an invocation-only auto override", () => {
@@ -82,6 +98,8 @@ test("merge-mode documentation exposes both options and preserves safety gates",
     assert.match(text, /GitHub.*--auto/);
     assert.match(text, /default.*squash/i);
     assert.match(text, /delet(?:e|ing) the PR branch afterward/i);
+    assert.doesNotMatch(text, /`--squash --delete-branch`/);
+    assert.match(text, /expected-OID/);
   }
 });
 
@@ -159,6 +177,8 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "changed-head-needs-fresh-approval",
     "conflicting-merge-modes",
     "squash-and-cleanup-defaults",
+    "merge-queue-deferred-cleanup",
+    "post-merge-branch-advanced",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
   assert.equal((evalSpec.match(/type: skill-invocation/g) ?? []).length, cases.length);

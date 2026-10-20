@@ -50,6 +50,11 @@ Changed heads or strategies require fresh confirmation in approval mode.
 Declined or unavailable confirmation leaves the PR awaiting approval, not merged.
 Auto mode preserves all CI, review, feedback, and other approval gates and does
 not enable GitHub's `--auto` queue.
-Both modes default to squash merging and deleting the PR branch afterward
-(`--squash --delete-branch`), unless explicitly overridden. Cleanup is verified
-separately; blocked local cleanup is reported rather than forced or claimed done.
+Both modes default to squash merging and deleting the PR branch afterward,
+unless explicitly overridden. Merge without `--delete-branch`, then perform
+separate cleanup with atomic expected-OID guards using the original PR head.
+Verify the head repository and branch, and leave checked-out local branches alone.
+For required merge queues, verify the queue strategy matches the authorized
+strategy and wait for confirmed merge, not just queue admission, before cleanup.
+Verify local and remote deletion separately; failed guards or unavailable safe
+cleanup are reported as pending rather than retried unconditionally or claimed done.
