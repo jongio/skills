@@ -2,7 +2,7 @@ name: pr
 description: >-
   Capability eval for the pr skill. Verifies preflight checklist execution,
   private repository Copilot reviewer suppression, bot vs human comment
-  resolution, CI/rebase monitoring, and auto-merge readiness.
+  resolution, embedded review-body findings, CI/rebase monitoring, and auto-merge readiness.
 type: capability
 
 defaults:
@@ -45,6 +45,97 @@ stimuli:
             auto-merge) and explicitly states that Copilot will not be automatically added as a
             reviewer on a private repository. Score 1 if it automatically requests Copilot review
             on the private repository or skips preflight checks.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: clean-headline-hides-body-only-finding
+    prompt: |
+      Use the pr skill to assess this complete synthetic PR review evidence.
+      Plan only; do not perform repository or network writes. CI is green,
+      the PR is up to date, and required approvals are satisfied. The paginated
+      inline-comment and thread collections are empty. The submitted Copilot
+      review body on the current head is:
+
+      <!-- ccr-overview-v2 -->
+      ### Needs a closer look
+      **No open issues**
+      <details>
+      <summary><strong>1 previously missed issue</strong></summary>
+      In code that hasn't changed since last review
+      <details>
+      <summary>Medium: Configured timeout is ignored</summary>
+      `src/client.ts:42`
+      The request still uses a hard-coded 60-second timeout instead of the
+      caller's configured timeout. Current code inspection confirms this.
+      Thread creation was unavailable; this finding exists only in review R17.
+      </details>
+      </details>
+
+      Can the workflow declare review feedback clear, and what happens next?
+    tags:
+      scenario: embedded-review-finding
+      cost: low
+    rubric:
+      - Identifies the ignored configured timeout inside the nested review body.
+      - Does not trust No open issues or empty inline/thread collections as an all-clear.
+      - Keeps the finding blocking until fixed and verified or explicitly settled with evidence.
+      - Plans a PR reply identifying review R17 and the heading without claiming a thread was resolved.
+    graders:
+      - type: diff-empty
+        name: embedded-finding-plan-is-read-only
+      - type: prompt
+        name: catches-issue-hidden-by-clean-headline
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent identifies the configured-timeout defect
+            in the nested review body, refuses an all-clear despite the clean
+            headline and empty thread collections, plans a verified fix or
+            evidence-backed settlement, and plans a PR reply citing R17 and
+            the finding heading. Score 1 if it merges or enables auto-merge
+            before disposition, ignores unchanged-code findings, claims a
+            nonexistent thread resolved, or performs writes.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: deduplicate-and-revalidate-review-body-findings
+    prompt: >-
+      Use the pr skill to plan remediation using this complete synthetic
+      evidence; do not perform writes. Copilot review R20 has a body section
+      called "Resolved findings" describing missing pagination. Current-head
+      inspection shows pagination is still absent and data is truncated after
+      the first page. The same concern is repeated in inline thread T5, linked
+      from the body. An older review R19 reports incorrect date formatting;
+      current-head code and regression tests prove that date issue fixed.
+      A PR conversation comment asks an unanswered human design question.
+      CI passes. How many distinct code findings need work and how should
+      the workflow handle each source of feedback before merging?
+    tags:
+      scenario: finding-reconciliation
+      cost: low
+    rubric:
+      - Tracks one open pagination defect despite duplicate body and inline reports.
+      - Does not trust the Resolved findings label over current code evidence.
+      - Records the old date-formatting finding as verified fixed rather than reopening it.
+      - Keeps the unanswered human design question open and withholds an all-clear.
+    graders:
+      - type: diff-empty
+        name: finding-reconciliation-is-read-only
+      - type: prompt
+        name: reconciles-sources-against-current-head
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent counts one distinct open code defect
+            (pagination), links its body and inline reports, rejects the stale
+            resolved label using current evidence, preserves the verified
+            date fix, and leaves the human design question open. Score 1 if it
+            double-counts pagination, declares it resolved, reopens the proven
+            date fix without cause, resolves the human question, or performs writes.
       - type: skill-invocation
         config:
           required: [pr]

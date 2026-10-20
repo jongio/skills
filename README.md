@@ -25,6 +25,7 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`test-doctor`](skills/test-doctor/) | Audit test correctness, coverage, reliability, and maintenance; optionally repair material gaps without gaming the suite. |
 | [`pr`](skills/pr/) | A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge. |
 | [`go`](skills/go/) | Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge. |
+| [`retro`](skills/retro/) | Close out a session with an evidence-backed task and feedback audit, source-skill improvements, and safely approved branch and worktree cleanup |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:

@@ -10,6 +10,18 @@ npx skills add jongio/skills --skill pr --skill test-doctor
 
 Reload your agent skills, then invoke `/pr`. (`test-doctor` is used during the preflight test check.)
 
+## Review feedback
+
+The workflow reads full submitted review bodies and PR conversation comments,
+not just inline comments and unresolved threads. Copilot can embed actionable
+findings inside nested details, including "previously missed" issues in unchanged
+code, even when the same review says "No open issues".
+
+Each finding receives an evidence-backed disposition. Duplicate links are
+reconciled, older findings are checked against the current head, and body-only
+findings receive a PR reply identifying the review and heading rather than a
+claim that a nonexistent thread was resolved.
+
 ## Development
 
 ```sh
@@ -18,8 +30,9 @@ npm test
 npm run eval:lint
 ```
 
-The deterministic test checks the portable skill shape. The Vally capability eval verifies that
-the agent follows the workflow.
+Deterministic tests check portable skill shape, instruction contracts, and
+registration. Synthetic capability scenarios cover review routing and feedback,
+including body-only findings; linting them does not establish agent behavior.
 
 ## License
 

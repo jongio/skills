@@ -34,15 +34,38 @@ test("workflow remains concise and covers preflight, review routing, monitoring,
   assert.match(skill, /auto-merge/i);
 });
 
+test("review inventory includes full bodies rather than trusting clean summary counts", () => {
+  const text = skill.replace(/\s+/g, " ");
+  assert.match(text, /all submitted review bodies, PR conversation comments, inline review comments, and review threads/i);
+  assert.match(text, /Paginate every collection/i);
+  assert.match(text, /nested `<details>`\/`<summary>`/);
+  assert.match(text, /previously missed/i);
+  assert.match(text, /unchanged code/i);
+  assert.match(text, /"No open issues".*not proof that feedback is clear/i);
+});
+
+test("body-only findings get evidence-backed disposition without fake thread resolution", () => {
+  const text = skill.replace(/\s+/g, " ");
+  assert.match(text, /Deduplicate.*review ID.*heading.*file\/line/i);
+  assert.match(text, /revalidate older findings against the current head/i);
+  assert.match(text, /body-only finding.*PR comment citing its review ID and heading/i);
+  assert.match(text, /no thread to resolve/i);
+  assert.match(text, /body-only findings.*addressed.*merge/i);
+});
+
 test("eval spec covers private repo reviewer rules, comment resolution, and balanced grader weights", () => {
   assert.doesNotMatch(evalSpec, /devx|devy/i);
   const cases = [...evalSpec.matchAll(/^  - name: (.+)$/gm)].map(([, name]) => name);
   assert.deepEqual(cases, [
     "private-repo-skips-auto-copilot-review",
+    "clean-headline-hides-body-only-finding",
+    "deduplicate-and-revalidate-review-body-findings",
     "bot-vs-human-comment-resolution",
   ]);
-  assert.match(evalSpec, /type: diff-empty/);
-  assert.match(evalSpec, /type: skill-invocation/);
+  assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
+  assert.equal((evalSpec.match(/type: skill-invocation/g) ?? []).length, cases.length);
+  assert.match(evalSpec, /\*\*No open issues\*\*[\s\S]*<details>[\s\S]*previously missed[\s\S]*<details>/);
+  assert.match(evalSpec, /finding exists only in review R17/);
   const weights = Object.fromEntries(
     [...evalSpec.matchAll(/^    (prompt|diff-empty|skill-invocation): ([\d.]+)$/gm)]
       .map(([, type, weight]) => [type, Number(weight)]),
