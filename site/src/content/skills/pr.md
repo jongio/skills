@@ -16,6 +16,13 @@ A concise checklist workflow for taking changes from local commit and preflight 
 Requires `test-doctor` and `doc-doctor`. PR preflight owns the documentation pass,
 including when called by `go`, and reuses matching passing evidence.
 
+Preserves the PR template and records exact validation commands and results.
+Expects Copilot review unless an explicitly authorized, verified private-owner
+exception applies; posted feedback remains in scope. Every expected review must
+complete on the full current head OID, with `COMMENTED` distinct from approval.
+Merges require authorization and all gates satisfied, use a literal head-pinned
+command, and verify actual merged state rather than enabling auto-merge.
+
 ## Install with required skills
 
 The single-skill options above do not install dependencies. Use this command

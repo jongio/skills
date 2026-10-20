@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const skill = (await readFile(new URL("../SKILL.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-const evalSpec = await readFile(new URL("../evals/pr/eval.yaml", import.meta.url), "utf8");
+const evalSpec = (await readFile(new URL("../evals/pr/eval.yaml", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 
 test("portable skill frontmatter contains only name and description", () => {
   const frontmatter = skill.match(/^---\n([\s\S]*?)\n---/);
@@ -27,11 +27,28 @@ test("workflow remains concise and covers preflight, review routing, monitoring,
   assert.match(skill, /npx skills add jongio\/skills --skill test-doctor/);
   assert.match(skill, /light security review/i);
   assert.match(skill, /linter and build/i);
-  assert.match(skill, /Never automatically add Copilot as a reviewer on \*\*private\*\* repositories/);
+  assert.match(skill, /including Copilot by default/);
+  assert.match(skill, /gh repo view --json owner,isPrivate/);
+  assert.match(skill, /explicit user-authorized private-owner exception/);
+  assert.match(skill, /both private visibility and the exact allowed owner login/);
+  assert.match(skill, /already-pending Copilot requests/);
+  assert.match(skill, /never waives posted feedback or other required reviews/);
+  assert.match(skill, /Private visibility alone is not an exception/);
   assert.match(skill, /resolve automated\/bot threads/i);
   assert.match(skill, /keep human threads with open questions open/i);
   assert.match(skill, /rebase/i);
-  assert.match(skill, /auto-merge/i);
+  assert.match(skill, /review threads \(including outdated ones\)/);
+  assert.match(skill, /submitted, non-dismissed review from every expected reviewer on the full current head OID/);
+  assert.match(skill, /COMMENTED is completion, not approval/);
+  assert.match(skill, /Green CI, mergeability, empty review requests, and reviewDecision do not prove completion/);
+  assert.match(skill, /Every new push invalidates/);
+  assert.match(skill, /exact validation commands plus results/);
+  assert.match(skill, /preserve its headings, comments, checklist items, and ordering/);
+  assert.match(skill, /explicit merge authorization/);
+  assert.match(skill, /gh pr merge <number> -R <owner\/repo> --squash --match-head-commit <full-head-OID>/);
+  assert.match(skill, /Never use auto-merge, `--admin`, raw API calls, or wrappers/);
+  assert.match(skill, /Verify actual merged state afterward/);
+  assert.doesNotMatch(skill, /gh pr merge --auto|Copilot never auto-requested on private repos/);
 });
 
 test("review inventory includes full bodies rather than trusting clean summary counts", () => {
@@ -65,14 +82,15 @@ test("body-only findings get evidence-backed disposition without fake thread res
   assert.match(text, /revalidate older findings against the current head/i);
   assert.match(text, /body-only finding.*PR comment citing its review ID and heading/i);
   assert.match(text, /no thread to resolve/i);
-  assert.match(text, /body-only findings.*addressed.*merge/i);
+  assert.match(text, /all actionable feedback \(including review-body-only findings\) is addressed/i);
 });
 
 test("eval spec covers private repo reviewer rules, comment resolution, and balanced grader weights", () => {
   assert.doesNotMatch(evalSpec, /devx|devy/i);
   const cases = [...evalSpec.matchAll(/^  - name: (.+)$/gm)].map(([, name]) => name);
   assert.deepEqual(cases, [
-    "private-repo-skips-auto-copilot-review",
+    "verified-private-owner-exception",
+    "other-private-owner-requires-current-head-review",
     "clean-headline-hides-body-only-finding",
     "deduplicate-and-revalidate-review-body-findings",
     "bot-vs-human-comment-resolution",
@@ -96,4 +114,25 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
       `${requiredGrader} failure must prevent passing threshold`,
     );
   }
+});
+
+test("review and merge evals distinguish exemptions, completion, approval, and authorization", () => {
+  const exception = evalSpec.split("  - name: verified-private-owner-exception\n")[1]
+    ?.split("\n  - name: ")[0];
+  const nonExempt = evalSpec.split("  - name: other-private-owner-requires-current-head-review\n")[1]
+    ?.split("\n  - name: ")[0];
+  assert.ok(exception);
+  assert.ok(nonExempt);
+  assert.match(exception, /doc-doctor, test-doctor/);
+  assert.match(exception, /already pending, with posted/);
+  assert.match(exception, /required human review/);
+  assert.match(exception, /template-preserving PR body/);
+  assert.match(exception, /exact validation commands\/results/);
+  assert.match(exception, /reject auto-merge/);
+  assert.match(nonExempt, /Copilot approved the previous head/);
+  assert.match(nonExempt, /COMMENTED on the new/);
+  assert.match(nonExempt, /No merge authorization/);
+  assert.match(nonExempt, /actual final-head submitted reviews from every/);
+  assert.match(nonExempt, /repository, PR number, authorized strategy and full --match-head-commit/);
+  assert.match(nonExempt, /merged-state verification/);
 });

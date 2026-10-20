@@ -1,8 +1,9 @@
 name: pr
 description: >-
   Capability eval for the pr skill. Verifies preflight checklist execution,
-  private repository Copilot reviewer suppression, bot vs human comment
-  resolution, embedded review-body findings, CI/rebase monitoring, and auto-merge readiness.
+  verified owner-specific private repository exceptions, exact-head review
+  completion, embedded review-body findings, bot vs human comment resolution,
+  and authorized head-pinned merge.
 type: capability
 
 defaults:
@@ -18,19 +19,23 @@ scoring:
   threshold: 0.8
 
 stimuli:
-  - name: private-repo-skips-auto-copilot-review
+  - name: verified-private-owner-exception
     prompt: >-
       Use the pr skill to plan the PR workflow for uncommitted changes in a
-      private repository where no human reviewer was specified and auto-merge
-      was requested. Do not run repository or network writes; state the exact
-      checklist steps you will execute.
+      private repository owned by sample-owner. The user explicitly exempts
+      private repositories owned by sample-owner from requesting or waiting
+      for Copilot review. One Copilot request is already pending, with posted
+      feedback, and a required human review is outstanding. The user requests
+      auto-merge. Treat these as scenario facts; do not run repository or network
+      writes. State the exact checklist and remaining merge gates.
     tags:
       scenario: workflow
       cost: low
     rubric:
       - Commits uncommitted changes and runs code review, doc-doctor, test-doctor, light security review, lint, and build before submitting.
-      - Checks repository visibility and does not automatically add Copilot as a reviewer because the repository is private.
-      - Monitors CI, rebase state, and comments, then merges or enables auto-merge once green.
+      - Verifies both the exact allowed owner and private visibility before skipping Copilot requests and waits, including the pending request.
+      - Still addresses posted feedback and waits for required human review on the final head.
+      - Rejects auto-merge and requires all gates plus authorization for a literal head-pinned merge command followed by merged-state verification.
     graders:
       - type: diff-empty
         name: plan-does-not-mutate-files
@@ -41,10 +46,51 @@ stimuli:
           threshold: 0.8
           prompt: >-
             Score 5 only if the response follows the pr checklist (commit, code review,
-            doc-doctor, test-doctor, light security review, lint, build, submit PR, monitor CI/rebase/comments,
-            auto-merge) and explicitly states that Copilot will not be automatically added as a
-            reviewer on a private repository. Score 1 if it automatically requests Copilot review
-            on the private repository or skips preflight checks.
+            doc-doctor, test-doctor, light security review, lint, build, template-preserving PR body with
+            exact validation commands/results, monitor CI/rebase/comments), verifies both
+            owner and private visibility before applying the explicit exception including
+            the pending Copilot request, and retains posted feedback and human review gates.
+            It must reject auto-merge and require an authorized literal head-pinned command
+            plus merged-state verification. Score 1 if it treats all private repositories as
+            exempt, waits for exempt Copilot review, waives human review, or enables auto-merge.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: other-private-owner-requires-current-head-review
+    prompt: >-
+      Use the pr skill to plan a merge for a private repository owned by other-owner.
+      The user's only Copilot exception is for private repositories owned by
+      sample-owner. CI is green, mergeability is clean, review requests are empty,
+      and reviewDecision is APPROVED. Copilot approved the previous head, then a
+      fix was pushed. A required human reviewer submitted COMMENTED on the new
+      head, and an outdated bot thread remains unaddressed. No merge authorization
+      has been given. Do not perform repository or network writes; explain the gates.
+    tags:
+      scenario: exact-head-review
+      cost: low
+    rubric:
+      - Requires Copilot review because the private owner does not match the explicit exception.
+      - Tracks every expected reviewer and requires actual submitted non-dismissed reviews on the final full head OID; new pushes invalidate evidence.
+      - Distinguishes COMMENTED completion from required approval; CI, mergeability, reviewDecision, and empty requests do not establish review completion.
+      - Addresses outdated feedback and requires merge authorization and a literal repository/PR/full-head-pinned command without bypasses, then verifies merged state.
+    graders:
+      - type: diff-empty
+        name: merge-plan-does-not-mutate-files
+      - type: prompt
+        name: exact-head-review-gates
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if Copilot remains required for the non-exempt owner and its old-head
+            approval is insufficient. Require actual final-head submitted reviews from every
+            expected reviewer, separate COMMENTED completion from required approval, reject
+            CI/mergeability/reviewDecision/empty requests as completion evidence, address the
+            outdated thread, and obtain merge authorization. Require one literal gh pr merge
+            command naming repository, PR number, authorized strategy and full --match-head-commit,
+            followed by merged-state verification, with no auto/admin/raw API/wrapper bypass.
+            Score 1 if it says merge-ready or treats private visibility alone as an exception.
       - type: skill-invocation
         config:
           required: [pr]
