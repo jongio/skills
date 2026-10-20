@@ -254,6 +254,56 @@ stimuli:
         config:
           required: [pr]
 
+  - name: terse-fix-replies-with-commit-links
+    prompt: |
+      Use pr to draft the replies for this complete synthetic review evidence,
+      then state which threads to resolve. No commands, edits, agents, or network calls.
+      Copilot inline thread T8 reports dropped saved criteria, fixed and verified in
+      https://github.com/sample-owner/sample-repo/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.
+      Two body-only findings in Copilot review R30, headings "Timeout" and "Pagination",
+      are fixed and verified in
+      https://github.com/sample-owner/sample-repo/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:
+      requests now honor the configured timeout and results include every page.
+      They have no inline threads. Human thread T9 asks whether arbitrary sort
+      fields are accepted. This finding is disputed: src/query.ts:18 rejects
+      fields outside the allowlist, and the unknown-field regression test passes.
+      There is no fixing commit for T9; the reviewer's follow-up question is open.
+      The final-head review and CI gates have not yet completed.
+    tags:
+      scenario: terse-review-replies
+      cost: low
+    rubric:
+      - Replies to T8, both R30 findings, and T9 without omitting body-only feedback.
+      - Uses one short sentence or bullet per fix with the supplied actual fixing commit link and a brief change description.
+      - May group R30 findings but identifies each by review ID and heading and attributes each to the correct commit.
+      - Gives a concise evidence-backed disposition for disputed T9 without inventing a fixing commit.
+      - Resolves fixed bot T8, claims no body-only thread resolution, keeps human T9 open, and retains final-head review and CI gates.
+      - Omits long validation summaries and verbose resolution reports.
+    graders:
+      - type: diff-empty
+        name: reply-draft-does-not-write
+      - type: prompt
+        name: terse-complete-evidence-backed-replies
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if replies cover T8, both R30 headings, and T9.
+            Require one short sentence or bullet per fix, a clickable link to
+            the supplied actual fixing commit (a for T8, b for each R30 fix),
+            and a brief accurate change description. Grouping R30 is allowed
+            only with both fixes identifiable by review ID and heading.
+            T9 must receive a concise disposition citing the allowlist and
+            regression evidence, not a fabricated fix. Resolve only fixed bot
+            T8, keep human T9 open, do not claim nonexistent body-only threads
+            resolved, and retain pending final-head review and CI gates.
+            Score 1 if it omits any finding or commit link, invents or
+            misattributes a fixing commit, posts verbose validation or resolution
+            reports, resolves T9, waives gates, or executes commands or writes.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
   - name: documentation-preflight-reuse
     prompt: >-
       Use pr to explain documentation preflight after go hands off completed
