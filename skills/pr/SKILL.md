@@ -10,6 +10,8 @@ Run this end-to-end checklist for the given context, current directory, or workt
 
 Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits.
 
+For long-running work, report the stage, elapsed time, last meaningful result, and next event at least every 60 seconds while execution is active, using host notifications or scheduling rather than tight polling. Distinguish running commands, external review/CI waits, and blocked approval/input. When blocked, state the exact decision needed and that execution is paused; resume only after that decision. Do not describe wall-clock time as active execution or invent an ETA. If a stage exceeds its documented runtime budget or stalls without progress, inspect the bounded stage evidence and surface the blocker; do not restart expensive checks, weaken gates, or redesign the workflow without authorization.
+
 ## Workflow
 
 1. **Branch & Commit**: Check `git status`, `git diff`, and the current/base branch in the target folder or worktree; if on the default/base branch or a detached `HEAD`, create a dedicated PR branch first (`git switch -c <branch>`), remove stray debug or secret files, preserve unrelated local edits, and commit intended uncommitted changes first.

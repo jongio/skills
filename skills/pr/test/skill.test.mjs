@@ -70,6 +70,16 @@ test("owns documentation preflight with identity-bound reuse and missing-skill b
   assert.match(skill, /If unavailable, stop and prompt to install.*--skill doc-doctor/);
 });
 
+test("long-running delivery distinguishes execution, external waits, and blocked decisions", () => {
+  assert.match(skill, /stage, elapsed time, last meaningful result, and next event at least every 60 seconds/);
+  assert.match(skill, /host notifications or scheduling rather than tight polling/);
+  assert.match(skill, /Distinguish running commands, external review\/CI waits, and blocked approval\/input/);
+  assert.match(skill, /exact decision needed and that execution is paused; resume only after that decision/);
+  assert.match(skill, /Do not describe wall-clock time as active execution or invent an ETA/);
+  assert.match(skill, /exceeds its documented runtime budget or stalls without progress/);
+  assert.match(skill, /do not restart expensive checks, weaken gates, or redesign the workflow without authorization/);
+});
+
 test("catalog body has a copyable install command with every required skill", async () => {
   const catalog = await readFile(new URL("../../../site/src/content/skills/pr.md", import.meta.url), "utf8");
   const body = catalog.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
@@ -90,6 +100,7 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
   const cases = [...evalSpec.matchAll(/^  - name: (.+)$/gm)].map(([, name]) => name);
   assert.deepEqual(cases, [
     "verified-private-owner-exception",
+    "long-running-gate-and-approval-wait",
     "other-private-owner-requires-current-head-review",
     "clean-headline-hides-body-only-finding",
     "deduplicate-and-revalidate-review-body-findings",
@@ -114,6 +125,19 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
       `${requiredGrader} failure must prevent passing threshold`,
     );
   }
+});
+
+test("progress eval preserves gate integrity and distinguishes approval waiting", () => {
+  const section = evalSpec.split("  - name: long-running-gate-and-approval-wait\n")[1]
+    ?.split("\n  - name: ")[0];
+  assert.ok(section);
+  const scenario = section.replace(/\s+/g, " ");
+  assert.match(scenario, /runtime budget/);
+  assert.match(scenario, /approval has not arrived/);
+  assert.match(scenario, /at least every 60 seconds/);
+  assert.match(scenario, /wall-clock.*active execution/);
+  assert.match(scenario, /does not restart.*weaken.*redesign/);
+  assert.match(scenario, /No commands, edits, agents, or network calls/);
 });
 
 test("review and merge evals distinguish exemptions, completion, approval, and authorization", () => {
