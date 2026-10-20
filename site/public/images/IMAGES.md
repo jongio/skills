@@ -34,6 +34,7 @@ validate all catalog mappings and generate byte-identical public copies.
 | `thumb-repo-ready.png` | `repo-ready` card/detail | Repository health checklist with gap indicators. |
 | `thumb-test-doctor.png` | `test-doctor` card/detail | Test diagnostic console transforms amber gaps into verified green test cards; generated source and provider provenance live with the skill. |
 | `thumb-pr.png` | `pr` card/detail | Pull request checklist workflow from local commit and preflight checks through review resolution, CI, and merge. |
+| `thumb-go.png` | `go` card/detail | Azure GPT Image 2 workflow dashboard from plan and tests through implementation, review, and merge. |
 
 ## Statusline diagrams
 

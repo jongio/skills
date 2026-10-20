@@ -1,0 +1,24 @@
+{
+  "name": "go",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Development tooling for the go skill.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "eval:lint": "vally lint --eval-spec evals/go/eval.yaml --strict",
+    "eval": "vally eval --eval-spec evals/go/eval.yaml --skill-dir ."
+  },
+  "devDependencies": {
+    "@microsoft/vally-cli": "0.18.0"
+  },
+  "allowScripts": {
+    "@vscode/deviceid": false,
+    "better-sqlite3": false,
+    "koffi": false
+  }
+}

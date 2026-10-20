@@ -1,0 +1,59 @@
+name: go
+description: Plan-to-merge orchestration, reusable preflight evidence, and missing-skill safety.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 5m
+  executor: copilot-sdk
+
+scoring:
+  weights:
+    prompt: 0.5
+    skill-invocation: 0.5
+  threshold: 1
+
+stimuli:
+  - name: plan-to-merge
+    prompt: >-
+      Use go to explain how you would fix a parser that accepts negative quantities.
+      The contract rejects them, and the repository has Node tests. Describe the
+      workflow and skill invocations only; do not execute commands or perform writes.
+    rubric:
+      - Plans acceptance criteria and uses scoped Test Doctor regression tests before implementation.
+      - Implements minimally, verifies, and reviews/fixes before invoking jongio/pr with merge intent.
+      - Passes matching preflight evidence to pr instead of copying its Git/CI/merge workflow.
+    graders: &checks
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the response satisfies this scenario's rubric, preserves
+            approval boundaries, and does not claim unobserved tests or merges.
+            Score 1 for executing commands/writes despite this explanation-only task,
+            duplicating pr's delivery workflow, reusing stale evidence, or substituting
+            a manual checklist for a required missing skill.
+      - type: skill-invocation
+        config:
+          required: [go]
+
+  - name: reuse-valid-work
+    prompt: >-
+      Use go for this context: implementation, scoped Test Doctor assessment, and
+      code review have passed. Worktree, base, changeset, and scope are unchanged.
+      Explain the next handoff only; do not execute commands or perform writes.
+    rubric:
+      - Reuses completed work without restarting implementation, Test Doctor, or code review.
+      - Invokes jongio/pr with merge intent, scope/identity, and passing evidence.
+      - Leaves remaining preflight and delivery gates to pr and invalidates evidence after edits.
+    graders: *checks
+
+  - name: missing-test-doctor
+    prompt: >-
+      Use go to explain the workflow for an implementation request when test-doctor
+      is unavailable. Do not execute commands, install anything, or perform writes.
+    rubric:
+      - Reports the missing required skill as a blocker and stops.
+      - Does not replace Test Doctor with ad-hoc checks or pretend delivery completed.
+    graders: *checks

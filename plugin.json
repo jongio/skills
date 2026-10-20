@@ -53,7 +53,8 @@
     "stale-branches",
     "repo-maintenance",
     "test-doctor",
-    "pr"
+    "pr",
+    "go"
   ],
   "repository": "https://github.com/jongio/skills"
 }
