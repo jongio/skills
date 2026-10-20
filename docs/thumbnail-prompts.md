@@ -47,6 +47,14 @@ The catalog site maps `skills/<skill>/thumbnail.png` to
 `site/src/content/skills/<skill>.md` frontmatter. Public copies are generated
 before local development and production builds.
 
+## backlog-groom (7d6140526ca4)
+
+- Provider: deterministic local placeholder (no network or billed request).
+- Recipe: create-skill's `encodeDeterministicPlaceholderPng()`.
+- Source: `skills/backlog-groom/thumbnail.png`.
+- Catalog mapping: `images/thumb-backlog-groom.png`.
+- SHA-256: 7d6140526ca40be2d5d16947ef02e1169fd1db733f22766d3e2e2f7e8903861a
+
 ## House style
 
 Every thumbnail shares this visual language (hold it constant; vary only the scene and
@@ -368,3 +376,14 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: f19845f36ba138e723b42b32710dda6c31c43cb61e6fccfa98728b8c29bfd3a7
+
+## backlog-groom (1ae794eaa4b8)
+
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One rounded dark-slate planning console is the hero surface. On its left, two small repository trays feed scattered issue cards into a neat prioritized backlog on the right. A magnifying lens inspects one card with a tiny code-branch symbol and an evidence checkmark. Delicate dependency connectors link a few cards; an optional small board panel sits beside the backlog. Preserve visible amber pending cards among teal and green verified cards: organized work does not mean all work is complete. A small GitHub Octocat mark appears on the console. Modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, teal and amber accents, minimal text, crisp professional artwork, no photorealism."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 1ae794eaa4b8fe3e9f40fb030df0f26e49997237470b08049f84d18751d7f5c4

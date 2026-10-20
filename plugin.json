@@ -56,7 +56,8 @@
     "pr",
     "go",
     "retro",
-    "doc-doctor"
+    "doc-doctor",
+    "backlog-groom"
   ],
   "repository": "https://github.com/jongio/skills"
 }
