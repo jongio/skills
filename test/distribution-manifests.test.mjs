@@ -628,7 +628,7 @@ test("portable package cannot gain implicit executable components", async () => 
     const { NODE_TEST_CONTEXT: _parentTestContext, ...env } = process.env;
     const result = spawnSync(
       process.execPath,
-      ["--test", ...tests.map((name) => path.join(testDir, name))],
+      ["--test", "--test-concurrency=1", ...tests.map((name) => path.join(testDir, name))],
       { encoding: "utf8", env },
     );
     assert.equal(
@@ -694,7 +694,7 @@ test("CI runs distribution parity for every manifest change", () => {
   }
   assert.ok(
     lintWorkflow.includes(
-      "node --test test/*.test.mjs",
+      "node --test --test-concurrency=1 test/*.test.mjs",
     ),
     "skill-lint.yml must run all distribution tests",
   );

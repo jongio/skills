@@ -164,7 +164,7 @@ jobs:
           echo "$PWD/.github/tools/vally/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Validate distribution manifests
-        run: node --test test/*.test.mjs
+        run: node --test --test-concurrency=1 test/*.test.mjs
 
       - name: Lint skills (spec-compliance)
         if: needs.detect.outputs.dirs != ''
