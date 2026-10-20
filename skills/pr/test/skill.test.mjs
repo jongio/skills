@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const skill = (await readFile(new URL("../SKILL.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-const evalSpec = await readFile(new URL("../evals/pr/eval.yaml", import.meta.url), "utf8");
+const evalSpec = (await readFile(new URL("../evals/pr/eval.yaml", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 
 test("portable skill frontmatter contains only name and description", () => {
   const frontmatter = skill.match(/^---\n([\s\S]*?)\n---/);
@@ -114,4 +114,25 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
       `${requiredGrader} failure must prevent passing threshold`,
     );
   }
+});
+
+test("review and merge evals distinguish exemptions, completion, approval, and authorization", () => {
+  const exception = evalSpec.split("  - name: verified-private-owner-exception\n")[1]
+    ?.split("\n  - name: ")[0];
+  const nonExempt = evalSpec.split("  - name: other-private-owner-requires-current-head-review\n")[1]
+    ?.split("\n  - name: ")[0];
+  assert.ok(exception);
+  assert.ok(nonExempt);
+  assert.match(exception, /doc-doctor, test-doctor/);
+  assert.match(exception, /already pending, with posted/);
+  assert.match(exception, /required human review/);
+  assert.match(exception, /template-preserving PR body/);
+  assert.match(exception, /exact validation commands\/results/);
+  assert.match(exception, /reject auto-merge/);
+  assert.match(nonExempt, /Copilot approved the previous head/);
+  assert.match(nonExempt, /COMMENTED on the new/);
+  assert.match(nonExempt, /No merge authorization/);
+  assert.match(nonExempt, /actual final-head submitted reviews from every/);
+  assert.match(nonExempt, /repository, PR number, authorized strategy and full --match-head-commit/);
+  assert.match(nonExempt, /merged-state verification/);
 });

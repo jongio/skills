@@ -25,6 +25,25 @@ reconciled, older findings are checked against the current head, and body-only
 findings receive a PR reply identifying the review and heading rather than a
 claim that a nonexistent thread was resolved.
 
+## Review and merge gates
+
+Copilot review is expected by default. Only an explicit user-authorized exception
+for a verified private repository with the exact allowed owner skips requesting
+and waiting, including already-pending requests. Posted feedback and other
+required reviews still apply.
+
+Every expected reviewer must submit a non-dismissed review on the full current
+head OID. `COMMENTED` completes a review but is not approval; new pushes invalidate
+head-specific review and check evidence. Required approvals and unresolved change
+requests remain separate gates.
+
+PR bodies preserve the repository template and record exact validation commands
+and results, including checks not run. A merge also requires explicit authorization
+or an applicable user-approved standing policy and an up-to-date base, green CI,
+and settled feedback. Use a literal `gh pr merge` command naming the PR, repository,
+authorized strategy, and full `--match-head-commit` OID, then verify actual merged
+state. Auto-merge, admin, API, and wrapper bypasses are not allowed.
+
 ## Development
 
 ```sh
@@ -34,8 +53,10 @@ npm run eval:lint
 ```
 
 Deterministic tests check portable skill shape, instruction contracts, and
-registration. Synthetic capability scenarios cover review routing and feedback,
-including body-only findings; linting them does not establish agent behavior.
+registration. Synthetic capability scenarios cover owner-specific exceptions,
+exact-head review completion, authorized pinned merges, documentation preflight,
+and feedback including body-only findings; linting them does not establish agent
+behavior.
 
 ## License
 
