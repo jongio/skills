@@ -53,6 +53,12 @@ test("owns documentation preflight with identity-bound reuse and missing-skill b
   assert.match(skill, /If unavailable, stop and prompt to install.*--skill doc-doctor/);
 });
 
+test("catalog body has a copyable install command with every required skill", async () => {
+  const catalog = await readFile(new URL("../../../site/src/content/skills/pr.md", import.meta.url), "utf8");
+  const body = catalog.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
+  assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill pr --skill test-doctor --skill doc-doctor -g --agent github-copilot\r?\n```/);
+});
+
 test("body-only findings get evidence-backed disposition without fake thread resolution", () => {
   const text = skill.replace(/\s+/g, " ");
   assert.match(text, /Deduplicate.*review ID.*heading.*file\/line/i);

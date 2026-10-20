@@ -47,9 +47,10 @@ test("evals distinguish matching preflight evidence from evidence invalidated by
   assert.match(evalSpec, /^  - name: invalidate-stale-work[\s\S]*base and changeset have changed[\s\S]*Reruns affected checks/m);
 });
 
-test("catalog body makes both required skills visible beyond the generic install widget", async () => {
+test("catalog body has a copyable install command with every required skill", async () => {
   const catalog = await readFile(new URL("../../../site/src/content/skills/go.md", import.meta.url), "utf8");
   const body = catalog.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
   assert.match(body, /Requires `test-doctor` and `pr`/);
   assert.match(body, /`doc-doctor`/);
+  assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill go --skill test-doctor --skill pr --skill doc-doctor -g --agent github-copilot\r?\n```/);
 });

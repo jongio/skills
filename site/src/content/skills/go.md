@@ -16,6 +16,15 @@ Plan, test, and implement the current context, then hand verified changes to pr 
 Requires `test-doctor` and `pr`, plus `doc-doctor` for PR preflight; install those skills too, or choose the full collection above.
 Only `pr` runs the documentation pass; `go` does not duplicate it.
 
+## Install with required skills
+
+The single-skill options above do not install dependencies. Use this command
+to install `go` and every required skill, or choose the full collection.
+
+```sh
+npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill doc-doctor -g --agent github-copilot
+```
+
 ## Use it
 
 ```text
