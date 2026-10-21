@@ -164,7 +164,7 @@ export function run(command, options) {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync.native(process.argv[1]) === realpathSync.native(fileURLToPath(import.meta.url))) {
   try {
     const [command, ...args] = process.argv.slice(2);
     const options = {};

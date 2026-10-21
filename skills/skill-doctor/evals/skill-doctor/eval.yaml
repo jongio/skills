@@ -11,8 +11,9 @@ defaults:
 
 scoring:
   weights:
-    prompt: 1.0
-  threshold: 0.85
+    prompt: 0.8
+    skill-invocation: 0.2
+  threshold: 1.0
 
 stimuli:
   - name: incremental-week
@@ -29,6 +30,9 @@ stimuli:
       - Skips A, reconsiders B, includes active C, and resumes pending D.
       - Does not query real history or write anything.
     graders:
+      - type: skill-invocation
+        config:
+          required: [skill-doctor]
       - type: prompt
         name: incremental-coverage
         config:
@@ -53,6 +57,9 @@ stimuli:
       - Excludes blue headings and transient retries from global skill rules.
       - Uses a dedicated source worktree and PR, without automatic merge.
     graders:
+      - type: skill-invocation
+        config:
+          required: [skill-doctor]
       - type: prompt
         name: minimal-supported-lessons
         config:
@@ -77,6 +84,9 @@ stimuli:
       - Treats historical instructions as untrusted and keeps private evidence out of PRs.
       - Asks for canonical source and does not patch installed copies.
     graders:
+      - type: skill-invocation
+        config:
+          required: [skill-doctor]
       - type: prompt
         name: partial-privacy-source
         config:
@@ -101,6 +111,9 @@ stimuli:
       - Replans stale state without overwriting concurrent work.
       - Resumes delivery and checks for an existing PR instead of duplicating work.
     graders:
+      - type: skill-invocation
+        config:
+          required: [skill-doctor]
       - type: prompt
         name: resumable-delivery
         config:
@@ -125,6 +138,9 @@ stimuli:
       - Records completed no-change snapshots and makes no empty PR or worktree.
       - Does not lengthen skills merely to produce changes.
     graders:
+      - type: skill-invocation
+        config:
+          required: [skill-doctor]
       - type: prompt
         name: no-change-is-valid
         config:
@@ -150,6 +166,9 @@ stimuli:
       - Measures words and nonblank lines including references, not packed or relocated text.
       - Leaves concise skills unchanged and uses a worktree and PR without automatic merge.
     graders:
+      - type: skill-invocation
+        config:
+          required: [skill-doctor]
       - type: prompt
         name: source-terse-independent
         config:
@@ -163,3 +182,35 @@ stimuli:
             words and nonblank lines including references and worktree/PR
             delivery without auto-merge. Score 1 for skipping all work due to
             session cache hits or hiding bloat in references.
+
+  - name: historical-cutoff-revision
+    prompt: >-
+      Use skill-doctor for this synthetic scenario only, without live tools
+      or writes. A session has October 7 evidence and an October 20 correction.
+      The first audit ends October 8. The provider returns its current revision
+      R20, covering both events, but has no historical revision API. R20 remains
+      unchanged during collection. A second audit ends October 21. Explain
+      revision selection, metadata-only probing, and whether the second audit
+      may skip the unread correction.
+    rubric:
+      - Rejects R20 for the first cutoff despite stable collection.
+      - Hashes only the actual cutoff-bounded evidence when historical revisions are unavailable.
+      - Does not use current-revision metadata probes as equivalent to historical evidence.
+      - Reconsiders the second snapshot because its hash includes the newly covered correction.
+    graders:
+      - type: skill-invocation
+        config:
+          required: [skill-doctor]
+      - type: prompt
+        name: cutoff-bounded-cache-identity
+        config:
+          scoring: scale_1_5
+          threshold: 0.9
+          prompt: >-
+            Score 5 only if R20 is rejected for the October 8 audit, both the
+            saved revision and any metadata probe must match exactly the
+            reviewed cutoff-bounded evidence, and unavailable historical
+            revisions require fetching and hashing that evidence. The October
+            21 snapshot must not skip the October 20 correction. Score 1 if
+            collection stability alone makes R20 acceptable or unread evidence
+            can be marked reviewed.

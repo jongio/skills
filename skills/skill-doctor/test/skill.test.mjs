@@ -35,3 +35,22 @@ test("referenced collection and cache protocol exists", async () => {
     assert.ok(reference.includes(phrase), `Missing cache rule: ${phrase}`);
   }
 });
+
+test("every capability scenario requires actual skill invocation", async () => {
+  const spec = await readFile(new URL("../evals/skill-doctor/eval.yaml", import.meta.url), "utf8");
+  const stimuli = spec.split(/\r?\n  - name:/).slice(1);
+  assert.ok(stimuli.length > 0);
+  for (const stimulus of stimuli) {
+    assert.match(stimulus, /- type: skill-invocation\s+config:\s+required: \[skill-doctor\]/,
+      `Missing mandatory invocation guard: ${stimulus.split(/\r?\n/)[0].trim()}`);
+  }
+  assert.match(spec, /skill-invocation: 0\.2/);
+  assert.match(spec, /^  threshold: 1\.0$/m);
+});
+
+test("historical cache revisions and probes cover only cutoff-bounded evidence", async () => {
+  const reference = await readFile(new URL("../references/session-audit.md", import.meta.url), "utf8");
+  assert.match(reference, /exactly the cutoff-bounded evidence/);
+  assert.match(reference, /Never use a current full-session revision for a historical cutoff/);
+  assert.match(reference, /Metadata-only probes must use that same cutoff-bounded scope/);
+});

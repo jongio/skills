@@ -102,15 +102,22 @@ Input is a local JSON object with a `sessions` array:
 }
 ```
 
-Use an authoritative full-session revision that changes for every new/edited turn
-and tool outcome. A session `updated_at` is sufficient only if the provider
-guarantees that property and precision; never use a date-only last-run marker.
-Otherwise hash canonical, ordered evidence records, including tool outcomes.
+The revision must identify exactly the cutoff-bounded evidence actually reviewed.
+Use a provider revision only if it describes the complete snapshot through that
+cutoff and changes for every included new/edited turn and tool outcome.
+Never use a current full-session revision for a historical cutoff: it may include
+later corrections that this audit did not read, even when collection was stable.
+An `updated_at` is sufficient only with the same scope and precision guarantees.
+Otherwise hash canonical, ordered evidence records through the cutoff, including
+tool outcomes. Never use a date-only last-run marker.
 Do not include retrieval time, the sliding window, or volatile usage counters
 in the revision. Keep the same complete evidence scope across runs; when changing
 the collector or coverage semantics, version the `source` namespace.
 
-A revision probe may precede expensive content retrieval. Set `complete: true`
+A revision probe may precede expensive content retrieval.
+Metadata-only probes must use that same cutoff-bounded scope. If the provider
+cannot supply it, fetch and hash the bounded evidence instead of probing with
+the current revision. Set `complete: true`
 only after all evidence needed for the audit was actually read. `plan` will skip
 an already-completed revision even on a metadata-only probe; a new incomplete
 snapshot still needs reading and must not be recorded. If the session changes

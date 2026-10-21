@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -184,4 +184,18 @@ test("CLI emits machine-readable output and nonzero errors", (t) => {
   const invalid = spawnSync(process.execPath, [script, ...args, "--unknown", "x"], { encoding: "utf8" });
   assert.equal(invalid.status, 1);
   assert.match(invalid.stderr, /skill-doctor cache:/);
+});
+
+test("CLI runs through a symlinked skill directory", (t) => {
+  const f = fixture(t);
+  const scripts = fileURLToPath(new URL("../scripts", import.meta.url));
+  const alias = path.join(f.root, "linked-scripts");
+  symlinkSync(scripts, alias, process.platform === "win32" ? "junction" : "dir");
+  const result = spawnSync(process.execPath, [
+    path.join(alias, "cache.mjs"), "plan", "--target", f.repo,
+    "--input", f.options.input, "--cache-dir", f.options["cache-dir"],
+  ], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.notEqual(result.stdout.trim(), "", "A successful CLI invocation must produce a plan");
+  assert.equal(JSON.parse(result.stdout).sessions[0].action, "audit");
 });
