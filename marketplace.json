@@ -115,6 +115,12 @@
       "source": "./skills/backlog-groom",
       "description": "Groom GitHub backlogs across issue and source repositories, with or without Projects, using scoped evidence and approved changes.",
       "version": "1.0.0"
+    },
+    {
+      "name": "nobs",
+      "source": "./skills/nobs",
+      "description": "Give the shortest complete answer for supplied or current context without filler or loss of essential facts.",
+      "version": "1.0.0"
     }
   ]
 }
