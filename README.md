@@ -29,6 +29,7 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`doc-doctor`](skills/doc-doctor/) | Check changed documentation against code and fix material gaps. |
 | [`backlog-groom`](skills/backlog-groom/) | Groom GitHub backlogs across issue and source repositories, with or without Projects, using scoped evidence and approved changes. |
 | [`nobs`](skills/nobs/) | Give the shortest complete answer for supplied or current context without filler or loss of essential facts. |
+| [`refactor`](skills/refactor/) | Plan behavior-preserving refactoring with explicit scope, depth and risk choices. |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:

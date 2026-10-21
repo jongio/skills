@@ -398,3 +398,14 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 4e5ffe03d60b42612e4e1dd023bab5ef32089a37142dc9a29dfbf590a0522897
+
+## refactor (6592e89245fe)
+
+Prompt: "Flat vector illustration, pure white background, 1024x1024, centered composition. One large rounded code-editor panel holds a left-to-right transformation: tangled abstract indigo code blocks on the left become three clean organized tiers of teal blocks on the right, joined by a short dashed arrow. A prominent three-position stepped selector beneath the panel conveys choosing refactoring depth, with only the first position highlighted. A small shield with a green check sits at the transformation boundary to convey preserved behavior. A small GitHub Octocat mark at upper right connects to the panel with a dotted tether. Indigo, teal and soft lavender palette, clean modern rounded shapes, soft long shadows, tiny sparkles. Strong simple silhouette legible at 175 pixels. Diagram treatment only: abstract short dashes and rounded pills, no readable text. No words, letters, numerals, fake text, photorealism, 3D, extra panels, deletion symbols or feature removal imagery."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 6592e89245fe8d81386de6b03fd26bd3a6111b36e0a6e8da4c8f32ce01646601
