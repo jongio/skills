@@ -387,3 +387,14 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 1ae794eaa4b8fe3e9f40fb030df0f26e49997237470b08049f84d18751d7f5c4
+
+## nobs (4e5ffe03d60b)
+
+Prompt: "Flat vector skill thumbnail, pure white background, 1024x1024, centered composition. One rounded dark navy chat panel is the hero surface. Inside it, many pale gray abstract message lines on the left transform through a simple teal arrow into three crisp short teal lines on the right, keeping one small amber warning badge and one green check badge visible. The lowercase wordmark nobs is large and deliberate below the panel, the only readable text. A small GitHub Octocat mark sits at upper right with a dotted tether to the panel. Teal, navy, white, and warm amber palette; modern rounded shapes, soft long shadows, subtle dashed guides, two tiny sparkles. Bold simple silhouette readable at 175 pixels. No extra words, no tiny labels, no numerals, no photorealism, no 3D, no clutter, no bull imagery, no censorship bars."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 4e5ffe03d60b42612e4e1dd023bab5ef32089a37142dc9a29dfbf590a0522897

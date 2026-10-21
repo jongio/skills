@@ -28,11 +28,24 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`retro`](skills/retro/) | Close out a session with an evidence-backed task and feedback audit, source-skill improvements, and safely approved branch and worktree cleanup |
 | [`doc-doctor`](skills/doc-doctor/) | Check changed documentation against code and fix material gaps. |
 | [`backlog-groom`](skills/backlog-groom/) | Groom GitHub backlogs across issue and source repositories, with or without Projects, using scoped evidence and approved changes. |
+| [`nobs`](skills/nobs/) | Give the shortest complete answer for supplied or current context without filler or loss of essential facts. |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:
 
 ![Invoking create-canvas-app from the Copilot composer: "/create-canvas-app customized stock ticker"](skills/create-canvas-app/docs/invoke.png)
+
+## Concise responses by default
+
+The full `jongio-skills` plugin includes a Copilot CLI rule that enables **nobs**:
+answer first, no filler, and the shortest complete response without hiding risks
+or skipping work. Say `nobs off` to disable the style for the current conversation,
+or `nobs on` to restore it. Explicit requests for detail still take precedence.
+
+Use `/nobs <text>` to condense specific context, or `/nobs` for the current context.
+Installing just the standalone skill does not enable the automatic rule.
+The statuslines-only plugin is unchanged. See [nobs](skills/nobs/README.md) for
+opt-out limitations and host support. Persistent opt-out is currently unsupported.
 
 ## Copilot CLI Statusline Extensions
 
