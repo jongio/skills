@@ -6,6 +6,12 @@ description: >-
 
 # Go
 
+## Worktree choice
+
+Default to working in a linked worktree. Before tests or edits, compare the normalized absolute paths from `git rev-parse --absolute-git-dir` and `git rev-parse --path-format=absolute --git-common-dir`. Different paths mean this is already a linked worktree: assume the location is safe and continue without prompting or creating another worktree. Still preserve unrelated edits and approval boundaries. If detection fails, stop and report it rather than assuming safety.
+
+If the paths match, prompt: **Create worktree (default)** or **Stay here**. Wait for the choice; merge auto mode does not bypass this prompt. For create, use the configured worktree root outside the repository, asking for a location if none is known; create a dedicated branch/worktree and run all subsequent work there. Do not move or discard existing edits without approval. For stay, continue in the current checkout for this invocation only. Keep the prompt and status terse.
+
 ## Merge choice
 
 Default to `--merge=approval`: prepare the PR, then require the user's final confirmation before merging. Accept `--merge=auto` to authorize merging once all delivery gates pass, or `--merge=approval` to explicitly require confirmation. Equivalent plain-language requests such as "auto merge" or "ask me before merging" select the same modes. Conflicting or unclear choices: ask the user to choose; do not merge until resolved. Prior standing merge policies and reviewer approvals do not override this default.
@@ -15,7 +21,7 @@ Default to squash merging and deleting the PR branch after merge unless the user
 
 ## Workflow
 
-1. Inspect the current context, repository instructions, and existing work. State a brief plan and acceptance criteria; reuse valid completed work and ask only blocking questions.
+1. Inspect the current context, repository instructions, and existing work; resolve the worktree choice before tests or edits. State a brief plan and acceptance criteria; reuse valid completed work and ask only blocking questions.
 2. Invoke `test-doctor fix` on the touched scope to establish a baseline and write meaningful regression tests before implementation.
 3. Implement the smallest complete change, run focused checks, and finish the scoped Test Doctor assessment.
 4. Review the final diff for correctness and regressions; fix material findings and repeat affected checks until the acceptance criteria are met.

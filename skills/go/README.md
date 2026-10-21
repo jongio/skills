@@ -13,6 +13,14 @@ Invoke `/go <context>` with an issue, conversation, code, or error.
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
 Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
 
+## Worktree choice
+
+By default, `go` works in a linked worktree. It detects and reuses an existing
+worktree without prompting. In the main checkout, it asks **Create worktree
+(default)** or **Stay here** before tests or edits, even in merge auto mode.
+Creating uses the configured external worktree root (or asks for a location);
+staying applies only to this invocation. Existing edits remain protected.
+
 ## Merge choice
 
 The default is to ask for final merge approval once the PR is ready:
