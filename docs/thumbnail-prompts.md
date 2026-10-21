@@ -409,3 +409,14 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 6592e89245fe8d81386de6b03fd26bd3a6111b36e0a6e8da4c8f32ce01646601
+
+## skill-doctor (8534a4def647)
+
+Prompt: "Flat vector illustration, pure white background, 1024x1024, centered composition. One large rounded dark navy console panel is the hero surface. Inside, on the left, a short stack of session cards with abstract dash marks and small amber warning badges flows through a teal stethoscope-shaped inspection loop into two tiny crisp skill cards with green check badges on the right. A subtle violet branch connector leads to a green pull-request badge. Show a small clock with a circular check badge to suggest skipping already inspected sessions. Clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, teal and violet accent palette. A tiny GitHub Octocat mark sits upper-right with a dotted tether to the panel. Diagram treatment only: no readable text, letters, numbers, or labels. Professional, minimal, clear at thumbnail size, no photorealism."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 8534a4def6471e615015c6c0f93e64eb82ff2e180cb78c0858550cf0d1937d5e
