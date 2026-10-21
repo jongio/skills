@@ -126,6 +126,19 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 
 ## Prompts
 
+### refactor (deterministic placeholder)
+
+The current thumbnail is the existing deterministic local placeholder, verified
+byte-for-byte against `encodeDeterministicPlaceholderPng()` in
+`skills/create-skill/scripts/png.mjs`. It is not Azure-generated art.
+
+- Provider: `placeholder`
+- Model/method: `deterministic-local-v1`
+- Size: `1024x1024`
+- Recipe: the repository's deterministic placeholder PNG encoder; no prompt or network call.
+- SHA-256: `7d6140526ca40be2d5d16947ef02e1169fd1db733f22766d3e2e2f7e8903861a`
+- Source: `skills/refactor/thumbnail.png`; catalog copies are generated during builds.
+
 > Provenance note: the verbatim prompt strings for the first three skills were sent to
 > `gpt-image-2` and were not saved at the time (only the PNGs were committed). Azure kept
 > no retrievable logs (no diagnostic settings on the resource) and the originating Copilot

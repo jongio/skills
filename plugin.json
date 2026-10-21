@@ -58,7 +58,8 @@
     "retro",
     "doc-doctor",
     "backlog-groom",
-    "nobs"
+    "nobs",
+    "refactor"
   ],
   "repository": "https://github.com/jongio/skills"
 }

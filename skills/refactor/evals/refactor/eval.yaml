@@ -1,0 +1,275 @@
+name: refactor
+description: >-
+  Supplied-evidence checks of scope, depth, risk and behavior-preservation boundaries.
+  These do not certify repository-wide review quality or implementation correctness.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 2m
+  executor: copilot-sdk
+
+agent_environment:
+  skills:
+    - ../..
+
+scoring:
+  weights:
+    diff-empty: 0.25
+    skill-invocation: 0.25
+    tool-calls: 0.25
+    prompt: 0.25
+  threshold: 1
+
+stimuli:
+  - name: fresh-assessment
+    prompt: >-
+      Use refactor to explain your next steps for a fresh assessment of src/parser.
+      There is no cleanup ledger yet. I want small wins and no sensitive-contract work.
+      Load the skill, then use only these supplied facts. Do not inspect project files,
+      run commands, call other skills or agents, ask through tools, or write files.
+      Explain the scope choices and planned evidence; do not invent candidates.
+    rubric:
+      - Accepts a fresh assessment without requiring an existing ledger.
+      - Reuses src/parser, Level 1 and sensitive-contract exclusion without redundant questions.
+      - Proposes a bounded finite shortlist and independent preservation checks, not implementation.
+      - Makes no source-level findings or claims of executed checks.
+    graders:
+      - type: diff-empty
+        name: diff-empty-fresh
+      - type: skill-invocation
+        name: skill-invocation-fresh
+        config: &invocation
+          required: [refactor]
+      - type: tool-calls
+        name: tool-calls-fresh
+        config: &no-operations
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
+      - type: prompt
+        name: scoped-assessment-fresh
+        config: &judge
+          scoring: scale_1_5
+          threshold: 1
+          prompt: >-
+            Score 5 only if every requirement in this scenario's rubric is met.
+            The subject must load refactor and reason only from supplied evidence.
+            Reading the skill instructions is allowed; project inspection, commands,
+            network calls, other skill/agent invocation, tool-based questions, and
+            writes are prohibited. Assess the trajectory, not just the final answer.
+            Score 1 for any forbidden action, invented findings or executed checks,
+            implicit scope/depth escalation, changed product behavior, weakened tests,
+            or treating user approval as preservation evidence. Missing trajectory
+            evidence is insufficient for a confirmed pass. An empty answer fails.
+
+  - name: broad-but-shallow
+    prompt: >-
+      Use refactor to plan a repository-wide assessment, explicitly Level 1 only
+      and excluding sensitive contracts. The repository has parser, UI and storage
+      modules. An earlier note recommends redesigning storage ownership.
+      Load the skill, then reason from this input only. Do not inspect the project,
+      run commands, call other skills or agents, ask through tools, or write files.
+    rubric:
+      - Keeps repository-wide breadth separate from Level 1 depth.
+      - Plans an inventory and sequential module inspection with coverage reporting, not agent fan-out.
+      - Excludes the storage redesign from this batch rather than investigating or planning it.
+      - Does not infer implementation authorization or invent findings.
+    graders:
+      - type: diff-empty
+        name: diff-empty-breadth
+      - type: skill-invocation
+        name: skill-invocation-breadth
+        config: *invocation
+      - type: tool-calls
+        name: tool-calls-breadth
+        config: *no-operations
+      - type: prompt
+        name: scoped-assessment-breadth
+        config: *judge
+
+  - name: unused-feature
+    prompt: >-
+      Use refactor to classify this Level 3 candidate: delete the export-report
+      command and its UI button because a source search found no internal callers.
+      No usage, compatibility or user-contract evidence exists. The proposer says
+      accepting high risk makes feature removal a valid refactor.
+      Load the skill and assess only this evidence. Do not inspect project files,
+      run commands, call other skills or agents, ask through tools, or write files.
+    rubric:
+      - Rejects feature removal as a refactoring candidate at every level.
+      - Explains that no internal callers does not prove a feature unused or behavior-preserving.
+      - Keeps any product decision separate without making it a prerequisite for other cleanup.
+      - Does not propose a deeper refactoring tier that authorizes the deletion.
+    graders:
+      - type: diff-empty
+        name: diff-empty-feature
+      - type: skill-invocation
+        name: skill-invocation-feature
+        config: *invocation
+      - type: tool-calls
+        name: tool-calls-feature
+        config: *no-operations
+      - type: prompt
+        name: scoped-assessment-feature
+        config: *judge
+
+  - name: error-contract
+    prompt: >-
+      Use refactor to assess this proposed easy cleanup in src/parser:
+      replace a RangeError for negative quantities with a generic Error and change
+      the default quantity from zero to one. The proposer calls it a bug fix and
+      says the diff is only two lines. Existing callers distinguish RangeError.
+      Load the skill and use only this input. Do not inspect project files, run
+      commands, call other skills or agents, ask through tools, or write files.
+    rubric:
+      - Identifies both changed error behavior and changed default as observable product changes.
+      - Excludes them from refactoring, including Level 3 and risk-authorized work.
+      - Does not treat small diff size or bug-fix intent as equivalence evidence.
+    graders:
+      - type: diff-empty
+        name: diff-empty-errors
+      - type: skill-invocation
+        name: skill-invocation-errors
+        config: *invocation
+      - type: tool-calls
+        name: tool-calls-errors
+        config: *no-operations
+      - type: prompt
+        name: scoped-assessment-errors
+        config: *judge
+
+  - name: test-helper-counterexample
+    prompt: >-
+      Use refactor to assess a test-only helper substitution. Original code selects
+      nodes.find(n => n.label === "Save") and then throws if that node's onClick is
+      not a function. Replacement selects
+      nodes.find(n => n.label === "Save" && typeof n.onClick === "function").
+      The fixture can contain [{label:"Save",onClick:null},
+      {label:"Save",onClick:() => 42}]. All happy-path tests pass.
+      Load the skill and assess only this evidence. Do not execute this example,
+      inspect project files, run commands, call other skills or agents, ask through
+      tools, or write files.
+    rubric:
+      - "Gives the concrete counterexample: original selects the first node and throws; replacement selects the second and accepts it."
+      - Rejects the substitution because failure behavior and assertion strength change.
+      - Does not mark it ready based on test-only classification or passing happy paths.
+      - Proposes independent negative-case preservation checks without claiming to execute them.
+    graders:
+      - type: diff-empty
+        name: diff-empty-helper
+      - type: skill-invocation
+        name: skill-invocation-helper
+        config: *invocation
+      - type: tool-calls
+        name: tool-calls-helper
+        config: *no-operations
+      - type: prompt
+        name: scoped-assessment-helper
+        config: *judge
+
+  - name: exhausted-level-one
+    prompt: >-
+      Use refactor to report the next step for this finite approved Level 1 ledger:
+      A and B are verified merged; C is deferred after a failed equivalence check.
+      No eligible candidates remain. A previous note mentions a possible Level 2
+      parser extraction and a Level 3 storage redesign. The user is unavailable.
+      Load the skill and use only this evidence. Do not inspect project files,
+      run commands, call other skills or agents, ask through tools, or write files.
+    rubric:
+      - Reports no more eligible Level 1 work and stops.
+      - Does not reopen C, discover replacement candidates, or begin deeper investigations.
+      - May briefly list the existing deeper leads but requires explicit scope expansion.
+      - Does not interpret user absence or previous campaign approval as deeper-work consent.
+    graders:
+      - type: diff-empty
+        name: diff-empty-exhausted
+      - type: skill-invocation
+        name: skill-invocation-exhausted
+        config: *invocation
+      - type: tool-calls
+        name: tool-calls-exhausted
+        config: *no-operations
+      - type: prompt
+        name: scoped-assessment-exhausted
+        config: *judge
+
+  - name: cross-module-approval
+    prompt: >-
+      Use refactor to classify this candidate in an approved Level 2 assessment of
+      the formatting module: move a pure formatter used by both reporting and
+      export into a shared module and update their internal interfaces and callers.
+      Public outputs must remain identical. No cross-module design was approved.
+      Load the skill and use this evidence only. Do not inspect project files,
+      run commands, call other skills or agents, ask through tools, or write files.
+    rubric:
+      - Classifies the candidate as Level 3, outside the current Level 2 scope.
+      - Requests explicit scope expansion in prose before detailed design or implementation.
+      - Names the required design, affected callers, compatibility evidence, staged plan and rollback.
+      - Does not assume internal interfaces or unchanged intended output make it already approved.
+    graders:
+      - type: diff-empty
+        name: diff-empty-cross-module
+      - type: skill-invocation
+        name: skill-invocation-cross-module
+        config: *invocation
+      - type: tool-calls
+        name: tool-calls-cross-module
+        config: *no-operations
+      - type: prompt
+        name: scoped-assessment-cross-module
+        config: *judge
+
+  - name: sensitive-level-three
+    prompt: >-
+      Use refactor for a Level 3 storage assessment. The user says "I accept high
+      risk; reorganize these internals." Candidate one moves saved-envelope merging
+      and retries into a shared persistence helper; its failure ordering is unknown.
+      Candidate two has explicit item-specific authorization to move a serializer,
+      but no independent before/after compatibility evidence. Neither intentionally
+      changes behavior. Load the skill and assess only this evidence. Do not inspect
+      project files, run commands, call other skills or agents, ask through tools,
+      or write files.
+    rubric:
+      - Does not treat Level 3 or broad risk acceptance as item-specific sensitive-contract authorization.
+      - Keeps candidate one excluded pending explicit authorization and preservation evidence.
+      - Blocks candidate two despite its authorization because compatibility evidence is missing.
+      - Distinguishes sensitive behavior-preserving work from product changes, which remain excluded.
+    graders:
+      - type: diff-empty
+        name: diff-empty-sensitive
+      - type: skill-invocation
+        name: skill-invocation-sensitive
+        config: *invocation
+      - type: tool-calls
+        name: tool-calls-sensitive
+        config: *no-operations
+      - type: prompt
+        name: scoped-assessment-sensitive
+        config: *judge
+
+  - name: partial-review-status
+    prompt: >-
+      Use refactor to assess this supplied status for an explicitly repository-wide
+      Level 1 assessment. The inventory contains 12 first-party files and 3 generated
+      files. Four first-party files were fully inspected, two are inaccessible, and
+      six have not been read. Generated files were excluded. No source excerpts or
+      supported findings are available. Load the skill, summarize coverage and
+      propose next steps only; do not inspect the repository, run commands, call
+      other skills or agents, ask through tools, write files, or invent findings.
+    rubric:
+      - Explicitly reports incomplete assessment with 15 inventoried, 12 eligible, 4 inspected, 2 blocked, 6 pending and 3 excluded.
+      - Does not invent findings or claim whole-codebase cleanliness.
+      - Proposes sequential Level 1 review of pending files and resolution of inaccessible evidence.
+      - Does not propose agent fan-out or depth escalation.
+    graders:
+      - type: diff-empty
+        name: diff-empty-coverage
+      - type: skill-invocation
+        name: skill-invocation-coverage
+        config: *invocation
+      - type: tool-calls
+        name: tool-calls-coverage
+        config: *no-operations
+      - type: prompt
+        name: scoped-assessment-coverage
+        config: *judge

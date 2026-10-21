@@ -121,6 +121,12 @@
       "source": "./skills/nobs",
       "description": "Give the shortest complete answer for supplied or current context without filler or loss of essential facts.",
       "version": "1.0.0"
+    },
+    {
+      "name": "refactor",
+      "source": "./skills/refactor",
+      "description": "Plan behavior-preserving refactoring with explicit scope, depth and risk choices.",
+      "version": "1.0.0"
     }
   ]
 }
