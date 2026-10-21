@@ -33,6 +33,11 @@ npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill d
 /go --merge=auto <context>
 ```
 
+By default, `go` works in a linked worktree and reuses an existing worktree
+without prompting. In the main checkout, it asks **Create worktree (default)**
+or **Stay here** before tests or edits, even in merge auto mode. Staying applies
+only to this invocation; existing edits remain protected.
+
 By default, `go` asks for final merge approval through `pr`. Choose
 `--merge=auto` (or "auto merge") to merge after all checks and reviews pass
 without another merge prompt; `--merge=approval` (or "ask me before merging")

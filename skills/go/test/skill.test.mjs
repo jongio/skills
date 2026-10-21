@@ -20,6 +20,35 @@ test("skill includes workflow, safety, and exit criteria", () => {
   assert.match(skill, /^## Exit Criteria$/m);
 });
 
+test("detects and reuses linked worktrees before tests or edits", () => {
+  assert.match(skill, /Default to working in a linked worktree/);
+  assert.match(skill, /normalized absolute paths/);
+  assert.match(skill, /git rev-parse --absolute-git-dir/);
+  assert.match(skill, /git rev-parse --path-format=absolute --git-common-dir/);
+  assert.match(skill, /Different paths.*assume the location is safe.*without prompting or creating another worktree/);
+  assert.match(skill, /If detection fails, stop and report/);
+  assert.match(skill, /^1\..*resolve the worktree choice before tests or edits/m);
+});
+
+test("requires a create-or-stay choice outside linked worktrees", () => {
+  assert.match(skill, /If the paths match, prompt: \*\*Create worktree \(default\)\*\* or \*\*Stay here\*\*/);
+  assert.match(skill, /Wait for the choice; merge auto mode does not bypass this prompt/);
+  assert.match(skill, /worktree root outside the repository, asking for a location if none is known/);
+  assert.match(skill, /create a dedicated branch\/worktree and run all subsequent work there/);
+  assert.match(skill, /Do not move or discard existing edits without approval/);
+  assert.match(skill, /For stay, continue in the current checkout for this invocation only/);
+});
+
+test("published go usage documents the worktree default and explicit stay option", async () => {
+  for (const file of ["../README.md", "../../../site/src/content/skills/go.md"]) {
+    const text = (await readFile(new URL(file, import.meta.url), "utf8")).replace(/\s+/g, " ");
+    assert.match(text, /By default, `go` works in a linked worktree/);
+    assert.match(text, /without prompting/);
+    assert.match(text, /\*\*Create worktree \(default\)\*\*.*\*\*Stay here\*\* before tests or edits/);
+    assert.match(text, /even in merge auto mode/);
+  }
+});
+
 test("plans, tests, implements, and reviews before invoking pr without copying its delivery logic", () => {
   assert.match(skill, /^1\..*plan[\s\S]*^2\..*Invoke `test-doctor fix`[\s\S]*^3\..*Implement[\s\S]*^4\..*Review[\s\S]*^5\..*Invoke `jongio\/pr`/m);
   assert.match(skill, /passing test\/review evidence/);
