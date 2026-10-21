@@ -13,6 +13,27 @@ const options = {
   timeout: 240_000,
 };
 
+function assertFullSuiteNotRun(response) {
+  assert.match(response.replaceAll("**", ""),
+    /\bfull (?:test )?suite\b\s*[:\-]?\s*(?:(?:has|is|was)\s+)?(?:not\s+(?:yet\s+)?(?:been\s+)?(?:run|executed)|hasn't\s+(?:been\s+)?(?:run|executed)|pending|unrun)\b/i);
+}
+
+test("the full-suite caveat cannot be satisfied by deployment approval wording", () => {
+  assert.throws(() => assertFullSuiteNotRun(
+    "The cache change is implemented; focused tests passed; the full suite passed; " +
+    "deployment is pending owner approval."));
+  assert.throws(() => assertFullSuiteNotRun(
+    "The full suite passed but deployment is pending owner approval."));
+  for (const response of [
+    "Full suite: not run. Deployment pending owner approval.",
+    "The full test suite has not yet been run.",
+    "The full suite hasn't run.",
+    "Full suite pending; deployment blocked.",
+  ]) {
+    assert.doesNotThrow(() => assertFullSuiteNotRun(response));
+  }
+});
+
 async function withRuntime(run) {
   const { CopilotClient } = await import("../.github/tools/vally/node_modules/@github/copilot-sdk/dist/index.js");
   const scratch = await mkdtemp(path.join(tmpdir(), "nobs-runtime-"));
@@ -65,7 +86,7 @@ test("Copilot loads nobs by default and preserves conversational opt-out", optio
     assert.ok(response.split(/\s+/).length <= 55, `Expected <=55 words: ${response}`);
     assert.match(response, /cache/i);
     assert.match(response, /(?:focused|targeted).*pass/is);
-    assert.match(response, /full.*(?:not|pending|unrun|hasn't)/is);
+    assertFullSuiteNotRun(response);
     assert.match(response, /(?:block|pending|await).*approval/is);
     assert.doesNotMatch(response, /happy to|let me know|anything else/i);
 

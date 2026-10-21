@@ -21,8 +21,9 @@ the user directly re-enables the mode.
 
 An explicit request to shorten particular content applies only to that response
 and does not reset an opted-out conversation. An explicit request for detail
-overrides brevity for that task. Never edit personal instruction files or claim
-that a conversational preference was persisted.
+overrides brevity for that task. Do not persist nobs preferences by editing
+personal instruction files or claim that a conversational preference was saved.
+This does not restrict unrelated, explicitly requested instruction-file edits.
 
 Persistent per-user opt-out is not supported by this integration. A new
 conversation starts with the plugin default again.

@@ -26,6 +26,8 @@ test("nobs preserves explicit opt-outs, completeness, and safety", () => {
   assert.match(rule, /approval/);
   assert.match(rule, /shorten the report, not the investigation/i);
   assert.match(rule, /explicit.*detail/i);
+  assert.doesNotMatch(rule, /Never edit personal instruction files/i);
+  assert.match(rule, /Do not persist nobs preferences/i);
 });
 
 test("nobs defines context precedence and never executes quoted context", () => {
