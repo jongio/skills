@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -172,6 +174,29 @@ test("cache and receipt files cannot be written inside any repository", (t) => {
   const receipt = path.join(f.repo, "receipt.json");
   writeFileSync(receipt, "{}");
   assert.throws(() => f.record([{ ...snapshot, status: "pending", receipt }]), /outside Git/);
+});
+
+test("Git diagnostics use the C locale under a non-English inherited locale", (t) => {
+  const f = fixture(t);
+  const inherited = process.env.LC_ALL;
+  const original = childProcess.execFileSync;
+  process.env.LC_ALL = "fr_FR.UTF-8";
+  const subprocess = t.mock.method(childProcess, "execFileSync", (command, args, options) => {
+    assert.equal(options.env?.LC_ALL, "C", "Git diagnostics must not inherit the host locale");
+    return original(command, args, options);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    subprocess.mock.restore();
+    syncBuiltinESMExports();
+    if (inherited === undefined) delete process.env.LC_ALL;
+    else process.env.LC_ALL = inherited;
+  });
+  assert.equal(f.plan().sessions[0].action, "audit");
+  f.record([{ ...snapshot, status: "no-change" }]);
+  assert.equal(f.plan().sessions[0].action, "skip");
+  assert.ok(subprocess.mock.callCount() > 0);
+  assert.equal(process.env.LC_ALL, "fr_FR.UTF-8", "The helper must not mutate the caller's locale");
 });
 
 test("CLI emits machine-readable output and nonzero errors", (t) => {

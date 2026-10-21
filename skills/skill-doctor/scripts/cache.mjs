@@ -16,7 +16,11 @@ const statuses = new Set(["no-change", "pending", "delivered"]);
 const prUrl = (value) => typeof value === "string" && /^https:\/\/github\.com\/[^/?#\s]+\/[^/?#\s]+\/pull\/[1-9]\d*$/.test(value);
 
 function git(directory, ...args) {
-  return execFileSync("git", ["-C", directory, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  return execFileSync("git", ["-C", directory, ...args], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, LC_ALL: "C" },
+  }).trim();
 }
 
 function canonicalCandidate(value) {
