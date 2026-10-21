@@ -126,19 +126,6 @@ blue/green, `repo-ready` = GitHub green, `naming-is-hard` = rose pink + green,
 
 ## Prompts
 
-### refactor (deterministic placeholder)
-
-The current thumbnail is the existing deterministic local placeholder, verified
-byte-for-byte against `encodeDeterministicPlaceholderPng()` in
-`skills/create-skill/scripts/png.mjs`. It is not Azure-generated art.
-
-- Provider: `placeholder`
-- Model/method: `deterministic-local-v1`
-- Size: `1024x1024`
-- Recipe: the repository's deterministic placeholder PNG encoder; no prompt or network call.
-- SHA-256: `7d6140526ca40be2d5d16947ef02e1169fd1db733f22766d3e2e2f7e8903861a`
-- Source: `skills/refactor/thumbnail.png`; catalog copies are generated during builds.
-
 > Provenance note: the verbatim prompt strings for the first three skills were sent to
 > `gpt-image-2` and were not saved at the time (only the PNGs were committed). Azure kept
 > no retrievable logs (no diagnostic settings on the resource) and the originating Copilot
@@ -411,3 +398,14 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 4e5ffe03d60b42612e4e1dd023bab5ef32089a37142dc9a29dfbf590a0522897
+
+## refactor (6592e89245fe)
+
+Prompt: "Flat vector illustration, pure white background, 1024x1024, centered composition. One large rounded code-editor panel holds a left-to-right transformation: tangled abstract indigo code blocks on the left become three clean organized tiers of teal blocks on the right, joined by a short dashed arrow. A prominent three-position stepped selector beneath the panel conveys choosing refactoring depth, with only the first position highlighted. A small shield with a green check sits at the transformation boundary to convey preserved behavior. A small GitHub Octocat mark at upper right connects to the panel with a dotted tether. Indigo, teal and soft lavender palette, clean modern rounded shapes, soft long shadows, tiny sparkles. Strong simple silhouette legible at 175 pixels. Diagram treatment only: abstract short dashes and rounded pills, no readable text. No words, letters, numerals, fake text, photorealism, 3D, extra panels, deletion symbols or feature removal imagery."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 6592e89245fe8d81386de6b03fd26bd3a6111b36e0a6e8da4c8f32ce01646601
