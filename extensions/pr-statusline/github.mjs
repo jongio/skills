@@ -100,18 +100,18 @@ export function summarizePrStatus(data) {
 		const conclusion = String(check?.conclusion ?? "").toUpperCase();
 		const status = String(check?.status ?? "").toUpperCase();
 		const checkState = String(check?.state ?? "").toUpperCase();
-		if (["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(conclusion) ||
-				["FAILURE", "ERROR"].includes(checkState)) {
-			failed++;
-		} else if (["IN_PROGRESS", "QUEUED", "PENDING", "WAITING", "REQUESTED"].includes(status) ||
+		if (["IN_PROGRESS", "QUEUED", "PENDING", "WAITING", "REQUESTED"].includes(status) ||
 				checkState === "PENDING" || (status && status !== "COMPLETED" && !conclusion)) {
 			running++;
+		} else if (["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(conclusion) ||
+				["FAILURE", "ERROR"].includes(checkState)) {
+			failed++;
 		} else if (["SUCCESS", "NEUTRAL", "SKIPPED"].includes(conclusion) || checkState === "SUCCESS") {
 			passed++;
 		}
 	}
 	const totalChecks = passed + failed + running;
-	const checkIcon = failed > 0 ? OCTICONS.fail : (running > 0 ? OCTICONS.running : OCTICONS.pass);
+	const checkIcon = running > 0 ? OCTICONS.running : (failed > 0 ? OCTICONS.fail : OCTICONS.pass);
 
 	const opinionated = Array.isArray(data.latestOpinionatedReviews?.nodes)
 		? data.latestOpinionatedReviews.nodes.filter(Boolean)
@@ -154,7 +154,8 @@ export function summarizePrStatus(data) {
 
 	const tokens = [];
 	if (data.isDraft) tokens.push(OCTICONS.draft);
-	tokens.push(`${checkIcon} ${passed}/${totalChecks}`);
+	const failureDetail = running > 0 && failed > 0 ? ` (${failed} failed)` : "";
+	tokens.push(`${checkIcon} ${passed}/${totalChecks}${failureDetail}`);
 	if (data.mergeStateStatus === "DIRTY") tokens.push(OCTICONS.conflict);
 	if (data.reviewDecision === "CHANGES_REQUESTED") tokens.push(OCTICONS.changes);
 	tokens.push(`${OCTICONS.approved} ${approvedCount}/${totalApprovals}`);

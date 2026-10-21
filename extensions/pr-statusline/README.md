@@ -134,8 +134,8 @@ Using `Azure/azure-dev` as an example checkout:
 | ` Merged` (`U+E727`) | Pull request merged (`nf-dev-git_merge`) |
 | `` (`U+F4DD`) | Draft pull request (`nf-oct-git_pull_request_draft`) |
 | ` x/y` (`U+F058`) | All checks completed with none failing (`x` passed / `y` total, including required branch-protection checks waiting to report) |
-| ` x/y` (`U+F252`) | Checks currently running or queued (`x` passed so far / `y` total) |
-| ` x/y` (`U+F057`) | One or more checks failed (`x` passed / `y` total) |
+| ` x/y` (`U+F252`) | Checks currently running or queued (`x` passed so far / `y` total); `(n failed)` appears if other checks have completed with failures |
+| ` x/y` (`U+F057`) | No checks are active and one or more checks failed (`x` passed / `y` total) |
 | ` x/y` (`U+F164`) | Review approvals received (`x`) out of total reviewers requested or opinionated (`y`) |
 | ` x/y` (`U+F075`) | Review comment threads resolved (`x`) out of total review threads (`y`) |
 | `` (`U+F071`) | Merge conflicts (`mergeStateStatus === "DIRTY"`) |
@@ -144,8 +144,8 @@ Using `Azure/azure-dev` as an example checkout:
 ### Attention-level badge colors
 
 - **Green (All Clear):** All checks passing, no conflicts, and all review threads resolved (` #4812  14/14  2/2  3/3`).
-- **Amber (In Progress / Needs Attention):** Checks are running (``), approvals are still pending (` 1/2`), or review threads remain unresolved (` 2/4`).
-- **Red (Critical):** One or more checks failed (``), the PR has merge conflicts (``), or changes were requested (``).
+- **Amber (In Progress / Needs Attention):** Checks are running or queued (``), including reruns after failure, approvals are still pending (` 1/2`), or review threads remain unresolved (` 2/4`). Active CI takes precedence over completed check failures; a mixed result shows progress plus `(n failed)` without implying the rerun has succeeded.
+- **Red (Critical):** CI has no active checks and one or more failed (``), the PR has merge conflicts (``), or changes were requested (``). Conflicts and requested changes remain red even while CI is running.
 - **Purple (Merged):** A merged PR remains visible until the next real user message
   after this session detects the merge, then disappears. GitHub's merge time and
   later cache polls don't move that first-observed boundary. Scheduled prompts,
@@ -165,7 +165,7 @@ Using `Azure/azure-dev` as an example checkout:
    - Scheduled watch prompts (`manage_schedule`)
    It ignores `gh pr list`/`search` output, exploratory subagents, skill-injected examples, and other sessions' transcripts.
 2. **Single-query GraphQL status + shared cache (`github.mjs`):**
-   Live PR status is fetched via `gh api graphql` (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (10s TTL while checks are running, 15s TTL when settled, with in-flight deduplication locks). It does **not** use Copilot AI model requests or touch Copilot's internal databases.
+   Live PR status is fetched via `gh api graphql` (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (20s TTL while checks are running, including mixed running/failed checks, 45s TTL when settled, with in-flight deduplication locks). A restarted check's active status takes precedence over a leftover conclusion; the pill changes on the next successful refresh, not optimistically when a rerun command is issued. It does **not** use Copilot AI model requests or touch Copilot's internal databases.
 3. **Automatic cleanup & manual controls:**
    Closed PRs are removed automatically. Merged PRs remain until the next real user message after this session detects the merge. When the SDK extension (`extension.mjs`) is loaded, you can also manage the list manually:
 
