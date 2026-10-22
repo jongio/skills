@@ -61,6 +61,41 @@ test("defaults to squash and branch deletion without destructive worktree cleanu
   assert.match(skill, /cleanup is blocked.*merged with cleanup pending/);
 });
 
+test("base updates require a verified blocker rather than divergence alone", () => {
+  const inspect = skill.split("**Inspect Base**:")[1]?.split("\n")[0];
+  const monitor = skill.split("**Base changes**:")[1]?.split("\n")[0];
+  assert.ok(inspect);
+  assert.ok(monitor);
+  assert.match(inspect, /without changing the PR head/);
+  assert.match(inspect, /Being behind base alone is not a reason to rebase, merge base.*update-branch/);
+  assert.match(inspect, /Update only for confirmed merge conflicts or a verified enforced up-to-date requirement blocking this PR/);
+  assert.match(inspect, /use rebase only when necessary to clear that blocker/);
+  assert.match(inspect, /Unknown mergeability or unavailable policy evidence.*not speculative rebasing/);
+  assert.match(inspect, /required merge queue is not itself a reason to update/);
+  assert.match(monitor, /same Inspect Base gate.*monitoring and immediately before merge/);
+  assert.match(monitor, /Preserve the head.*pending or passing/);
+  assert.match(monitor, /Resolve confirmed conflicts even after submission/);
+  assert.match(monitor, /record the blocker and target base OID.*recheck.*before changing the head/);
+  assert.match(monitor, /batch known fixes into the same push/);
+  assert.match(monitor, /Do not repeat an update unless fresh evidence/);
+  assert.match(monitor, /rerun invalidated checks and obtain expected reviews on the new head/);
+  assert.match(monitor, /Never bypass required freshness checks or force-push shared branches without explicit confirmation/);
+  assert.match(skill, /satisfies applicable enforced base-freshness or merge-queue requirements \(being behind alone is acceptable\)/);
+  assert.doesNotMatch(skill, /rebase onto the base branch if behind|rebase\/push if the branch falls behind|PR is submitted, up to date with base/);
+});
+
+test("base-update documentation preserves CI without waiving real blockers", async () => {
+  for (const file of ["../README.md", "../../../site/src/content/skills/pr.md"]) {
+    const text = (await readFile(new URL(file, import.meta.url), "utf8")).replace(/\s+/g, " ");
+    assert.match(text, /Being behind base alone.*(?:does not|never) trigger/);
+    assert.match(text, /confirmed merge conflicts or a verified enforced up-to-date requirement/);
+    assert.match(text, /use rebase only when necessary/i);
+    assert.match(text, /before submission, during monitoring, (?:or|and) before merge/);
+    assert.match(text, /required merge queue alone/);
+    assert.doesNotMatch(text, /an up-to-date base/);
+  }
+});
+
 test("queue admission waits for confirmed merge and preserves the authorized strategy", () => {
   assert.match(skill, /merge queue.*configured strategy.*authorized strategy/);
   assert.match(skill, /Queue admission is not a merge/);
@@ -170,6 +205,9 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "clean-headline-hides-body-only-finding",
     "deduplicate-and-revalidate-review-body-findings",
     "bot-vs-human-comment-resolution",
+    "behind-base-preserves-head",
+    "verified-base-update-blockers",
+    "unknown-mergeability-and-queue",
     "terse-fix-replies-with-commit-links",
     "documentation-preflight-reuse",
     "default-merge-approval",
@@ -199,6 +237,27 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
       `${requiredGrader} failure must prevent passing threshold`,
     );
   }
+});
+
+test("base-update evals distinguish divergence, confirmed blockers, and unknown state", () => {
+  const scenario = (name) => {
+    const section = evalSpec.split(`  - name: ${name}\n`)[1]?.split("\n  - name: ")[0];
+    assert.ok(section, `missing scenario ${name}`);
+    assert.match(section, /No commands, edits, agents, or network calls/);
+    return section.replace(/\s+/g, " ");
+  };
+  const behind = scenario("behind-base-preserves-head");
+  assert.match(behind, /pending.*passing/);
+  assert.match(behind, /before submission.*during monitoring.*before merge/);
+  assert.match(behind, /rebase.*merge from base.*update-branch/);
+  const blockers = scenario("verified-base-update-blockers");
+  assert.match(blockers, /confirmed merge conflicts/);
+  assert.match(blockers, /enforced strict up-to-date requirement/);
+  assert.match(blockers, /fresh evidence.*new head/);
+  const unknown = scenario("unknown-mergeability-and-queue");
+  assert.match(unknown, /UNKNOWN/);
+  assert.match(unknown, /unavailable/);
+  assert.match(unknown, /queue admission is not a merge/i);
 });
 
 test("reply eval checks actual fix attribution, body-only grouping, and disputed findings", () => {

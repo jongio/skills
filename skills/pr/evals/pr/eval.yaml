@@ -47,7 +47,7 @@ stimuli:
           prompt: >-
             Score 5 only if the response follows the pr checklist (commit, code review,
             doc-doctor, test-doctor, light security review, lint, build, template-preserving PR body with
-            exact validation commands/results, monitor CI/rebase/comments), verifies both
+            exact validation commands/results, monitor CI/mergeability/comments), verifies both
             owner and private visibility before applying the explicit exception including
             the pending Copilot request, and retains posted feedback and human review gates.
             It must accept invocation-only auto mode, reject GitHub auto-merge and require an authorized literal head-pinned command
@@ -228,14 +228,15 @@ stimuli:
   - name: bot-vs-human-comment-resolution
     prompt: >-
       Use the pr skill to explain how to handle an open PR that is behind the
-      base branch, has one failing CI check, one Copilot review comment pointing
+      base branch but has no merge conflicts or enforced up-to-date requirement,
+      has one failing CI check, one Copilot review comment pointing
       out a bug, and one human reviewer comment asking an open design question.
       Do not perform network or repository writes.
     tags:
       scenario: remediation
       cost: low
     rubric:
-      - Rebases onto the base branch and fixes the failing CI check.
+      - Does not rebase merely because the branch is behind; investigates and fixes the failing CI check.
       - Fixes the bug, replies to both comments, resolves the automated Copilot thread, and leaves the human reviewer's open question unresolved.
     graders:
       - type: diff-empty
@@ -246,10 +247,120 @@ stimuli:
           scoring: scale_1_5
           threshold: 0.8
           prompt: >-
-            Score 5 only if the agent plans to rebase the behind branch, fix the failing CI check,
+            Score 5 only if the agent avoids rebasing merely because the branch is behind,
+            investigates and fixes the failing CI check,
             address and reply to both review comments, resolve the automated Copilot review thread,
             and keep the human reviewer's open-question thread open. Score 1 if it resolves the
-            human's open question or ignores the failing CI or rebase.
+            human's open question, ignores the failing CI, or unnecessarily updates from base.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: behind-base-preserves-head
+    prompt: >-
+      Use pr to explain what to do before submission, during monitoring, and
+      immediately before merge when the branch is behind base by four commits.
+      There are no merge conflicts, no enforced up-to-date requirement, and no
+      source changes needed. During monitoring CI is initially pending, then
+      passing; all expected reviews are complete on the current head. Base
+      advances again without introducing conflicts or a freshness requirement.
+      No commands, edits, agents, or network calls are authorized.
+    tags:
+      scenario: base-update-gate
+      cost: low
+    rubric:
+      - Preserves the head before submission, during monitoring, and before merge despite divergence alone.
+      - Does not rebase, merge from base, use update-branch, or push merely to catch up.
+      - Rechecks actual merge gates without needlessly invalidating pending or passing CI and current-head reviews.
+    graders:
+      - type: diff-empty
+        name: behind-base-plan-does-not-write
+      - type: prompt
+        name: preserves-head-without-blocker
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the response preserves the head in all three stages,
+            rejects rebase, merge from base, update-branch and push just because
+            base advanced, and retains current-head evidence while rechecking
+            actual merge gates and authorization. Score 1 if it insists on
+            catching up, invalidates reviews solely due to divergence, restarts
+            CI unnecessarily, or performs calls or edits.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: verified-base-update-blockers
+    prompt: >-
+      Use pr to plan two independent submitted PRs. PR A has confirmed merge
+      conflicts after base advances. PR B has no conflicts, but a verified
+      enforced strict up-to-date requirement blocks merging its stale head.
+      Both have known review fixes ready and CI passing on the old head.
+      Explain the minimum justified updates, what to record and recheck,
+      how to handle another base advance, and which evidence must be renewed.
+      One branch is shared and has no force-push authorization.
+      No commands, edits, agents, or network calls are authorized.
+    tags:
+      scenario: base-update-gate
+      cost: low
+    rubric:
+      - Resolves confirmed post-submission conflicts and satisfies the verified enforced freshness blocker rather than ignoring either.
+      - Records the blocker and target base OID, rechecks necessity before updating, and batches known fixes where practical.
+      - Rebases only when necessary, requires fresh evidence for repeat updates, and obtains invalidated checks and expected reviews on the new head.
+      - Does not bypass required checks or force-push a shared branch without explicit confirmation.
+    graders:
+      - type: diff-empty
+        name: required-update-plan-does-not-write
+      - type: prompt
+        name: minimum-necessary-base-update
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if both real blockers are remediated, with the blocker
+            and target base OID recorded and necessity rechecked before updating.
+            Batch known fixes where practical; require fresh evidence before
+            repeating an update and invalidated checks plus expected reviews
+            on the new head. Rebase only when necessary and preserve the
+            shared-branch force-push approval boundary. Score 1 if it ignores
+            conflicts or strict freshness, reuses stale checks or reviews after
+            changing the head, blindly chases base, or bypasses safety gates.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: unknown-mergeability-and-queue
+    prompt: >-
+      Use pr to explain two independent cases. In case A the PR is behind,
+      mergeability is UNKNOWN, and branch policy evidence is unavailable.
+      In case B a conflict-free PR is behind and requires a merge queue with
+      a verified authorized strategy; queue admission does not require a
+      branch update. Explain whether either case warrants a speculative
+      rebase and what evidence or gates remain necessary.
+      No commands, edits, agents, or network calls are authorized.
+    tags:
+      scenario: base-update-gate
+      cost: low
+    rubric:
+      - Uses bounded rechecking or reports an evidence blocker for UNKNOWN state, without speculative rebasing or claiming readiness.
+      - Does not update the branch merely for queue admission and retains normal CI, review, and authorization gates.
+      - Queue admission is not a merge; waits for actual merge confirmation before cleanup.
+    graders:
+      - type: diff-empty
+        name: uncertain-update-plan-does-not-write
+      - type: prompt
+        name: no-speculative-base-updates
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if neither case triggers a speculative branch update.
+            Case A needs bounded rechecking or a blocker report, not assumed
+            merge readiness. Case B preserves the head and all normal merge
+            gates; queue admission is not a merge and cleanup waits for actual
+            confirmation. Score 1 for rebasing on uncertainty or queue presence,
+            treating unavailable evidence as permission, or premature cleanup.
       - type: skill-invocation
         config:
           required: [pr]
