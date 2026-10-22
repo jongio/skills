@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { applyPlan, buildRepositoryPlan } from "./registration.mjs";
+import { applyRepositoryPlan, buildRepositoryPlan } from "./registration.mjs";
 import { bumpVersion, readSkillVersion, setSkillVersion, validateVersion } from "./versions.mjs";
 
 const MANIFESTS = ["plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", "gemini-extension.json"];
@@ -60,6 +60,15 @@ export function planVersions(root, { command = "check", target, level } = {}) {
       aggregateVersion = bumpVersion(aggregateVersion, "patch");
     }
   }
+  const bundledAuthoring = "skills/create-skills-repo/templates/repository/skills/create-skill/SKILL.md";
+  if (skills.has("create-skill") && existsSync(join(root, bundledAuthoring))) {
+    values.set(join(root, bundledAuthoring), setSkillVersion(read(bundledAuthoring), skills.get("create-skill").version));
+    if (command === "bump" && target === "create-skill" && skills.has("create-skills-repo")) {
+      const generator = skills.get("create-skills-repo");
+      generator.version = bumpVersion(generator.version, "patch");
+      values.set(join(root, generator.file), setSkillVersion(generator.source, generator.version));
+    }
+  }
   if (config) {
     config.package.version = aggregateVersion;
     put("skills-repo.config.json", config);
@@ -101,12 +110,17 @@ export function runVersionCommand(root, argv) {
       args.length !== (command === "bump" ? 3 : 1)) {
     throw new Error("Usage: version-skills.mjs check|sync|bump <package|skill-name|statuslines> <major|minor|patch> [--dry-run]");
   }
-  const plan = planVersions(root, { command, target, level });
-  const changes = plan.mutations.map((item) => item.path.slice(plan.root.length + 1).split(sep).join("/"));
   if (command === "check" || argv.includes("--dry-run")) {
+    const plan = planVersions(root, { command, target, level });
+    const changes = changedPaths(plan);
     return { status: changes.length ? (command === "check" ? "drift" : "planned") : "clean", changes };
   }
-  const result = applyPlan(plan, { approval: plan.hash });
+  const { plan, result } = applyRepositoryPlan(root, () => planVersions(root, { command, target, level }));
   if (result.cleanupFailures.length) throw new Error(result.cleanupFailures.join("\n"));
+  const changes = changedPaths(plan);
   return { status: changes.length ? "updated" : "clean", changes };
+}
+
+function changedPaths(plan) {
+  return plan.mutations.map((item) => item.path.slice(plan.root.length + 1).split(sep).join("/"));
 }

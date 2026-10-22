@@ -54,6 +54,9 @@ Generated repositories include `scripts/version-skills.mjs` with `check`,
 the aggregate source of truth, and each skill uses `metadata.version` in
 `SKILL.md`. Skill bumps also patch the aggregate plugin and update managed
 hashes transactionally. CI checks distribution version parity.
+Release commands hold shared locks during both planning and application.
+In the source marketplace, a `create-skill` release also refreshes its bundled
+metadata and patches the containing `create-skills-repo` release.
 
 Generator sync preserves each discovered skill version. Upgrade reads the
 incoming bundled authoring skill's version, not a hard-coded `1.0.0`.

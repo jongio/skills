@@ -558,21 +558,34 @@ function applyPlanUnlocked(plan, options = {}) {
   };
 }
 
-export function applyPlan(plan, options = {}) {
-  if (options.dryRun || !options.approval || options.approval !== plan.hash) {
-    return applyPlanUnlocked(plan, options);
-  }
-  const releaseManaged = plan.managed ? acquirePlanLock(plan.root, "create-skills-repo") : null;
+function withPlanLocks(root, managed, action) {
+  const releaseManaged = managed ? acquirePlanLock(root, "create-skills-repo") : null;
   try {
-    const release = acquirePlanLock(plan.root);
+    const release = acquirePlanLock(root);
     try {
-      return applyPlanUnlocked(plan, options);
+      return action();
     } finally {
       release();
     }
   } finally {
     releaseManaged?.();
   }
+}
+
+export function applyPlan(plan, options = {}) {
+  if (options.dryRun || !options.approval || options.approval !== plan.hash) {
+    return applyPlanUnlocked(plan, options);
+  }
+  return withPlanLocks(plan.root, plan.managed, () => applyPlanUnlocked(plan, options));
+}
+
+export function applyRepositoryPlan(root, planner) {
+  root = resolve(root);
+  return withPlanLocks(root, existsSync(join(root, "skills-repo.config.json")), () => {
+    const plan = planner();
+    if (resolve(plan.root) !== root) throw new Error("Repository plan must use the locked root.");
+    return { plan, result: applyPlanUnlocked(plan, { approval: plan.hash }) };
+  });
 }
 
 export function checkSkill(profile, name) {

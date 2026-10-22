@@ -232,6 +232,9 @@ for legacy skills without metadata it preserves the existing marketplace
 version, never resets it to `1.0.0`. `check` is read-only and CI rejects drift.
 These commands only change local files; they do not commit, tag, push, or publish.
 After adding or removing a skill, bump the aggregate package before publishing.
+Releasing `create-skill` also updates its bundled metadata and patches the
+containing `create-skills-repo` release. Mutating release commands hold the
+shared repository locks from the first version read through transaction apply.
 
 Private npm manifests version development tooling, not distributed skill
 releases. Schema and generator template versions are also independent.
