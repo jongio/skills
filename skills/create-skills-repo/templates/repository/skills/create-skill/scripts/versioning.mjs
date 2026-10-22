@@ -99,8 +99,7 @@ export function planVersions(root, { command = "check", target, level } = {}) {
     put(file, manifest);
   }
   // Do not add unsupported version fields to the Codex marketplace index.
-  const plan = buildRepositoryPlan(root, values);
-  return Object.freeze({ ...plan, managed: config !== null });
+  return buildRepositoryPlan(root, values, { validateManaged: command !== "check" });
 }
 
 export function runVersionCommand(root, argv) {

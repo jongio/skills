@@ -224,9 +224,9 @@ function makePlan(root, values) {
   });
 }
 
-export function buildRepositoryPlan(root, values) {
+export function buildRepositoryPlan(root, values, { validateManaged = true } = {}) {
   const statePath = join(root, ".skills-repo", "state.json");
-  if (existsSync(join(root, "skills-repo.config.json"))) {
+  if (validateManaged && existsSync(join(root, "skills-repo.config.json"))) {
     ensureSafeDestination(root, statePath);
     const state = JSON.parse(readText(statePath));
     if (state.schemaVersion !== 1 || state.hashVersion !== 1 || !state.files) {
@@ -576,7 +576,8 @@ export function applyPlan(plan, options = {}) {
   if (options.dryRun || !options.approval || options.approval !== plan.hash) {
     return applyPlanUnlocked(plan, options);
   }
-  return withPlanLocks(plan.root, plan.managed, () => applyPlanUnlocked(plan, options));
+  return withPlanLocks(plan.root, existsSync(join(plan.root, "skills-repo.config.json")),
+    () => applyPlanUnlocked(plan, options));
 }
 
 export function applyRepositoryPlan(root, planner) {

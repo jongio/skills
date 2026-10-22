@@ -16,6 +16,7 @@ import {
   applyPlan,
   buildArtPlan,
   buildCreatePlan,
+  buildRegisterPlan,
   buildRegistrationUpdates,
   checkSkill,
   hashPlan,
@@ -76,6 +77,35 @@ test("create plan covers skill files and every discovered registration surface",
     assert.equal(readFileSync(join(root, "README.md"), "utf8").includes(manifest.name), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("all managed authoring writes honor the generator lock", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "create-skill-managed-lock-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  createRepositoryFixture(root, { managed: true });
+  const profile = discoverRepository(root);
+  const lock = `${root}.create-skills-repo.lock`;
+  t.after(() => rmSync(lock, { force: true }));
+  const art = placeholderArt();
+  const create = buildCreatePlan(profile, manifest, { art });
+  writeFileSync(lock, "generator-operation\n");
+  assert.throws(() => applyPlan(create, { approval: create.hash }), /Another create-skills-repo operation/);
+  assert.equal(existsSync(join(root, "skills", manifest.name)), false);
+  rmSync(lock);
+  applyPlan(create, { approval: create.hash });
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  const state = readFileSync(join(root, ".skills-repo", "state.json"), "utf8");
+  for (const plan of [
+    buildRegisterPlan(profile, manifest, art),
+    buildArtPlan(profile, manifest, art),
+  ]) {
+    writeFileSync(lock, "generator-operation\n");
+    assert.throws(() => applyPlan(plan, { approval: plan.hash }), /Another create-skills-repo operation/);
+    assert.equal(readFileSync(lock, "utf8"), "generator-operation\n");
+    assert.equal(readFileSync(join(root, "README.md"), "utf8"), readme);
+    assert.equal(readFileSync(join(root, ".skills-repo", "state.json"), "utf8"), state);
+    rmSync(lock);
   }
 });
 

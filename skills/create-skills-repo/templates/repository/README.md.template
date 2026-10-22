@@ -63,7 +63,8 @@ changes. A skill bump also patches the aggregate plugin so whole-package
 installations see the release. Bump once per release; use `package major` too
 when the aggregate has breaking changes. `sync` repairs mirrors without a bump,
 and migrates missing skill metadata from existing marketplace versions.
-`check` is read-only and CI rejects drift. No command commits, tags, pushes,
+`check` compares release versions only, remains read-only, and lets unrelated
+dependency updates proceed; CI rejects version drift. No command commits, tags, pushes,
 or publishes.
 After adding or removing a skill, bump the aggregate package before publishing.
 

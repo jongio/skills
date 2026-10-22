@@ -40,6 +40,9 @@ mirror-repairing `sync`, and `bump <package|skill-name> <major|minor|patch>`.
 Use `--dry-run` to preview writes. Skill bumps also patch the aggregate;
 managed hashes are updated in the same transaction. These commands never
 commit, tag, push, or publish.
+Read-only version `check` compares releases without enforcing unrelated managed
+hashes, so dependency-only PRs remain valid. Mutating release commands still
+reject managed-file conflicts; the generator's own `check` still reports them.
 
 Run the version helper's `sync` after upgrading a legacy repository to migrate
 missing skill metadata from its existing marketplace versions. Generator
