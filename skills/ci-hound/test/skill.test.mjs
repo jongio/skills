@@ -473,6 +473,56 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
   assert.equal(releaseTick.events.length, 1);
   assert.equal(releaseTick.events[0].type, "WORKFLOW_FAILED");
   assert.equal(releaseTick.events[0].deliverySkill, "go");
+
+  // A failed pull_request_target run sharing main's branch and SHA must not block ALL_GREEN for a passing main push run,
+  // and a watched push run on a feature branch with associated pull_requests routes to "pr".
+  const collisionState = loadState("/nonexistent/state.json");
+  const collisionTick = evaluatePollTick(parseArgs(["watch", "--repo", "github/evals"]), collisionState, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sharedsha"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 801,
+              name: "CI",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sharedsha",
+              status: "completed",
+              conclusion: "success",
+              updated_at: "2026-10-22T18:10:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/801",
+            },
+            {
+              id: 802,
+              name: "PR Check",
+              event: "pull_request_target",
+              head_branch: "main",
+              head_sha: "sharedsha",
+              status: "completed",
+              conclusion: "failure",
+              updated_at: "2026-10-22T18:10:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/802",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.includes("/jobs?per_page=50")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"jobs":[]}', stderr: "" };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(collisionTick.events.length, 1);
+  assert.equal(collisionTick.events[0].type, "ALL_GREEN");
+  assert.equal(collisionTick.events[0].runs.length, 1);
+  assert.equal(collisionTick.events[0].runs[0].id, 801);
 });
 
 

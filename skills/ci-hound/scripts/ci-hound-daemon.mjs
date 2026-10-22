@@ -407,6 +407,10 @@ export function buildOptimizationReport(state, mergeMode = "approval") {
   };
 }
 
+function isPullRequestRunEvent(event) {
+  return event === "pull_request" || event === "pull_request_target";
+}
+
 export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   state.repo = args.repo;
   state.branch = args.branch;
@@ -448,7 +452,11 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   }
   const trackedActiveIds = new Set(args.watchRunIds);
   for (const existing of Object.values(state.runs)) {
-    if (existing.head_branch === args.branch && existing.status !== "completed") {
+    if (
+      existing.head_branch === args.branch &&
+      !isPullRequestRunEvent(existing.event) &&
+      existing.status !== "completed"
+    ) {
       trackedActiveIds.add(existing.id);
     }
   }
@@ -467,7 +475,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   for (const run of workflowRuns) {
     const runKey = String(run.id);
     const prevRun = state.runs[runKey];
-    const isPullRequestEvent = run.event === "pull_request" || run.event === "pull_request_target";
+    const isPullRequestEvent = isPullRequestRunEvent(run.event);
     const isMainBranch = run.head_branch === args.branch && !isPullRequestEvent;
     const isWatchedRun = args.watchRunIds.includes(run.id);
     const isCurrentHeadMainRun = isMainBranch && run.head_sha === state.lastMainSha;
@@ -520,8 +528,12 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
               hasCommittedFixBranch: false,
               docsOrConfigOnlyStaged: false,
             };
+      const hasAssociatedPrOnFeatureBranch =
+        !isMainBranch && Array.isArray(run.pull_requests) && run.pull_requests.length > 0;
       const deliveryContext = {
-        hasExistingPr: Boolean(explicitExistingFix.hasExistingPr || isPullRequestEvent),
+        hasExistingPr: Boolean(
+          explicitExistingFix.hasExistingPr || isPullRequestEvent || hasAssociatedPrOnFeatureBranch
+        ),
         hasCommittedFixBranch: explicitExistingFix.hasCommittedFixBranch,
         docsOrConfigOnlyStaged: explicitExistingFix.docsOrConfigOnlyStaged,
       };
@@ -602,7 +614,10 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       }
     } else if (state.lastMainSha) {
       const headMainRuns = Object.values(state.runs).filter(
-        (r) => r.head_branch === args.branch && r.head_sha === state.lastMainSha
+        (r) =>
+          r.head_branch === args.branch &&
+          !isPullRequestRunEvent(r.event) &&
+          r.head_sha === state.lastMainSha
       );
       const allCompletedGreen =
         headMainRuns.length > 0 &&
