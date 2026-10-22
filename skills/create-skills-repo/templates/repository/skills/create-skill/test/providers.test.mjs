@@ -133,7 +133,12 @@ test("Azure provider uses exact endpoint, keyless token provider, and no retries
 });
 
 for (const provider of ["openai", "azure-openai"]) {
-  test(`${provider} works with the real SDK and an offline transport`, async () => {
+  test(`${provider} works with the real SDK and an offline transport`, async (t) => {
+    for (const key of Object.keys(process.env).filter((name) => /^(?:AZURE_)?OPENAI_/.test(name))) {
+      const value = process.env[key];
+      delete process.env[key];
+      t.after(() => { process.env[key] = value; });
+    }
     const requests = [];
     const scopes = [];
     const result = await generateBuiltInArt(provider, {
