@@ -31,6 +31,7 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`nobs`](skills/nobs/) | Give the shortest complete answer for supplied or current context without filler or loss of essential facts. |
 | [`refactor`](skills/refactor/) | Plan behavior-preserving refactoring with explicit scope, depth and risk choices. |
 | [`skill-doctor`](skills/skill-doctor/) | Learn from recent session feedback and trim skill bloat, with cached audits, a dedicated worktree, and one improvement PR. |
+| [`ci-hound`](skills/ci-hound/) | Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows. |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:

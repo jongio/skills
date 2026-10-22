@@ -133,6 +133,12 @@
       "source": "./skills/skill-doctor",
       "description": "Learn from recent session feedback and trim skill bloat, with cached audits, a dedicated worktree, and one improvement PR.",
       "version": "1.0.0"
+    },
+    {
+      "name": "ci-hound",
+      "source": "./skills/ci-hound",
+      "description": "Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows.",
+      "version": "1.0.0"
     }
   ]
 }

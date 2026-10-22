@@ -420,3 +420,14 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 8534a4def6471e615015c6c0f93e64eb82ff2e180cb78c0858550cf0d1937d5e
+
+## ci-hound (08baa9ed97ba)
+
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One large rounded dark-navy CI pipeline console panel is the hero surface. Inside it, show a clear left-to-right transformation: on the left, a workflow pipeline node with a coral-red failure dot and a small amber alert bell badge branches down into an isolated git worktree folder card with a teal repair wrench badge in the center, then merges back up on the right into three sleek parallel workflow nodes with circular green check badges and a speed gauge icon. A subtle cyan radar pulse ring around the center node suggests continuous zero-token background monitoring. Place a small GitHub Octocat mark in the upper-right with a dotted tether to the console, never the main subject. Deep navy, electric cyan, health green, and warm amber palette; clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and rounded pills instead of labels. No words, letters, numerals, fake text, photorealism, 3D, cartoon dog mascot, or clutter."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 08baa9ed97ba72f128d1d1051119960d7eef89f4fdc8d4a466e5da6ad3c837c9

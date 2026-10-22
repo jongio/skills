@@ -60,7 +60,8 @@
     "backlog-groom",
     "nobs",
     "refactor",
-    "skill-doctor"
+    "skill-doctor",
+    "ci-hound"
   ],
   "repository": "https://github.com/jongio/skills"
 }
