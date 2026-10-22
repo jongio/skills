@@ -43,6 +43,21 @@ export const FLAKE_PATTERNS = [
   },
 ];
 
+export function isValidRepoSlug(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const parts = value.trim().split("/");
+  if (parts.length !== 2) {
+    return false;
+  }
+  const [owner, repo] = parts;
+  if (!owner || !repo || owner === "." || owner === ".." || repo === "." || repo === "..") {
+    return false;
+  }
+  return /^[A-Za-z0-9_.-]+$/.test(owner) && /^[A-Za-z0-9_.-]+$/.test(repo);
+}
+
 export function selectDeliverySkill({
   eventType = "",
   hasExistingPr = false,
@@ -62,8 +77,18 @@ export function parseArgs(argv) {
   const args = {
     mode: "watch",
     repo: "",
+    explicitRepos: [],
+    addRepos: [],
+    removeRepos: [],
+    clearRepos: false,
+    owner: "",
+    visibility: "",
+    worktreeRoot: "",
     branch: "main",
+    explicitBranch: false,
     stateFile: "",
+    explicitStateFile: false,
+    configFile: join(homedir(), ".copilot", "ci-hound", "config.json"),
     activeIntervalSec: 15,
     idleIntervalSec: 60,
     watchRunIds: [],
@@ -71,23 +96,71 @@ export function parseArgs(argv) {
     wakeOnAllGreen: true,
     maxPolls: 0,
     mergeMode: "approval",
+    explicitMergeMode: false,
     hasExistingPr: false,
     hasCommittedFixBranch: false,
     docsOrConfigOnlyStaged: false,
   };
 
+  const addValidatedRepos = (targetList, rawValue) => {
+    for (const item of String(rawValue)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)) {
+      if (!isValidRepoSlug(item)) {
+        throw new Error(`Invalid repository slug "${item}". Expected "<owner>/<repo>".`);
+      }
+      if (!targetList.includes(item)) {
+        targetList.push(item);
+      }
+    }
+  };
+
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
-    if (token === "watch" || token === "status" || token === "optimize" || token === "once") {
+    if (
+      token === "watch" ||
+      token === "status" ||
+      token === "optimize" ||
+      token === "once" ||
+      token === "setup"
+    ) {
       args.mode = token;
     } else if (token === "--mode" && argv[i + 1]) {
       args.mode = argv[++i];
     } else if (token === "--repo" && argv[i + 1]) {
-      args.repo = argv[++i];
+      const val = argv[++i].trim();
+      addValidatedRepos(args.explicitRepos, val);
+      args.repo = args.explicitRepos[0] || "";
+    } else if (token === "--repos" && argv[i + 1]) {
+      addValidatedRepos(args.explicitRepos, argv[++i]);
+      if (!args.repo && args.explicitRepos.length > 0) {
+        args.repo = args.explicitRepos[0];
+      }
+    } else if (token === "--add-repo" && argv[i + 1]) {
+      addValidatedRepos(args.addRepos, argv[++i]);
+    } else if (token === "--remove-repo" && argv[i + 1]) {
+      addValidatedRepos(args.removeRepos, argv[++i]);
+    } else if (token === "--clear-repos") {
+      args.clearRepos = true;
+    } else if (token === "--all-my-repos") {
+      args.owner = "@me";
+    } else if (token === "--owner" && argv[i + 1]) {
+      args.owner = argv[++i].trim();
+    } else if (token === "--visibility" && argv[i + 1]) {
+      args.visibility = argv[++i].trim().toLowerCase();
+    } else if (token.startsWith("--visibility=")) {
+      args.visibility = token.slice("--visibility=".length).trim().toLowerCase();
+    } else if (token === "--worktree-root" && argv[i + 1]) {
+      args.worktreeRoot = resolve(argv[++i]);
+    } else if (token === "--config-file" && argv[i + 1]) {
+      args.configFile = resolve(argv[++i]);
     } else if (token === "--branch" && argv[i + 1]) {
       args.branch = argv[++i];
+      args.explicitBranch = true;
     } else if (token === "--state-file" && argv[i + 1]) {
-      args.stateFile = argv[++i];
+      args.stateFile = resolve(argv[++i]);
+      args.explicitStateFile = true;
     } else if (token === "--active-interval" && argv[i + 1]) {
       args.activeIntervalSec = Math.max(5, Number.parseInt(argv[++i], 10) || 15);
     } else if (token === "--idle-interval" && argv[i + 1]) {
@@ -102,8 +175,10 @@ export function parseArgs(argv) {
       args.maxPolls = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
     } else if (token === "--merge" && argv[i + 1]) {
       args.mergeMode = argv[++i];
+      args.explicitMergeMode = true;
     } else if (token.startsWith("--merge=")) {
       args.mergeMode = token.slice("--merge=".length);
+      args.explicitMergeMode = true;
     } else if (token === "--existing-pr") {
       args.hasExistingPr = true;
     } else if (token === "--existing-worktree") {
@@ -116,6 +191,12 @@ export function parseArgs(argv) {
   if (args.mergeMode !== "approval" && args.mergeMode !== "auto") {
     throw new Error(`Invalid --merge mode "${args.mergeMode}". Expected "approval" or "auto".`);
   }
+  if (args.visibility && !["all", "private", "public"].includes(args.visibility)) {
+    throw new Error(`Invalid --visibility "${args.visibility}". Expected "all", "private", or "public".`);
+  }
+  if (args.owner && args.owner !== "@me" && !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(args.owner)) {
+    throw new Error(`Invalid --owner "${args.owner}". Expected "@me" or a valid GitHub login.`);
+  }
 
   if (!args.repo) {
     args.repo = detectRepoFromGit();
@@ -123,10 +204,133 @@ export function parseArgs(argv) {
   if (!args.stateFile) {
     const safeSlug = (args.repo || "default").replace(/[^a-zA-Z0-9._-]+/g, "__");
     args.stateFile = join(homedir(), ".copilot", "ci-hound", `${safeSlug}.json`);
-  } else {
-    args.stateFile = resolve(args.stateFile);
   }
   return args;
+}
+
+export function loadConfig(configFile) {
+  if (configFile && existsSync(configFile)) {
+    try {
+      const parsed = JSON.parse(readFileSync(configFile, "utf8"));
+      return {
+        repos: Array.isArray(parsed.repos) ? parsed.repos.filter(isValidRepoSlug) : [],
+        owner: typeof parsed.owner === "string" ? parsed.owner : "",
+        visibility: ["all", "private", "public"].includes(parsed.visibility) ? parsed.visibility : "",
+        branch: typeof parsed.branch === "string" && parsed.branch ? parsed.branch : "main",
+        mergeMode: parsed.mergeMode === "auto" ? "auto" : "approval",
+        worktreeRoot: typeof parsed.worktreeRoot === "string" ? parsed.worktreeRoot : "",
+      };
+    } catch {
+      // Fall through to default config
+    }
+  }
+  return {
+    repos: [],
+    owner: "",
+    visibility: "",
+    branch: "main",
+    mergeMode: "approval",
+    worktreeRoot: "",
+  };
+}
+
+export function saveConfig(configFile, config) {
+  mkdirSync(dirname(configFile), { recursive: true });
+  writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+}
+
+export function applySetupConfig(args, existingConfig) {
+  const next = {
+    repos: [...(existingConfig.repos || [])],
+    owner: existingConfig.owner || "",
+    visibility: existingConfig.visibility || "",
+    branch: existingConfig.branch || "main",
+    mergeMode: existingConfig.mergeMode || "approval",
+    worktreeRoot: existingConfig.worktreeRoot || "",
+  };
+
+  if (args.clearRepos) {
+    next.repos = [];
+    next.owner = "";
+    next.visibility = "";
+  }
+  if (args.explicitRepos.length > 0) {
+    next.repos = [...args.explicitRepos];
+  }
+  for (const r of args.addRepos) {
+    if (!next.repos.includes(r)) {
+      next.repos.push(r);
+    }
+  }
+  if (args.removeRepos.length > 0) {
+    next.repos = next.repos.filter((r) => !args.removeRepos.includes(r));
+  }
+  if (args.owner) {
+    next.owner = args.owner;
+    if (!next.visibility && !args.visibility) {
+      next.visibility = "all";
+    }
+  }
+  if (args.visibility) {
+    next.visibility = args.visibility;
+  }
+  if (args.explicitBranch) {
+    next.branch = args.branch;
+  }
+  if (args.explicitMergeMode) {
+    next.mergeMode = args.mergeMode;
+  }
+  if (args.worktreeRoot) {
+    next.worktreeRoot = args.worktreeRoot;
+  }
+  return next;
+}
+
+export function discoverOwnerRepos(owner, visibility = "all", state, execFn = defaultExecGh) {
+  if (!owner) {
+    return [];
+  }
+  const effectiveVisibility = visibility || "all";
+  const endpoint =
+    owner === "@me"
+      ? `user/repos?affiliation=owner&visibility=${effectiveVisibility}&per_page=100`
+      : `users/${encodeURIComponent(owner)}/repos?type=all&per_page=100`;
+  const res = ghApiWithEtag(endpoint, state, execFn);
+  if (!Array.isArray(res.data)) {
+    return [];
+  }
+  return res.data
+    .filter((r) => {
+      if (!r || r.archived || r.disabled || !isValidRepoSlug(r.full_name)) {
+        return false;
+      }
+      if (effectiveVisibility === "private" && r.private !== true) {
+        return false;
+      }
+      if (effectiveVisibility === "public" && r.private !== false) {
+        return false;
+      }
+      return true;
+    })
+    .map((r) => r.full_name);
+}
+
+export function resolveTargetRepos(args, config, discoveryState, execFn = defaultExecGh) {
+  if (args.explicitRepos.length > 0) {
+    return [...args.explicitRepos];
+  }
+  const effectiveOwner = args.owner || config?.owner || "";
+  const effectiveVisibility = args.visibility || config?.visibility || "all";
+  const combined = new Set(config?.repos || []);
+  if (effectiveOwner) {
+    for (const r of discoverOwnerRepos(effectiveOwner, effectiveVisibility, discoveryState, execFn)) {
+      combined.add(r);
+    }
+  }
+  if (combined.size > 0) {
+    return [...combined];
+  }
+  return args.repo ? [args.repo] : [];
 }
 
 export function detectRepoFromGit(cwd = process.cwd()) {
@@ -426,6 +630,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     if (args.wakeOnNewCommit) {
       events.push({
         type: "NEW_MAIN_COMMIT",
+        repo: args.repo,
         sha: currentSha,
         previousSha: prevSha,
       });
@@ -565,6 +770,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         );
         events.push({
           type: "JOB_FAILED",
+          repo: args.repo,
           runId: run.id,
           jobId: firstFailed.id,
           workflow: run.name,
@@ -590,6 +796,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         );
         events.push({
           type: "WORKFLOW_FAILED",
+          repo: args.repo,
           runId: run.id,
           workflow: run.name,
           sha: run.head_sha,
@@ -617,6 +824,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       if (allWatchedDone) {
         events.push({
           type: "WATCHED_RUNS_GREEN",
+          repo: args.repo,
           watchRunIds: args.watchRunIds,
           sha: state.lastMainSha,
           runs: watchedRecords,
@@ -635,6 +843,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       if (allCompletedGreen) {
         events.push({
           type: "ALL_GREEN",
+          repo: args.repo,
           sha: state.lastMainSha,
           runs: headMainRuns,
         });
@@ -649,40 +858,132 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   };
 }
 
+export function stateFileForRepo(repo, args) {
+  if (args.explicitStateFile) {
+    return args.stateFile;
+  }
+  const safeSlug = (repo || "default").replace(/[^a-zA-Z0-9._-]+/g, "__");
+  return join(dirname(args.configFile), `${safeSlug}.json`);
+}
+
+export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) {
+  const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
+  const discoveryState = loadState(discoveryStateFile);
+  const targetRepos = resolveTargetRepos(args, config, discoveryState, execFn);
+  if (args.owner || config?.owner) {
+    saveState(discoveryStateFile, discoveryState);
+  }
+
+  const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
+  const effectiveMergeMode = args.explicitMergeMode
+    ? args.mergeMode
+    : config?.mergeMode || args.mergeMode || "approval";
+
+  const allEvents = [];
+  const reports = [];
+  let totalActiveMainRuns = 0;
+
+  for (const repo of targetRepos) {
+    const repoStateFile = stateFileForRepo(repo, args);
+    const repoState = loadState(repoStateFile);
+    const repoArgs = {
+      ...args,
+      repo,
+      branch: effectiveBranch,
+      mergeMode: effectiveMergeMode,
+      stateFile: repoStateFile,
+      watchRunIds: targetRepos.length === 1 ? args.watchRunIds : [],
+    };
+    const tick = evaluatePollTick(repoArgs, repoState, execFn);
+    saveState(repoStateFile, repoState);
+    allEvents.push(...tick.events);
+    totalActiveMainRuns += tick.activeMainRuns;
+    reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
+  }
+
+  return {
+    repos: targetRepos,
+    events: allEvents,
+    activeMainRuns: totalActiveMainRuns,
+    nextIntervalSec: totalActiveMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec,
+    reports,
+  };
+}
+
 async function sleepSeconds(sec) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, sec * 1000));
 }
 
 export async function runCli(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  if (!args.repo) {
-    console.error("Error: could not determine GitHub repository. Pass --repo <owner/repo>.");
+  const existingConfig = loadConfig(args.configFile);
+
+  if (args.mode === "setup") {
+    const updatedConfig = applySetupConfig(args, existingConfig);
+    saveConfig(args.configFile, updatedConfig);
+    const discoveryState = loadState(join(dirname(args.configFile), "_discovery.json"));
+    const resolvedRepos = resolveTargetRepos(
+      { ...args, explicitRepos: [] },
+      updatedConfig,
+      discoveryState
+    );
+    console.log(
+      JSON.stringify(
+        {
+          mode: "setup",
+          configFile: args.configFile,
+          config: updatedConfig,
+          resolvedRepos,
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  const previewRepos = resolveTargetRepos(args, existingConfig, loadState(join(dirname(args.configFile), "_discovery.json")));
+  if (previewRepos.length === 0) {
+    console.error(
+      "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
+    );
     process.exit(1);
   }
-  const state = loadState(args.stateFile);
 
   if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
-    const tick = evaluatePollTick(args, state);
-    saveState(args.stateFile, state);
-    const report = buildOptimizationReport(state, args.mergeMode);
-    console.log(JSON.stringify({ mode: args.mode, tick, report }, null, 2));
+    const multi = evaluateMultiRepoPollTick(args, existingConfig);
+    console.log(
+      JSON.stringify(
+        {
+          mode: args.mode,
+          repos: multi.repos,
+          tick: {
+            events: multi.events,
+            activeMainRuns: multi.activeMainRuns,
+            nextIntervalSec: multi.nextIntervalSec,
+          },
+          report: multi.reports.length === 1 ? multi.reports[0] : multi.reports,
+        },
+        null,
+        2
+      )
+    );
     return;
   }
 
   let polls = 0;
   while (true) {
     polls += 1;
-    const tick = evaluatePollTick(args, state);
-    saveState(args.stateFile, state);
-    if (tick.events.length > 0) {
-      console.log(JSON.stringify({ events: tick.events, metrics: state.metrics }, null, 2));
+    const multi = evaluateMultiRepoPollTick(args, existingConfig);
+    if (multi.events.length > 0) {
+      console.log(JSON.stringify({ repos: multi.repos, events: multi.events }, null, 2));
       return;
     }
     if (args.maxPolls > 0 && polls >= args.maxPolls) {
-      console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], metrics: state.metrics }, null, 2));
+      console.log(JSON.stringify({ repos: multi.repos, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
       return;
     }
-    await sleepSeconds(tick.nextIntervalSec);
+    await sleepSeconds(multi.nextIntervalSec);
   }
 }
 

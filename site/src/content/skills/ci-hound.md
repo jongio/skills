@@ -18,6 +18,8 @@ Continuously monitor GitHub Actions workflows with a zero-token ETag-cached back
 ```text
 /ci-hound
 /ci-hound --merge=auto
+/ci-hound setup for all my private repos
+/ci-hound setup --repos owner/repo1,owner/repo2
 /ci-hound status
 /ci-hound optimize
 /ci-hound stop

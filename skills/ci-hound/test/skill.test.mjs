@@ -4,13 +4,20 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  applySetupConfig,
   buildOptimizationReport,
+  discoverOwnerRepos,
+  evaluateMultiRepoPollTick,
   evaluatePollTick,
   ghApiWithEtag,
+  isValidRepoSlug,
+  loadConfig,
   loadState,
   matchFlakePattern,
   parseArgs,
   parseHttpResponse,
+  resolveTargetRepos,
+  saveConfig,
   saveState,
   selectDeliverySkill,
 } from "../scripts/ci-hound-daemon.mjs";
@@ -38,11 +45,123 @@ test("portable skill frontmatter contains name, description, and version metadat
   assert.match(frontmatter[1], /^  version: "[^"]+"$/m);
 });
 
-test("skill includes workflow, go/pr routing, safety, and exit criteria", () => {
+test("skill includes workflow, setup, go/pr routing, safety, and exit criteria", () => {
+  assert.match(skill, /^## Multi-Repository Setup \(`\/ci-hound setup`\)$/m);
   assert.match(skill, /^## `go` vs `pr` Delivery Routing$/m);
   assert.match(skill, /^## Workflow$/m);
   assert.match(skill, /^## Safety$/m);
   assert.match(skill, /^## Exit Criteria$/m);
+});
+
+test("setup config, owner repo discovery, and multi-repo polling resolve and isolate repositories", async (t) => {
+  disableAlertsForTest(t);
+  const tempDir = await mkdtemp(path.join(tmpdir(), "ci-hound-setup-"));
+  t.after(() => rm(tempDir, { recursive: true, force: true }));
+  const configFile = path.join(tempDir, "config.json");
+
+  assert.equal(isValidRepoSlug("jongio/skills"), true);
+  assert.equal(isValidRepoSlug("invalid-slug"), false);
+  assert.equal(isValidRepoSlug("../escape"), false);
+  assert.throws(() => parseArgs(["setup", "--repos", "bad-slug"]), /Invalid repository slug/);
+  assert.throws(() => parseArgs(["setup", "--visibility", "secret"]), /Invalid --visibility/);
+  assert.throws(() => parseArgs(["setup", "--owner", "bad/owner"]), /Invalid --owner/);
+
+  const setupArgs = parseArgs([
+    "setup",
+    "--config-file",
+    configFile,
+    "--all-my-repos",
+    "--visibility=private",
+    "--add-repo",
+    "github/evals",
+    "--merge=auto",
+  ]);
+  const saved = applySetupConfig(setupArgs, loadConfig(configFile));
+  saveConfig(configFile, saved);
+  const reloaded = loadConfig(configFile);
+  assert.equal(reloaded.owner, "@me");
+  assert.equal(reloaded.visibility, "private");
+  assert.deepEqual(reloaded.repos, ["github/evals"]);
+  assert.equal(reloaded.mergeMode, "auto");
+
+  // Incremental add/remove without --merge preserves existing mergeMode
+  const modified = applySetupConfig(
+    parseArgs(["setup", "--add-repo", "jongio/skills", "--remove-repo", "github/evals"]),
+    reloaded
+  );
+  assert.deepEqual(modified.repos, ["jongio/skills"]);
+  assert.equal(modified.mergeMode, "auto");
+
+  const discoveryState = loadState("/nonexistent/discovery.json");
+  const discovered = discoverOwnerRepos("@me", "private", discoveryState, (ghArgs) => {
+    assert.equal(ghArgs[2], "user/repos?affiliation=owner&visibility=private&per_page=100");
+    return {
+      ok: true,
+      stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+        { full_name: "jongio/private-one", private: true, archived: false, disabled: false },
+        { full_name: "jongio/public-one", private: false, archived: false, disabled: false },
+        { full_name: "jongio/archived-one", private: true, archived: true, disabled: false },
+      ])}`,
+      stderr: "",
+    };
+  });
+  assert.deepEqual(discovered, ["jongio/private-one"]);
+
+  const watchArgs = parseArgs(["watch", "--config-file", configFile]);
+  const multiTick = evaluateMultiRepoPollTick(watchArgs, reloaded, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+          { full_name: "jongio/private-one", private: true, archived: false, disabled: false },
+        ])}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.startsWith("repos/") && endpoint.endsWith("/commits/main")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha123"}', stderr: "" };
+    }
+    if (endpoint === "repos/jongio/private-one/actions/runs?branch=main&per_page=20") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 7001,
+              name: "CI",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha123",
+              status: "completed",
+              conclusion: "failure",
+              updated_at: "2026-10-22T19:00:00Z",
+              html_url: "https://github.com/jongio/private-one/actions/runs/7001",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.includes("/actions/runs")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"workflow_runs":[],"jobs":[]}', stderr: "" };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+
+  assert.deepEqual(multiTick.repos, ["github/evals", "jongio/private-one"]);
+  assert.equal(multiTick.events.length, 1);
+  assert.equal(multiTick.events[0].repo, "jongio/private-one");
+  assert.equal(multiTick.events[0].type, "WORKFLOW_FAILED");
+  assert.equal(multiTick.events[0].deliverySkill, "go");
+  assert.equal(multiTick.events[0].mergeMode, "auto");
+
+  const cleared = applySetupConfig(parseArgs(["setup", "--clear-repos"]), reloaded);
+  assert.deepEqual(cleared.repos, []);
+  assert.equal(cleared.owner, "");
+  assert.deepEqual(resolveTargetRepos(parseArgs(["watch", "--repo", "github/evals"]), cleared, discoveryState), [
+    "github/evals",
+  ]);
 });
 
 test("selectDeliverySkill routes new failures and optimizations to go and existing worktrees/PRs to pr", () => {

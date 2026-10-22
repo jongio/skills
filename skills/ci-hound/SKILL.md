@@ -14,10 +14,36 @@ Continuously monitor GitHub Actions workflows with a zero-token ETag-cached back
 
 | Invocation | Behavior |
 | --- | --- |
-| `/ci-hound [--merge=approval\|auto]` | Start the background daemon (`scripts/ci-hound-daemon.mjs`) in an async shell to watch `main` for failures, harvest repo-wide telemetry, and deliver fixes via `go` / `pr`. |
-| `/ci-hound status` | Run a single delta poll and display current `main` health, active runs, ETag 304 cache efficiency, and top slow/failing steps. |
+| `/ci-hound [--merge=approval\|auto]` | Start the background daemon (`scripts/ci-hound-daemon.mjs`) in an async shell to watch the configured repository watchlist (or active repo) for `main` failures, harvest telemetry, and deliver fixes via `go` / `pr`. |
+| `/ci-hound setup ...` | Configure which repositories `ci-hound` watches across sessions (`--all-my-repos --visibility private`, `--owner <login> --visibility <all\|private\|public>`, `--repos <owner/repo,...>`, `--add-repo <owner/repo>`, `--remove-repo <owner/repo>`, `--worktree-root <path>`, `--merge <approval\|auto>`). |
+| `/ci-hound status` | Run a single delta poll across all watched repositories and display health, active runs, ETag 304 cache efficiency, and top slow/failing steps. |
 | `/ci-hound optimize [--merge=approval\|auto]` | Analyze collected job/step durations, queue wait times, and flake sightings across `main` and PR runs, then deliver a high-ROI optimization PR via `go` / `pr`. |
 | `/ci-hound stop` | Stop the active `ci-hound` background shell session. |
+
+## Multi-Repository Setup (`/ci-hound setup`)
+
+`ci-hound` is not limited to the current working directory. Users can configure a persistent watchlist in `~/.copilot/ci-hound/config.json`:
+
+- **All private repos owned by the user** (`/ci-hound setup for all my private repos`):
+  ```sh
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --all-my-repos --visibility private
+  ```
+- **All repos (or public/private repos) for a user or org**:
+  ```sh
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --owner <login> --visibility <all|private|public>
+  ```
+- **Specific repository or list of repositories**:
+  ```sh
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --repos owner/repo1,owner/repo2
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --add-repo owner/repo3
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --remove-repo owner/repo1
+  ```
+- **Reset to current checkout only**:
+  ```sh
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --clear-repos
+  ```
+
+When watching multiple repositories, the daemon maintains a separate ETag-cached state file per repository (`~/.copilot/ci-hound/<owner>__<repo>.json`) and includes `repo: "<owner>/<repo>"` on every emitted event so repairs and worktrees target the exact repository that failed.
 
 ## `go` vs `pr` Delivery Routing
 
