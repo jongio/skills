@@ -13,6 +13,7 @@ Create options:
   --owner-name <name>
   --repo <name>
   --package-name <name>
+  --package-version <semver>
   --display-name <name>
   --description <text>
   --visibility <public|private|internal>
@@ -36,6 +37,7 @@ const VALUE_OPTIONS = new Set([
   "owner-name",
   "repo",
   "package-name",
+  "package-version",
   "display-name",
   "description",
   "visibility",

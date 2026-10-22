@@ -10,6 +10,8 @@ description: >-
   scaffolding a new marketplace collection from scratch (use
   create-skills-repo), editing one existing skill instruction without registration work (use
   skill-authoring), creating an agent persona.
+metadata:
+  version: "1.1.0"
 ---
 
 > [!CAUTION]
@@ -86,7 +88,7 @@ destination, missing locked Vally toolchain, ambiguous registration, or invalid 
 
 Creation includes:
 
-- `SKILL.md` with only `name` and `description` frontmatter keys.
+- `SKILL.md` with `name`, `description`, and `metadata.version` frontmatter.
 - `README.md`, `LICENSE`, `package.json`, and `package-lock.json`.
 - `.vally.yaml`, deterministic tests, and `evals/<name>/eval.yaml`.
 - `thumbnail.png` as the tracked source for catalog synchronization when a catalog is present.
@@ -214,6 +216,10 @@ authoring skill through the same atomic path without rewriting its skill files.
    skill.
 
 ## Exit Criteria
+
+- New skills declare `metadata.version` as a quoted SemVer string. Preserve
+  existing skill versions during registration; use the repository's version
+  helper to bump a release and synchronize plugin listings when available.
 
 - The skill has every required file and only portable SKILL.md frontmatter keys.
 - Every discovered or configured registration surface includes the skill.

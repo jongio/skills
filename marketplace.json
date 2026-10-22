@@ -12,7 +12,7 @@
       "name": "jongio-skills",
       "source": "./",
       "description": "Install the complete Jon Gallant skills collection as one plugin.",
-      "version": "2.0.0"
+      "version": "2.1.0"
     },
     {
       "name": "statuslines",
@@ -36,13 +36,13 @@
       "name": "create-skill",
       "source": "./skills/create-skill",
       "description": "Create and register a complete portable agent skill with instructions, tests, Vally evals, catalog metadata, and optional validated thumbnail art.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "create-skills-repo",
       "source": "./skills/create-skills-repo",
       "description": "Create or safely upgrade a cross-agent skills marketplace repository with manifests, Vally, secure CI, Dependabot, a starter skill, and an optional GitHub Pages catalog.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "naming-is-hard",

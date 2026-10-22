@@ -12,9 +12,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { assertValidPng } from "./png.mjs";
 import { renderSkillFiles, validateSkillName } from "./render.mjs";
+import { validateVersion } from "./versions.mjs";
 
 function toBuffer(value) {
   return Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
@@ -56,6 +57,7 @@ function addReadmeRow(text, manifest, skillsRelative) {
 }
 
 function addMarketplaceEntry(text, manifest, skillsRelative) {
+  validateVersion(manifest.version);
   const value = JSON.parse(text);
   if (!Array.isArray(value.plugins)) throw new Error("Marketplace manifest must contain plugins");
   const existing = value.plugins.find((entry) => entry.name === manifest.name);
@@ -63,6 +65,10 @@ function addMarketplaceEntry(text, manifest, skillsRelative) {
   if (existing) {
     if (existing.source !== expectedSource) {
       throw new Error(`Marketplace entry ${manifest.name} points to ${existing.source}`);
+    }
+    if (existing.version !== manifest.version) {
+      existing.version = manifest.version;
+      return json(value);
     }
     return text;
   }
@@ -216,6 +222,28 @@ function makePlan(root, values) {
     mutations: Object.freeze(mutations),
     hash: hashPlan(mutations),
   });
+}
+
+export function buildRepositoryPlan(root, values, { validateManaged = true } = {}) {
+  const statePath = join(root, ".skills-repo", "state.json");
+  if (validateManaged && existsSync(join(root, "skills-repo.config.json"))) {
+    ensureSafeDestination(root, statePath);
+    const state = JSON.parse(readText(statePath));
+    if (state.schemaVersion !== 1 || state.hashVersion !== 1 || !state.files) {
+      throw new Error("Managed repository state has an invalid schema");
+    }
+    for (const [relativePath, record] of Object.entries(state.files)) {
+      const absolute = resolve(root, relativePath);
+      ensureSafeDestination(root, absolute);
+      if (!["lf", "raw"].includes(record.normalization) ||
+          !/^[a-f0-9]{64}$/.test(record.sha256 ?? "") ||
+          hashManagedContent(readFileSync(absolute), record.normalization) !== record.sha256) {
+        throw new Error(`Managed file conflict: ${relativePath}`);
+      }
+    }
+    addManagedStateUpdate({ mode: "managed", root }, values);
+  }
+  return makePlan(root, values);
 }
 
 function hashManagedContent(value, normalization) {
@@ -379,7 +407,7 @@ export function buildArtPlan(profile, manifest, art) {
 function ensureSafeDestination(root, path) {
   const absolute = resolve(path);
   const rel = relative(root, absolute);
-  if (rel === ".." || rel.startsWith(`..${sep}`) || rel === "") {
+  if (rel === ".." || rel.startsWith(`..${sep}`) || rel === "" || isAbsolute(rel)) {
     throw new Error(`Unsafe plan destination ${path}`);
   }
 
@@ -400,8 +428,8 @@ function matchesExpected(mutation) {
   return existsSync(mutation.path) && readFileSync(mutation.path).equals(mutation.expected);
 }
 
-function acquirePlanLock(root) {
-  const lockPath = `${resolve(root)}.create-skill.lock`;
+function acquirePlanLock(root, operation = "create-skill") {
+  const lockPath = `${resolve(root)}.${operation}.lock`;
   const owner = `${process.pid}.${randomBytes(16).toString("hex")}`;
   const candidate = `${lockPath}.${owner}.candidate`;
   writeFileSync(candidate, `${owner}\n`, { flag: "wx", mode: 0o600 });
@@ -411,7 +439,7 @@ function acquirePlanLock(root) {
     if (error.code === "EEXIST") {
       const currentOwner = readFileSync(lockPath, "utf8").trim() || "unknown";
       throw new Error(
-        `Another create-skill operation holds ${lockPath} for ${currentOwner}. Remove the lock only after confirming that operation has stopped.`,
+        `Another ${operation} operation holds ${lockPath} for ${currentOwner}. Remove the lock only after confirming that operation has stopped.`,
       );
     }
     throw error;
@@ -530,16 +558,35 @@ function applyPlanUnlocked(plan, options = {}) {
   };
 }
 
+function withPlanLocks(root, managed, action) {
+  const releaseManaged = managed ? acquirePlanLock(root, "create-skills-repo") : null;
+  try {
+    const release = acquirePlanLock(root);
+    try {
+      return action();
+    } finally {
+      release();
+    }
+  } finally {
+    releaseManaged?.();
+  }
+}
+
 export function applyPlan(plan, options = {}) {
   if (options.dryRun || !options.approval || options.approval !== plan.hash) {
     return applyPlanUnlocked(plan, options);
   }
-  const release = acquirePlanLock(plan.root);
-  try {
-    return applyPlanUnlocked(plan, options);
-  } finally {
-    release();
-  }
+  return withPlanLocks(plan.root, existsSync(join(plan.root, "skills-repo.config.json")),
+    () => applyPlanUnlocked(plan, options));
+}
+
+export function applyRepositoryPlan(root, planner) {
+  root = resolve(root);
+  return withPlanLocks(root, existsSync(join(root, "skills-repo.config.json")), () => {
+    const plan = planner();
+    if (resolve(plan.root) !== root) throw new Error("Repository plan must use the locked root.");
+    return { plan, result: applyPlanUnlocked(plan, { approval: plan.hash }) };
+  });
 }
 
 export function checkSkill(profile, name) {

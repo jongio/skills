@@ -33,6 +33,8 @@ on:
       - ".cursor-plugin/**"
       - "gemini-extension.json"
       - "test/**"
+      - "scripts/version-skills.mjs"
+      - "extensions/plugin.json"
       - "mcp.json"
       - ".mcp.json"
       - ".lsp.json"

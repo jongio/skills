@@ -6,6 +6,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { readSkillVersion, validateVersion } from "../templates/repository/skills/create-skill/scripts/versions.mjs";
 import {
   canonicalJson,
   validateConfig,
@@ -123,7 +124,8 @@ export function readSkillFrontmatter(source, directoryName) {
       `skills/${directoryName}/SKILL.md description must contain 1 to 1024 characters.`,
     );
   }
-  return { name, description };
+  const version = readSkillVersion(source, { optional: true });
+  return { name, description, ...(version ? { version } : {}) };
 }
 
 export async function discoverSkills(root) {
@@ -157,6 +159,15 @@ export async function discoverSkills(root) {
       await readFile(skillPath, "utf8"),
       entry.name,
     );
+    if (!record.version) {
+      const marketplace = JSON.parse(await readFile(path.join(root, "marketplace.json"), "utf8"));
+      const existing = marketplace.plugins.filter((item) =>
+        item.name === record.name && item.source === `./skills/${record.name}`);
+      if (existing.length !== 1) {
+        throw new Error(`skills/${record.name}/SKILL.md needs metadata.version.`);
+      }
+      record.version = validateVersion(existing[0].version, `${record.name} legacy version`);
+    }
     const caseKey = record.name.toLowerCase();
     if (names.has(caseKey)) {
       throw new Error(`Duplicate skill directory identity: ${record.name}.`);
@@ -200,7 +211,7 @@ function marketplaceEntries(config, skills) {
       name: skill.name,
       source: `./skills/${skill.name}`,
       description: skill.description,
-      version: "1.0.0",
+      version: validateVersion(skill.version, `${skill.name} version`),
     })),
   ];
 }
@@ -320,7 +331,8 @@ export async function renderRepositoryTemplates(
     validateRelativeTemplatePath(relativePath);
     if (options.derivedOnly && !DERIVED_PATHS.has(relativePath)) continue;
     const content = await readFile(absolute, "utf8");
-    rendered.set(relativePath, applyReplacements(content, values, relativePath));
+    const replaced = applyReplacements(content, values, relativePath);
+    rendered.set(relativePath, relativePath.endsWith(".json") ? canonicalJson(JSON.parse(replaced)) : replaced);
   }
   return rendered;
 }

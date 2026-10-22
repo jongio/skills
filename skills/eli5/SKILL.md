@@ -10,6 +10,8 @@ description: >-
   for code review, debugging, implementation, documentation generation,
   architecture design, or requests that need new research rather than a simpler
   explanation of supplied context.
+metadata:
+  version: "1.0.0"
 ---
 
 # Explain Like I'm Five

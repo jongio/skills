@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import test, { before } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
+import { planVersions } from "../skills/create-skill/scripts/versioning.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...parts) => readFile(path.join(root, ...parts), "utf8");
@@ -92,7 +93,7 @@ before(async () => {
 });
 
 const packageName = "jongio-skills";
-const packageVersion = "2.0.0";
+const packageVersion = JSON.parse(await read("plugin.json")).version;
 const agentPluginSchema =
   "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
 const description =
@@ -295,6 +296,10 @@ test("root package uses the portable Agent Plugins manifest", () => {
   }
 });
 
+test("all distribution versions match their canonical release sources", () => {
+  assert.deepEqual(planVersions(root).mutations.map((item) => item.path), []);
+});
+
 test("every canonical skill is registered in the Copilot marketplace", async () => {
   assertExactKeys(
     copilotMarketplace,
@@ -340,7 +345,7 @@ test("every canonical skill is registered in the Copilot marketplace", async () 
   assert.equal(statuslinesEntry.source, "./extensions");
   assertLocalSource(statuslinesEntry.source, "statuslines Copilot source");
   assert.ok(statuslinesEntry.description.length > 0);
-  assert.equal(statuslinesEntry.version, "1.0.0");
+  assert.equal(statuslinesEntry.version, (await parse("extensions", "plugin.json")).version);
 
   for (const entry of individualEntries) {
     assertExactKeys(
@@ -501,7 +506,7 @@ test("Cursor marketplace points at the portable root plugin", () => {
   assert.equal(cursorMarketplace.plugins.length, 1);
   assertExactKeys(
     cursorMarketplace.plugins[0],
-    ["name", "source", "description"],
+    ["name", "source", "description", "version"],
     "Cursor marketplace entry",
   );
   assert.equal(cursorMarketplace.plugins[0].name, packageName);

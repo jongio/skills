@@ -4,11 +4,17 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (...parts) => readFile(path.join(root, ...parts), "utf8");
 const parse = async (...parts) => JSON.parse(await read(...parts));
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+test("release versions match all plugin manifests and skill listings", () => {
+  const result = spawnSync(process.execPath, [path.join(root, "scripts", "version-skills.mjs"), "check"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
 
 async function skillNames() {
   return (await readdir(path.join(root, "skills"), { withFileTypes: true }))

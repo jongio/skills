@@ -5,6 +5,8 @@ on:
     paths:
       - "skills/**"
       - "test/**"
+      - "scripts/**"
+      - "skills-repo.config.json"
       - ".github/tools/vally/**"
       - ".github/workflows/**"
       - "plugin.json"
@@ -19,6 +21,8 @@ on:
     paths:
       - "skills/**"
       - "test/**"
+      - "scripts/**"
+      - "skills-repo.config.json"
       - ".github/tools/vally/**"
       - ".github/workflows/**"
       - "plugin.json"

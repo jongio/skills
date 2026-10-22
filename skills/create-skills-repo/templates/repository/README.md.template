@@ -43,6 +43,36 @@ __CATALOG_SECTION__
 Use the bundled `create-skill` skill. Individual skill authoring does not
 belong to the repository lifecycle tool.
 
+## Versioning
+
+`skills-repo.config.json`'s `package.version` owns the aggregate release.
+Each skill owns its release in `SKILL.md` under `metadata.version` (a quoted
+SemVer string). All plugin manifests and marketplace listings mirror these
+sources. Private npm tooling versions and schema/template versions are separate.
+
+```sh
+node scripts/version-skills.mjs check
+node scripts/version-skills.mjs bump example-skill patch --dry-run
+node scripts/version-skills.mjs bump example-skill patch
+node scripts/version-skills.mjs bump package minor
+node scripts/version-skills.mjs sync
+```
+
+Use patch for fixes, minor for compatible additions, and major for breaking
+changes. A skill bump also patches the aggregate plugin so whole-package
+installations see the release. Bump once per release; use `package major` too
+when the aggregate has breaking changes. `sync` repairs mirrors without a bump,
+and migrates missing skill metadata from existing marketplace versions.
+`check` compares release versions only, remains read-only, and lets unrelated
+dependency updates proceed; CI rejects version drift. No command commits, tags, pushes,
+or publishes.
+After adding or removing a skill, bump the aggregate package before publishing.
+
+Use this helper instead of editing managed manifests or configuration by hand:
+it preserves managed hashes and rejects conflicting edits. After a release,
+the repository generator's `sync` preserves published skill versions.
+Skill metadata does not pin an installer; use an immutable Git ref when needed.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -1,6 +1,8 @@
 ---
 name: doc-doctor
 description: "Check documentation against code. USE FOR: doc-doctor, check docs, stale docs, broken links, README accuracy. DO NOT USE FOR: general code review or standalone test audits (use test-doctor)."
+metadata:
+  version: "1.0.0"
 ---
 
 # Doc Doctor

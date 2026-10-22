@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { bumpVersion, compareVersions } from "../templates/repository/skills/create-skill/scripts/versions.mjs";
 import { HELP, parseArguments } from "./arguments.mjs";
 import { composeCatalog } from "./catalog.mjs";
 import {
@@ -34,6 +35,7 @@ import {
   discoverSkills,
   readTreeAsManaged,
   renderConfig,
+  readSkillFrontmatter,
   renderRepositoryTemplates,
   writeRenderedTree,
 } from "./render.mjs";
@@ -62,7 +64,7 @@ const fixturePath = path.join(
 );
 const SUPPORTED_OPERATIONS = new Set(["create", "upgrade", "sync"]);
 const CREATE_OPTIONS = new Set([
-  "owner-login", "owner-name", "repo", "package-name", "display-name",
+  "owner-login", "owner-name", "repo", "package-name", "package-version", "display-name",
   "description", "visibility", "default-branch", "no-catalog",
   "create-skill-source", "catalog-script", "catalog-templates-dir",
   "catalog-registry", "catalog-registry-ref",
@@ -122,6 +124,7 @@ async function createDryRun(target, options, dependencies) {
     ownerName: options["owner-name"],
     repositoryName: options.repo ?? path.basename(target),
     packageName: options["package-name"],
+    packageVersion: options["package-version"],
     displayName: options["display-name"],
     description: options.description,
     visibility: options.visibility,
@@ -179,6 +182,7 @@ async function createRepository(target, options, dependencies) {
     ownerName: options["owner-name"],
     repositoryName: options.repo ?? path.basename(target),
     packageName: options["package-name"],
+    packageVersion: options["package-version"],
     displayName: options["display-name"],
     description: options.description,
     visibility: options.visibility,
@@ -355,13 +359,26 @@ async function prepareUpgrade(root, options, dependencies) {
   const dependency =
     await dependencies.resolveCreateSkill(options["create-skill-source"]);
   const skills = await discoverSkills(root);
+  const snapshot = await readTreeAsManaged(dependency.source, "skills/create-skill");
+  const nextAuthoringSkill = readSkillFrontmatter(
+    snapshot.get("skills/create-skill/SKILL.md").toString("utf8"),
+    "create-skill",
+  );
+  const currentAuthoringSkill = skills.find((skill) => skill.name === "create-skill");
+  if (currentAuthoringSkill) {
+    const comparison = compareVersions(nextAuthoringSkill.version, currentAuthoringSkill.version);
+    if (comparison < 0) {
+      throw new Error("Upgrade would downgrade create-skill. Supply a newer --create-skill-source.");
+    }
+    if (comparison > 0) config.package.version = bumpVersion(config.package.version, "patch");
+  }
+  const nextSkills = skills.map((skill) => skill.name === "create-skill" ? nextAuthoringSkill : skill);
   const rendered = await renderRepositoryTemplates(
     templateRoot,
     config,
-    skills,
+    nextSkills,
   );
   rendered.set(CONFIG_FILE, renderConfig(config));
-  const snapshot = await readTreeAsManaged(dependency.source, "skills/create-skill");
   return {
     config,
     state,

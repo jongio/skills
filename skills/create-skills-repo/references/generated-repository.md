@@ -31,6 +31,25 @@ The repository includes:
 directory. It rejects missing frontmatter, mismatched names, duplicate
 case-insensitive identities, symlinks, and unsafe paths.
 
+## Release versions
+
+`skills-repo.config.json`'s `package.version` is the aggregate SemVer release.
+Each skill declares its own version under `metadata.version` in `SKILL.md`.
+The generated `scripts/version-skills.mjs` provides read-only `check`,
+mirror-repairing `sync`, and `bump <package|skill-name> <major|minor|patch>`.
+Use `--dry-run` to preview writes. Skill bumps also patch the aggregate;
+managed hashes are updated in the same transaction. These commands never
+commit, tag, push, or publish.
+Read-only version `check` compares releases without enforcing unrelated managed
+hashes, so dependency-only PRs remain valid. Mutating release commands still
+reject managed-file conflicts; the generator's own `check` still reports them.
+
+Run the version helper's `sync` after upgrading a legacy repository to migrate
+missing skill metadata from its existing marketplace versions. Generator
+`sync` preserves those legacy versions but does not author skill metadata.
+Version-helper failures or drift exit 1; this is separate from the generator
+CLI's exit-2 drift contract.
+
 ## Validation and automation
 
 - `.vally.yaml` discovers repository skills and evals.

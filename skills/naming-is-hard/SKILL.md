@@ -14,6 +14,8 @@ description: >-
   confusable-name screens. Every finalist gets one of three verdicts: Deal Breaker,
   It's Complicated, or Perfect Match. Do NOT use for renaming code identifiers or SEO
   keyword research.
+metadata:
+  version: "1.0.0"
 ---
 
 # naming-is-hard

@@ -9,6 +9,8 @@ description: >-
   Lucide icon set, plus a generator that stamps a working canvas in one command.
   Do NOT use for non-canvas extensions (plain agent tools) or for shipping web
   apps unrelated to Copilot canvases.
+metadata:
+  version: "1.0.0"
 ---
 
 # Create Canvas App

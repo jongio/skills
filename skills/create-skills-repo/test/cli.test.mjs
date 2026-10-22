@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   existsSync,
+  copyFileSync,
   mkdirSync,
   renameSync,
   readFileSync,
@@ -29,6 +30,8 @@ function exampleSkillSource() {
 name: example-skill
 description: >-
   A functional example skill used to verify repository distribution.
+metadata:
+  version: "1.0.0"
 ---
 
 # Example Skill
@@ -42,6 +45,8 @@ function createSkillSource() {
 name: create-skill
 description: >-
   Create one portable agent skill from validated noninteractive input.
+metadata:
+  version: "1.0.0"
 ---
 
 # Create Skill
@@ -156,6 +161,12 @@ async function fixture() {
   writeFileSync(path.join(snapshot, "SKILL.md"), createSkillSource());
   writeFileSync(path.join(snapshot, "package.json"), "{\"private\":true}\n");
   writeFileSync(path.join(snapshot, "scripts", "cli.mjs"), "export {};\n");
+  for (const name of ["versions", "versioning", "registration", "render", "png"]) {
+    copyFileSync(
+      new URL(`../../create-skill/scripts/${name}.mjs`, import.meta.url),
+      path.join(snapshot, "scripts", `${name}.mjs`),
+    );
+  }
   const dependencies = {
     resolveCreateSkill: async () => ({
       source: snapshot,
@@ -722,7 +733,7 @@ test("check detects newly added skills until sync runs", async (t) => {
   mkdirSync(customRoot, { recursive: true });
   writeFileSync(
     path.join(customRoot, "SKILL.md"),
-    "---\nname: custom-skill\ndescription: A custom skill using __BASE_PATH__.\n---\n",
+    '---\nname: custom-skill\ndescription: A custom skill using __BASE_PATH__.\nmetadata:\n  version: "2.3.4"\n---\n',
   );
 
   const drift = await execute(["check", fx.target], fx.dependencies);
