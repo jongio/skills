@@ -464,13 +464,8 @@ fails, stop, re-inventory, recompute witnesses, and seek new approvals.
 
 ## Output
 
-For normal interactive runs, render the Git Clean style categorized report
-before the selection prompt. Number every visible item and show safe removals,
-items needing review, items to keep, and protected entities. Every safe row
-names both the exact target and the durable copy that remains. Never offer a
-batch action for hidden rows. Internal outcome names, purpose detail, OIDs, file
-lists, coverage, blockers, diagnostics, and exact command context stay behind
-`Show full evidence` until needed for approval.
+Use step 6.1's categorized `ask_user` report.
+Keep evidence behind `Show full evidence` until approval requires it.
 
 The full report includes requested scope/depth, Node capability, coverage state
 and gaps, observed/skipped counts, mechanical evidence, interpretive review

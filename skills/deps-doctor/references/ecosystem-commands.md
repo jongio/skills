@@ -15,11 +15,8 @@ of `SKILL.md` first, review the resolved graph, and only then install normally.
 A bare install or update as the first action runs package-authored code before
 anyone has looked at what changed.
 
-The apply column also moves every package to its newest eligible release. That
-is only correct when step 4 held nothing back. Where a release was withheld for
-age or a package was pinned back to settle a peer conflict, apply that package
-by explicit version from the table further down instead, or the bulk command
-will reinstate exactly what step 4 rejected.
+Use bulk updates only when step 4 held nothing back.
+Otherwise, apply the selected explicit versions below.
 
 | Ecosystem | Discover updates | Apply updates |
 |---|---|---|

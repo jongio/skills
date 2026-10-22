@@ -217,15 +217,10 @@ applicable. Count each evaluated SPF `include`, `a`, `mx`, `ptr`, `exists`, or
 `redirect` term once toward the 10-term limit. Do not count one term per MX
 host; the separate per-`mx` address-query limit still applies.
 
-Never construct a DKIM selector target from an MX token, a tenant name, or a
-documented provider pattern, even when the pattern looks certain. Ask for the
-exact values from the provider console or its activation error, and publish
-them at 60 seconds until the provider confirms signing. The low TTL is the
-point of the exercise rather than a detail. A provider that reads a wrong value
-during activation caches that answer and keeps retrying against its own cache,
-so a correction published behind a long TTL does not take effect until that
-cache expires, and the activation appears to keep failing after you have
-already fixed it. Raise the TTL only once signing is confirmed.
+Never derive DKIM selector targets from MX tokens, tenant names, or documented provider patterns.
+Ask for exact values from the provider console or activation error.
+Publish at 60 seconds until signing is confirmed; only then raise the TTL.
+Wrong cached answers persist until their original TTL expires, even after correction.
 
 ### 6. Audit web routing and TLS
 
@@ -346,13 +341,9 @@ Report the returned cache path, timestamp, and created or updated status. A
 cache failure must not hide or invalidate audit results. Remove the temporary
 session snapshot after comparison and save.
 
-Every enumerated field is validated on write, so use the documented values
-exactly and never invent a synonym such as `Unknown`, `OK`, `done`, or
-`Completed`. Two pairs are easy to transpose. State describes evidence strength
-while health describes the service, and they move independently, so a
-`Verified` check can be `Unhealthy`. A completed fix sets the finding status to
-`resolved` and its remediation state to `verified`, which are different fields
-with different vocabularies.
+Use documented enum strings exactly; never invent synonyms such as `Unknown`, `OK`, `done`, or `Completed`.
+Evidence state and health are independent: a `Verified` check can be `Unhealthy`.
+A completed fix uses finding status `resolved` and remediation state `verified`.
 
 The executable delegates persistence and comparison to the
 [cache store](scripts/cache-store.mjs). Its boundary and lifecycle behavior is

@@ -20,16 +20,6 @@ metadata:
 
 # naming-is-hard
 
-An interactive naming assistant for projects, CLIs, products, packages, and
-organizations. It guides you from a blank slate to a validated name you can
-actually ship.
-
-The core insight: you rarely know what name you want until you see candidates and
-react to them. This skill generates diverse on-brief names, learns your
-preferences as you rank them, then validates your finalists against real-world
-availability (domains, GitHub, npm/PyPI, social handles) and flags trademark or
-confusable-name collisions before you commit.
-
 ## When to use it
 
 Reach for this whenever a name needs to be chosen and checked: a new project,
@@ -53,24 +43,6 @@ flow immediately**. Do not ask "What can I help you with?" or wait passively.
   like to name this, or something else?" Then proceed to Act 1.
 - If there's no project context at all, ask a single question to get started:
   "What are we naming? Tell me what it is and I'll kick off the process."
-
-The skill exists to DO naming, not to explain itself. Get moving.
-
-## How it works: five acts
-
-1. **The Profile.** Read the user's context (a description, a repo path, or a URL)
-   and write a Naming Brief: what the thing is and will be, who it is for, the
-   tone, and any constraints. This anchors all candidate generation.
-2. **The Deck.** Generate a diverse, on-brief pool of candidate names across many
-   naming strategies. Each candidate is tagged so the model can learn from it.
-3. **The Swipe.** Show one card at a time. The user swipes Like / Pass / Super-like.
-   A preference model learns their taste and biases the next cards toward it, with
-   enough exploration that it does not tunnel. It can state "your type" in words.
-4. **The Match.** For the names the user liked, run a deep availability scan and a
-   trademark/existing-business screen, roll each up into a verdict tier, and present
-   the ranked matches with a compatibility scorecard and a winner.
-5. **Next actions.** Hand the user the links to grab the GitHub org, register the
-   domain, and claim the handles.
 
 ## Division of labor
 
@@ -406,20 +378,6 @@ The rules that keep this honest:
 Everything lives in the `--dir` state file, so a run survives across turns and
 sessions. To resume, point the same `--dir` at the existing state and continue with
 `next`. `state --dir D` dumps everything; `reset --dir D` starts over.
-
-## The workflow you follow
-
-1. Intake the context; read the repo or fetch the URL if given one.
-2. Write the Naming Brief; `init --brief-json` (or `brief`).
-3. Generate ~20 to 30 diverse, on-brief candidates; `add` them and replace anything
-   reported in `blocked`.
-4. Swipe loop: `next` -> `ask_user` card -> `swipe`; refill the deck as needed;
-   share `profile` occasionally.
-5. On Done: `check` the finalists; run a `web_search` per finalist for trademarks
-   and businesses.
-6. `report` the ranked matches with verdict tiers; present ALL liked names with
-   per-name reasons for their ranking (not just the winner).
-7. Offer next actions (grab org/domain/handles) and an option to keep swiping.
 
 ## Exit criteria
 

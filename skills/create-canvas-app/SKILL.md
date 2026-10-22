@@ -15,11 +15,6 @@ metadata:
 
 # Create Canvas App
 
-A batteries-included way to build **Copilot App canvas extensions**. It exists
-because hand-rolled canvases keep hitting the same walls: an `innerHTML` repaint
-loop that eats keystrokes, state that lives only in one panel, ad-hoc styling
-that ignores the host theme, and inconsistent icons. The kit fixes all four.
-
 ## What a canvas is (and when to build one)
 
 A canvas is an interactive surface the agent opens in a side panel via
@@ -413,21 +408,10 @@ A canvas isn't done because the server boots. Verify the UI:
 
 ## Footguns
 
-- **Never** repaint with `innerHTML`; render through Preact so pushes don't eat
-  keystrokes.
-- **Never** key state by `instanceId` — key by domain so panels stay in sync.
 - **Never** hand `open_canvas` an `instanceId` outside `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`
   — ≤128 chars, an alphanumeric first character, then only `A-Za-z0-9._-`. A malformed
   handle (leading `-`/`_`, spaces, over-long) is rejected by the runtime with
   `Invalid canvas instance ID` before your canvas ever opens.
-- **Never** hand-roll or CDN-load icons. Import `Icon` from `/kit/icons.mjs`.
-- **Never** put SDK imports outside `extension.mjs`.
-- **Never** pass `strokeWidth` to `Icon` or invent pixel sizes off the scale.
-- **Never** `fetch()` in the view — network I/O belongs in an action handler,
-  always with `AbortSignal.timeout(...)`.
-- **Never** hand-roll a polling `setInterval` — use `pollWhileVisible` so a
-  hidden panel stops hammering the network.
-- **Never** `import { Fragment }` — it isn't exported; use htm's `<>…</>`.
 - **Never** reach for the model with `fetch`/API keys or a `client.createSession()`
   sub-session (it hangs from an extension) — use `ctx.ai(...)` for silent
   generation, `ctx.askAgent(...)` to drive the main agent.
