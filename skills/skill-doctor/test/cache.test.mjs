@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import childProcess from "node:child_process";
-import { execFileSync, spawnSync } from "node:child_process";
+import childProcess, { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { syncBuiltinESMExports } from "node:module";
