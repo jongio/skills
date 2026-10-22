@@ -19,11 +19,7 @@ metadata:
 
 # Repo Ready
 
-Turn any repository into a well-maintained, community-ready project by
-scaffolding (or auditing) all the standard files GitHub expects. The hard part
-isn't writing a LICENSE file; it's knowing which 15+ files matter, how GitHub
-uses each one, and making choices that fit the project's stack, audience, and
-governance model. This skill owns all of that.
+Scaffold or audit standard GitHub repository files, adapting them to the project's stack, audience, and governance.
 
 ## Two modes
 

@@ -6,9 +6,7 @@ mechanisms each one needs.
 
 ## Minimum release age settings
 
-Prefer enforcement by the package manager itself over checking publish dates by
-hand, because a configured setting also protects every later install and every
-contributor, not just this run.
+Prefer package-manager enforcement over manual publish-date checks.
 
 | Ecosystem | Setting | Location | Unit |
 |---|---|---|---|

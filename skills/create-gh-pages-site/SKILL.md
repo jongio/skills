@@ -20,18 +20,8 @@ metadata:
 
 # Create GitHub Pages Site
 
-Turn "put this on GitHub Pages" into a correct, building, auto-deploying repo. The
-hard part of GitHub Pages isn't the HTML — it's the deploy plumbing and the
-**base-path trap**. This skill owns both: it stamps a vetted template, sets the
-base path for the exact repo, ships the current official Pages workflow, and walks
-the user through enabling Pages.
-
-It also never stops at the template's demo content. A stamped template is a
-**skeleton, not the deliverable** — the skill reads the target repo and authors a
-site about *that* project: real name and pitch, the right kind of reference (CLI,
-library, app, or catalog), real install/usage pulled from the repo, and labeled
-image placeholders the user can drop real art into. Shipping a site that still says
-"Hello, Astro" for someone's CLI is a failure, even if it deploys.
+Scaffold a vetted Pages template with the correct base path and deployment workflow.
+Replace demo content with repo-derived content.
 
 ## When to use which template
 
@@ -302,10 +292,6 @@ disables persisted checkout credentials and lifecycle scripts, and then validate
 the result. Never apply this normalization to a custom registry.
 
 ## Digest the repo, then author it (never ship the template defaults)
-
-Stamping gives you a working skeleton with **demo content**. The job is only half
-done. Now make the site about the actual repo. This is not optional polish — it's
-the deliverable.
 
 ### 1. Run the digest
 
