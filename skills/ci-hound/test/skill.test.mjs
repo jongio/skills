@@ -298,19 +298,9 @@ test("evaluatePollTick detects instant job-level failure on active main run, har
   assert.equal(tick.events[0].mergeMode, "approval");
   assert.equal(prJobsCalls, 1);
 
-  // When watching an existing PR run (--watch-run 102) that failed, evaluatePollTick emits deliverySkill: "pr"
-  delete state.runs["102"];
-  const watchedPrArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "102", "--merge=auto"]);
-  const watchedPrTick = evaluatePollTick(watchedPrArgs, state, fakeExec);
-  const prFailureEvent = watchedPrTick.events.find((e) => e.runId === 102);
-  assert.ok(prFailureEvent);
-  assert.equal(prFailureEvent.type, "JOB_FAILED");
-  assert.equal(prFailureEvent.deliverySkill, "pr");
-  assert.equal(prFailureEvent.mergeMode, "auto");
-
   // Second poll with identical updated_at on completed PR run 102 must skip re-fetching 102/jobs
   evaluatePollTick(args, state, fakeExec);
-  assert.equal(prJobsCalls, 2);
+  assert.equal(prJobsCalls, 1);
 
   const report = buildOptimizationReport(state);
   assert.equal(report.slowJobs.length, 1);
@@ -318,6 +308,16 @@ test("evaluatePollTick detects instant job-level failure on active main run, har
   assert.equal(report.slowJobs[0].avgDurationSec, 300);
   assert.equal(report.recentFailures.length, 1);
   assert.equal(report.recentFailures[0].matchedPattern?.id, "apt-mirror-timeout");
+
+  // When watching an existing PR run (--watch-run 102) that failed, evaluatePollTick emits deliverySkill: "pr"
+  const watchedPrState = loadState("/nonexistent/state.json");
+  const watchedPrArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "102", "--merge=auto"]);
+  const watchedPrTick = evaluatePollTick(watchedPrArgs, watchedPrState, fakeExec);
+  const prFailureEvent = watchedPrTick.events.find((e) => e.runId === 102);
+  assert.ok(prFailureEvent);
+  assert.equal(prFailureEvent.type, "JOB_FAILED");
+  assert.equal(prFailureEvent.deliverySkill, "pr");
+  assert.equal(prFailureEvent.mergeMode, "auto");
   assert.ok(parseHttpResponse("plain body").status === 200);
   assert.ok(matchFlakePattern("write EPIPE")?.id === "epipe-stdin");
   assert.equal(matchFlakePattern(""), null);
