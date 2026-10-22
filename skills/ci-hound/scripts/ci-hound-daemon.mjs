@@ -528,10 +528,17 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
               hasCommittedFixBranch: false,
               docsOrConfigOnlyStaged: false,
             };
+      const runSourceRepoId = run.head_repository?.id;
       const hasAssociatedPrForSourceBranch =
+        runSourceRepoId !== undefined &&
+        runSourceRepoId !== null &&
         Array.isArray(run.pull_requests) &&
-        run.pull_requests.some((pr) =>
-          pr?.head?.ref ? pr.head.ref === run.head_branch : run.head_branch !== "main"
+        run.pull_requests.some(
+          (pr) =>
+            pr?.head?.repo?.id !== undefined &&
+            pr?.head?.repo?.id === runSourceRepoId &&
+            typeof pr?.head?.ref === "string" &&
+            pr.head.ref === run.head_branch
         );
       const deliveryContext = {
         hasExistingPr: Boolean(

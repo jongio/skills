@@ -196,7 +196,14 @@ test("evaluatePollTick detects instant job-level failure on active main run, har
               event: "push",
               head_branch: "main",
               head_sha: "f62e3acbbc9a96e644864a3b1ed4ef6f8004d4e2",
-              pull_requests: [{ number: 301 }],
+              head_repository: { id: 1000 },
+              pull_requests: [
+                {
+                  number: 301,
+                  head: { ref: "main", repo: { id: 2000 } },
+                  base: { ref: "main", repo: { id: 1000 } },
+                },
+              ],
               status: "in_progress",
               conclusion: null,
               updated_at: "2026-10-22T17:00:00Z",
@@ -545,7 +552,14 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
                 event: "push",
                 head_branch: "feat/fix",
                 head_sha: "featsha",
-                pull_requests: [{ number: 42, head: { ref: "feat/fix" }, base: { ref: "main" } }],
+                head_repository: { id: 1000 },
+                pull_requests: [
+                  {
+                    number: 42,
+                    head: { ref: "feat/fix", repo: { id: 1000 } },
+                    base: { ref: "main", repo: { id: 1000 } },
+                  },
+                ],
                 status: "completed",
                 conclusion: "failure",
                 updated_at: "2026-10-22T18:20:00Z",
