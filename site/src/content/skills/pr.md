@@ -23,6 +23,15 @@ complete on the full current head OID, with `COMMENTED` distinct from approval.
 Merges require authorization and all gates satisfied, use a literal head-pinned
 command, and verify actual merged state rather than enabling GitHub auto-merge.
 
+Being behind base alone never triggers a rebase, merge from base, or update-branch
+operation. Preserve the head and CI/review evidence unless confirmed merge
+conflicts or a verified enforced up-to-date requirement blocks the PR; use rebase
+only when necessary to clear that blocker. This applies before submission,
+during monitoring, and before merge. Unknown mergeability calls for bounded
+rechecking, not speculative updates; a required merge queue alone is not a reason
+to update. Necessary updates require fresh blocker evidence and new-head checks
+and reviews, without bypassing freshness requirements or shared-branch safeguards.
+
 ## Install with required skills
 
 The single-skill options above do not install dependencies. Use this command

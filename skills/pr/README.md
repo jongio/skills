@@ -13,6 +13,24 @@ and `doc-doctor` for the diff and affected documentation. `pr` owns the document
 pass, including when called by `go`; matching passing evidence is reused, and
 later edits invalidate affected evidence rather than triggering duplicate checks.
 
+## Base updates
+
+Being behind base alone does not trigger a rebase, merge from base, or
+update-branch operation, before submission, during monitoring, or before merge.
+Preserve the PR head and existing CI/review evidence while checks are pending or
+passing. Update only for confirmed merge conflicts or a verified enforced
+up-to-date requirement blocking this PR; use rebase only when necessary to clear
+that blocker. Resolve confirmed conflicts even after submission.
+
+Unknown mergeability or unavailable policy evidence requires bounded rechecking
+or a blocker report, not a speculative update. A required merge queue alone
+does not justify updating the branch. Before a necessary update, record the
+blocker and target base OID and recheck that the blocker still applies; batch
+known fixes into the same push where practical. Repeated updates require fresh
+evidence, and every changed head needs invalidated checks and expected reviews
+again. Never bypass required freshness checks or force-push shared branches
+without explicit confirmation.
+
 ## Merge choice
 
 The default is to ask for final merge approval once all readiness gates pass:
@@ -111,7 +129,8 @@ requests remain separate gates.
 
 PR bodies preserve the repository template and record exact validation commands
 and results, including checks not run. A merge also requires authorization under
-the selected merge mode and an up-to-date base, green CI,
+the selected merge mode, no merge conflicts, applicable enforced base-freshness
+or merge-queue requirements, green CI,
 and settled feedback. Use a literal `gh pr merge` command naming the PR, repository,
 authorized strategy, and full `--match-head-commit` OID, then verify actual merged
 state. GitHub auto-merge, admin, API, and wrapper bypasses are not allowed.
