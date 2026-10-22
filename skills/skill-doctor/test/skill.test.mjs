@@ -27,6 +27,7 @@ test("instructions stay concise and preserve the workflow boundaries", () => {
   for (const phrase of ["every target skill", "even without session failures", "nonblank lines", "No code-golf", "equivalent decisions"]) {
     assert.ok(skill.includes(phrase), `Missing terseness rule: ${phrase}`);
   }
+  assert.match(skill, /Describe intended cache and delivery transitions without executing them/);
 });
 
 test("referenced collection and cache protocol exists", async () => {

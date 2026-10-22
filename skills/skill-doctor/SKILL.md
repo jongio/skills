@@ -69,6 +69,7 @@ in skills, tests, commits, PRs, image prompts, or external services. Generalize
 lessons and use synthetic examples. Missing access is a coverage gap, not success.
 Scenario-only requests use supplied facts only; do not inspect real history or
 write cache, files, Git state, or GitHub objects.
+Describe intended cache and delivery transitions without executing them.
 
 ## Exit Criteria
 
