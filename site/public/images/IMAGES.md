@@ -34,6 +34,7 @@ validate all catalog mappings and generate byte-identical public copies.
 | `thumb-naming-is-hard.png` | `naming-is-hard` card/detail | Candidate names screened across registries. |
 | `thumb-nobs.png` | `nobs` card/detail | Concise chat-panel wordmark; source and provider provenance live with the skill. |
 | `thumb-repo-ready.png` | `repo-ready` card/detail | Repository health checklist with gap indicators. |
+| `thumb-skill-doctor.png` | `skill-doctor` card/detail | Session cards become concise skill fixes through an inspection loop, with cached-review and PR badges. |
 | `thumb-test-doctor.png` | `test-doctor` card/detail | Test diagnostic console transforms amber gaps into verified green test cards; generated source and provider provenance live with the skill. |
 | `thumb-pr.png` | `pr` card/detail | Pull request checklist workflow from local commit and preflight checks through review resolution, CI, and merge. |
 | `thumb-go.png` | `go` card/detail | Azure GPT Image 2 workflow dashboard from plan and tests through implementation, review, and merge. |
