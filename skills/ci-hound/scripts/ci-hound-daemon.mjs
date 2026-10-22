@@ -507,15 +507,22 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     };
 
     if ((isCurrentHeadMainRun || isWatchedRun) && !state.runs[runKey].alertedFailure) {
-      const runHasExistingPr = Boolean(
-        args.hasExistingPr ||
-          run.event === "pull_request" ||
-          (Array.isArray(run.pull_requests) && run.pull_requests.length > 0)
-      );
+      const explicitExistingFix =
+        args.watchRunIds.length === 0 || isWatchedRun
+          ? {
+              hasExistingPr: Boolean(args.hasExistingPr),
+              hasCommittedFixBranch: Boolean(args.hasCommittedFixBranch),
+              docsOrConfigOnlyStaged: Boolean(args.docsOrConfigOnlyStaged),
+            }
+          : {
+              hasExistingPr: false,
+              hasCommittedFixBranch: false,
+              docsOrConfigOnlyStaged: false,
+            };
       const deliveryContext = {
-        hasExistingPr: runHasExistingPr,
-        hasCommittedFixBranch: Boolean(args.hasCommittedFixBranch),
-        docsOrConfigOnlyStaged: Boolean(args.docsOrConfigOnlyStaged),
+        hasExistingPr: Boolean(explicitExistingFix.hasExistingPr || (!isMainBranch && run.event === "pull_request")),
+        hasCommittedFixBranch: explicitExistingFix.hasCommittedFixBranch,
+        docsOrConfigOnlyStaged: explicitExistingFix.docsOrConfigOnlyStaged,
       };
       const failedJobs = jobs.filter(
         (j) =>
