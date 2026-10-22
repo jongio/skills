@@ -43,6 +43,21 @@ export const FLAKE_PATTERNS = [
   },
 ];
 
+export function selectDeliverySkill({
+  eventType = "",
+  hasExistingPr = false,
+  hasCommittedFixBranch = false,
+  docsOrConfigOnlyStaged = false,
+} = {}) {
+  if (hasExistingPr || hasCommittedFixBranch || docsOrConfigOnlyStaged) {
+    return "pr";
+  }
+  if (eventType === "JOB_FAILED" || eventType === "WORKFLOW_FAILED" || eventType === "OPTIMIZE") {
+    return "go";
+  }
+  return "pr";
+}
+
 export function parseArgs(argv) {
   const args = {
     mode: "watch",
@@ -55,6 +70,7 @@ export function parseArgs(argv) {
     wakeOnNewCommit: false,
     wakeOnAllGreen: true,
     maxPolls: 0,
+    mergeMode: "approval",
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -81,7 +97,15 @@ export function parseArgs(argv) {
       args.wakeOnAllGreen = false;
     } else if (token === "--max-polls" && argv[i + 1]) {
       args.maxPolls = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
+    } else if (token === "--merge" && argv[i + 1]) {
+      args.mergeMode = argv[++i];
+    } else if (token.startsWith("--merge=")) {
+      args.mergeMode = token.slice("--merge=".length);
     }
+  }
+
+  if (args.mergeMode !== "approval" && args.mergeMode !== "auto") {
+    throw new Error(`Invalid --merge mode "${args.mergeMode}". Expected "approval" or "auto".`);
   }
 
   if (!args.repo) {
@@ -339,7 +363,7 @@ export function recordTelemetryForRun(run, jobs, state) {
   }
 }
 
-export function buildOptimizationReport(state) {
+export function buildOptimizationReport(state, mergeMode = "approval") {
   const slowJobs = Object.values(state.jobTelemetry)
     .map((entry) => ({
       ...entry,
@@ -363,6 +387,11 @@ export function buildOptimizationReport(state) {
     branch: state.branch,
     lastMainSha: state.lastMainSha,
     metrics: state.metrics,
+    deliveryRouting: {
+      newRepairOrOptimize: selectDeliverySkill({ eventType: "OPTIMIZE" }),
+      existingWorktreeOrOpenPr: selectDeliverySkill({ hasExistingPr: true }),
+      mergeMode,
+    },
     slowJobs,
     slowSteps,
     recentFailures: state.flakeSightings.slice(0, 10),
@@ -495,6 +524,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           branch: run.head_branch,
           conclusion: firstFailed.conclusion,
           url: firstFailed.html_url || run.html_url,
+          deliverySkill: selectDeliverySkill({ eventType: "JOB_FAILED" }),
+          mergeMode: args.mergeMode,
         });
       } else if (
         run.status === "completed" &&
@@ -516,6 +547,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           branch: run.head_branch,
           conclusion: run.conclusion,
           url: run.html_url,
+          deliverySkill: selectDeliverySkill({ eventType: "WORKFLOW_FAILED" }),
+          mergeMode: args.mergeMode,
         });
       }
     }
@@ -579,7 +612,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
     const tick = evaluatePollTick(args, state);
     saveState(args.stateFile, state);
-    const report = buildOptimizationReport(state);
+    const report = buildOptimizationReport(state, args.mergeMode);
     console.log(JSON.stringify({ mode: args.mode, tick, report }, null, 2));
     return;
   }

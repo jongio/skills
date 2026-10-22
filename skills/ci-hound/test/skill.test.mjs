@@ -12,6 +12,7 @@ import {
   parseArgs,
   parseHttpResponse,
   saveState,
+  selectDeliverySkill,
 } from "../scripts/ci-hound-daemon.mjs";
 
 const skill = await readFile(new URL("../SKILL.md", import.meta.url), "utf8");
@@ -37,13 +38,24 @@ test("portable skill frontmatter contains name, description, and version metadat
   assert.match(frontmatter[1], /^  version: "[^"]+"$/m);
 });
 
-test("skill includes workflow, safety, and exit criteria", () => {
+test("skill includes workflow, go/pr routing, safety, and exit criteria", () => {
+  assert.match(skill, /^## `go` vs `pr` Delivery Routing$/m);
   assert.match(skill, /^## Workflow$/m);
   assert.match(skill, /^## Safety$/m);
   assert.match(skill, /^## Exit Criteria$/m);
 });
 
-test("parseArgs parses mode, repo, intervals, flags, and watched run IDs", () => {
+test("selectDeliverySkill routes new failures and optimizations to go and existing worktrees/PRs to pr", () => {
+  assert.equal(selectDeliverySkill({ eventType: "JOB_FAILED" }), "go");
+  assert.equal(selectDeliverySkill({ eventType: "WORKFLOW_FAILED" }), "go");
+  assert.equal(selectDeliverySkill({ eventType: "OPTIMIZE" }), "go");
+  assert.equal(selectDeliverySkill({ eventType: "JOB_FAILED", hasExistingPr: true }), "pr");
+  assert.equal(selectDeliverySkill({ eventType: "OPTIMIZE", hasCommittedFixBranch: true }), "pr");
+  assert.equal(selectDeliverySkill({ eventType: "OPTIMIZE", docsOrConfigOnlyStaged: true }), "pr");
+  assert.equal(selectDeliverySkill({}), "pr");
+});
+
+test("parseArgs parses mode, repo, intervals, merge modes, flags, and watched run IDs", () => {
   const parsed = parseArgs([
     "--mode",
     "optimize",
@@ -63,6 +75,7 @@ test("parseArgs parses mode, repo, intervals, flags, and watched run IDs", () =>
     "--no-wake-on-green",
     "--max-polls",
     "3",
+    "--merge=auto",
   ]);
   assert.equal(parsed.mode, "optimize");
   assert.equal(parsed.repo, "github/evals");
@@ -74,6 +87,12 @@ test("parseArgs parses mode, repo, intervals, flags, and watched run IDs", () =>
   assert.equal(parsed.wakeOnNewCommit, true);
   assert.equal(parsed.wakeOnAllGreen, false);
   assert.equal(parsed.maxPolls, 3);
+  assert.equal(parsed.mergeMode, "auto");
+
+  const defaultMerge = parseArgs(["watch", "--repo", "github/evals", "--merge", "approval"]);
+  assert.equal(defaultMerge.mergeMode, "approval");
+
+  assert.throws(() => parseArgs(["watch", "--repo", "github/evals", "--merge=invalid"]), /Invalid --merge mode/);
 });
 
 test("saveState and loadState round-trip state and recover from corrupted JSON", async (t) => {

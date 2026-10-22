@@ -10,6 +10,9 @@ Continuously monitor GitHub Actions workflows with a zero-token ETag-cached back
 - **Two-Tier Monitoring**:
   1. **Tier 1 (`main` branch — `push`, `workflow_dispatch`, `schedule`)**: Instant job-level failure detection, cross-platform desktop + audio alert, and isolated worktree auto-repair.
   2. **Tier 2 (All runs including `pull_request`)**: Harvests step/job durations, queue wait times, and recurring flake signatures even when nothing merges to `main`.
+- **Context-Aware `go` & `pr` Delivery**:
+  - Routes **new incident repairs and new optimizations** through **`go`** (`/jongio-skills:go` -> `test-doctor fix` -> `pr`) so every fix ships with deterministic regression tests and full PR monitoring/merge.
+  - Routes **existing fix worktrees and open in-flight PRs** directly through **`pr`** (`/jongio-skills:pr`) for CI/review monitoring, thread resolution, and head-pinned squash merge (`--merge=approval` default or `--merge=auto`).
 
 ## Install
 
