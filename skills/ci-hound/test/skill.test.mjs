@@ -523,6 +523,48 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
   assert.equal(collisionTick.events[0].type, "ALL_GREEN");
   assert.equal(collisionTick.events[0].runs.length, 1);
   assert.equal(collisionTick.events[0].runs[0].id, 801);
+
+  // Explicitly monitoring a PR source branch (--branch feat/fix) whose push run has pull_requests routes to "pr"
+  const prBranchState = loadState("/nonexistent/state.json");
+  const prBranchTick = evaluatePollTick(
+    parseArgs(["watch", "--repo", "github/evals", "--branch", "feat/fix"]),
+    prBranchState,
+    (ghArgs) => {
+      const endpoint = ghArgs[2];
+      if (endpoint === "repos/github/evals/commits/feat/fix") {
+        return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"featsha"}', stderr: "" };
+      }
+      if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+        return {
+          ok: true,
+          stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+            workflow_runs: [
+              {
+                id: 901,
+                name: "CI",
+                event: "push",
+                head_branch: "feat/fix",
+                head_sha: "featsha",
+                pull_requests: [{ number: 42, head: { ref: "feat/fix" }, base: { ref: "main" } }],
+                status: "completed",
+                conclusion: "failure",
+                updated_at: "2026-10-22T18:20:00Z",
+                html_url: "https://github.com/github/evals/actions/runs/901",
+              },
+            ],
+          })}`,
+          stderr: "",
+        };
+      }
+      if (endpoint.includes("/jobs?per_page=50")) {
+        return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"jobs":[]}', stderr: "" };
+      }
+      throw new Error(`Unexpected endpoint: ${endpoint}`);
+    }
+  );
+  assert.equal(prBranchTick.events.length, 1);
+  assert.equal(prBranchTick.events[0].type, "WORKFLOW_FAILED");
+  assert.equal(prBranchTick.events[0].deliverySkill, "pr");
 });
 
 
