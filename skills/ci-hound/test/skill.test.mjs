@@ -294,11 +294,23 @@ test("evaluatePollTick detects instant job-level failure on active main run, har
   assert.equal(tick.events.length, 1);
   assert.equal(tick.events[0].type, "JOB_FAILED");
   assert.equal(tick.events[0].jobId, 9001);
+  assert.equal(tick.events[0].deliverySkill, "go");
+  assert.equal(tick.events[0].mergeMode, "approval");
   assert.equal(prJobsCalls, 1);
+
+  // When watching an existing PR run (--watch-run 102) that failed, evaluatePollTick emits deliverySkill: "pr"
+  delete state.runs["102"];
+  const watchedPrArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "102", "--merge=auto"]);
+  const watchedPrTick = evaluatePollTick(watchedPrArgs, state, fakeExec);
+  const prFailureEvent = watchedPrTick.events.find((e) => e.runId === 102);
+  assert.ok(prFailureEvent);
+  assert.equal(prFailureEvent.type, "JOB_FAILED");
+  assert.equal(prFailureEvent.deliverySkill, "pr");
+  assert.equal(prFailureEvent.mergeMode, "auto");
 
   // Second poll with identical updated_at on completed PR run 102 must skip re-fetching 102/jobs
   evaluatePollTick(args, state, fakeExec);
-  assert.equal(prJobsCalls, 1);
+  assert.equal(prJobsCalls, 2);
 
   const report = buildOptimizationReport(state);
   assert.equal(report.slowJobs.length, 1);
@@ -406,6 +418,22 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
   assert.equal(failedTick.events.length, 1);
   assert.equal(failedTick.events[0].type, "WORKFLOW_FAILED");
   assert.equal(failedTick.events[0].conclusion, "timed_out");
+  assert.equal(failedTick.events[0].deliverySkill, "go");
+
+  // With --existing-worktree on WORKFLOW_FAILED, emits deliverySkill: "pr"
+  state.runs["555"].status = "in_progress";
+  state.runs["555"].alertedFailure = false;
+  const existingWorktreeArgs = parseArgs([
+    "watch",
+    "--repo",
+    "github/evals",
+    "--watch-run",
+    "555",
+    "--existing-worktree",
+  ]);
+  const existingWorktreeFailedTick = evaluatePollTick(existingWorktreeArgs, state, fakeExec);
+  assert.equal(existingWorktreeFailedTick.events[0].type, "WORKFLOW_FAILED");
+  assert.equal(existingWorktreeFailedTick.events[0].deliverySkill, "pr");
 });
 
 

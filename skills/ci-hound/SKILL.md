@@ -48,14 +48,13 @@ Every repair or optimization created or tracked by `ci-hound` must be monitored 
    - The daemon uses HTTP `If-None-Match` (`ETag`) caching (`304 Not Modified` costs 0 GitHub API rate-limit quota), an `updated_at` delta cursor so completed runs are never re-queried, and adaptive intervals (`15s` while `main` runs are active, `60s` when idle).
 3. **Act on wakeup events**:
    - **`JOB_FAILED` / `WORKFLOW_FAILED` (Tier 1: `main` or watched run failure)**:
-     1. The daemon immediately fires a native desktop + audio alert and exits with structured JSON identifying `runId`, `jobId`, `workflow`, `jobName`, `sha`, `url`, `deliverySkill` (`"go"`), and `mergeMode`.
-     2. Fetch the failed job logs (`gh api repos/<owner>/<repo>/actions/jobs/<jobId>/logs`) and diagnose the root cause using [references/actions-optimizations.md](references/actions-optimizations.md).
-     3. Create a fresh git worktree outside the repository (`<worktree-root>/<repo>/<fix-branch>` off `origin/<branch>`) so you never disturb the user's active working tree.
-     4. Route delivery by context:
-        - Invoke **`go`** (`/jongio-skills:go` with the resolved `--merge` mode) to run `test-doctor fix`, implement and verify the smallest complete fix (plus `actionlint`/`shellcheck`/Podman `act` when touching `.github/workflows/`), and hand off to **`pr`** (`/jongio-skills:pr`).
-        - If a fix worktree or open PR already exists for the issue, invoke **`pr`** (`/jongio-skills:pr`) directly.
+     1. The daemon immediately fires a native desktop + audio alert and exits with structured JSON identifying `runId`, `jobId`, `workflow`, `jobName`, `sha`, `url`, `deliverySkill`, and `mergeMode`.
+     2. **Immediately re-arm `ci-hound-daemon.mjs`** in the background (preserving the resolved `--repo`, `--branch`, `--state-file`, and `--merge` options) before starting RCA or invoking `go` / `pr`, so `main` never goes unmonitored during delivery, CI, or review waits.
+     3. Fetch the failed job logs (`gh api repos/<owner>/<repo>/actions/jobs/<jobId>/logs`) and diagnose the root cause using [references/actions-optimizations.md](references/actions-optimizations.md).
+     4. Check whether an existing fix worktree, staged docs/config edit, or open PR already targets this issue:
+        - **Existing worktree or open PR (`deliverySkill: "pr"`)**: Do not create a duplicate branch or worktree. Invoke **`pr`** (`/jongio-skills:pr` with the resolved `--merge` mode) directly against that existing worktree and PR identity.
+        - **New repair (`deliverySkill: "go"`)**: Create a fresh git worktree outside the repository (`<worktree-root>/<repo>/<fix-branch>` off `origin/<branch>`) so you never disturb the user's active working tree, then invoke **`go`** (`/jongio-skills:go` with the resolved `--merge` mode) to run `test-doctor fix`, implement and verify the smallest complete fix (plus `actionlint`/`shellcheck`/Podman `act` when touching `.github/workflows/`), and hand off to **`pr`** (`/jongio-skills:pr`).
      5. Monitor the PR through **`pr`** until all CI checks and expected reviews (including Copilot) complete on the current head, all actionable review findings (including review-body-only findings) are fixed and replied to with commit links, and the PR is either merged (under `--merge=auto` or user confirmation) or reported as `awaiting merge approval; not merged`. When monitoring multiple PRs, report a concise status table (PR link, CI status, approval state, unresolved comment count, current action).
-     6. **Immediately re-arm `ci-hound-daemon.mjs`** in the background so `main` is never left unguarded.
    - **`WATCHED_RUNS_GREEN` / `ALL_GREEN`**:
      1. Execute any queued green-gated action requested by the user (such as dispatching `source-release.yml` on `main` and re-arming with `--watch-run <releaseRunId>`).
      2. Otherwise re-arm `ci-hound-daemon.mjs` with `--no-wake-on-green` to stay on guard for future merges or failures.

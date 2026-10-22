@@ -71,6 +71,9 @@ export function parseArgs(argv) {
     wakeOnAllGreen: true,
     maxPolls: 0,
     mergeMode: "approval",
+    hasExistingPr: false,
+    hasCommittedFixBranch: false,
+    docsOrConfigOnlyStaged: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -101,6 +104,12 @@ export function parseArgs(argv) {
       args.mergeMode = argv[++i];
     } else if (token.startsWith("--merge=")) {
       args.mergeMode = token.slice("--merge=".length);
+    } else if (token === "--existing-pr") {
+      args.hasExistingPr = true;
+    } else if (token === "--existing-worktree") {
+      args.hasCommittedFixBranch = true;
+    } else if (token === "--docs-only-staged") {
+      args.docsOrConfigOnlyStaged = true;
     }
   }
 
@@ -498,6 +507,17 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     };
 
     if ((isCurrentHeadMainRun || isWatchedRun) && !state.runs[runKey].alertedFailure) {
+      const runHasExistingPr = Boolean(
+        args.hasExistingPr ||
+          run.event === "pull_request" ||
+          (Array.isArray(run.pull_requests) && run.pull_requests.length > 0) ||
+          (isWatchedRun && !isMainBranch)
+      );
+      const deliveryContext = {
+        hasExistingPr: runHasExistingPr,
+        hasCommittedFixBranch: Boolean(args.hasCommittedFixBranch),
+        docsOrConfigOnlyStaged: Boolean(args.docsOrConfigOnlyStaged),
+      };
       const failedJobs = jobs.filter(
         (j) =>
           j.status === "completed" &&
@@ -524,7 +544,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           branch: run.head_branch,
           conclusion: firstFailed.conclusion,
           url: firstFailed.html_url || run.html_url,
-          deliverySkill: selectDeliverySkill({ eventType: "JOB_FAILED" }),
+          deliverySkill: selectDeliverySkill({ eventType: "JOB_FAILED", ...deliveryContext }),
           mergeMode: args.mergeMode,
         });
       } else if (
@@ -547,7 +567,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           branch: run.head_branch,
           conclusion: run.conclusion,
           url: run.html_url,
-          deliverySkill: selectDeliverySkill({ eventType: "WORKFLOW_FAILED" }),
+          deliverySkill: selectDeliverySkill({ eventType: "WORKFLOW_FAILED", ...deliveryContext }),
           mergeMode: args.mergeMode,
         });
       }
