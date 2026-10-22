@@ -510,8 +510,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       const runHasExistingPr = Boolean(
         args.hasExistingPr ||
           run.event === "pull_request" ||
-          (Array.isArray(run.pull_requests) && run.pull_requests.length > 0) ||
-          (isWatchedRun && !isMainBranch)
+          (Array.isArray(run.pull_requests) && run.pull_requests.length > 0)
       );
       const deliveryContext = {
         hasExistingPr: runHasExistingPr,

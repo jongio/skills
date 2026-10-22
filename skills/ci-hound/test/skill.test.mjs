@@ -434,6 +434,44 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
   const existingWorktreeFailedTick = evaluatePollTick(existingWorktreeArgs, state, fakeExec);
   assert.equal(existingWorktreeFailedTick.events[0].type, "WORKFLOW_FAILED");
   assert.equal(existingWorktreeFailedTick.events[0].deliverySkill, "pr");
+
+  // A watched non-PR run on another branch (e.g. release/1.x workflow_dispatch with pull_requests: []) still emits deliverySkill: "go"
+  const releaseState = loadState("/nonexistent/state.json");
+  const releaseArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "777"]);
+  const releaseTick = evaluatePollTick(releaseArgs, releaseState, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"mainsha"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"workflow_runs":[]}', stderr: "" };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/777") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          id: 777,
+          name: "Release",
+          event: "workflow_dispatch",
+          head_branch: "release/1.x",
+          head_sha: "relsha12345678",
+          pull_requests: [],
+          status: "completed",
+          conclusion: "failure",
+          updated_at: "2026-10-22T18:00:00Z",
+          html_url: "https://github.com/github/evals/actions/runs/777",
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/777/jobs?per_page=50") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"jobs":[]}', stderr: "" };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(releaseTick.events.length, 1);
+  assert.equal(releaseTick.events[0].type, "WORKFLOW_FAILED");
+  assert.equal(releaseTick.events[0].deliverySkill, "go");
 });
 
 
