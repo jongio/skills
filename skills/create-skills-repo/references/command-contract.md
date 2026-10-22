@@ -21,6 +21,7 @@ Options:
 - `--owner-name <name>`
 - `--repo <name>`
 - `--package-name <name>`
+- `--package-version <semver>`
 - `--display-name <name>`
 - `--description <text>`
 - `--visibility <public|private|internal>`

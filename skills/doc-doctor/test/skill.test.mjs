@@ -4,16 +4,18 @@ import test from "node:test";
 
 const skill = (await readFile(new URL("../SKILL.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 
-test("portable skill frontmatter contains only name and description", () => {
+test("portable skill frontmatter contains name, description, and version metadata", () => {
   const frontmatter = skill.match(/^---\n([\s\S]*?)\n---/);
   assert.ok(frontmatter);
   const keys = [...frontmatter[1].matchAll(/^([a-z][a-z-]*):/gm)].map((match) => match[1]);
-  assert.deepEqual(keys, ["name", "description"]);
+  assert.deepEqual(keys, ["name", "description", "metadata"]);
+  assert.match(frontmatter[1], /^  version: "[^"\r\n]+"$/m);
   assert.match(frontmatter[1], /^name: doc-doctor$/m);
 });
 
-test("entire portable skill stays within ten lines", () => {
-  assert.ok(skill.replace(/\n$/, "").split("\n").length <= 10);
+test("portable skill stays within ten lines excluding release metadata", () => {
+  const instructions = skill.replace(/^metadata:\n  version: "[^"\r\n]+"\n/m, "");
+  assert.ok(instructions.replace(/\n$/, "").split("\n").length <= 10);
   assert.match(skill, /^# Doc Doctor$/m);
   assert.deepEqual([...skill.matchAll(/^(\d)\. /gm)].map((match) => match[1]), ["1", "2", "3", "4"]);
   assert.doesNotMatch(skill, /devx|devy/i);

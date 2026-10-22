@@ -31,7 +31,8 @@ npm test
 npm run eval:lint
 ```
 
-Deterministic tests enforce the ten-line instruction limit, scope/safety rules,
+Deterministic tests enforce the ten-line instruction limit (excluding the two
+release-metadata lines), scope/safety rules,
 registration, and single-owner pipeline contract. Synthetic Vally scenarios cover
 documentation drift and verification honesty; linting is not a behavioral run.
 

@@ -88,7 +88,7 @@ destination, missing locked Vally toolchain, ambiguous registration, or invalid 
 
 Creation includes:
 
-- `SKILL.md` with only `name` and `description` frontmatter keys.
+- `SKILL.md` with `name`, `description`, and `metadata.version` frontmatter.
 - `README.md`, `LICENSE`, `package.json`, and `package-lock.json`.
 - `.vally.yaml`, deterministic tests, and `evals/<name>/eval.yaml`.
 - `thumbnail.png` as the tracked source for catalog synchronization when a catalog is present.

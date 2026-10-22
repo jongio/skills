@@ -85,5 +85,5 @@ export function setSkillVersion(source, version) {
     else lines[index] = line;
   }
   const newline = source.includes("\r\n") ? "\r\n" : "\n";
-  return source.replace(frontmatter[1], lines.join(newline));
+  return source.replace(frontmatter[1], () => lines.join(newline));
 }

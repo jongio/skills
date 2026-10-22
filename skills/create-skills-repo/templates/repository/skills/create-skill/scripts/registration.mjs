@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { assertValidPng } from "./png.mjs";
 import { renderSkillFiles, validateSkillName } from "./render.mjs";
 import { validateVersion } from "./versions.mjs";
@@ -407,7 +407,7 @@ export function buildArtPlan(profile, manifest, art) {
 function ensureSafeDestination(root, path) {
   const absolute = resolve(path);
   const rel = relative(root, absolute);
-  if (rel === ".." || rel.startsWith(`..${sep}`) || rel === "") {
+  if (rel === ".." || rel.startsWith(`..${sep}`) || rel === "" || isAbsolute(rel)) {
     throw new Error(`Unsafe plan destination ${path}`);
   }
 

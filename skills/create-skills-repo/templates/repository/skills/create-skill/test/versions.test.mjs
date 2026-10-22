@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse as parsePath } from "node:path";
 import test from "node:test";
 import { bumpVersion, compareVersions, readSkillVersion, setSkillVersion, validateVersion } from "../scripts/versions.mjs";
 import { runVersionCommand } from "../scripts/versioning.mjs";
+import { buildRepositoryPlan } from "../scripts/registration.mjs";
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "skill-versions-"));
@@ -81,6 +82,13 @@ test("skill release advances its listing and aggregate manifests, then stays ide
   assert.equal(parse("marketplace.json").plugins[1].version, "1.3.0");
 });
 
+test("metadata updates preserve literal replacement tokens in frontmatter", () => {
+  const source = "---\nname: sample\ndescription: Keep literal $& $$ $` $' text.\n---\nBody.\n";
+  const expected = "---\nname: sample\ndescription: Keep literal $& $$ $` $' text.\nmetadata:\n  version: \"1.0.0\"\n---\nBody.\n";
+  assert.equal(setSkillVersion(source, "1.0.0"), expected);
+  assert.equal(setSkillVersion(expected, "2.0.0"), expected.replace('"1.0.0"', '"2.0.0"'));
+});
+
 test("legacy migration preserves published skill versions instead of resetting to 1.0.0", (t) => {
   const { root, write, parse } = fixture(t);
   write("skills/example/SKILL.md", "---\nname: example\ndescription: Example.\n---\n");
@@ -123,4 +131,34 @@ test("standalone extension release also advances its aggregate", (t) => {
   assert.equal(parse("marketplace.json").plugins.at(-1).version, "1.3.0");
   assert.equal(parse("plugin.json").version, "2.0.1");
   assert.equal(runVersionCommand(root, ["check"]).status, "clean");
+});
+
+test("managed version planning rejects escaping state paths before reading them", (t) => {
+  const { root, write } = fixture(t);
+  write("skills-repo.config.json", {});
+  const escapes = ["../outside", root];
+  if (process.platform === "win32") {
+    escapes.push(`${parsePath(root).root[0].toUpperCase() === "Z" ? "Y" : "Z"}:\\outside`);
+  }
+  for (const outside of escapes) {
+    write(".skills-repo/state.json", {
+      schemaVersion: 1,
+      hashVersion: 1,
+      files: { [outside]: { normalization: "lf", sha256: "0".repeat(64) } },
+    });
+    assert.throws(() => buildRepositoryPlan(root, new Map()), /Unsafe plan destination/);
+  }
+});
+
+test("linked manifest directories are rejected without modifying their target", (t) => {
+  const { root, parse } = fixture(t);
+  const external = mkdtempSync(join(tmpdir(), "version-link-"));
+  t.after(() => rmSync(external, { recursive: true, force: true }));
+  const source = '{"name":"test-skills","version":"7.0.0"}\n';
+  writeFileSync(join(external, "plugin.json"), source);
+  rmSync(join(root, ".codex-plugin"), { recursive: true });
+  symlinkSync(external, join(root, ".codex-plugin"), process.platform === "win32" ? "junction" : "dir");
+  assert.throws(() => runVersionCommand(root, ["bump", "package", "patch"]), /symbolic link/);
+  assert.equal(readFileSync(join(external, "plugin.json"), "utf8"), source);
+  assert.equal(parse("plugin.json").version, "2.0.0");
 });

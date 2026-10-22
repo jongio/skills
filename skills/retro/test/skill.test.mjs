@@ -20,11 +20,12 @@ function includesAll(text, phrases) {
   }
 }
 
-test("portable skill frontmatter contains only name and description", () => {
+test("portable skill frontmatter contains name, description, and version metadata", () => {
   const frontmatter = skill.match(/^---\n([\s\S]*?)\n---/);
   assert.ok(frontmatter);
   const keys = [...frontmatter[1].matchAll(/^([a-z][a-z-]*):/gm)].map((match) => match[1]);
-  assert.deepEqual(keys, ["name", "description"]);
+  assert.deepEqual(keys, ["name", "description", "metadata"]);
+  assert.match(frontmatter[1], /^  version: "[^"\r\n]+"$/m);
   assert.match(frontmatter[1], /^name: retro$/m);
   assert.ok(skill.split("\n").length <= 500);
   const description = frontmatter[1].split("description: >-\n")[1].trim();
