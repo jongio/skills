@@ -132,6 +132,55 @@ test("Azure provider uses exact endpoint, keyless token provider, and no retries
   );
 });
 
+for (const provider of ["openai", "azure-openai"]) {
+  test(`${provider} works with the real SDK and an offline transport`, async () => {
+    const requests = [];
+    const scopes = [];
+    const result = await generateBuiltInArt(provider, {
+      prompt: "Offline compatibility test",
+      apiKey: "offline-test-key",
+      endpoint: "https://fixture.openai.azure.com",
+      credentialFactory: () => ({
+        async getToken(scope) {
+          scopes.push(scope);
+          return { token: "offline-test-token", expiresOnTimestamp: Date.now() + 3_600_000 };
+        },
+      }),
+      async fetchImpl(input, init) {
+        const request = new Request(input, init);
+        requests.push({
+          url: new URL(request.url),
+          method: request.method,
+          authorization: request.headers.get("authorization"),
+          body: await request.json(),
+          redirect: request.redirect,
+        });
+        return new Response(JSON.stringify({ data: [{ b64_json: encoded }] }), {
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    validatePng(result.bytes);
+    assert.equal(requests.length, 1);
+    const request = requests[0];
+    assert.equal(request.method, "POST");
+    assert.equal(request.redirect, "manual");
+    assert.equal(request.body.model, "gpt-image-2");
+    assert.equal(request.body.prompt, "Offline compatibility test");
+    if (provider === "openai") {
+      assert.equal(request.url.href, `${OPENAI_ORIGIN}/v1/images/generations`);
+      assert.equal(request.authorization, "Bearer offline-test-key");
+      assert.equal(scopes.length, 0);
+    } else {
+      assert.equal(request.url.origin, "https://fixture.openai.azure.com");
+      assert.equal(request.url.pathname, "/openai/deployments/gpt-image-2/images/generations");
+      assert.equal(request.url.searchParams.get("api-version"), AZURE_API_VERSION);
+      assert.equal(request.authorization, "Bearer offline-test-token");
+      assert.deepEqual(scopes.flat(), ["https://cognitiveservices.azure.com/.default"]);
+    }
+  });
+}
+
 test("built-in provider dispatcher never falls back", async () => {
   const placeholder = await generateBuiltInArt("placeholder", { prompt: "unused" });
   validatePng(placeholder.bytes);

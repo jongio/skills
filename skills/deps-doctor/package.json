@@ -11,11 +11,7 @@
     "eval": "vally eval --eval-spec evals/deps-doctor/eval.yaml --skill-dir ."
   },
   "devDependencies": {
-    "@microsoft/vally-cli": "0.18.0"
-  },
-  "overrides": {
-    "@opentelemetry/sdk-logs": "0.220.0",
-    "@azure/monitor-opentelemetry-exporter": "1.0.0-beta.44"
+    "@microsoft/vally-cli": "0.19.0"
   },
   "allowScripts": {
     "@vscode/deviceid": false,

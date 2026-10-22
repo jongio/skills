@@ -1,7 +1,7 @@
 import { encodeDeterministicPlaceholderPng } from "./png.mjs";
 
 export const VALLY_PACKAGE = "@microsoft/vally-cli";
-export const VALLY_VERSION = "0.18.0";
+export const VALLY_VERSION = "0.19.0";
 export const SKILL_NAME_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 
 export function validateSkillName(value) {
