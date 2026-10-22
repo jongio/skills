@@ -6,10 +6,6 @@ description: >-
 
 # Skill Doctor
 
-Learn from session feedback and remove skill bloat without losing useful guidance.
-
-
-
 ## Defaults
 
 Review all accessible personal Copilot sessions active in the last **7 days**,
@@ -20,9 +16,10 @@ Create one focused improvement PR, not a merge. No justified changes means no PR
 
 ## Workflow
 
-1. **Resolve.** Verify the target Git repository and canonical skill sources.
-   Accept a repository containing `skills/`, a skills root, or one skill directory.
-   Ask if ambiguous; never edit installed bundles or expand to another repository.
+1. **Resolve.** Accept a repository containing `skills/`, a skills root, or one skill.
+   Verify its Git repository and canonical source; clarify ambiguous targets.
+   If only an installed copy is known, ask for the canonical source path.
+   Never edit installed copies or other repositories.
 2. **Collect.** Freeze the time window. Use available host session-history tools;
    follow [session discovery and cache rules](references/session-audit.md).
    Paginate all accessible sessions active in that window, including older
@@ -35,12 +32,12 @@ Create one focused improvement PR, not a merge. No justified changes means no PR
    invoked target skill and its current source instruction. Separate instruction
    gaps from noncompliance, transient failures, and task-specific preferences.
    Deduplicate lessons; check current source and existing PRs before proposing.
-5. **Trim bloat.** Inspect every target skill, even without session failures.
-   Remove duplicate rules, filler, repeated explanations, and redundant examples.
-   Prefer one or two short imperative sentences to a new section. Keep essential
-   safety rules, decision branches, exceptions, and useful examples. No code-golf,
-   packed lines, or moving bloat to references to fake savings. Measure before/after
-   words and nonblank lines across all touched instructions and references.
+5. **Trim bloat.** Audit every target skill, even without session failures.
+   Delete duplicate rules, filler, repeated explanations, and redundant examples.
+   Prefer one or two short imperative sentences; aim for at most 20 words per sentence.
+   Preserve safety rules, decision branches, exceptions, and useful examples.
+   No code-golf, packed lines, or moving bloat to references to fake savings.
+   Measure before/after words and nonblank lines across all touched instructions and references.
    Terseness-only fixes are valid; clear concise skills stay unchanged.
 6. **Isolate.** Preview lessons, exact source files, and worktree/base. Follow
    repository approval rules. Verify the intended remote/base and OID, then
@@ -53,12 +50,12 @@ Create one focused improvement PR, not a merge. No justified changes means no PR
    and lint; verify equivalent decisions for terseness-only edits. Paid
    capability evals need separate consent. Update the pending receipt before
    delivery; keep cache and evidence outside Git.
-8. **Deliver.** Use the installed `pr` workflow for commit, push, review, and CI,
-   preserving its approval gates. Explicitly stop before merge: this skill asks
-   for a PR only. If unavailable, report delivery blocked rather than inventing
-   a substitute. Verify the PR's repository, branch, head, and open state.
-   Cache delivery only after that verification. Retain pending work on failure
-   or declined approval; never discard its worktree or create a duplicate PR.
+8. **Deliver.** Before retrying PR creation, look up the target repository and
+   head branch; reuse any existing PR. Use `pr` for commit, push, review, and CI.
+   State and preserve required approvals before those actions; stop before merge.
+   If `pr` is unavailable, report delivery blocked.
+   Verify the PR's repository, branch, head, and open state before caching delivery.
+   Retain pending receipts and worktrees after failure or declined approval.
 
 ## Safety
 

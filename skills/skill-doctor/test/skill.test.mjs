@@ -55,3 +55,11 @@ test("historical cache revisions and probes cover only cutoff-bounded evidence",
   assert.match(reference, /Never use a current full-session revision for a historical cutoff/);
   assert.match(reference, /Metadata-only probes must use that same cutoff-bounded scope/);
 });
+
+test("source resolution and delivery state their required preconditions", () => {
+  assert.match(skill, /If only an installed copy is known, ask for the canonical source path/);
+  assert.match(skill, /Before retrying PR creation, look up the target repository and\s+head branch; reuse any existing PR/);
+  assert.match(skill, /State and preserve required approvals before those actions; stop before merge/);
+  assert.match(skill, /aim for at most 20 words per sentence/);
+  assert.match(skill, /Preserve safety rules, decision branches, exceptions, and useful examples/);
+});
