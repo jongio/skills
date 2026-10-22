@@ -467,7 +467,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   for (const run of workflowRuns) {
     const runKey = String(run.id);
     const prevRun = state.runs[runKey];
-    const isMainBranch = run.head_branch === args.branch;
+    const isPullRequestEvent = run.event === "pull_request" || run.event === "pull_request_target";
+    const isMainBranch = run.head_branch === args.branch && !isPullRequestEvent;
     const isWatchedRun = args.watchRunIds.includes(run.id);
     const isCurrentHeadMainRun = isMainBranch && run.head_sha === state.lastMainSha;
 
@@ -520,7 +521,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
               docsOrConfigOnlyStaged: false,
             };
       const deliveryContext = {
-        hasExistingPr: Boolean(explicitExistingFix.hasExistingPr || (!isMainBranch && run.event === "pull_request")),
+        hasExistingPr: Boolean(explicitExistingFix.hasExistingPr || isPullRequestEvent),
         hasCommittedFixBranch: explicitExistingFix.hasCommittedFixBranch,
         docsOrConfigOnlyStaged: explicitExistingFix.docsOrConfigOnlyStaged,
       };

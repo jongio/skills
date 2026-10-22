@@ -216,7 +216,7 @@ test("evaluatePollTick detects instant job-level failure on active main run, har
               id: 102,
               name: "CI",
               event: "pull_request",
-              head_branch: "feat/test",
+              head_branch: "main",
               head_sha: "1111222233334444",
               status: "completed",
               conclusion: "failure",
