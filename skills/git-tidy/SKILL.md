@@ -3,20 +3,20 @@ name: git-tidy
 description: >-
   Git repository triage across branches, worktrees, stashes, remote refs, tags,
   remotes, artifacts, ignored-but-tracked files, large blobs, and maintenance.
-  Correlates exact work for work-bearing carriers, runs protected read-only
-  inventory for legacy scopes, reports coverage gaps, and recommends outcomes
+  Correlates exact work for work-bearing carriers, runs protected read-only inventory for legacy scopes, reports coverage gaps, and recommends outcomes
   without treating age or names as proof. Analysis and revalidation are
   read-only; every refresh, save, cleanup, and GitHub write requires its own
   exact approval and established workflow. USE FOR: git-tidy, tidy repo, triage
   branches, audit worktrees, inspect stashes, stale branch review, repo hygiene,
   safe git cleanup. DO NOT USE FOR: history rewriting, repository deletion,
   automatic cleanup, or any mutation the user hasn't explicitly approved.
+metadata:
+  version: "1.0.0"
 ---
 
 # Git Tidy
 
-Triage work before tidying its carriers. Correlate exact changes across branches,
-worktrees, stashes, and remote refs, then recommend what should happen. Keep
+Triage work before tidying its carriers. Correlate exact changes across branches, worktrees, stashes, and remote refs, then recommend what should happen. Keep
 carrier cleanup separate, proved, revalidated, and individually approved.
 ## Syntax
 

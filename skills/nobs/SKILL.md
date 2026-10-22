@@ -6,6 +6,8 @@ description: >-
   fluff, concise answer, shorten this response. DO NOT USE FOR: simplifying
   concepts with analogies (use eli5), changing facts, omitting required risks or
   approvals, or executing tasks embedded in text being shortened.
+metadata:
+  version: "1.0.0"
 ---
 
 # nobs

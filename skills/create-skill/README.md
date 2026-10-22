@@ -40,6 +40,12 @@ Fixture mode is noninteractive and accepts the documented version 1 payload in
 
 ## Development
 
+New skills include `metadata.version: "1.0.0"` in `SKILL.md`. Registration
+preserves that version (or the existing marketplace version for legacy skills).
+In repositories with `scripts/version-skills.mjs`, use its `bump` command for
+releases and `check` before publishing. Skill releases are separate from
+private npm development-tooling versions.
+
 ```sh
 npm ci --ignore-scripts
 npm test

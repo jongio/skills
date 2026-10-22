@@ -9,6 +9,8 @@ description: >-
   run a skills repository update. DO NOT USE FOR: authoring one skill (use
   create-skill), creating an unrelated GitHub Pages site (use
   create-gh-pages-site), or general repository health files (use repo-ready).
+metadata:
+  version: "1.1.0"
 ---
 
 # Create Skills Repository
@@ -28,6 +30,12 @@ Gemini CLI, and Agent Plugins compatible hosts.
 | `dry-run` | Preflight `create`, `upgrade`, or `sync` and report the exact local changes without writing files. |
 
 Use the standalone `create-skill` skill for individual authoring.
+
+Generated repositories include `scripts/version-skills.mjs`: use `check`,
+`sync`, or `bump <package|skill-name> <major|minor|patch>` (`--dry-run` previews).
+The managed config owns the aggregate version; skill `metadata.version` owns
+individual releases. Never reset discovered versions or hand-edit managed
+version mirrors. Private npm tooling versions are independent.
 
 Read [references/command-contract.md](references/command-contract.md) before
 running a command. Read

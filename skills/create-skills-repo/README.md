@@ -45,7 +45,25 @@ dependency snapshots remain unchanged.
 Vally requires grader names to be unique across each eval file and at most
 60 characters long. Strict-lint existing eval specs before running them.
 
-## Safety model
+## Versioning
+
+Creation accepts `--package-version <semver>` (default `1.0.0`).
+Generated repositories include `scripts/version-skills.mjs` with `check`,
+`sync`, and `bump <package|skill-name> <major|minor|patch>` commands; add
+`--dry-run` to preview. `package.version` in the managed configuration is
+the aggregate source of truth, and each skill uses `metadata.version` in
+`SKILL.md`. Skill bumps also patch the aggregate plugin and update managed
+hashes transactionally. CI checks distribution version parity.
+
+Generator sync preserves each discovered skill version. Upgrade reads the
+incoming bundled authoring skill's version, not a hard-coded `1.0.0`.
+It rejects an authoring-skill downgrade and patches the aggregate when upgrading
+to a newer authoring-skill release.
+For legacy authored skills, sync preserves the existing marketplace version;
+run the generated version helper's `sync` to populate missing metadata.
+Private npm tooling versions and schema/template versions remain independent.
+
+## Safety guarantees
 
 - New repositories are completed in sibling staging directories.
 - Managed upgrades preflight all hashes and roll back a failed transaction.

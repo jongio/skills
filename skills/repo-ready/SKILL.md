@@ -13,6 +13,8 @@ description: >-
   missing repo files. Do NOT use for project code scaffolding, GitHub Pages
   setup (use create-gh-pages-site), or CI pipeline design beyond the starter
   workflow.
+metadata:
+  version: "1.0.0"
 ---
 
 # Repo Ready

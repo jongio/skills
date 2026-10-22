@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { validateVersion } from "./versions.mjs";
 
 export const CONFIG_FILE = "skills-repo.config.json";
 
@@ -110,7 +111,7 @@ export function validateManagedConfig(config, root) {
   assertText(config.package.name, "package.name", 64, IDENTIFIER);
   assertText(config.package.displayName, "package.displayName", 80);
   assertText(config.package.description, "package.description", 240);
-  if (config.package.version !== "1.0.0") throw new Error("package.version must be 1.0.0");
+  validateVersion(config.package.version, "package.version");
 
   assertExactKeys(config.catalog, new Set(["enabled", "template"]), "catalog");
   if (typeof config.catalog.enabled !== "boolean") {

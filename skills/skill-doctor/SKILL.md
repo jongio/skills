@@ -2,6 +2,8 @@
 name: skill-doctor
 description: >-
   **WORKFLOW SKILL** - Improve skills from recent sessions and reduce instruction bloat, using cached audits, a dedicated worktree, and one PR. USE FOR: skill doctor, skill-doctor, improve skills from session feedback, trim skill instructions. DO NOT USE FOR: single-session closeout (use retro), creating skills (use create-skill), standalone PR delivery (use pr), repository cleanup (use git-tidy).
+metadata:
+  version: "1.0.0"
 ---
 
 # Skill Doctor

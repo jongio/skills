@@ -2,6 +2,8 @@
 name: backlog-groom
 description: >-
   **WORKFLOW SKILL** - Groom GitHub backlogs across issue and source repositories, with or without Projects, using scoped evidence and approved changes. USE FOR: backlog-groom, groom backlog, triage GitHub issues, reconcile backlog, organize GitHub Project, audit delivery readiness. DO NOT USE FOR: implementing issues (use go), PR delivery (use pr), creating skills (use create-skill), dependency maintenance (use deps-doctor), Git cleanup (use git-tidy).
+metadata:
+  version: "1.0.0"
 ---
 
 # Backlog Groom

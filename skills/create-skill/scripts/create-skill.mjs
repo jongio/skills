@@ -4,6 +4,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { discoverRepository } from "./repository.mjs";
 import { createSkillManifest, validateSkillName } from "./render.mjs";
+import { readSkillVersion, validateVersion } from "./versions.mjs";
 import {
   applyPlan,
   buildArtPlan,
@@ -193,7 +194,12 @@ export function manifestFromExistingSkill(profile, name) {
     .trim();
   const useFor = description.match(/\bUSE FOR:\s*(.*?)(?:\s+DO NOT USE FOR:|$)/i)?.[1]?.trim()
     ?? `Use ${name}`;
-  return Object.freeze({ name, summary, useFor, version: "1.0.0" });
+  let version = readSkillVersion(text, { optional: true });
+  if (!version && profile.paths.marketplace) {
+    const marketplace = JSON.parse(readFileSync(profile.paths.marketplace, "utf8"));
+    version = marketplace.plugins.find((entry) => entry.name === name)?.version;
+  }
+  return Object.freeze({ name, summary, useFor, version: validateVersion(version ?? "1.0.0") });
 }
 
 function targetPaths(profile, name) {

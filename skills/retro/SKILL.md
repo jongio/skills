@@ -8,6 +8,8 @@ description: >-
   DO NOT USE FOR: standalone PR delivery (use pr), standalone repository
   cleanup (use git-tidy), creating new skills (use create-skill), unrelated
   historical session audits.
+metadata:
+  version: "1.0.0"
 ---
 
 # Retro

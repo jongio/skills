@@ -6,6 +6,8 @@ description: >-
   cross-module refactoring, idiomatic cleanup.
   DO NOT USE FOR: product changes, bug fixes, dependency upgrades (use deps-doctor),
   security reviews, formatting-only passes, or unapproved implementation.
+metadata:
+  version: "1.0.0"
 ---
 
 # Refactor

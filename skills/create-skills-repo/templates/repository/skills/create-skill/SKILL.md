@@ -10,6 +10,8 @@ description: >-
   scaffolding a new marketplace collection from scratch (use
   create-skills-repo), editing one existing skill instruction without registration work (use
   skill-authoring), creating an agent persona.
+metadata:
+  version: "1.1.0"
 ---
 
 > [!CAUTION]
@@ -214,6 +216,10 @@ authoring skill through the same atomic path without rewriting its skill files.
    skill.
 
 ## Exit Criteria
+
+- New skills declare `metadata.version` as a quoted SemVer string. Preserve
+  existing skill versions during registration; use the repository's version
+  helper to bump a release and synchronize plugin listings when available.
 
 - The skill has every required file and only portable SKILL.md frontmatter keys.
 - Every discovered or configured registration surface includes the skill.

@@ -205,6 +205,46 @@ gemini-extension.json               Gemini CLI extension
 skills/                             Canonical Agent Skills
 ```
 
+## Versioning
+
+The aggregate plugin's canonical release is `plugin.json`'s `version`. Each
+skill has its own SemVer string in `SKILL.md` under `metadata.version`.
+`extensions/plugin.json` owns the standalone statuslines release. Marketplace
+entries and the Claude, Codex, Cursor, and Gemini distribution manifests are
+derived from those sources; the Codex marketplace index retains its own schema
+without invented version fields.
+
+```sh
+node scripts/version-skills.mjs check
+node scripts/version-skills.mjs bump create-skill patch --dry-run
+node scripts/version-skills.mjs bump create-skill patch
+node scripts/version-skills.mjs bump package minor
+node scripts/version-skills.mjs bump statuslines patch
+node scripts/version-skills.mjs sync
+```
+
+Use patch for fixes, minor for compatible additions, and major for breaking
+workflow or command changes. A skill or statuslines bump also patches the
+aggregate release so whole-package installations receive the update. For a
+breaking aggregate change, bump `package major` too. Bump once per release,
+not once per edited file. `sync` repairs mirrors without incrementing releases;
+for legacy skills without metadata it preserves the existing marketplace
+version, never resets it to `1.0.0`. `check` is read-only and CI rejects drift.
+These commands only change local files; they do not commit, tag, push, or publish.
+After adding or removing a skill, bump the aggregate package before publishing.
+
+Private npm manifests version development tooling, not distributed skill
+releases. Schema and generator template versions are also independent.
+Skill metadata is descriptive, not an installer pin or an automatic update
+guarantee. Use an immutable Git ref when reproducible installation is required.
+
+The audit follows the [Agent Skills metadata format](https://agentskills.io/specification),
+[Copilot plugin reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-plugin-reference),
+[Claude version rules](https://code.claude.com/docs/en/plugins-reference#version),
+and [Cursor marketplace fields](https://cursor.com/docs/reference/plugins).
+In particular, a declared Claude plugin version must change for users to receive
+new plugin content.
+
 ## Dependency maintenance
 
 Active development tooling uses Vally **0.18.0**, pinned in the shared CI tools

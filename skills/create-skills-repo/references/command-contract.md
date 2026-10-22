@@ -2,6 +2,11 @@
 
 ## Create
 
+`--package-version <semver>` sets the initial aggregate release (default
+`1.0.0`). Later releases use the generated `scripts/version-skills.mjs` helper,
+which updates config, mirrors, and managed hashes together. Skill versions
+come from `SKILL.md` metadata, not a fixed generator default.
+
 ```sh
 node scripts/cli.mjs create <target> --owner-login <login> [options]
 ```

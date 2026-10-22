@@ -8,6 +8,8 @@ description: >-
   DO NOT USE FOR: routine test execution, application scaffolding, dependency
   upgrades (use deps-doctor), community health files (use repo-ready), or a
   source-code security review.
+metadata:
+  version: "1.0.0"
 ---
 
 # Test Doctor

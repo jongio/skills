@@ -11,6 +11,8 @@ description: >-
   review, CDN or proxy analysis. DO NOT USE FOR: unauthorized changes,
   implicit or unattended provider mutations, general network performance
   tuning, broad SEO audits.
+metadata:
+  version: "1.0.0"
 ---
 
 # DNS Doctor

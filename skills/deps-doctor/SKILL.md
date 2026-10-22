@@ -11,14 +11,14 @@ description: >-
   "dependency doctor", "update dependencies", "upgrade packages", "outdated
   packages", "dependency audit", "security patches", "CVE remediation", or
   "deps". Do NOT use for adding a single new package, general code refactoring,
-  a source-code security review, or fixing a build unrelated to dependency
-  changes.
+  a source-code security review, or fixing a build unrelated to dependency changes.
+metadata:
+  version: "1.0.0"
 ---
 
 # Dependency Doctor
 
-Audit and update project dependencies across package managers. Keep packages
-current, remove dependencies that add no value, explicitly declare what the
+Audit and update project dependencies across package managers. Keep packages current, remove dependencies that add no value, explicitly declare what the
 project imports, and fix compatibility issues forward.
 
 Two references carry the per-ecosystem detail. Open

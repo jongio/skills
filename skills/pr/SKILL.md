@@ -2,6 +2,8 @@
 name: pr
 description: >-
   **WORKFLOW SKILL** - A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge. USE FOR: /pr, PR checklist, prepare a PR, submit a PR, monitor a PR, address PR feedback, merge a PR. DO NOT USE FOR: non-PR git cleanup (use git-tidy) or standalone test-only audits (use test-doctor).
+metadata:
+  version: "1.0.0"
 ---
 
 # PR Workflow

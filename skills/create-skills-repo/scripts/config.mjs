@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { validateVersion } from "../templates/repository/skills/create-skill/scripts/versions.mjs";
 
 export const CONFIG_FILE = "skills-repo.config.json";
 export const CONFIG_SCHEMA_VERSION = 1;
@@ -147,9 +148,7 @@ export function validateConfig(input) {
   assertText(input.package.name, "package.name", 64, IDENTIFIER);
   assertText(input.package.displayName, "package.displayName", 80);
   assertText(input.package.description, "package.description", 240);
-  if (input.package.version !== "1.0.0") {
-    throw new Error("package.version must be 1.0.0.");
-  }
+  validateVersion(input.package.version, "package.version");
 
   assertExactKeys(input.catalog, new Set(["enabled", "template"]), "catalog");
   if (typeof input.catalog.enabled !== "boolean") {
@@ -211,7 +210,7 @@ export function createConfig(options) {
       name: packageName,
       displayName,
       description,
-      version: "1.0.0",
+      version: options.packageVersion ?? "1.0.0",
     },
     catalog: {
       enabled: options.catalogEnabled ?? true,

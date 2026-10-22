@@ -14,6 +14,8 @@ description: >-
   image placeholders the user swaps in. Do NOT use for non-Pages hosting
   (Vercel/Netlify/Azure), deploying an existing app without a Pages target, or
   plain web pages unrelated to GitHub Pages.
+metadata:
+  version: "1.1.0"
 ---
 
 # Create GitHub Pages Site

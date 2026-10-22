@@ -2,6 +2,8 @@
 name: go
 description: >-
   **WORKFLOW SKILL** - Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge. USE FOR: /go, implement this context end to end, take this issue from plan to merge. DO NOT USE FOR: PR-only work on existing changes (use pr), standalone test audits (use test-doctor), Go language questions without an implementation request.
+metadata:
+  version: "1.0.0"
 ---
 
 # Go
