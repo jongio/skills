@@ -43,6 +43,21 @@ export const FLAKE_PATTERNS = [
   },
 ];
 
+export function selectDeliverySkill({
+  eventType = "",
+  hasExistingPr = false,
+  hasCommittedFixBranch = false,
+  docsOrConfigOnlyStaged = false,
+} = {}) {
+  if (hasExistingPr || hasCommittedFixBranch || docsOrConfigOnlyStaged) {
+    return "pr";
+  }
+  if (eventType === "JOB_FAILED" || eventType === "WORKFLOW_FAILED" || eventType === "OPTIMIZE") {
+    return "go";
+  }
+  return "pr";
+}
+
 export function parseArgs(argv) {
   const args = {
     mode: "watch",
@@ -55,6 +70,10 @@ export function parseArgs(argv) {
     wakeOnNewCommit: false,
     wakeOnAllGreen: true,
     maxPolls: 0,
+    mergeMode: "approval",
+    hasExistingPr: false,
+    hasCommittedFixBranch: false,
+    docsOrConfigOnlyStaged: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -81,7 +100,21 @@ export function parseArgs(argv) {
       args.wakeOnAllGreen = false;
     } else if (token === "--max-polls" && argv[i + 1]) {
       args.maxPolls = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
+    } else if (token === "--merge" && argv[i + 1]) {
+      args.mergeMode = argv[++i];
+    } else if (token.startsWith("--merge=")) {
+      args.mergeMode = token.slice("--merge=".length);
+    } else if (token === "--existing-pr") {
+      args.hasExistingPr = true;
+    } else if (token === "--existing-worktree") {
+      args.hasCommittedFixBranch = true;
+    } else if (token === "--docs-only-staged") {
+      args.docsOrConfigOnlyStaged = true;
     }
+  }
+
+  if (args.mergeMode !== "approval" && args.mergeMode !== "auto") {
+    throw new Error(`Invalid --merge mode "${args.mergeMode}". Expected "approval" or "auto".`);
   }
 
   if (!args.repo) {
@@ -339,7 +372,7 @@ export function recordTelemetryForRun(run, jobs, state) {
   }
 }
 
-export function buildOptimizationReport(state) {
+export function buildOptimizationReport(state, mergeMode = "approval") {
   const slowJobs = Object.values(state.jobTelemetry)
     .map((entry) => ({
       ...entry,
@@ -363,10 +396,19 @@ export function buildOptimizationReport(state) {
     branch: state.branch,
     lastMainSha: state.lastMainSha,
     metrics: state.metrics,
+    deliveryRouting: {
+      newRepairOrOptimize: selectDeliverySkill({ eventType: "OPTIMIZE" }),
+      existingWorktreeOrOpenPr: selectDeliverySkill({ hasExistingPr: true }),
+      mergeMode,
+    },
     slowJobs,
     slowSteps,
     recentFailures: state.flakeSightings.slice(0, 10),
   };
+}
+
+function isPullRequestRunEvent(event) {
+  return event === "pull_request" || event === "pull_request_target";
 }
 
 export function evaluatePollTick(args, state, execFn = defaultExecGh) {
@@ -410,7 +452,11 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   }
   const trackedActiveIds = new Set(args.watchRunIds);
   for (const existing of Object.values(state.runs)) {
-    if (existing.head_branch === args.branch && existing.status !== "completed") {
+    if (
+      existing.head_branch === args.branch &&
+      !isPullRequestRunEvent(existing.event) &&
+      existing.status !== "completed"
+    ) {
       trackedActiveIds.add(existing.id);
     }
   }
@@ -429,7 +475,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   for (const run of workflowRuns) {
     const runKey = String(run.id);
     const prevRun = state.runs[runKey];
-    const isMainBranch = run.head_branch === args.branch;
+    const isPullRequestEvent = isPullRequestRunEvent(run.event);
+    const isMainBranch = run.head_branch === args.branch && !isPullRequestEvent;
     const isWatchedRun = args.watchRunIds.includes(run.id);
     const isCurrentHeadMainRun = isMainBranch && run.head_sha === state.lastMainSha;
 
@@ -469,6 +516,37 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     };
 
     if ((isCurrentHeadMainRun || isWatchedRun) && !state.runs[runKey].alertedFailure) {
+      const explicitExistingFix =
+        args.watchRunIds.length === 0 || isWatchedRun
+          ? {
+              hasExistingPr: Boolean(args.hasExistingPr),
+              hasCommittedFixBranch: Boolean(args.hasCommittedFixBranch),
+              docsOrConfigOnlyStaged: Boolean(args.docsOrConfigOnlyStaged),
+            }
+          : {
+              hasExistingPr: false,
+              hasCommittedFixBranch: false,
+              docsOrConfigOnlyStaged: false,
+            };
+      const runSourceRepoId = run.head_repository?.id;
+      const hasAssociatedPrForSourceBranch =
+        runSourceRepoId !== undefined &&
+        runSourceRepoId !== null &&
+        Array.isArray(run.pull_requests) &&
+        run.pull_requests.some(
+          (pr) =>
+            pr?.head?.repo?.id !== undefined &&
+            pr?.head?.repo?.id === runSourceRepoId &&
+            typeof pr?.head?.ref === "string" &&
+            pr.head.ref === run.head_branch
+        );
+      const deliveryContext = {
+        hasExistingPr: Boolean(
+          explicitExistingFix.hasExistingPr || isPullRequestEvent || hasAssociatedPrForSourceBranch
+        ),
+        hasCommittedFixBranch: explicitExistingFix.hasCommittedFixBranch,
+        docsOrConfigOnlyStaged: explicitExistingFix.docsOrConfigOnlyStaged,
+      };
       const failedJobs = jobs.filter(
         (j) =>
           j.status === "completed" &&
@@ -495,6 +573,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           branch: run.head_branch,
           conclusion: firstFailed.conclusion,
           url: firstFailed.html_url || run.html_url,
+          deliverySkill: selectDeliverySkill({ eventType: "JOB_FAILED", ...deliveryContext }),
+          mergeMode: args.mergeMode,
         });
       } else if (
         run.status === "completed" &&
@@ -516,6 +596,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           branch: run.head_branch,
           conclusion: run.conclusion,
           url: run.html_url,
+          deliverySkill: selectDeliverySkill({ eventType: "WORKFLOW_FAILED", ...deliveryContext }),
+          mergeMode: args.mergeMode,
         });
       }
     }
@@ -542,7 +624,10 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       }
     } else if (state.lastMainSha) {
       const headMainRuns = Object.values(state.runs).filter(
-        (r) => r.head_branch === args.branch && r.head_sha === state.lastMainSha
+        (r) =>
+          r.head_branch === args.branch &&
+          !isPullRequestRunEvent(r.event) &&
+          r.head_sha === state.lastMainSha
       );
       const allCompletedGreen =
         headMainRuns.length > 0 &&
@@ -579,7 +664,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
     const tick = evaluatePollTick(args, state);
     saveState(args.stateFile, state);
-    const report = buildOptimizationReport(state);
+    const report = buildOptimizationReport(state, args.mergeMode);
     console.log(JSON.stringify({ mode: args.mode, tick, report }, null, 2));
     return;
   }
