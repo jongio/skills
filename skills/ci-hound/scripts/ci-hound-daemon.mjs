@@ -92,6 +92,7 @@ export function parseArgs(argv) {
     activeIntervalSec: 15,
     idleIntervalSec: 60,
     watchRunIds: [],
+    watchRunsByRepo: {},
     wakeOnNewCommit: false,
     wakeOnAllGreen: true,
     maxPolls: 0,
@@ -166,7 +167,27 @@ export function parseArgs(argv) {
     } else if (token === "--idle-interval" && argv[i + 1]) {
       args.idleIntervalSec = Math.max(15, Number.parseInt(argv[++i], 10) || 60);
     } else if (token === "--watch-run" && argv[i + 1]) {
-      args.watchRunIds.push(Number.parseInt(argv[++i], 10));
+      const rawWatch = String(argv[++i]).trim();
+      const colonIdx = rawWatch.indexOf(":");
+      if (colonIdx !== -1) {
+        const repoPart = rawWatch.slice(0, colonIdx).trim();
+        const idPart = Number.parseInt(rawWatch.slice(colonIdx + 1).trim(), 10);
+        if (!isValidRepoSlug(repoPart) || !Number.isSafeInteger(idPart) || idPart <= 0) {
+          throw new Error(`Invalid --watch-run "${rawWatch}". Expected "<runId>" or "<owner>/<repo>:<runId>".`);
+        }
+        args.watchRunsByRepo[repoPart] ??= [];
+        if (!args.watchRunsByRepo[repoPart].includes(idPart)) {
+          args.watchRunsByRepo[repoPart].push(idPart);
+        }
+      } else {
+        const idPart = Number.parseInt(rawWatch, 10);
+        if (!Number.isSafeInteger(idPart) || idPart <= 0) {
+          throw new Error(`Invalid --watch-run "${rawWatch}". Expected "<runId>" or "<owner>/<repo>:<runId>".`);
+        }
+        if (!args.watchRunIds.includes(idPart)) {
+          args.watchRunIds.push(idPart);
+        }
+      }
     } else if (token === "--wake-on-commit") {
       args.wakeOnNewCommit = true;
     } else if (token === "--no-wake-on-green") {
@@ -915,17 +936,29 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
   const discoveryState = loadState(discoveryStateFile);
   const targetRepos = resolveTargetRepos(args, config, discoveryState, execFn);
+  for (const qualifiedRepo of Object.keys(args.watchRunsByRepo || {})) {
+    if (!targetRepos.includes(qualifiedRepo)) {
+      targetRepos.push(qualifiedRepo);
+    }
+  }
   if (args.owner || config?.owner) {
     saveState(discoveryStateFile, discoveryState);
   }
   if (args.explicitStateFile && targetRepos.length > 1) {
     throw new Error("Cannot use a single --state-file when monitoring multiple repositories.");
   }
+  if (args.watchRunIds.length > 0 && targetRepos.length > 1) {
+    throw new Error(
+      "Unqualified --watch-run requires a single target repository (pass --repo <owner/repo> or --watch-run <owner/repo>:<runId>)."
+    );
+  }
 
   const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
   const effectiveMergeMode = args.explicitMergeMode
     ? args.mergeMode
     : config?.mergeMode || args.mergeMode || "approval";
+  const hasAnyWatchedRuns =
+    args.watchRunIds.length > 0 || Object.keys(args.watchRunsByRepo || {}).length > 0;
 
   const allEvents = [];
   const reports = [];
@@ -934,13 +967,21 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   for (const repo of targetRepos) {
     const repoStateFile = stateFileForRepo(repo, args);
     const repoState = loadState(repoStateFile);
+    const qualifiedIds = args.watchRunsByRepo?.[repo] || [];
+    const repoWatchRunIds =
+      targetRepos.length === 1
+        ? [...new Set([...args.watchRunIds, ...qualifiedIds])]
+        : [...qualifiedIds];
     const repoArgs = {
       ...args,
       repo,
       branch: effectiveBranch,
       mergeMode: effectiveMergeMode,
       stateFile: repoStateFile,
-      watchRunIds: targetRepos.length === 1 ? args.watchRunIds : [],
+      watchRunIds: repoWatchRunIds,
+      wakeOnAllGreen: hasAnyWatchedRuns
+        ? repoWatchRunIds.length > 0 && args.wakeOnAllGreen
+        : args.wakeOnAllGreen,
     };
     const tick = evaluatePollTick(repoArgs, repoState, execFn);
     saveState(repoStateFile, repoState);

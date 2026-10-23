@@ -174,6 +174,78 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
     /Cannot use a single --state-file when monitoring multiple repositories/
   );
 
+  // Rejects unqualified --watch-run when multiple target repositories resolve
+  assert.throws(
+    () =>
+      evaluateMultiRepoPollTick(
+        parseArgs(["watch", "--config-file", configFile, "--watch-run", "12345"]),
+        reloaded,
+        (ghArgs) => {
+          if (ghArgs[2].startsWith("user/repos?")) {
+            return {
+              ok: true,
+              stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+                { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+              ])}`,
+              stderr: "",
+            };
+          }
+          throw new Error("Should not poll any repository when unqualified --watch-run is ambiguous");
+        }
+      ),
+    /Unqualified --watch-run requires a single target repository/
+  );
+  assert.throws(() => parseArgs(["watch", "--watch-run", "bad:id"]), /Invalid --watch-run/);
+
+  // Supports repository-qualified --watch-run <owner/repo>:<runId> across multiple repositories
+  const qualifiedWatchArgs = parseArgs([
+    "watch",
+    "--config-file",
+    configFile,
+    "--watch-run",
+    "github/evals:9999",
+  ]);
+  const qualifiedTick = evaluateMultiRepoPollTick(qualifiedWatchArgs, reloaded, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint.startsWith("user/repos?")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+          { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+        ])}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.startsWith("repos/") && endpoint.endsWith("/commits/main")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha123"}', stderr: "" };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/9999") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          id: 9999,
+          name: "Release",
+          event: "workflow_dispatch",
+          head_branch: "main",
+          head_sha: "sha123",
+          status: "completed",
+          conclusion: "success",
+          updated_at: "2026-10-22T19:05:00Z",
+          html_url: "https://github.com/github/evals/actions/runs/9999",
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.includes("/actions/runs")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"workflow_runs":[],"jobs":[]}', stderr: "" };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(qualifiedTick.events.length, 1);
+  assert.equal(qualifiedTick.events[0].type, "WATCHED_RUNS_GREEN");
+  assert.equal(qualifiedTick.events[0].repo, "github/evals");
+  assert.deepEqual(qualifiedTick.events[0].watchRunIds, [9999]);
+
   const watchArgs = parseArgs(["watch", "--config-file", configFile]);
   const multiTick = evaluateMultiRepoPollTick(watchArgs, reloaded, (ghArgs) => {
     const endpoint = ghArgs[2];
