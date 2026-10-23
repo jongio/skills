@@ -1734,8 +1734,7 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(onceRest429Tick.nextIntervalSec, 300);
 
   // --no-phase-events still resets consecutiveUnchangedPolls and nextIntervalSec on a phase transition
-  const noPhaseEventsState = createPrWatchState();
-  noPhaseEventsState.consecutiveUnchangedPolls = 12;
+  state.consecutiveUnchangedPolls = 12;
   const noPhaseEventsTick = evaluatePrPollTick(
     parsePrWatchArgs([
       "watch",
@@ -1750,10 +1749,10 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
       "--no-phase-events",
     ]),
     execWithEtag,
-    noPhaseEventsState
+    state
   );
   assert.equal(noPhaseEventsTick.events.length, 0);
-  assert.equal(noPhaseEventsState.consecutiveUnchangedPolls, 0);
+  assert.equal(state.consecutiveUnchangedPolls, 0);
   assert.equal(noPhaseEventsTick.nextIntervalSec, 15);
   assert.ok(parseGhApiArgs(["api", "-i", "repos/jongio/skills/actions/runs?head_sha=abc&per_page=100"]));
 });
