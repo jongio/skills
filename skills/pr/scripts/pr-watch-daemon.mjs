@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
+import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_threads";
 
 const ERRORED_COPILOT_REVIEW_RE = /Copilot encountered an error and was unable to review this pull request/i;
 const ACTIONABLE_BODY_RE =
@@ -294,7 +295,305 @@ export function extractBodyOnlyFindings(
   return findings;
 }
 
+export function createPrWatchState() {
+  return {
+    etags: {},
+    consecutiveUnchangedPolls: 0,
+    metrics: {
+      apiCalls: 0,
+      cacheHits304: 0,
+      rateLimitRemaining: null,
+      rateLimitReset: null,
+      retryAfterSec: null,
+    },
+  };
+}
+
+function parseRetryAfterHeader(rawVal) {
+  if (!rawVal) return null;
+  const trimmed = String(rawVal).trim();
+  if (/^\d+$/.test(trimmed)) {
+    return Number.parseInt(trimmed, 10);
+  }
+  const dateMs = Date.parse(trimmed);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(1, Math.ceil((dateMs - Date.now()) / 1000));
+  }
+  return null;
+}
+
+export function parsePrHttpResponse(raw) {
+  let remaining = String(raw || "").replace(/\r\n/g, "\n");
+  let lastHeaderBlock = "";
+  while (/^HTTP\/[\d.]+\s+\d{3}\b/.test(remaining)) {
+    const splitIndex = remaining.indexOf("\n\n");
+    if (splitIndex === -1) {
+      lastHeaderBlock = remaining;
+      remaining = "";
+      break;
+    }
+    lastHeaderBlock = remaining.slice(0, splitIndex);
+    remaining = remaining.slice(splitIndex + 2).trimStart();
+  }
+  if (!lastHeaderBlock) {
+    return {
+      status: 200,
+      etag: "",
+      rateLimitRemaining: null,
+      rateLimitReset: null,
+      retryAfterSec: null,
+      bodyText: remaining,
+    };
+  }
+  const bodyText = remaining.trim();
+  const statusMatch = lastHeaderBlock.match(/^HTTP\/[\d.]+\s+(\d{3})/m);
+  const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : 200;
+  const etagMatch = lastHeaderBlock.match(/^etag:\s*(.+)$/im);
+  const etag = etagMatch ? etagMatch[1].trim() : "";
+  const remMatch = lastHeaderBlock.match(/^x-ratelimit-remaining:\s*(\d+)\s*$/im);
+  const rateLimitRemaining = remMatch ? Number.parseInt(remMatch[1], 10) : null;
+  const resetMatch = lastHeaderBlock.match(/^x-ratelimit-reset:\s*(\d+)\s*$/im);
+  const rateLimitReset = resetMatch ? Number.parseInt(resetMatch[1], 10) : null;
+  const retryMatch = lastHeaderBlock.match(/^retry-after:\s*(.+)$/im);
+  const retryAfterSec = retryMatch ? parseRetryAfterHeader(retryMatch[1]) : null;
+  return { status, etag, rateLimitRemaining, rateLimitReset, retryAfterSec, bodyText };
+}
+
+export function computeAdaptivePrIntervalSec({
+  baseIntervalSec = 15,
+  consecutiveUnchangedPolls = 0,
+  rateLimitRemaining = null,
+  retryAfterSec = null,
+} = {}) {
+  const baseSec = Math.max(5, Number(baseIntervalSec) || 15);
+  let intervalSec = baseSec;
+  if (consecutiveUnchangedPolls >= 12) {
+    intervalSec = Math.max(intervalSec, 45);
+  } else if (consecutiveUnchangedPolls >= 4) {
+    intervalSec = Math.max(intervalSec, 30);
+  }
+  if (Number.isFinite(rateLimitRemaining) && rateLimitRemaining < 500) {
+    intervalSec = Math.max(intervalSec, baseSec * 4, 60);
+  }
+  if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
+    intervalSec = Math.max(intervalSec, retryAfterSec);
+  }
+  return intervalSec;
+}
+
+export function parseGhApiArgs(ghArgs) {
+  if (!Array.isArray(ghArgs) || ghArgs[0] !== "api") {
+    return null;
+  }
+  let includeHeaders = false;
+  let method = "";
+  const headers = {};
+  let endpoint = "";
+  const rawFields = {};
+  const typedFields = {};
+
+  for (let i = 1; i < ghArgs.length; i += 1) {
+    const token = ghArgs[i];
+    if (token === "-i" || token === "--include") {
+      includeHeaders = true;
+    } else if ((token === "-X" || token === "--method") && ghArgs[i + 1]) {
+      method = String(ghArgs[++i]).toUpperCase();
+    } else if ((token === "-H" || token === "--header") && ghArgs[i + 1]) {
+      const rawHeader = String(ghArgs[++i]);
+      const colonIdx = rawHeader.indexOf(":");
+      if (colonIdx <= 0) return null;
+      headers[rawHeader.slice(0, colonIdx).trim()] = rawHeader.slice(colonIdx + 1).trim();
+    } else if ((token === "-f" || token === "--raw-field") && ghArgs[i + 1]) {
+      const pair = String(ghArgs[++i]);
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx <= 0) return null;
+      rawFields[pair.slice(0, eqIdx)] = pair.slice(eqIdx + 1);
+    } else if ((token === "-F" || token === "--field") && ghArgs[i + 1]) {
+      const pair = String(ghArgs[++i]);
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx <= 0) return null;
+      const key = pair.slice(0, eqIdx);
+      const val = pair.slice(eqIdx + 1);
+      if (val.startsWith("@")) return null;
+      if (/^-?\d+$/.test(val)) {
+        typedFields[key] = Number.parseInt(val, 10);
+      } else if (val === "true" || val === "false") {
+        typedFields[key] = val === "true";
+      } else if (val === "null") {
+        typedFields[key] = null;
+      } else {
+        typedFields[key] = val;
+      }
+    } else if (token.startsWith("-")) {
+      return null;
+    } else if (!endpoint) {
+      endpoint = token;
+    } else {
+      return null;
+    }
+  }
+
+  if (!endpoint) {
+    return null;
+  }
+
+  if (endpoint === "graphql") {
+    const query = rawFields.query ?? typedFields.query;
+    if (typeof query !== "string" || !query) {
+      return null;
+    }
+    const variables = { ...rawFields, ...typedFields };
+    delete variables.query;
+    return {
+      url: "https://api.github.com/graphql",
+      method: method || "POST",
+      includeHeaders,
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ query, variables }),
+    };
+  }
+
+  if (Object.keys(rawFields).length > 0 || Object.keys(typedFields).length > 0) {
+    return null;
+  }
+
+  const normalizedEndpoint = endpoint.replace(/^\/+/, "");
+  const url = /^https?:\/\//i.test(endpoint)
+    ? endpoint
+    : `https://api.github.com/${normalizedEndpoint}`;
+  return {
+    url,
+    method: method || "GET",
+    includeHeaders,
+    headers,
+    body: undefined,
+  };
+}
+
+let keepAliveWorkerState = null;
+let nextWorkerReqId = 0;
+
+function resolveGhTokenOnce() {
+  const envToken = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim();
+  if (envToken) {
+    return envToken;
+  }
+  try {
+    return execFileSync("gh", ["auth", "token"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5000,
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function getKeepAliveWorker() {
+  if (process.env.GH_HOST || process.env.PR_WATCH_DISABLE_KEEPALIVE === "1") {
+    return null;
+  }
+  if (keepAliveWorkerState !== null) {
+    return keepAliveWorkerState;
+  }
+  const token = resolveGhTokenOnce();
+  if (!token) {
+    keepAliveWorkerState = false;
+    return false;
+  }
+  try {
+    const { port1, port2 } = new MessageChannel();
+    const workerCode = `
+      const { parentPort } = require("node:worker_threads");
+      let replyPort = null;
+      parentPort.on("message", async (msg) => {
+        if (msg.initPort) {
+          replyPort = msg.initPort;
+          return;
+        }
+        const { reqId, token, req, signalBuf } = msg;
+        const signal = new Int32Array(signalBuf);
+        try {
+          const res = await fetch(req.url, {
+            method: req.method,
+            headers: {
+              Accept: "application/vnd.github+json",
+              Authorization: "Bearer " + token,
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "jongio-skills-daemon",
+              ...req.headers,
+            },
+            body: req.body,
+            signal: AbortSignal.timeout(28000),
+          });
+          const bodyText = await res.text();
+          let stdout = bodyText;
+          if (req.includeHeaders) {
+            const hdrLines = ["HTTP/2.0 " + res.status];
+            for (const h of ["etag", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after"]) {
+              const v = res.headers.get(h);
+              if (v !== null && v !== undefined && v !== "") hdrLines.push(h + ": " + v);
+            }
+            stdout = hdrLines.join("\\r\\n") + "\\r\\n\\r\\n" + bodyText;
+          }
+          replyPort.postMessage({
+            reqId,
+            ok: res.ok || (req.includeHeaders && res.status === 304),
+            stdout,
+            stderr: res.ok || res.status === 304 ? "" : (bodyText || ("HTTP " + res.status)),
+          });
+        } catch (err) {
+          replyPort.postMessage({
+            reqId,
+            ok: false,
+            stdout: "",
+            stderr: err && err.message ? err.message : String(err),
+          });
+        } finally {
+          Atomics.store(signal, 0, 1);
+          Atomics.notify(signal, 0, 1);
+        }
+      });
+    `;
+    const worker = new Worker(workerCode, { eval: true });
+    worker.unref();
+    worker.postMessage({ initPort: port2 }, [port2]);
+    keepAliveWorkerState = { worker, port1, token };
+    return keepAliveWorkerState;
+  } catch {
+    keepAliveWorkerState = false;
+    return false;
+  }
+}
+
 function defaultExecGh(ghArgs) {
+  const parsedReq = parseGhApiArgs(ghArgs);
+  if (parsedReq) {
+    const ka = getKeepAliveWorker();
+    if (ka) {
+      const reqId = (nextWorkerReqId += 1);
+      const signalBuf = new SharedArrayBuffer(4);
+      const signal = new Int32Array(signalBuf);
+      ka.worker.postMessage({
+        reqId,
+        token: ka.token,
+        req: parsedReq,
+        signalBuf,
+      });
+      const waitRes = Atomics.wait(signal, 0, 0, 30000);
+      while (true) {
+        const msg = receiveMessageOnPort(ka.port1);
+        if (!msg) break;
+        if (waitRes === "ok" && msg.message?.reqId === reqId) {
+          return {
+            ok: msg.message.ok,
+            stdout: msg.message.stdout,
+            stderr: msg.message.stderr,
+          };
+        }
+      }
+    }
+  }
   const res = spawnSync("gh", ghArgs, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
@@ -662,7 +961,7 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   };
 }
 
-export function evaluatePrPollTick(args, execFn = defaultExecGh) {
+export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
   const [owner, name] = args.repo.split("/");
   const query = `query($owner: String!, $name: String!, $pr: Int!) {
     repository(owner: $owner, name: $name) {
@@ -750,6 +1049,11 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     }
   }`;
 
+  if (state?.metrics) {
+    state.metrics.retryAfterSec = null;
+    state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
+  }
+
   const gqlRes = execFn([
     "api",
     "graphql",
@@ -762,8 +1066,31 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     "-f",
     `query=${query}`,
   ]);
-  if (!gqlRes.ok) {
-    const errMsg = gqlRes.stderr || "GraphQL query failed";
+  if (!gqlRes || !gqlRes.ok) {
+    const errMsg = gqlRes?.stderr || "GraphQL query failed";
+    if (/rate limit|secondary rate limit|HTTP 429/i.test(`${errMsg} ${gqlRes?.stdout || ""}`)) {
+      const retryAfterSec = 60;
+      if (state?.metrics) {
+        state.metrics.retryAfterSec = retryAfterSec;
+      }
+      return {
+        events: [
+          {
+            type: "RATE_LIMITED",
+            headRefOid: args.head || "",
+            retryAfterSec,
+            rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+          },
+        ],
+        rateLimited: true,
+        nextIntervalSec: computeAdaptivePrIntervalSec({
+          baseIntervalSec: args.intervalSec,
+          consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
+          rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+          retryAfterSec,
+        }),
+      };
+    }
     return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
   }
 
@@ -775,6 +1102,32 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
   }
   if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
+    const isGqlRateLimited = parsed.errors.some(
+      (e) => e?.type === "RATE_LIMITED" || /rate limit/i.test(e?.message || "")
+    );
+    if (isGqlRateLimited) {
+      const retryAfterSec = 60;
+      if (state?.metrics) {
+        state.metrics.retryAfterSec = retryAfterSec;
+      }
+      return {
+        events: [
+          {
+            type: "RATE_LIMITED",
+            headRefOid: args.head || "",
+            retryAfterSec,
+            rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+          },
+        ],
+        rateLimited: true,
+        nextIntervalSec: computeAdaptivePrIntervalSec({
+          baseIntervalSec: args.intervalSec,
+          consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
+          rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+          retryAfterSec,
+        }),
+      };
+    }
     const errMsg = parsed.errors.map((e) => e?.message || "GraphQL error").join("; ");
     return {
       events: [{ type: "POLL_ERROR", error: errMsg }],
@@ -894,18 +1247,93 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
   // Check Actions workflow runs on headOid for both active Copilot reviews and latest workflow-level state
   let copilotWorkflowActive = false;
   const activeWorkflowRuns = [];
-  const runsRes = execFn(["api", `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=100`]);
-  if (!runsRes.ok || !runsRes.stdout) {
-    const errMsg = runsRes.stderr || "Workflow runs inventory unavailable";
-    return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+  const runsEndpoint = `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=100`;
+  const cachedRunsEntry = state?.etags?.[runsEndpoint];
+  const runsGhArgs = state
+    ? [
+        "api",
+        "-i",
+        runsEndpoint,
+        ...(cachedRunsEntry?.etag ? ["-H", `If-None-Match: ${cachedRunsEntry.etag}`] : []),
+      ]
+    : ["api", runsEndpoint];
+  if (state?.metrics) {
+    state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   }
+  const runsRes = execFn(runsGhArgs);
+  const parsedRunsHttp = parsePrHttpResponse(runsRes?.stdout || "");
+  if (state?.metrics) {
+    if (parsedRunsHttp.rateLimitRemaining !== null) {
+      state.metrics.rateLimitRemaining = parsedRunsHttp.rateLimitRemaining;
+    }
+    if (parsedRunsHttp.rateLimitReset !== null) {
+      state.metrics.rateLimitReset = parsedRunsHttp.rateLimitReset;
+    }
+    if (parsedRunsHttp.retryAfterSec !== null) {
+      state.metrics.retryAfterSec = Math.max(
+        state.metrics.retryAfterSec || 0,
+        parsedRunsHttp.retryAfterSec
+      );
+    }
+  }
+
   let runsData;
-  try {
-    runsData = JSON.parse(runsRes.stdout);
-  } catch (error) {
-    const errMsg = `Invalid workflow runs JSON: ${error.message}`;
-    return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+  if (state && parsedRunsHttp.status === 304 && cachedRunsEntry?.data !== undefined) {
+    state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
+    runsData = cachedRunsEntry.data;
+  } else {
+    const isRateLimited =
+      parsedRunsHttp.status === 429 ||
+      (parsedRunsHttp.status === 403 &&
+        (parsedRunsHttp.rateLimitRemaining === 0 ||
+          parsedRunsHttp.retryAfterSec !== null ||
+          /rate limit/i.test(parsedRunsHttp.bodyText || runsRes?.stderr || "")));
+    if (isRateLimited) {
+      const retryAfterSec = parsedRunsHttp.retryAfterSec || 60;
+      if (state?.metrics) {
+        state.metrics.retryAfterSec = retryAfterSec;
+      }
+      return {
+        events: [
+          {
+            type: "RATE_LIMITED",
+            headRefOid: headOid,
+            retryAfterSec,
+            rateLimitRemaining: parsedRunsHttp.rateLimitRemaining,
+          },
+        ],
+        rateLimited: true,
+        nextIntervalSec: computeAdaptivePrIntervalSec({
+          baseIntervalSec: args.intervalSec,
+          consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
+          rateLimitRemaining: parsedRunsHttp.rateLimitRemaining,
+          retryAfterSec,
+        }),
+      };
+    }
+    if (!runsRes || !runsRes.ok || !parsedRunsHttp.bodyText) {
+      const errMsg = runsRes?.stderr || "Workflow runs inventory unavailable";
+      return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+    }
+    try {
+      runsData = JSON.parse(parsedRunsHttp.bodyText);
+    } catch (error) {
+      const errMsg = `Invalid workflow runs JSON: ${error.message}`;
+      return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+    }
+    if (state && parsedRunsHttp.etag && Array.isArray(runsData?.workflow_runs)) {
+      state.etags[runsEndpoint] = {
+        etag: parsedRunsHttp.etag,
+        data: runsData,
+        updatedAt: new Date().toISOString(),
+      };
+      const etagKeys = Object.keys(state.etags);
+      if (etagKeys.length > 20) {
+        delete state.etags[etagKeys[0]];
+      }
+    }
   }
+
   if (!Array.isArray(runsData?.workflow_runs)) {
     const errMsg = "Workflow runs response missing workflow_runs array";
     return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
@@ -1161,7 +1589,26 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     bodyFindingsCount: bodyFindings.length,
   };
 
-  if (args.emitPhaseChanges && args.lastPhase && phaseInfo.phase !== args.lastPhase) {
+  const phaseChanged = Boolean(
+    args.emitPhaseChanges && args.lastPhase && phaseInfo.phase !== args.lastPhase
+  );
+  if (state) {
+    state.consecutiveUnchangedPolls = phaseChanged
+      ? 0
+      : (state.consecutiveUnchangedPolls || 0) + 1;
+  }
+  const nextIntervalSec = computeAdaptivePrIntervalSec({
+    baseIntervalSec: args.intervalSec,
+    consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
+    rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+    retryAfterSec: state?.metrics?.retryAfterSec ?? null,
+  });
+  statusPayload.nextIntervalSec = nextIntervalSec;
+  if (state?.metrics) {
+    statusPayload.cacheHits304 = state.metrics.cacheHits304 || 0;
+  }
+
+  if (phaseChanged) {
     return {
       events: [
         {
@@ -1175,12 +1622,14 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
         },
       ],
       status: statusPayload,
+      nextIntervalSec,
     };
   }
 
   return {
     events: [],
     status: statusPayload,
+    nextIntervalSec,
   };
 }
 
@@ -1207,18 +1656,32 @@ export async function runCli(argv = process.argv.slice(2)) {
     return;
   }
 
+  const watchState = createPrWatchState();
   let baselinePhase = args.lastPhase;
   let hasCommentBaseline = args.hasExplicitSinceCommentId;
   let baselineCommentId = args.sinceCommentId;
   let polls = 0;
   while (true) {
     polls += 1;
-    const tick = evaluatePrPollTick({
-      ...args,
-      lastPhase: baselinePhase,
-      hasExplicitSinceCommentId: hasCommentBaseline,
-      sinceCommentId: baselineCommentId,
-    });
+    const tick = evaluatePrPollTick(
+      {
+        ...args,
+        lastPhase: baselinePhase,
+        hasExplicitSinceCommentId: hasCommentBaseline,
+        sinceCommentId: baselineCommentId,
+      },
+      defaultExecGh,
+      watchState
+    );
+    if (tick.rateLimited) {
+      console.log(JSON.stringify(tick, null, 2));
+      if (args.maxPolls > 0 && polls >= args.maxPolls) {
+        console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+        return;
+      }
+      await sleepSeconds(tick.nextIntervalSec || 60);
+      continue;
+    }
     if (tick.error) {
       console.error(JSON.stringify(tick, null, 2));
       process.exit(1);
@@ -1241,7 +1704,7 @@ export async function runCli(argv = process.argv.slice(2)) {
       console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], status: tick.status }, null, 2));
       return;
     }
-    await sleepSeconds(args.intervalSec);
+    await sleepSeconds(tick.nextIntervalSec || args.intervalSec);
   }
 }
 

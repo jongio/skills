@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_threads";
 
 export const FLAKE_PATTERNS = [
   {
@@ -481,12 +482,74 @@ export function loadState(stateFile) {
 }
 
 export function saveState(stateFile, state) {
+  pruneState(state);
   mkdirSync(dirname(stateFile), { recursive: true });
   writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
+export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunIds = [] } = {}) {
+  if (!state || typeof state !== "object") {
+    return state;
+  }
+  const protectedSet = new Set((protectedRunIds || []).map((id) => String(id)));
+  if (state.etags && typeof state.etags === "object") {
+    for (const endpoint of Object.keys(state.etags)) {
+      const jobsMatch = endpoint.match(/\/actions\/runs\/(\d+)\/jobs\b/);
+      if (jobsMatch) {
+        const runRecord = state.runs?.[jobsMatch[1]];
+        if (runRecord && runRecord.status === "completed" && runRecord.telemetryRecorded) {
+          delete state.etags[endpoint];
+        }
+      }
+    }
+    const etagEntries = Object.entries(state.etags);
+    if (etagEntries.length > maxEtags) {
+      etagEntries.sort((a, b) => {
+        const ta = Date.parse(a[1]?.updatedAt || "") || 0;
+        const tb = Date.parse(b[1]?.updatedAt || "") || 0;
+        return tb - ta;
+      });
+      for (const [oldEndpoint] of etagEntries.slice(maxEtags)) {
+        delete state.etags[oldEndpoint];
+      }
+    }
+  }
+  if (state.runs && typeof state.runs === "object") {
+    const allRunIds = Object.keys(state.runs).sort((a, b) => Number(b) - Number(a));
+    if (allRunIds.length > maxRuns) {
+      let keptCount = 0;
+      for (const runId of allRunIds) {
+        const runRecord = state.runs[runId];
+        if (protectedSet.has(runId) || (runRecord && runRecord.status !== "completed")) {
+          keptCount += 1;
+          continue;
+        }
+        if (keptCount < maxRuns) {
+          keptCount += 1;
+        } else {
+          delete state.runs[runId];
+        }
+      }
+    }
+  }
+  return state;
+}
+
+function parseRetryAfterHeader(rawVal) {
+  if (!rawVal) return null;
+  const trimmed = String(rawVal).trim();
+  if (/^\d+$/.test(trimmed)) {
+    return Number.parseInt(trimmed, 10);
+  }
+  const dateMs = Date.parse(trimmed);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(1, Math.ceil((dateMs - Date.now()) / 1000));
+  }
+  return null;
+}
+
 export function parseHttpResponse(raw) {
-  let remaining = raw.replace(/\r\n/g, "\n");
+  let remaining = String(raw || "").replace(/\r\n/g, "\n");
   let lastHeaderBlock = "";
   while (/^HTTP\/[\d.]+\s+\d{3}\b/.test(remaining)) {
     const splitIndex = remaining.indexOf("\n\n");
@@ -499,14 +562,40 @@ export function parseHttpResponse(raw) {
     remaining = remaining.slice(splitIndex + 2).trimStart();
   }
   if (!lastHeaderBlock) {
-    return { status: 200, etag: "", bodyText: remaining };
+    return {
+      status: 200,
+      etag: "",
+      rateLimitRemaining: null,
+      rateLimitReset: null,
+      retryAfterSec: null,
+      bodyText: remaining,
+    };
   }
   const bodyText = remaining.trim();
   const statusMatch = lastHeaderBlock.match(/^HTTP\/[\d.]+\s+(\d{3})/m);
   const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : 200;
   const etagMatch = lastHeaderBlock.match(/^etag:\s*(.+)$/im);
   const etag = etagMatch ? etagMatch[1].trim() : "";
-  return { status, etag, bodyText };
+  const remMatch = lastHeaderBlock.match(/^x-ratelimit-remaining:\s*(\d+)\s*$/im);
+  const rateLimitRemaining = remMatch ? Number.parseInt(remMatch[1], 10) : null;
+  const resetMatch = lastHeaderBlock.match(/^x-ratelimit-reset:\s*(\d+)\s*$/im);
+  const rateLimitReset = resetMatch ? Number.parseInt(resetMatch[1], 10) : null;
+  const retryMatch = lastHeaderBlock.match(/^retry-after:\s*(.+)$/im);
+  const retryAfterSec = retryMatch ? parseRetryAfterHeader(retryMatch[1]) : null;
+  return { status, etag, rateLimitRemaining, rateLimitReset, retryAfterSec, bodyText };
+}
+
+export function computeNextPollIntervalSec(args, activeMainRuns, metrics = {}) {
+  const baseSec = activeMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec;
+  let intervalSec = baseSec;
+  if (Number.isFinite(metrics?.rateLimitRemaining) && metrics.rateLimitRemaining < 500) {
+    const floorSec = activeMainRuns > 0 ? 60 : 120;
+    intervalSec = Math.max(baseSec * 2, floorSec);
+  }
+  if (Number.isFinite(metrics?.retryAfterSec) && metrics.retryAfterSec > 0) {
+    intervalSec = Math.max(intervalSec, metrics.retryAfterSec);
+  }
+  return intervalSec;
 }
 
 export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
@@ -518,9 +607,37 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
   state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   const result = execFn(ghArgs);
   const parsed = parseHttpResponse(result.stdout || "");
+  if (parsed.rateLimitRemaining !== null) {
+    state.metrics.rateLimitRemaining = parsed.rateLimitRemaining;
+  }
+  if (parsed.rateLimitReset !== null) {
+    state.metrics.rateLimitReset = parsed.rateLimitReset;
+  }
+  if (parsed.retryAfterSec !== null) {
+    state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, parsed.retryAfterSec);
+  }
+
   if (parsed.status === 304 && cached?.data !== undefined) {
     state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
     return { fromCache: true, data: cached.data };
+  }
+  const isRateLimited =
+    parsed.status === 429 ||
+    (parsed.status === 403 &&
+      (parsed.rateLimitRemaining === 0 ||
+        parsed.retryAfterSec !== null ||
+        /rate limit/i.test(parsed.bodyText || result.stderr || "")));
+  if (isRateLimited) {
+    state.metrics.retryAfterSec = Math.max(
+      state.metrics.retryAfterSec || 0,
+      parsed.retryAfterSec || 60
+    );
+    return {
+      fromCache: Boolean(cached?.data !== undefined),
+      data: cached?.data ?? null,
+      rateLimited: true,
+      error: result.stderr || `HTTP ${parsed.status} rate limited`,
+    };
   }
   if (!result.ok && parsed.status !== 304) {
     return { fromCache: false, data: cached?.data ?? null, error: result.stderr || `HTTP ${parsed.status}` };
@@ -536,7 +653,219 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
   }
 }
 
+export function parseGhApiArgs(ghArgs) {
+  if (!Array.isArray(ghArgs) || ghArgs[0] !== "api") {
+    return null;
+  }
+  let includeHeaders = false;
+  let method = "";
+  const headers = {};
+  let endpoint = "";
+  const rawFields = {};
+  const typedFields = {};
+
+  for (let i = 1; i < ghArgs.length; i += 1) {
+    const token = ghArgs[i];
+    if (token === "-i" || token === "--include") {
+      includeHeaders = true;
+    } else if ((token === "-X" || token === "--method") && ghArgs[i + 1]) {
+      method = String(ghArgs[++i]).toUpperCase();
+    } else if ((token === "-H" || token === "--header") && ghArgs[i + 1]) {
+      const rawHeader = String(ghArgs[++i]);
+      const colonIdx = rawHeader.indexOf(":");
+      if (colonIdx <= 0) return null;
+      headers[rawHeader.slice(0, colonIdx).trim()] = rawHeader.slice(colonIdx + 1).trim();
+    } else if ((token === "-f" || token === "--raw-field") && ghArgs[i + 1]) {
+      const pair = String(ghArgs[++i]);
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx <= 0) return null;
+      rawFields[pair.slice(0, eqIdx)] = pair.slice(eqIdx + 1);
+    } else if ((token === "-F" || token === "--field") && ghArgs[i + 1]) {
+      const pair = String(ghArgs[++i]);
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx <= 0) return null;
+      const key = pair.slice(0, eqIdx);
+      const val = pair.slice(eqIdx + 1);
+      if (val.startsWith("@")) return null;
+      if (/^-?\d+$/.test(val)) {
+        typedFields[key] = Number.parseInt(val, 10);
+      } else if (val === "true" || val === "false") {
+        typedFields[key] = val === "true";
+      } else if (val === "null") {
+        typedFields[key] = null;
+      } else {
+        typedFields[key] = val;
+      }
+    } else if (token.startsWith("-")) {
+      return null;
+    } else if (!endpoint) {
+      endpoint = token;
+    } else {
+      return null;
+    }
+  }
+
+  if (!endpoint) {
+    return null;
+  }
+
+  if (endpoint === "graphql") {
+    const query = rawFields.query ?? typedFields.query;
+    if (typeof query !== "string" || !query) {
+      return null;
+    }
+    const variables = { ...rawFields, ...typedFields };
+    delete variables.query;
+    return {
+      url: "https://api.github.com/graphql",
+      method: method || "POST",
+      includeHeaders,
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ query, variables }),
+    };
+  }
+
+  if (Object.keys(rawFields).length > 0 || Object.keys(typedFields).length > 0) {
+    return null;
+  }
+
+  const normalizedEndpoint = endpoint.replace(/^\/+/, "");
+  const url = /^https?:\/\//i.test(endpoint)
+    ? endpoint
+    : `https://api.github.com/${normalizedEndpoint}`;
+  return {
+    url,
+    method: method || "GET",
+    includeHeaders,
+    headers,
+    body: undefined,
+  };
+}
+
+let keepAliveWorkerState = null;
+let nextWorkerReqId = 0;
+
+function resolveGhTokenOnce() {
+  const envToken = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim();
+  if (envToken) {
+    return envToken;
+  }
+  try {
+    return execFileSync("gh", ["auth", "token"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5000,
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function getKeepAliveWorker() {
+  if (process.env.GH_HOST || process.env.CI_HOUND_DISABLE_KEEPALIVE === "1") {
+    return null;
+  }
+  if (keepAliveWorkerState !== null) {
+    return keepAliveWorkerState;
+  }
+  const token = resolveGhTokenOnce();
+  if (!token) {
+    keepAliveWorkerState = false;
+    return false;
+  }
+  try {
+    const { port1, port2 } = new MessageChannel();
+    const workerCode = `
+      const { parentPort } = require("node:worker_threads");
+      let replyPort = null;
+      parentPort.on("message", async (msg) => {
+        if (msg.initPort) {
+          replyPort = msg.initPort;
+          return;
+        }
+        const { reqId, token, req, signalBuf } = msg;
+        const signal = new Int32Array(signalBuf);
+        try {
+          const res = await fetch(req.url, {
+            method: req.method,
+            headers: {
+              Accept: "application/vnd.github+json",
+              Authorization: "Bearer " + token,
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "jongio-skills-daemon",
+              ...req.headers,
+            },
+            body: req.body,
+            signal: AbortSignal.timeout(28000),
+          });
+          const bodyText = await res.text();
+          let stdout = bodyText;
+          if (req.includeHeaders) {
+            const hdrLines = ["HTTP/2.0 " + res.status];
+            for (const h of ["etag", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after"]) {
+              const v = res.headers.get(h);
+              if (v !== null && v !== undefined && v !== "") hdrLines.push(h + ": " + v);
+            }
+            stdout = hdrLines.join("\\r\\n") + "\\r\\n\\r\\n" + bodyText;
+          }
+          replyPort.postMessage({
+            reqId,
+            ok: res.ok || (req.includeHeaders && res.status === 304),
+            stdout,
+            stderr: res.ok || res.status === 304 ? "" : (bodyText || ("HTTP " + res.status)),
+          });
+        } catch (err) {
+          replyPort.postMessage({
+            reqId,
+            ok: false,
+            stdout: "",
+            stderr: err && err.message ? err.message : String(err),
+          });
+        } finally {
+          Atomics.store(signal, 0, 1);
+          Atomics.notify(signal, 0, 1);
+        }
+      });
+    `;
+    const worker = new Worker(workerCode, { eval: true });
+    worker.unref();
+    worker.postMessage({ initPort: port2 }, [port2]);
+    keepAliveWorkerState = { worker, port1, token };
+    return keepAliveWorkerState;
+  } catch {
+    keepAliveWorkerState = false;
+    return false;
+  }
+}
+
 function defaultExecGh(ghArgs) {
+  const parsedReq = parseGhApiArgs(ghArgs);
+  if (parsedReq) {
+    const ka = getKeepAliveWorker();
+    if (ka) {
+      const reqId = (nextWorkerReqId += 1);
+      const signalBuf = new SharedArrayBuffer(4);
+      const signal = new Int32Array(signalBuf);
+      ka.worker.postMessage({
+        reqId,
+        token: ka.token,
+        req: parsedReq,
+        signalBuf,
+      });
+      const waitRes = Atomics.wait(signal, 0, 0, 30000);
+      while (true) {
+        const msg = receiveMessageOnPort(ka.port1);
+        if (!msg) break;
+        if (waitRes === "ok" && msg.message?.reqId === reqId) {
+          return {
+            ok: msg.message.ok,
+            stdout: msg.message.stdout,
+            stderr: msg.message.stderr,
+          };
+        }
+      }
+    }
+  }
   const res = spawnSync("gh", ghArgs, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
@@ -729,6 +1058,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   state.repo = args.repo;
   state.branch = args.branch;
   state.metrics.lastPollAt = new Date().toISOString();
+  state.metrics.retryAfterSec = null;
 
   const events = [];
 
@@ -920,10 +1250,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
 
-  const runIdsDescending = Object.keys(state.runs).sort((a, b) => Number(b) - Number(a));
-  for (const oldId of runIdsDescending.slice(100)) {
-    delete state.runs[oldId];
-  }
+  pruneState(state, { protectedRunIds: args.watchRunIds || [] });
 
   if (events.length === 0 && args.wakeOnAllGreen) {
     if (args.watchRunIds.length > 0) {
@@ -964,7 +1291,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   return {
     events,
     activeMainRuns,
-    nextIntervalSec: activeMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec,
+    nextIntervalSec: computeNextPollIntervalSec(args, activeMainRuns, state.metrics),
   };
 }
 
@@ -1012,6 +1339,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const allEvents = [];
   const reports = [];
   let totalActiveMainRuns = 0;
+  let maxNextIntervalSec = 0;
 
   for (const repo of targetRepos) {
     const repoStateFile = stateFileForRepo(repo, args);
@@ -1040,14 +1368,17 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     saveState(repoStateFile, repoState);
     allEvents.push(...tick.events);
     totalActiveMainRuns += tick.activeMainRuns;
+    maxNextIntervalSec = Math.max(maxNextIntervalSec, tick.nextIntervalSec || 0);
     reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
   }
 
+  const baseMultiIntervalSec =
+    totalActiveMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec;
   return {
     repos: targetRepos,
     events: allEvents,
     activeMainRuns: totalActiveMainRuns,
-    nextIntervalSec: totalActiveMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec,
+    nextIntervalSec: Math.max(baseMultiIntervalSec, maxNextIntervalSec),
     reports,
   };
 }

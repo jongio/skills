@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   applySetupConfig,
   buildOptimizationReport,
+  computeNextPollIntervalSec,
   discoverOwnerRepos,
   evaluateMultiRepoPollTick,
   evaluatePollTick,
@@ -15,7 +16,9 @@ import {
   loadState,
   matchFlakePattern,
   parseArgs,
+  parseGhApiArgs,
   parseHttpResponse,
+  pruneState,
   resolveTargetRepos,
   saveConfig,
   saveState,
@@ -918,6 +921,95 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
   assert.equal(prBranchTick.events.length, 1);
   assert.equal(prBranchTick.events[0].type, "WORKFLOW_FAILED");
   assert.equal(prBranchTick.events[0].deliverySkill, "pr");
+});
+
+test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and back off under rate pressure", () => {
+  // 1. parseGhApiArgs parses REST (-i, -H, -X) and GraphQL (-F typed, -f raw) requests for keep-alive execution
+  const restReq = parseGhApiArgs([
+    "api",
+    "-i",
+    "repos/github/evals/actions/runs?per_page=25",
+    "-H",
+    'If-None-Match: "etag-1"',
+  ]);
+  assert.deepEqual(restReq, {
+    url: "https://api.github.com/repos/github/evals/actions/runs?per_page=25",
+    method: "GET",
+    includeHeaders: true,
+    headers: { "If-None-Match": '"etag-1"' },
+    body: undefined,
+  });
+
+  const gqlReq = parseGhApiArgs([
+    "api",
+    "graphql",
+    "-F",
+    "owner=jongio",
+    "-F",
+    "name=skills",
+    "-F",
+    "pr=178",
+    "-f",
+    "query=query($pr: Int!) { node }",
+  ]);
+  assert.equal(gqlReq.url, "https://api.github.com/graphql");
+  assert.equal(gqlReq.method, "POST");
+  assert.deepEqual(JSON.parse(gqlReq.body), {
+    query: "query($pr: Int!) { node }",
+    variables: { owner: "jongio", name: "skills", pr: 178 },
+  });
+
+  // 2. pruneState removes completed run jobs payloads from state.etags while retaining active runs
+  const bloatedState = loadState("/nonexistent/state.json");
+  bloatedState.runs["100"] = { id: 100, status: "completed", telemetryRecorded: true };
+  bloatedState.runs["101"] = { id: 101, status: "in_progress", telemetryRecorded: false };
+  bloatedState.etags["repos/o/r/actions/runs/100/jobs?per_page=50"] = {
+    etag: '"e100"',
+    data: { jobs: [{ id: 1 }] },
+    updatedAt: "2026-10-23T01:00:00Z",
+  };
+  bloatedState.etags["repos/o/r/actions/runs/101/jobs?per_page=50"] = {
+    etag: '"e101"',
+    data: { jobs: [{ id: 2 }] },
+    updatedAt: "2026-10-23T01:05:00Z",
+  };
+  pruneState(bloatedState, { maxRuns: 50, maxEtags: 50 });
+  assert.equal(bloatedState.etags["repos/o/r/actions/runs/100/jobs?per_page=50"], undefined);
+  assert.ok(bloatedState.etags["repos/o/r/actions/runs/101/jobs?per_page=50"]);
+
+  // Protected watched run IDs are never evicted even when completed and older than maxRuns
+  for (let id = 200; id < 210; id += 1) {
+    bloatedState.runs[String(id)] = { id, status: "completed", telemetryRecorded: true };
+  }
+  pruneState(bloatedState, { maxRuns: 3, maxEtags: 50, protectedRunIds: [100] });
+  assert.ok(bloatedState.runs["100"]);
+  assert.ok(bloatedState.runs["101"]);
+
+  // 3. Rate-limit headers and 429/403 secondary rate limits trigger interval backoff and preserve cached data
+  const rlState = loadState("/nonexistent/state.json");
+  rlState.etags["repos/o/r/commits/main"] = {
+    etag: '"cached-sha"',
+    data: { sha: "abc12345" },
+    updatedAt: "2026-10-23T01:00:00Z",
+  };
+  const rlRes = ghApiWithEtag("repos/o/r/commits/main", rlState, () => ({
+    ok: false,
+    stdout:
+      "HTTP/2.0 429 Too Many Requests\r\nx-ratelimit-remaining: 12\r\nretry-after: 90\r\n\r\n{\"message\":\"You have exceeded a secondary rate limit\"}",
+    stderr: "HTTP 429",
+  }));
+  assert.equal(rlRes.rateLimited, true);
+  assert.equal(rlRes.fromCache, true);
+  assert.deepEqual(rlRes.data, { sha: "abc12345" });
+  assert.equal(rlState.metrics.rateLimitRemaining, 12);
+  assert.equal(rlState.metrics.retryAfterSec, 90);
+
+  const pollArgs = parseArgs(["watch", "--repo", "o/r"]);
+  assert.equal(computeNextPollIntervalSec(pollArgs, 1, rlState.metrics), 90);
+  assert.equal(
+    computeNextPollIntervalSec(pollArgs, 0, { rateLimitRemaining: 200, retryAfterSec: null }),
+    120
+  );
 });
 
 
