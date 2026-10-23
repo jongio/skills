@@ -1251,7 +1251,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       (isWatchedRun && run.status !== "completed");
 
     let jobs = prevRun?.jobs || [];
-    let jobsFetchRateLimited = false;
+    let jobsComplete = true;
     if (needsJobsInspection) {
       if (tickRateLimited) {
         continue;
@@ -1276,27 +1276,30 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           );
           if (pageRes.rateLimited) {
             tickRateLimited = true;
-            jobsFetchRateLimited = true;
+            jobsComplete = false;
             break;
           }
           const pageJobs = pageRes.data?.jobs;
           if (!Array.isArray(pageJobs) || pageJobs.length === 0) {
+            jobsComplete = false;
             break;
           }
           collectedJobs.push(...pageJobs);
           page += 1;
         }
-        if (jobsFetchRateLimited) {
-          continue;
+        if (collectedJobs.length < totalJobsExpected) {
+          jobsComplete = false;
         }
         jobs = collectedJobs;
+      } else {
+        jobsComplete = false;
       }
-      if (run.status === "completed" && !prevRun?.telemetryRecorded && jobs.length > 0) {
+      if (run.status === "completed" && jobsComplete && !prevRun?.telemetryRecorded && jobs.length > 0) {
         recordTelemetryForRun(run, jobs, state);
       }
     }
 
-    if ((isMainBranch || isWatchedRun) && run.status !== "completed") {
+    if ((isMainBranch || isWatchedRun) && run.status !== "completed" && jobsComplete) {
       const completedJobsCount = jobs.filter(
         (j) => j.status === "completed" && (j.conclusion === "success" || j.conclusion === "skipped")
       ).length;
@@ -1325,9 +1328,11 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       head_sha: run.head_sha,
       status: run.status,
       conclusion: run.conclusion,
-      updated_at: run.updated_at,
+      updated_at: jobsComplete ? run.updated_at : prevRun?.updated_at || "",
       html_url: run.html_url,
-      telemetryRecorded: Boolean(prevRun?.telemetryRecorded || (run.status === "completed" && jobs.length > 0)),
+      telemetryRecorded: Boolean(
+        prevRun?.telemetryRecorded || (run.status === "completed" && jobsComplete && jobs.length > 0)
+      ),
       alertedFailure: Boolean(prevRun?.alertedFailure),
     };
 
