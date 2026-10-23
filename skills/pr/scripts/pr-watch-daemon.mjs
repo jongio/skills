@@ -28,9 +28,22 @@ export function parsePrWatchArgs(argv) {
     intervalSec: 15,
     maxPolls: 0,
     expectCopilot: true,
+    expectedReviewers: [],
     sinceCommentId: 0,
+    hasExplicitSinceCommentId: false,
     lastPhase: "",
     emitPhaseChanges: true,
+  };
+
+  const addExpectedReviewers = (raw) => {
+    for (const item of String(raw)
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)) {
+      if (!args.expectedReviewers.includes(item)) {
+        args.expectedReviewers.push(item);
+      }
+    }
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -51,8 +64,18 @@ export function parsePrWatchArgs(argv) {
       args.maxPolls = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
     } else if (token === "--no-copilot") {
       args.expectCopilot = false;
+    } else if (
+      (token === "--expected-reviewer" || token === "--expected-reviewers") &&
+      argv[i + 1]
+    ) {
+      addExpectedReviewers(argv[++i]);
     } else if (token === "--since-comment-id" && argv[i + 1]) {
-      args.sinceCommentId = Math.max(0, Number.parseInt(argv[++i], 10) || 0);
+      const parsedId = Number.parseInt(argv[++i], 10);
+      if (!Number.isSafeInteger(parsedId) || parsedId < 0) {
+        throw new Error(`Invalid --since-comment-id "${parsedId}". Expected a non-negative integer.`);
+      }
+      args.sinceCommentId = parsedId;
+      args.hasExplicitSinceCommentId = true;
     } else if (token === "--last-phase" && argv[i + 1]) {
       args.lastPhase = argv[++i].trim();
     } else if (token === "--no-phase-events") {
@@ -125,14 +148,14 @@ export function isErroredCopilotReview(review) {
   return Boolean(review && typeof review.body === "string" && ERRORED_COPILOT_REVIEW_RE.test(review.body));
 }
 
-export function extractBodyOnlyFindings(reviews, issueComments, currentHeadOid) {
+export function extractBodyOnlyFindings(reviews, issueComments, _currentHeadOid) {
   const findings = [];
   const validReviews = (reviews || []).filter(
     (r) => r && r.state !== "DISMISSED" && !isErroredCopilotReview(r)
   );
   const latestByAuthor = new Map();
   for (const r of validReviews) {
-    const login = r.author?.login || "";
+    const login = (r.author?.login || "").toLowerCase();
     if (login) {
       latestByAuthor.set(login, r);
     }
@@ -141,21 +164,22 @@ export function extractBodyOnlyFindings(reviews, issueComments, currentHeadOid) 
   for (const review of validReviews) {
     const commitOid = review.commit?.oid || "";
     const login = review.author?.login || "unknown";
-    const isLatestChangesRequestedForAuthor =
-      review.state === "CHANGES_REQUESTED" && latestByAuthor.get(login) === review;
-    if (currentHeadOid && commitOid !== currentHeadOid && !isLatestChangesRequestedForAuthor) {
-      continue;
-    }
+    const lowerLogin = login.toLowerCase();
+    const latestForAuthor = latestByAuthor.get(lowerLogin);
     const body = review.body || "";
-    const isActionable = review.state === "CHANGES_REQUESTED" || ACTIONABLE_BODY_RE.test(body);
-    if (!isActionable) {
+    const hasActionableBody = ACTIONABLE_BODY_RE.test(body);
+    const isActiveChangesRequested =
+      review.state === "CHANGES_REQUESTED" && latestForAuthor === review;
+
+    if (!isActiveChangesRequested && !hasActionableBody) {
       continue;
     }
+
     const reviewId = review.databaseId;
     const reviewSubmittedMs = review.submittedAt ? Date.parse(review.submittedAt) : NaN;
     const citedInComment =
       reviewId &&
-      !isLatestChangesRequestedForAuthor &&
+      !isActiveChangesRequested &&
       (issueComments || []).some((c) => {
         if (typeof c?.body !== "string" || !new RegExp(`\\b${reviewId}\\b`).test(c.body)) {
           return false;
@@ -209,6 +233,8 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
               __typename
               ... on Bot { login }
               ... on User { login }
+              ... on Team { slug name }
+              ... on Mannequin { login }
             }
           }
         }
@@ -292,24 +318,28 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     `query=${query}`,
   ]);
   if (!gqlRes.ok) {
-    return { events: [], error: gqlRes.stderr || "GraphQL query failed" };
+    const errMsg = gqlRes.stderr || "GraphQL query failed";
+    return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
   }
 
   let parsed;
   try {
     parsed = JSON.parse(gqlRes.stdout);
   } catch (error) {
-    return { events: [], error: `Invalid GraphQL JSON: ${error.message}` };
+    const errMsg = `Invalid GraphQL JSON: ${error.message}`;
+    return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
   }
   if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
+    const errMsg = parsed.errors.map((e) => e?.message || "GraphQL error").join("; ");
     return {
-      events: [],
-      error: parsed.errors.map((e) => e?.message || "GraphQL error").join("; "),
+      events: [{ type: "POLL_ERROR", error: errMsg }],
+      error: errMsg,
     };
   }
   const pr = parsed?.data?.repository?.pullRequest;
   if (!pr) {
-    return { events: [], error: "Pull request not found" };
+    const errMsg = "Pull request not found";
+    return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
   }
 
   const truncatedCollections = [];
@@ -368,18 +398,23 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     };
   }
 
-  const newConversationComments =
-    args.sinceCommentId > 0
-      ? (pr.comments?.nodes || []).filter(
-          (c) => Number.isSafeInteger(c?.databaseId) && c.databaseId > args.sinceCommentId
-        )
-      : [];
+  const allComments = pr.comments?.nodes || [];
+  const latestCommentId = allComments.reduce(
+    (maxId, c) => (Number.isSafeInteger(c?.databaseId) && c.databaseId > maxId ? c.databaseId : maxId),
+    0
+  );
+  const newConversationComments = args.hasExplicitSinceCommentId
+    ? allComments.filter(
+        (c) => Number.isSafeInteger(c?.databaseId) && c.databaseId > args.sinceCommentId
+      )
+    : [];
   if (newConversationComments.length > 0) {
     return {
       events: [
         {
           type: "NEW_PR_COMMENTS",
           headRefOid: pr.headRefOid,
+          latestCommentId,
           comments: newConversationComments,
         },
       ],
@@ -420,31 +455,52 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
   let copilotWorkflowActive = false;
   if (args.expectCopilot) {
     const runsRes = execFn(["api", `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=20`]);
-    if (runsRes.ok && runsRes.stdout) {
-      try {
-        const runsData = JSON.parse(runsRes.stdout);
-        copilotWorkflowActive = (runsData.workflow_runs || []).some(
-          (r) =>
-            /Copilot Code Review/i.test(r.name || "") &&
-            r.status !== "completed"
-        );
-      } catch {
-        // Ignore parse errors
-      }
+    if (!runsRes.ok || !runsRes.stdout) {
+      const errMsg = runsRes.stderr || "Workflow runs inventory unavailable";
+      return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
     }
+    let runsData;
+    try {
+      runsData = JSON.parse(runsRes.stdout);
+    } catch (error) {
+      const errMsg = `Invalid workflow runs JSON: ${error.message}`;
+      return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+    }
+    if (!Array.isArray(runsData?.workflow_runs)) {
+      const errMsg = "Workflow runs response missing workflow_runs array";
+      return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+    }
+    copilotWorkflowActive = runsData.workflow_runs.some(
+      (r) =>
+        /Copilot Code Review/i.test(r.name || "") &&
+        r.status !== "completed"
+    );
   }
 
-  const pendingReviewers = (pr.reviewRequests?.nodes || [])
-    .map((n) => n?.requestedReviewer?.login)
+  const rawPendingReviewers = (pr.reviewRequests?.nodes || [])
+    .map((n) => {
+      const rr = n?.requestedReviewer;
+      if (!rr) return "";
+      return rr.login || rr.slug || rr.name || rr.__typename || "unknown-reviewer";
+    })
     .filter(Boolean);
-  const copilotRequested = pendingReviewers.some((login) => /copilot/i.test(login));
+  const pendingReviewers = args.expectCopilot
+    ? rawPendingReviewers
+    : rawPendingReviewers.filter((id) => !/copilot/i.test(id));
+  const copilotRequested = args.expectCopilot && rawPendingReviewers.some((id) => /copilot/i.test(id));
 
   const headReviews = (pr.reviews?.nodes || []).filter(
-    (r) => r && r.commit?.oid === headOid && r.state !== "DISMISSED"
+    (r) => r && r.commit?.oid === headOid && r.state !== "DISMISSED" && !isErroredCopilotReview(r)
   );
-  const headCopilotReviews = headReviews.filter((r) => /copilot/i.test(r.author?.login || ""));
-  const validHeadCopilotReviews = headCopilotReviews.filter((r) => !isErroredCopilotReview(r));
-  const latestHeadCopilotReview = headCopilotReviews.at(-1);
+  const allHeadCopilotReviews = (pr.reviews?.nodes || []).filter(
+    (r) =>
+      r &&
+      r.commit?.oid === headOid &&
+      r.state !== "DISMISSED" &&
+      /copilot/i.test(r.author?.login || "")
+  );
+  const validHeadCopilotReviews = allHeadCopilotReviews.filter((r) => !isErroredCopilotReview(r));
+  const latestHeadCopilotReview = allHeadCopilotReviews.at(-1);
 
   if (
     args.expectCopilot &&
@@ -481,18 +537,32 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
 
   const bodyFindings = extractBodyOnlyFindings(pr.reviews?.nodes || [], pr.comments?.nodes || [], headOid);
 
-  // Wait for active Copilot review before waking on feedback or readiness
-  const copilotReviewComplete =
-    !args.expectCopilot ||
-    (!copilotWorkflowActive && !copilotRequested && validHeadCopilotReviews.length > 0);
-  const allRequestedReviewsComplete = pendingReviewers.length === 0 && copilotReviewComplete;
+  // Verify every non-exempt expected reviewer has a non-dismissed, non-errored review on headOid
+  const headReviewerLogins = new Set(
+    headReviews.map((r) => (r.author?.login || "").toLowerCase()).filter(Boolean)
+  );
+  const nonExemptExpectedReviewers = (args.expectedReviewers || []).filter(
+    (login) => args.expectCopilot || !/copilot/i.test(login)
+  );
+  const missingExpectedReviewers = nonExemptExpectedReviewers.filter(
+    (login) => !headReviewerLogins.has(login)
+  );
 
-  if (allRequestedReviewsComplete && (unresolvedThreads.length > 0 || bodyFindings.length > 0)) {
+  const copilotReviewPending = args.expectCopilot && (copilotWorkflowActive || copilotRequested);
+  const copilotReviewComplete =
+    !args.expectCopilot || (!copilotReviewPending && validHeadCopilotReviews.length > 0);
+  const allRequestedReviewsComplete =
+    pendingReviewers.length === 0 &&
+    copilotReviewComplete &&
+    missingExpectedReviewers.length === 0;
+
+  if (!copilotReviewPending && (unresolvedThreads.length > 0 || bodyFindings.length > 0)) {
     return {
       events: [
         {
           type: "FEEDBACK_ACTION_NEEDED",
           headRefOid: headOid,
+          latestCommentId,
           unresolvedThreads,
           bodyFindings,
         },
@@ -500,8 +570,15 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     };
   }
 
+  const mergeGatesSatisfied =
+    pr.mergeable === "MERGEABLE" &&
+    ["CLEAN", "HAS_HOOKS"].includes(pr.mergeStateStatus) &&
+    pr.reviewDecision !== "REVIEW_REQUIRED" &&
+    pr.reviewDecision !== "CHANGES_REQUESTED";
+
   if (
     allRequestedReviewsComplete &&
+    mergeGatesSatisfied &&
     contexts.length > 0 &&
     pendingChecks.length === 0 &&
     unresolvedThreads.length === 0 &&
@@ -512,6 +589,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
         {
           type: "PR_READY_TO_MERGE",
           headRefOid: headOid,
+          latestCommentId,
           mergeStateStatus: pr.mergeStateStatus,
           mergeable: pr.mergeable,
           reviewDecision: pr.reviewDecision,
@@ -522,6 +600,10 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
 
   const totalChecksCount = contexts.length;
   const passedChecksCount = totalChecksCount - pendingChecks.length - failedChecks.length;
+  const nowIso = new Date().toISOString();
+  const combinedPendingReviewers = [
+    ...new Set([...pendingReviewers, ...missingExpectedReviewers]),
+  ];
   const phaseInfo = computePrPhase({
     totalChecksCount,
     passedChecksCount,
@@ -530,20 +612,19 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     copilotWorkflowActive,
     copilotRequested,
     validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
-    pendingReviewers,
+    pendingReviewers: combinedPendingReviewers,
   });
-
-  const nowIso = new Date().toISOString();
   const statusPayload = {
     timestamp: nowIso,
     headRefOid: headOid,
+    latestCommentId,
     phase: phaseInfo.phase,
     summary: phaseInfo.summary,
     totalChecksCount,
     passedChecksCount,
     pendingChecksCount: pendingChecks.length,
     pendingChecks,
-    pendingReviewers,
+    pendingReviewers: combinedPendingReviewers,
     copilotWorkflowActive,
     validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
     unresolvedThreadsCount: unresolvedThreads.length,
@@ -557,6 +638,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
           type: "PHASE_CHANGED",
           timestamp: nowIso,
           headRefOid: headOid,
+          latestCommentId,
           previousPhase: args.lastPhase,
           phase: phaseInfo.phase,
           summary: phaseInfo.summary,
@@ -579,21 +661,40 @@ async function sleepSeconds(sec) {
 export async function runCli(argv = process.argv.slice(2)) {
   const args = parsePrWatchArgs(argv);
   if (args.mode === "once") {
-    console.log(JSON.stringify(evaluatePrPollTick(args), null, 2));
+    const tick = evaluatePrPollTick(args);
+    console.log(JSON.stringify(tick, null, 2));
+    if (tick.error) {
+      process.exit(1);
+    }
     return;
   }
 
   let baselinePhase = args.lastPhase;
+  let hasCommentBaseline = args.hasExplicitSinceCommentId;
+  let baselineCommentId = args.sinceCommentId;
   let polls = 0;
   while (true) {
     polls += 1;
-    const tick = evaluatePrPollTick({ ...args, lastPhase: baselinePhase });
+    const tick = evaluatePrPollTick({
+      ...args,
+      lastPhase: baselinePhase,
+      hasExplicitSinceCommentId: hasCommentBaseline,
+      sinceCommentId: baselineCommentId,
+    });
+    if (tick.error) {
+      console.error(JSON.stringify(tick, null, 2));
+      process.exit(1);
+    }
     if (tick.events.length > 0) {
       console.log(JSON.stringify(tick, null, 2));
       return;
     }
     if (!baselinePhase && tick.status?.phase) {
       baselinePhase = tick.status.phase;
+    }
+    if (!hasCommentBaseline && Number.isSafeInteger(tick.status?.latestCommentId)) {
+      hasCommentBaseline = true;
+      baselineCommentId = tick.status.latestCommentId;
     }
     if (args.maxPolls > 0 && polls >= args.maxPolls) {
       console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], status: tick.status }, null, 2));

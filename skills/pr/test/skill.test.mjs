@@ -513,12 +513,119 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
           commit: { oid: "olderhead" },
           body: "Please fix this",
         },
+        {
+          databaseId: 889,
+          state: "COMMENTED",
+          author: { login: "copilot-pull-request-reviewer" },
+          commit: { oid: "olderhead" },
+          body: "### 🔵 Needs a closer look\n<details>1 previously missed issue</details>",
+        },
       ],
       [],
       "head123"
     ).length,
-    1
+    2
   );
+
+  // 4. --no-copilot ignores pending Copilot requests, Team requests stay pending,
+  // --expected-reviewers requires current-head review, and REVIEW_REQUIRED blocks PR_READY_TO_MERGE
+  const gatedArgs = parsePrWatchArgs([
+    "watch",
+    "--repo",
+    "jongio/skills",
+    "--pr",
+    "175",
+    "--head",
+    "head123",
+    "--no-copilot",
+    "--expected-reviewers",
+    "alice",
+    "--since-comment-id",
+    "0",
+  ]);
+  assert.equal(gatedArgs.hasExplicitSinceCommentId, true);
+  assert.deepEqual(gatedArgs.expectedReviewers, ["alice"]);
+
+  const blockedByExpectedReviewer = evaluatePrPollTick(gatedArgs, () => ({
+    ok: true,
+    stdout: JSON.stringify({
+      data: {
+        repository: {
+          pullRequest: {
+            state: "OPEN",
+            headRefOid: "head123",
+            mergeable: "MERGEABLE",
+            mergeStateStatus: "CLEAN",
+            reviewDecision: "APPROVED",
+            reviewRequests: {
+              nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
+            },
+            reviews: {
+              nodes: [
+                {
+                  databaseId: 910,
+                  state: "APPROVED",
+                  commit: { oid: "olderhead" },
+                  author: { login: "alice" },
+                  body: "LGTM on old head",
+                },
+              ],
+            },
+            reviewThreads: { nodes: [] },
+            comments: { nodes: [] },
+            commits: {
+              nodes: [
+                {
+                  commit: {
+                    statusCheckRollup: {
+                      state: "SUCCESS",
+                      contexts: {
+                        nodes: [{ __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }],
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    }),
+    stderr: "",
+  }));
+  assert.equal(blockedByExpectedReviewer.events.length, 0);
+  assert.deepEqual(blockedByExpectedReviewer.status.pendingReviewers, ["alice"]);
+
+  // Unavailable workflow_runs inventory surfaces POLL_ERROR instead of assuming idle Copilot
+  const workflowErrTick = evaluatePrPollTick(args, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: "APPROVED",
+                reviewRequests: { nodes: [] },
+                reviews: { nodes: [] },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return { ok: false, stdout: "", stderr: "HTTP 503" };
+  });
+  assert.equal(workflowErrTick.events[0].type, "POLL_ERROR");
+  assert.match(workflowErrTick.error, /503/);
 
   // 3. Phase-transition wakeup: emits PHASE_CHANGED when CI transitions from running to passed while Copilot reviews
   const phaseInfo = computePrPhase({
