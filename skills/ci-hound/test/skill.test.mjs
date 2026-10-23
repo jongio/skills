@@ -92,6 +92,12 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   assert.deepEqual(modified.repos, ["jongio/skills"]);
   assert.equal(modified.mergeMode, "auto");
 
+  // Replacing repos with an explicit --repos list clears inherited owner and visibility filters
+  const replaced = applySetupConfig(parseArgs(["setup", "--repos", "acme/one"]), modified);
+  assert.deepEqual(replaced.repos, ["acme/one"]);
+  assert.equal(replaced.owner, "");
+  assert.equal(replaced.visibility, "");
+
   const discoveryState = loadState("/nonexistent/discovery.json");
   const page1Repos = Array.from({ length: 100 }, (_, idx) => ({
     full_name: `jongio/archived-${idx}`,
@@ -247,12 +253,14 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   assert.equal(multiTick.events[0].mergeMode, "auto");
 
   // Supports repository-qualified --watch-run <owner/repo>:<runId> across multiple repositories
+  // and scopes --existing-worktree only to the repository with watched runs
   const qualifiedWatchArgs = parseArgs([
     "watch",
     "--config-file",
     configFile,
     "--watch-run",
     "github/evals:9999",
+    "--existing-worktree",
   ]);
   const qualifiedTick = evaluateMultiRepoPollTick(qualifiedWatchArgs, reloaded, (ghArgs) => {
     const endpoint = ghArgs[2];
@@ -261,12 +269,34 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
         ok: true,
         stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
           { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+          { full_name: "jongio/private-two", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
         ])}`,
         stderr: "",
       };
     }
     if (endpoint.startsWith("repos/") && endpoint.endsWith("/commits/main")) {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha123"}', stderr: "" };
+    }
+    if (endpoint === "repos/jongio/private-two/actions/runs?branch=main&per_page=20") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 7002,
+              name: "CI",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha123",
+              status: "completed",
+              conclusion: "failure",
+              updated_at: "2026-10-22T19:05:00Z",
+              html_url: "https://github.com/jongio/private-two/actions/runs/7002",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
     }
     if (endpoint === "repos/github/evals/actions/runs/9999") {
       return {
@@ -290,10 +320,17 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
     }
     throw new Error(`Unexpected endpoint: ${endpoint}`);
   });
-  assert.equal(qualifiedTick.events.length, 1);
-  assert.equal(qualifiedTick.events[0].type, "WATCHED_RUNS_GREEN");
-  assert.equal(qualifiedTick.events[0].repo, "github/evals");
-  assert.deepEqual(qualifiedTick.events[0].watchRunIds, [9999]);
+  assert.equal(qualifiedTick.events.length, 2);
+  const evalsWatchedEvent = qualifiedTick.events.find((e) => e.repo === "github/evals");
+  const unrelatedFailEvent = qualifiedTick.events.find((e) => e.repo === "jongio/private-two");
+  assert.equal(evalsWatchedEvent.type, "WATCHED_RUNS_GREEN");
+  assert.deepEqual(evalsWatchedEvent.watchRunIds, [9999]);
+  assert.equal(unrelatedFailEvent.type, "WORKFLOW_FAILED");
+  assert.equal(
+    unrelatedFailEvent.deliverySkill,
+    "go",
+    "--existing-worktree must not leak to repositories without watched runs"
+  );
 
   const cleared = applySetupConfig(parseArgs(["setup", "--clear-repos"]), reloaded);
   assert.deepEqual(cleared.repos, []);

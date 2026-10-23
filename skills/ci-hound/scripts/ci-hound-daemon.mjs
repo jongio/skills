@@ -277,6 +277,12 @@ export function applySetupConfig(args, existingConfig) {
   }
   if (args.explicitRepos.length > 0) {
     next.repos = [...args.explicitRepos];
+    if (!args.owner) {
+      next.owner = "";
+      if (!args.visibility) {
+        next.visibility = "";
+      }
+    }
   }
   for (const r of args.addRepos) {
     if (!next.repos.includes(r)) {
@@ -972,6 +978,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       targetRepos.length === 1
         ? [...new Set([...args.watchRunIds, ...qualifiedIds])]
         : [...qualifiedIds];
+    const applyRepoExistingFlags = !hasAnyWatchedRuns || repoWatchRunIds.length > 0;
     const repoArgs = {
       ...args,
       repo,
@@ -979,6 +986,9 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       mergeMode: effectiveMergeMode,
       stateFile: repoStateFile,
       watchRunIds: repoWatchRunIds,
+      hasExistingPr: applyRepoExistingFlags ? Boolean(args.hasExistingPr) : false,
+      hasCommittedFixBranch: applyRepoExistingFlags ? Boolean(args.hasCommittedFixBranch) : false,
+      docsOrConfigOnlyStaged: applyRepoExistingFlags ? Boolean(args.docsOrConfigOnlyStaged) : false,
       wakeOnAllGreen: hasAnyWatchedRuns
         ? repoWatchRunIds.length > 0 && args.wakeOnAllGreen
         : args.wakeOnAllGreen,
