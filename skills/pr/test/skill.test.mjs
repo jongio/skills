@@ -364,6 +364,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
                     {
                       databaseId: 901,
                       state: "COMMENTED",
+                      submittedAt: "2026-10-22T20:00:00Z",
                       commit: { oid: "head123" },
                       author: { login: "copilot-pull-request-reviewer" },
                       body: "Copilot encountered an error and was unable to review this pull request.",
@@ -419,6 +420,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
                     {
                       databaseId: 902,
                       state: "COMMENTED",
+                      submittedAt: "2026-10-22T20:00:00Z",
                       commit: { oid: "head123" },
                       author: { login: "copilot-pull-request-reviewer" },
                       body: "### 🔵 Needs a closer look\n**No open issues**\n<details><summary><strong>1 previously missed issue</strong></summary>Fix X</details>",
@@ -509,23 +511,46 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
         {
           databaseId: 888,
           state: "CHANGES_REQUESTED",
+          submittedAt: "2026-10-22T20:00:00Z",
           author: { login: "alice" },
           commit: { oid: "olderhead" },
-          body: "Please fix this",
+          body: "",
         },
         {
           databaseId: 889,
           state: "COMMENTED",
-          author: { login: "copilot-pull-request-reviewer" },
-          commit: { oid: "olderhead" },
-          body: "### 🔵 Needs a closer look\n<details>1 previously missed issue</details>",
+          submittedAt: "2026-10-22T20:05:00Z",
+          author: { login: "alice" },
+          commit: { oid: "head123" },
+          body: "Please also check the timeout before merging.",
         },
       ],
       [],
       "head123"
     ).length,
-    2
+    2,
+    "Later COMMENTED review must not clear earlier CHANGES_REQUESTED decision, and unclassified COMMENTED body must surface"
   );
+
+  // Partial disposition of a multi-concern body leaves unsettled concerns active
+  const multiConcernBody =
+    "### 🟡 Changes recommended\n- [Fix timeout](https://github.com/o/r/pull/1#discussion_r1)\n- [Fix pagination](https://github.com/o/r/pull/1#discussion_r2)";
+  const partialFindings = extractBodyOnlyFindings(
+    [
+      {
+        databaseId: 905,
+        state: "COMMENTED",
+        submittedAt: "2026-10-22T20:00:00Z",
+        author: { login: "copilot-pull-request-reviewer" },
+        commit: { oid: "head123" },
+        body: multiConcernBody,
+      },
+    ],
+    [{ databaseId: 600, createdAt: "2026-10-22T20:05:00Z", body: "Review 905: addressed Fix timeout." }],
+    "head123"
+  );
+  assert.equal(partialFindings.length, 1);
+  assert.deepEqual(partialFindings[0].unsettledConcerns, ["Fix pagination"]);
 
   // 4. --no-copilot ignores pending Copilot requests, Team requests stay pending,
   // --expected-reviewers requires current-head review, and REVIEW_REQUIRED blocks PR_READY_TO_MERGE

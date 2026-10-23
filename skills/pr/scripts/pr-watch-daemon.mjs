@@ -4,6 +4,13 @@ import { execFileSync, spawnSync } from "node:child_process";
 const ERRORED_COPILOT_REVIEW_RE = /Copilot encountered an error and was unable to review this pull request/i;
 const ACTIONABLE_BODY_RE =
   /(?:###\s*(?:🟡\s*Changes recommended|🔵\s*Needs a closer look)|\b[1-9]\d*\s+(?:open|previously missed)\s+issues?\b)/i;
+const CLEAN_COPILOT_BODY_RE = /###\s*🟢\s*Approval recommended[\s\S]*?\*\*No open issues\*\*/i;
+
+export function isCopilotBotLogin(login) {
+  return /^(?:copilot|copilot-pull-request-reviewer(?:\[bot\])?|github-copilot(?:\[bot\])?)$/i.test(
+    String(login || "").trim()
+  );
+}
 
 export function detectRepoFromGit(cwd = process.cwd()) {
   try {
@@ -12,7 +19,7 @@ export function detectRepoFromGit(cwd = process.cwd()) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/i);
+    const match = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/i);
     return match ? match[1] : "";
   } catch {
     return "";
@@ -148,16 +155,41 @@ export function isErroredCopilotReview(review) {
   return Boolean(review && typeof review.body === "string" && ERRORED_COPILOT_REVIEW_RE.test(review.body));
 }
 
+function extractBodyConcerns(body, fallbackHeadline) {
+  const concerns = [];
+  for (const match of body.matchAll(/\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\)/g)) {
+    const title = match[1].trim();
+    if (title && !concerns.includes(title)) {
+      concerns.push(title);
+    }
+  }
+  for (const match of body.matchAll(/<summary>[\s\S]*?<\/picture>\s*([^<\n]+)<\/summary>/gi)) {
+    const title = match[1].trim();
+    if (title && !concerns.includes(title)) {
+      concerns.push(title);
+    }
+  }
+  if (concerns.length === 0) {
+    concerns.push(fallbackHeadline);
+  }
+  return concerns;
+}
+
 export function extractBodyOnlyFindings(reviews, issueComments, _currentHeadOid) {
   const findings = [];
   const validReviews = (reviews || []).filter(
-    (r) => r && r.state !== "DISMISSED" && !isErroredCopilotReview(r)
+    (r) =>
+      r &&
+      r.state !== "DISMISSED" &&
+      r.state !== "PENDING" &&
+      Boolean(r.submittedAt !== null) &&
+      !isErroredCopilotReview(r)
   );
-  const latestByAuthor = new Map();
+  const latestDecisionByAuthor = new Map();
   for (const r of validReviews) {
     const login = (r.author?.login || "").toLowerCase();
-    if (login) {
-      latestByAuthor.set(login, r);
+    if (login && (r.state === "APPROVED" || r.state === "CHANGES_REQUESTED")) {
+      latestDecisionByAuthor.set(login, r);
     }
   }
 
@@ -165,11 +197,14 @@ export function extractBodyOnlyFindings(reviews, issueComments, _currentHeadOid)
     const commitOid = review.commit?.oid || "";
     const login = review.author?.login || "unknown";
     const lowerLogin = login.toLowerCase();
-    const latestForAuthor = latestByAuthor.get(lowerLogin);
-    const body = review.body || "";
-    const hasActionableBody = ACTIONABLE_BODY_RE.test(body);
+    const latestDecision = latestDecisionByAuthor.get(lowerLogin);
+    const body = (review.body || "").trim();
+    const isCleanApprovalBody = CLEAN_COPILOT_BODY_RE.test(body) && !ACTIONABLE_BODY_RE.test(body);
+    const hasActionableBody =
+      ACTIONABLE_BODY_RE.test(body) ||
+      (review.state === "COMMENTED" && body.length > 0 && !isCleanApprovalBody);
     const isActiveChangesRequested =
-      review.state === "CHANGES_REQUESTED" && latestForAuthor === review;
+      review.state === "CHANGES_REQUESTED" && latestDecision === review;
 
     if (!isActiveChangesRequested && !hasActionableBody) {
       continue;
@@ -177,27 +212,42 @@ export function extractBodyOnlyFindings(reviews, issueComments, _currentHeadOid)
 
     const reviewId = review.databaseId;
     const reviewSubmittedMs = review.submittedAt ? Date.parse(review.submittedAt) : NaN;
-    const citedInComment =
-      reviewId &&
-      !isActiveChangesRequested &&
-      (issueComments || []).some((c) => {
-        if (typeof c?.body !== "string" || !new RegExp(`\\b${reviewId}\\b`).test(c.body)) {
-          return false;
-        }
-        const commentCreatedMs = c.createdAt ? Date.parse(c.createdAt) : NaN;
-        if (Number.isFinite(reviewSubmittedMs) && Number.isFinite(commentCreatedMs)) {
-          return commentCreatedMs >= reviewSubmittedMs;
-        }
-        return true;
-      });
-    if (!citedInComment) {
-      const headlineMatch = body.match(/^###\s+.+$/m);
+    const headlineMatch = body.match(/^###\s+.+$/m);
+    const headline = headlineMatch ? headlineMatch[0].trim() : review.state;
+    const concerns = extractBodyConcerns(body, headline);
+
+    const eligibleComments = (issueComments || []).filter((c) => {
+      if (typeof c?.body !== "string" || !new RegExp(`\\b${reviewId}\\b`).test(c.body)) {
+        return false;
+      }
+      const commentCreatedMs = c.createdAt ? Date.parse(c.createdAt) : NaN;
+      if (Number.isFinite(reviewSubmittedMs) && Number.isFinite(commentCreatedMs)) {
+        return commentCreatedMs >= reviewSubmittedMs;
+      }
+      return true;
+    });
+
+    const unsettledConcerns = isActiveChangesRequested
+      ? concerns
+      : concerns.filter((concern) => {
+          if (eligibleComments.length === 0) {
+            return true;
+          }
+          if (concerns.length === 1) {
+            return false;
+          }
+          const lowerConcern = concern.toLowerCase();
+          return !eligibleComments.some((c) => c.body.toLowerCase().includes(lowerConcern));
+        });
+
+    if (unsettledConcerns.length > 0) {
       findings.push({
         reviewId,
         author: login,
         state: review.state,
         commitOid,
-        headline: headlineMatch ? headlineMatch[0].trim() : review.state,
+        headline,
+        unsettledConcerns,
         body,
       });
     }
@@ -447,7 +497,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
 
   // Check Actions workflow runs on headOid for both active Copilot reviews and workflow-level CI failures
   let copilotWorkflowActive = false;
-  const runsRes = execFn(["api", `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=20`]);
+  const runsRes = execFn(["api", `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=100`]);
   if (!runsRes.ok || !runsRes.stdout) {
     if (args.expectCopilot) {
       const errMsg = runsRes.stderr || "Workflow runs inventory unavailable";
@@ -466,6 +516,21 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     if (args.expectCopilot && !Array.isArray(runsData?.workflow_runs)) {
       const errMsg = "Workflow runs response missing workflow_runs array";
       return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+    }
+    if (
+      args.expectCopilot &&
+      typeof runsData?.total_count === "number" &&
+      runsData.total_count > runsData.workflow_runs.length
+    ) {
+      return {
+        events: [
+          {
+            type: "COLLECTION_TRUNCATED",
+            headRefOid: headOid,
+            collections: ["workflow_runs"],
+          },
+        ],
+      };
     }
     for (const run of runsData?.workflow_runs || []) {
       if (/Copilot Code Review/i.test(run.name || "")) {
@@ -508,27 +573,34 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     };
   }
 
-  const rawPendingReviewers = (pr.reviewRequests?.nodes || [])
+  const rawPendingReviewerEntries = (pr.reviewRequests?.nodes || [])
     .map((n) => {
       const rr = n?.requestedReviewer;
-      if (!rr) return "";
-      return rr.login || rr.slug || rr.name || rr.__typename || "unknown-reviewer";
+      if (!rr) return null;
+      const id = rr.login || rr.slug || rr.name || rr.__typename || "unknown-reviewer";
+      const isCopilotBot = rr.__typename === "Bot" && isCopilotBotLogin(rr.login);
+      return { id, isCopilotBot };
     })
     .filter(Boolean);
-  const pendingReviewers = args.expectCopilot
-    ? rawPendingReviewers
-    : rawPendingReviewers.filter((id) => !/copilot/i.test(id));
-  const copilotRequested = args.expectCopilot && rawPendingReviewers.some((id) => /copilot/i.test(id));
+  const pendingReviewers = (
+    args.expectCopilot
+      ? rawPendingReviewerEntries
+      : rawPendingReviewerEntries.filter((entry) => !entry.isCopilotBot)
+  ).map((entry) => entry.id);
+  const copilotRequested =
+    args.expectCopilot && rawPendingReviewerEntries.some((entry) => entry.isCopilotBot);
+
+  const isSubmittedReview = (r) =>
+    Boolean(r && r.state !== "DISMISSED" && r.state !== "PENDING" && r.submittedAt);
 
   const headReviews = (pr.reviews?.nodes || []).filter(
-    (r) => r && r.commit?.oid === headOid && r.state !== "DISMISSED" && !isErroredCopilotReview(r)
+    (r) => isSubmittedReview(r) && r.commit?.oid === headOid && !isErroredCopilotReview(r)
   );
   const allHeadCopilotReviews = (pr.reviews?.nodes || []).filter(
     (r) =>
-      r &&
+      isSubmittedReview(r) &&
       r.commit?.oid === headOid &&
-      r.state !== "DISMISSED" &&
-      /copilot/i.test(r.author?.login || "")
+      isCopilotBotLogin(r.author?.login)
   );
   const validHeadCopilotReviews = allHeadCopilotReviews.filter((r) => !isErroredCopilotReview(r));
   const latestHeadCopilotReview = allHeadCopilotReviews.at(-1);
@@ -568,12 +640,12 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
 
   const bodyFindings = extractBodyOnlyFindings(pr.reviews?.nodes || [], pr.comments?.nodes || [], headOid);
 
-  // Verify every non-exempt expected reviewer has a non-dismissed, non-errored review on headOid
+  // Verify every non-exempt expected reviewer has a non-dismissed, non-errored submitted review on headOid
   const headReviewerLogins = new Set(
     headReviews.map((r) => (r.author?.login || "").toLowerCase()).filter(Boolean)
   );
   const nonExemptExpectedReviewers = (args.expectedReviewers || []).filter(
-    (login) => args.expectCopilot || !/copilot/i.test(login)
+    (login) => args.expectCopilot || !isCopilotBotLogin(login)
   );
   const missingExpectedReviewers = nonExemptExpectedReviewers.filter(
     (login) => !headReviewerLogins.has(login)
