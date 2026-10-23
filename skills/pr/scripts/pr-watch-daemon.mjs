@@ -127,12 +127,23 @@ export function isErroredCopilotReview(review) {
 
 export function extractBodyOnlyFindings(reviews, issueComments, currentHeadOid) {
   const findings = [];
-  for (const review of reviews || []) {
-    if (!review || review.state === "DISMISSED" || isErroredCopilotReview(review)) {
-      continue;
+  const validReviews = (reviews || []).filter(
+    (r) => r && r.state !== "DISMISSED" && !isErroredCopilotReview(r)
+  );
+  const latestByAuthor = new Map();
+  for (const r of validReviews) {
+    const login = r.author?.login || "";
+    if (login) {
+      latestByAuthor.set(login, r);
     }
+  }
+
+  for (const review of validReviews) {
     const commitOid = review.commit?.oid || "";
-    if (currentHeadOid && commitOid !== currentHeadOid) {
+    const login = review.author?.login || "unknown";
+    const isLatestChangesRequestedForAuthor =
+      review.state === "CHANGES_REQUESTED" && latestByAuthor.get(login) === review;
+    if (currentHeadOid && commitOid !== currentHeadOid && !isLatestChangesRequestedForAuthor) {
       continue;
     }
     const body = review.body || "";
@@ -141,16 +152,25 @@ export function extractBodyOnlyFindings(reviews, issueComments, currentHeadOid) 
       continue;
     }
     const reviewId = review.databaseId;
+    const reviewSubmittedMs = review.submittedAt ? Date.parse(review.submittedAt) : NaN;
     const citedInComment =
       reviewId &&
-      (issueComments || []).some(
-        (c) => typeof c?.body === "string" && new RegExp(`\\b${reviewId}\\b`).test(c.body)
-      );
+      !isLatestChangesRequestedForAuthor &&
+      (issueComments || []).some((c) => {
+        if (typeof c?.body !== "string" || !new RegExp(`\\b${reviewId}\\b`).test(c.body)) {
+          return false;
+        }
+        const commentCreatedMs = c.createdAt ? Date.parse(c.createdAt) : NaN;
+        if (Number.isFinite(reviewSubmittedMs) && Number.isFinite(commentCreatedMs)) {
+          return commentCreatedMs >= reviewSubmittedMs;
+        }
+        return true;
+      });
     if (!citedInComment) {
       const headlineMatch = body.match(/^###\s+.+$/m);
       findings.push({
         reviewId,
-        author: review.author?.login || "unknown",
+        author: login,
         state: review.state,
         commitOid,
         headline: headlineMatch ? headlineMatch[0].trim() : review.state,
@@ -193,6 +213,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
           }
         }
         reviews(last: 50) {
+          pageInfo { hasPreviousPage }
           nodes {
             databaseId
             state
@@ -203,6 +224,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
           }
         }
         reviewThreads(first: 100) {
+          pageInfo { hasNextPage }
           nodes {
             id
             isResolved
@@ -219,8 +241,10 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
           }
         }
         comments(last: 50) {
+          pageInfo { hasPreviousPage }
           nodes {
             databaseId
+            createdAt
             author { login }
             body
           }
@@ -231,6 +255,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
               statusCheckRollup {
                 state
                 contexts(first: 100) {
+                  pageInfo { hasNextPage }
                   nodes {
                     __typename
                     ... on CheckRun {
@@ -270,10 +295,40 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     return { events: [], error: gqlRes.stderr || "GraphQL query failed" };
   }
 
-  const parsed = JSON.parse(gqlRes.stdout);
+  let parsed;
+  try {
+    parsed = JSON.parse(gqlRes.stdout);
+  } catch (error) {
+    return { events: [], error: `Invalid GraphQL JSON: ${error.message}` };
+  }
+  if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
+    return {
+      events: [],
+      error: parsed.errors.map((e) => e?.message || "GraphQL error").join("; "),
+    };
+  }
   const pr = parsed?.data?.repository?.pullRequest;
   if (!pr) {
     return { events: [], error: "Pull request not found" };
+  }
+
+  const truncatedCollections = [];
+  if (pr.reviews?.pageInfo?.hasPreviousPage) truncatedCollections.push("reviews");
+  if (pr.reviewThreads?.pageInfo?.hasNextPage) truncatedCollections.push("reviewThreads");
+  if (pr.comments?.pageInfo?.hasPreviousPage) truncatedCollections.push("comments");
+  if (pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts?.pageInfo?.hasNextPage) {
+    truncatedCollections.push("statusCheckRollup.contexts");
+  }
+  if (truncatedCollections.length > 0) {
+    return {
+      events: [
+        {
+          type: "COLLECTION_TRUNCATED",
+          headRefOid: pr.headRefOid,
+          collections: truncatedCollections,
+        },
+      ],
+    };
   }
 
   if (pr.state !== "OPEN") {
@@ -478,50 +533,42 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     pendingReviewers,
   });
 
+  const nowIso = new Date().toISOString();
+  const statusPayload = {
+    timestamp: nowIso,
+    headRefOid: headOid,
+    phase: phaseInfo.phase,
+    summary: phaseInfo.summary,
+    totalChecksCount,
+    passedChecksCount,
+    pendingChecksCount: pendingChecks.length,
+    pendingChecks,
+    pendingReviewers,
+    copilotWorkflowActive,
+    validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
+    unresolvedThreadsCount: unresolvedThreads.length,
+    bodyFindingsCount: bodyFindings.length,
+  };
+
   if (args.emitPhaseChanges && args.lastPhase && phaseInfo.phase !== args.lastPhase) {
     return {
       events: [
         {
           type: "PHASE_CHANGED",
+          timestamp: nowIso,
           headRefOid: headOid,
           previousPhase: args.lastPhase,
           phase: phaseInfo.phase,
           summary: phaseInfo.summary,
         },
       ],
-      status: {
-        headRefOid: headOid,
-        phase: phaseInfo.phase,
-        summary: phaseInfo.summary,
-        totalChecksCount,
-        passedChecksCount,
-        pendingChecksCount: pendingChecks.length,
-        pendingChecks,
-        pendingReviewers,
-        copilotWorkflowActive,
-        validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
-        unresolvedThreadsCount: unresolvedThreads.length,
-        bodyFindingsCount: bodyFindings.length,
-      },
+      status: statusPayload,
     };
   }
 
   return {
     events: [],
-    status: {
-      headRefOid: headOid,
-      phase: phaseInfo.phase,
-      summary: phaseInfo.summary,
-      totalChecksCount,
-      passedChecksCount,
-      pendingChecksCount: pendingChecks.length,
-      pendingChecks,
-      pendingReviewers,
-      copilotWorkflowActive,
-      validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
-      unresolvedThreadsCount: unresolvedThreads.length,
-      bodyFindingsCount: bodyFindings.length,
-    },
+    status: statusPayload,
   };
 }
 

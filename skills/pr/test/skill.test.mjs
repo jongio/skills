@@ -468,14 +468,56 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(feedbackTick.events[0].bodyFindings.length, 1);
   assert.equal(feedbackTick.events[0].bodyFindings[0].reviewId, 902);
 
-  // Once a PR comment cites reviewId 902, extractBodyOnlyFindings clears it
+  // Once a PR comment cites reviewId 902 after submittedAt, extractBodyOnlyFindings clears it;
+  // an older comment created before review.submittedAt does NOT clear it, and an unaddressed
+  // CHANGES_REQUESTED review on an older commit remains blocking.
   assert.equal(
     extractBodyOnlyFindings(
-      [{ databaseId: 902, state: "COMMENTED", commit: { oid: "head123" }, body: "### 🔵 Needs a closer look" }],
-      [{ databaseId: 501, body: "Addressed review 902 in commit abc." }],
+      [
+        {
+          databaseId: 902,
+          state: "COMMENTED",
+          submittedAt: "2026-10-22T20:00:00Z",
+          commit: { oid: "head123" },
+          body: "### 🔵 Needs a closer look",
+        },
+      ],
+      [{ databaseId: 501, createdAt: "2026-10-22T19:00:00Z", body: "Addressed review 902 early." }],
+      "head123"
+    ).length,
+    1
+  );
+  assert.equal(
+    extractBodyOnlyFindings(
+      [
+        {
+          databaseId: 902,
+          state: "COMMENTED",
+          submittedAt: "2026-10-22T20:00:00Z",
+          commit: { oid: "head123" },
+          body: "### 🔵 Needs a closer look",
+        },
+      ],
+      [{ databaseId: 501, createdAt: "2026-10-22T20:05:00Z", body: "Addressed review 902 in commit abc." }],
       "head123"
     ).length,
     0
+  );
+  assert.equal(
+    extractBodyOnlyFindings(
+      [
+        {
+          databaseId: 888,
+          state: "CHANGES_REQUESTED",
+          author: { login: "alice" },
+          commit: { oid: "olderhead" },
+          body: "Please fix this",
+        },
+      ],
+      [],
+      "head123"
+    ).length,
+    1
   );
 
   // 3. Phase-transition wakeup: emits PHASE_CHANGED when CI transitions from running to passed while Copilot reviews
