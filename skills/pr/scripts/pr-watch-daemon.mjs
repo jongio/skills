@@ -443,6 +443,31 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   }
   let pr = initialPrCheck.pr;
 
+  const isMatchingActivePrRun = (run, targetPr) => {
+    if (!run || run.status === "completed" || !/Copilot Code Review/i.test(run.name || "")) {
+      return false;
+    }
+    const hasExplicitPrs = Array.isArray(run.pull_requests) && run.pull_requests.length > 0;
+    if (hasExplicitPrs) {
+      return run.pull_requests.some((p) => p?.number === args.pr);
+    }
+    const sameBranch = Boolean(targetPr.headRefName && run.head_branch === targetPr.headRefName);
+    if (!sameBranch) {
+      return false;
+    }
+    const baseRepoLower = (args.repo || "").toLowerCase();
+    const expectedHeadRepoLower = (
+      targetPr.headRepository?.nameWithOwner ||
+      args.repo ||
+      ""
+    ).toLowerCase();
+    const runHeadRepoLower = (run.head_repository?.full_name || "").toLowerCase();
+    if (expectedHeadRepoLower !== baseRepoLower) {
+      return runHeadRepoLower === expectedHeadRepoLower;
+    }
+    return !runHeadRepoLower || runHeadRepoLower === expectedHeadRepoLower;
+  };
+
   // Order statuses from pre-execution to running, and perform a bounded multi-pass
   // stabilization recheck so runs transitioning (e.g., queued -> in_progress) between
   // per-status queries cannot slip between buckets undetected.
@@ -519,7 +544,7 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
     }
 
     const passSignature = passRuns
-      .filter((r) => r && r.status !== "completed" && /Copilot Code Review/i.test(r.name || ""))
+      .filter((r) => isMatchingActivePrRun(r, pr))
       .map((r) => `${r.id ?? ""}:${r.head_sha ?? ""}`)
       .sort()
       .join("|");
@@ -547,31 +572,7 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   }
   pr = refreshedPrCheck.pr;
 
-  const baseRepoLower = (args.repo || "").toLowerCase();
-  const expectedHeadRepoLower = (
-    pr.headRepository?.nameWithOwner ||
-    args.repo ||
-    ""
-  ).toLowerCase();
-
-  const matchingActiveRuns = allWorkflowRuns.filter((run) => {
-    if (!run || run.status === "completed" || !/Copilot Code Review/i.test(run.name || "")) {
-      return false;
-    }
-    const hasExplicitPrs = Array.isArray(run.pull_requests) && run.pull_requests.length > 0;
-    if (hasExplicitPrs) {
-      return run.pull_requests.some((p) => p?.number === args.pr);
-    }
-    const sameBranch = Boolean(pr.headRefName && run.head_branch === pr.headRefName);
-    if (!sameBranch) {
-      return false;
-    }
-    const runHeadRepoLower = (run.head_repository?.full_name || "").toLowerCase();
-    if (expectedHeadRepoLower !== baseRepoLower) {
-      return runHeadRepoLower === expectedHeadRepoLower;
-    }
-    return !runHeadRepoLower || runHeadRepoLower === expectedHeadRepoLower;
-  });
+  const matchingActiveRuns = allWorkflowRuns.filter((run) => isMatchingActivePrRun(run, pr));
 
   const currentHeadRun = matchingActiveRuns.find((run) => run.head_sha === pr.headRefOid);
 

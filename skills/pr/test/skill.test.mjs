@@ -1457,6 +1457,55 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
       (c) => c[3] === "repos/jongio/skills/actions/runs/9201/cancel"
     )
   );
+
+  // 12. Unrelated PRs starting/finishing Copilot runs between passes do NOT cause inventory_unstable
+  let unrelatedPassCall = 0;
+  const unrelatedNoiseRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[1] === "repos/jongio/skills/actions/runs?status=in_progress&per_page=100") {
+      unrelatedPassCall += 1;
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          workflow_runs: [
+            {
+              id: 9300 + unrelatedPassCall,
+              name: "Running Copilot Code Review",
+              status: "in_progress",
+              head_branch: `feat/unrelated-${unrelatedPassCall}`,
+              head_sha: `sha_unrelated_${unrelatedPassCall}`,
+              pull_requests: [{ number: 200 + unrelatedPassCall }],
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1]?.startsWith("repos/jongio/skills/actions/runs?status=")) {
+      return { ok: true, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(unrelatedNoiseRes.ok, true);
+  assert.equal(unrelatedNoiseRes.status, "requested");
+  assert.deepEqual(unrelatedNoiseRes.cancelledRunIds, []);
 });
 
 
