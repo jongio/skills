@@ -580,6 +580,7 @@ function getKeepAliveWorker() {
           replyPort.postMessage({
             reqId,
             ok: false,
+            transportError: true,
             stdout: "",
             stderr: err && err.message ? err.message : String(err),
           });
@@ -619,6 +620,11 @@ function defaultExecGh(ghArgs) {
         const msg = receiveMessageOnPort(ka.port1);
         if (!msg) break;
         if ((waitRes === "ok" || waitRes === "not-equal") && msg.message?.reqId === reqId) {
+          const isReadOnlyRequest =
+            parsedReq.method === "GET" || parsedReq.url.endsWith("/graphql");
+          if (msg.message.transportError && isReadOnlyRequest) {
+            break;
+          }
           return {
             ok: msg.message.ok,
             stdout: msg.message.stdout,
@@ -1330,7 +1336,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   }
   const runsRes = execFn(runsGhArgs);
-  const parsedRunsHttp = parsePrHttpResponse(runsRes?.stdout || "");
+  const parsedRunsHttp = parsePrHttpResponse(runsRes?.stdout || "", runsRes?.httpMeta);
   if (state?.metrics) {
     if (parsedRunsHttp.rateLimitRemaining !== null) {
       state.metrics.rateLimitRemaining = parsedRunsHttp.rateLimitRemaining;
@@ -1663,11 +1669,10 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     bodyFindingsCount: bodyFindings.length,
   };
 
-  const phaseChanged = Boolean(
-    args.emitPhaseChanges && args.lastPhase && phaseInfo.phase !== args.lastPhase
-  );
+  const phaseTransitioned = Boolean(args.lastPhase && phaseInfo.phase !== args.lastPhase);
+  const phaseChanged = Boolean(args.emitPhaseChanges && phaseTransitioned);
   if (state) {
-    state.consecutiveUnchangedPolls = phaseChanged
+    state.consecutiveUnchangedPolls = phaseTransitioned
       ? 0
       : (state.consecutiveUnchangedPolls || 0) + 1;
   }

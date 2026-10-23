@@ -853,6 +853,7 @@ function getKeepAliveWorker() {
           replyPort.postMessage({
             reqId,
             ok: false,
+            transportError: true,
             stdout: "",
             stderr: err && err.message ? err.message : String(err),
           });
@@ -892,6 +893,11 @@ function defaultExecGh(ghArgs) {
         const msg = receiveMessageOnPort(ka.port1);
         if (!msg) break;
         if ((waitRes === "ok" || waitRes === "not-equal") && msg.message?.reqId === reqId) {
+          const isReadOnlyRequest =
+            parsedReq.method === "GET" || parsedReq.url.endsWith("/graphql");
+          if (msg.message.transportError && isReadOnlyRequest) {
+            break;
+          }
           return {
             ok: msg.message.ok,
             stdout: msg.message.stdout,

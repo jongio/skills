@@ -1716,6 +1716,45 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   );
   assert.equal(splitQuotaTick.nextIntervalSec, 60);
   assert.equal(splitQuotaState.metrics.rateLimitRemaining, 100);
+
+  // once-mode (state === null) still classifies REST httpMeta 429 and preserves retryAfter: 300
+  const onceRest429Tick = evaluatePrPollTick(watchArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+    }
+    return {
+      ok: false,
+      stdout: "{}",
+      stderr: "HTTP 429",
+      httpMeta: { status: 429, retryAfter: "300", rateLimitRemaining: "5" },
+    };
+  });
+  assert.equal(onceRest429Tick.rateLimited, true);
+  assert.equal(onceRest429Tick.events[0].type, "RATE_LIMITED");
+  assert.equal(onceRest429Tick.nextIntervalSec, 300);
+
+  // --no-phase-events still resets consecutiveUnchangedPolls and nextIntervalSec on a phase transition
+  const noPhaseEventsState = createPrWatchState();
+  noPhaseEventsState.consecutiveUnchangedPolls = 12;
+  const noPhaseEventsTick = evaluatePrPollTick(
+    parsePrWatchArgs([
+      "watch",
+      "--repo",
+      "jongio/skills",
+      "--pr",
+      "178",
+      "--head",
+      "head123",
+      "--last-phase",
+      "ci:passed|review:copilot-queued",
+      "--no-phase-events",
+    ]),
+    execWithEtag,
+    noPhaseEventsState
+  );
+  assert.equal(noPhaseEventsTick.events.length, 0);
+  assert.equal(noPhaseEventsState.consecutiveUnchangedPolls, 0);
+  assert.equal(noPhaseEventsTick.nextIntervalSec, 15);
   assert.ok(parseGhApiArgs(["api", "-i", "repos/jongio/skills/actions/runs?head_sha=abc&per_page=100"]));
 });
 
