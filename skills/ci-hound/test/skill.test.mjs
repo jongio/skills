@@ -959,10 +959,25 @@ test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and ba
     variables: { owner: "jongio", name: "skills", pr: 178 },
   });
 
-  // 2. pruneState removes completed run jobs payloads from state.etags while retaining active runs
+  // 2. pruneState removes completed run jobs payloads from state.etags, retains active main runs and protected watched runs,
+  // and evicts stale unrefreshed non-main/PR active runs beyond maxRuns
   const bloatedState = loadState("/nonexistent/state.json");
+  bloatedState.branch = "main";
+  bloatedState.runs["99"] = {
+    id: 99,
+    head_branch: "feat/old-pr",
+    event: "pull_request",
+    status: "in_progress",
+    telemetryRecorded: false,
+  };
   bloatedState.runs["100"] = { id: 100, status: "completed", telemetryRecorded: true };
-  bloatedState.runs["101"] = { id: 101, status: "in_progress", telemetryRecorded: false };
+  bloatedState.runs["101"] = {
+    id: 101,
+    head_branch: "main",
+    event: "push",
+    status: "in_progress",
+    telemetryRecorded: false,
+  };
   bloatedState.etags["repos/o/r/actions/runs/100/jobs?per_page=50"] = {
     etag: '"e100"',
     data: { jobs: [{ id: 1 }] },
@@ -977,13 +992,14 @@ test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and ba
   assert.equal(bloatedState.etags["repos/o/r/actions/runs/100/jobs?per_page=50"], undefined);
   assert.ok(bloatedState.etags["repos/o/r/actions/runs/101/jobs?per_page=50"]);
 
-  // Protected watched run IDs are never evicted even when completed and older than maxRuns
+  // Protected watched run IDs and active main runs are never evicted, while stale PR in_progress run 99 is evicted
   for (let id = 200; id < 210; id += 1) {
     bloatedState.runs[String(id)] = { id, status: "completed", telemetryRecorded: true };
   }
   pruneState(bloatedState, { maxRuns: 3, maxEtags: 50, protectedRunIds: [100] });
   assert.ok(bloatedState.runs["100"]);
   assert.ok(bloatedState.runs["101"]);
+  assert.equal(bloatedState.runs["99"], undefined);
 
   // 3. Rate-limit headers and 429/403 secondary rate limits trigger interval backoff and preserve cached data
   const rlState = loadState("/nonexistent/state.json");

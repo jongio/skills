@@ -1689,6 +1689,33 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(resetRateLimitedTick.rateLimited, true);
   assert.equal(resetRateLimitedTick.events[0].type, "RATE_LIMITED");
   assert.ok(resetRateLimitedTick.nextIntervalSec >= 410);
+
+  // Low GraphQL quota (100 remaining) is not overwritten by high REST quota (4500 remaining)
+  const splitQuotaState = createPrWatchState();
+  const splitQuotaTick = evaluatePrPollTick(
+    watchArgs,
+    (ghArgs) => {
+      if (ghArgs[1] === "graphql") {
+        return {
+          ok: true,
+          stdout: gqlRunningPayload,
+          stderr: "",
+          httpMeta: { status: 200, rateLimitRemaining: "100", rateLimitReset: String(futureReset) },
+        };
+      }
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\r\nx-ratelimit-remaining: 4500\r\n\r\n${JSON.stringify({
+          total_count: 1,
+          workflow_runs: [{ id: 1, name: "Running Copilot Code Review", status: "in_progress" }],
+        })}`,
+        stderr: "",
+      };
+    },
+    splitQuotaState
+  );
+  assert.equal(splitQuotaTick.nextIntervalSec, 60);
+  assert.equal(splitQuotaState.metrics.rateLimitRemaining, 100);
   assert.ok(parseGhApiArgs(["api", "-i", "repos/jongio/skills/actions/runs?head_sha=abc&per_page=100"]));
 });
 

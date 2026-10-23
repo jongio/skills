@@ -529,12 +529,19 @@ export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunI
     }
   }
   if (state.runs && typeof state.runs === "object") {
+    const targetBranch = state.branch || "main";
     const allRunIds = Object.keys(state.runs).sort((a, b) => Number(b) - Number(a));
     if (allRunIds.length > maxRuns) {
       let keptCount = 0;
       for (const runId of allRunIds) {
         const runRecord = state.runs[runId];
-        if (protectedSet.has(runId) || (runRecord && runRecord.status !== "completed")) {
+        const isTrackedActiveMainRun = Boolean(
+          runRecord &&
+            runRecord.status !== "completed" &&
+            runRecord.head_branch === targetBranch &&
+            !isPullRequestRunEvent(runRecord.event)
+        );
+        if (protectedSet.has(runId) || isTrackedActiveMainRun) {
           keptCount += 1;
           continue;
         }
@@ -1086,6 +1093,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   state.repo = args.repo;
   state.branch = args.branch;
   state.metrics.lastPollAt = new Date().toISOString();
+  state.metrics.rateLimitRemaining = null;
+  state.metrics.rateLimitReset = null;
   state.metrics.retryAfterSec = null;
   state.rateLimited = false;
 
@@ -1189,15 +1198,19 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       (isWatchedRun && run.status !== "completed");
 
     let jobs = prevRun?.jobs || [];
-    if (needsJobsInspection && !tickRateLimited) {
+    if (needsJobsInspection) {
+      if (tickRateLimited) {
+        continue;
+      }
       const jobsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
       if (jobsRes.rateLimited) {
         tickRateLimited = true;
+        continue;
       }
       if (jobsRes.data?.jobs) {
         jobs = jobsRes.data.jobs;
       }
-      if (!jobsRes.rateLimited && run.status === "completed" && !prevRun?.telemetryRecorded && jobs.length > 0) {
+      if (run.status === "completed" && !prevRun?.telemetryRecorded && jobs.length > 0) {
         recordTelemetryForRun(run, jobs, state);
       }
     }
@@ -1375,6 +1388,8 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const discoveryState = loadState(discoveryStateFile);
   discoveryState.rateLimited = false;
   if (discoveryState.metrics) {
+    discoveryState.metrics.rateLimitRemaining = null;
+    discoveryState.metrics.rateLimitReset = null;
     discoveryState.metrics.retryAfterSec = null;
   }
   const targetRepos = resolveTargetRepos(args, config, discoveryState, execFn);

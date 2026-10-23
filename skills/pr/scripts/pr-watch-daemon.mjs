@@ -1671,12 +1671,32 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
       ? 0
       : (state.consecutiveUnchangedPolls || 0) + 1;
   }
-  const nextIntervalSec = computeAdaptivePrIntervalSec({
+  const unchangedCount = state?.consecutiveUnchangedPolls || 0;
+  const gqlIntervalSec = computeAdaptivePrIntervalSec({
     baseIntervalSec: args.intervalSec,
-    consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
-    rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
-    retryAfterSec: state?.metrics?.retryAfterSec ?? null,
+    consecutiveUnchangedPolls: unchangedCount,
+    rateLimitRemaining: parsedGqlHttp.rateLimitRemaining,
+    rateLimitReset: parsedGqlHttp.rateLimitReset,
+    retryAfterSec: parsedGqlHttp.retryAfterSec,
   });
+  const restIntervalSec = computeAdaptivePrIntervalSec({
+    baseIntervalSec: args.intervalSec,
+    consecutiveUnchangedPolls: unchangedCount,
+    rateLimitRemaining: parsedRunsHttp.rateLimitRemaining,
+    rateLimitReset: parsedRunsHttp.rateLimitReset,
+    retryAfterSec: parsedRunsHttp.retryAfterSec,
+  });
+  const nextIntervalSec = Math.max(gqlIntervalSec, restIntervalSec);
+  if (
+    state?.metrics &&
+    parsedGqlHttp.rateLimitRemaining !== null &&
+    parsedRunsHttp.rateLimitRemaining !== null
+  ) {
+    state.metrics.rateLimitRemaining = Math.min(
+      parsedGqlHttp.rateLimitRemaining,
+      parsedRunsHttp.rateLimitRemaining
+    );
+  }
   statusPayload.nextIntervalSec = nextIntervalSec;
   if (state?.metrics) {
     statusPayload.cacheHits304 = state.metrics.cacheHits304 || 0;
