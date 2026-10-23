@@ -58,6 +58,10 @@ export function isValidRepoSlug(value) {
   return /^[A-Za-z0-9_.-]+$/.test(owner) && /^[A-Za-z0-9_.-]+$/.test(repo);
 }
 
+export function normalizeRepoSlug(value) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
 export function selectDeliverySkill({
   eventType = "",
   hasExistingPr = false,
@@ -111,8 +115,9 @@ export function parseArgs(argv) {
       if (!isValidRepoSlug(item)) {
         throw new Error(`Invalid repository slug "${item}". Expected "<owner>/<repo>".`);
       }
-      if (!targetList.includes(item)) {
-        targetList.push(item);
+      const normalized = normalizeRepoSlug(item);
+      if (!targetList.includes(normalized)) {
+        targetList.push(normalized);
       }
     }
   };
@@ -170,11 +175,12 @@ export function parseArgs(argv) {
       const rawWatch = String(argv[++i]).trim();
       const colonIdx = rawWatch.indexOf(":");
       if (colonIdx !== -1) {
-        const repoPart = rawWatch.slice(0, colonIdx).trim();
+        const rawRepoPart = rawWatch.slice(0, colonIdx).trim();
         const idPart = Number.parseInt(rawWatch.slice(colonIdx + 1).trim(), 10);
-        if (!isValidRepoSlug(repoPart) || !Number.isSafeInteger(idPart) || idPart <= 0) {
+        if (!isValidRepoSlug(rawRepoPart) || !Number.isSafeInteger(idPart) || idPart <= 0) {
           throw new Error(`Invalid --watch-run "${rawWatch}". Expected "<runId>" or "<owner>/<repo>:<runId>".`);
         }
+        const repoPart = normalizeRepoSlug(rawRepoPart);
         args.watchRunsByRepo[repoPart] ??= [];
         if (!args.watchRunsByRepo[repoPart].includes(idPart)) {
           args.watchRunsByRepo[repoPart].push(idPart);
@@ -223,7 +229,7 @@ export function parseArgs(argv) {
     args.repo = detectRepoFromGit();
   }
   if (!args.stateFile) {
-    const safeSlug = (args.repo || "default").replace(/[^a-zA-Z0-9._-]+/g, "__");
+    const safeSlug = normalizeRepoSlug(args.repo || "default").replace(/[^a-zA-Z0-9._-]+/g, "__");
     args.stateFile = join(homedir(), ".copilot", "ci-hound", `${safeSlug}.json`);
   }
   return args;
@@ -233,8 +239,19 @@ export function loadConfig(configFile) {
   if (configFile && existsSync(configFile)) {
     try {
       const parsed = JSON.parse(readFileSync(configFile, "utf8"));
+      const normalizedRepos = [];
+      if (Array.isArray(parsed.repos)) {
+        for (const r of parsed.repos) {
+          if (isValidRepoSlug(r)) {
+            const norm = normalizeRepoSlug(r);
+            if (!normalizedRepos.includes(norm)) {
+              normalizedRepos.push(norm);
+            }
+          }
+        }
+      }
       return {
-        repos: Array.isArray(parsed.repos) ? parsed.repos.filter(isValidRepoSlug) : [],
+        repos: normalizedRepos,
         owner: typeof parsed.owner === "string" ? parsed.owner : "",
         visibility: ["all", "private", "public"].includes(parsed.visibility) ? parsed.visibility : "",
         branch: typeof parsed.branch === "string" && parsed.branch ? parsed.branch : "main",
@@ -351,7 +368,7 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
     const byName = new Map();
     for (const r of accessible) {
       if (isValidRepoSlug(r?.full_name)) {
-        byName.set(r.full_name, r);
+        byName.set(normalizeRepoSlug(r.full_name), r);
       }
     }
     if (effectiveVisibility !== "private") {
@@ -361,12 +378,13 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
         execFn
       );
       for (const r of publicOwnerRepos) {
+        const normName = isValidRepoSlug(r?.full_name) ? normalizeRepoSlug(r.full_name) : "";
         if (
-          isValidRepoSlug(r?.full_name) &&
+          normName &&
           (!r?.owner?.login || r.owner.login.toLowerCase() === lowerOwner) &&
-          !byName.has(r.full_name)
+          !byName.has(normName)
         ) {
-          byName.set(r.full_name, r);
+          byName.set(normName, r);
         }
       }
     }
@@ -386,27 +404,27 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
       }
       return true;
     })
-    .map((r) => r.full_name);
+    .map((r) => normalizeRepoSlug(r.full_name));
 }
 
 export function resolveTargetRepos(args, config, discoveryState, execFn = defaultExecGh) {
   if (args.explicitRepos.length > 0) {
-    return [...args.explicitRepos];
+    return [...new Set(args.explicitRepos.map(normalizeRepoSlug))];
   }
   const effectiveOwner = args.owner || config?.owner || "";
   const effectiveVisibility = args.visibility || config?.visibility || "all";
   const hasConfiguredRepos = Array.isArray(config?.repos) && config.repos.length > 0;
   const hasConfiguredScope = Boolean(effectiveOwner || hasConfiguredRepos);
-  const combined = new Set(config?.repos || []);
+  const combined = new Set((config?.repos || []).map(normalizeRepoSlug).filter(Boolean));
   if (effectiveOwner) {
     for (const r of discoverOwnerRepos(effectiveOwner, effectiveVisibility, discoveryState, execFn)) {
-      combined.add(r);
+      combined.add(normalizeRepoSlug(r));
     }
   }
   if (hasConfiguredScope) {
     return [...combined];
   }
-  return args.repo ? [args.repo] : [];
+  return args.repo ? [normalizeRepoSlug(args.repo)] : [];
 }
 
 export function detectRepoFromGit(cwd = process.cwd()) {
@@ -417,7 +435,7 @@ export function detectRepoFromGit(cwd = process.cwd()) {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/i);
-    return match ? match[1] : "";
+    return match ? normalizeRepoSlug(match[1]) : "";
   } catch {
     return "";
   }
@@ -947,7 +965,7 @@ export function stateFileForRepo(repo, args) {
   if (args.explicitStateFile) {
     return args.stateFile;
   }
-  const safeSlug = (repo || "default").replace(/[^a-zA-Z0-9._-]+/g, "__");
+  const safeSlug = normalizeRepoSlug(repo || "default").replace(/[^a-zA-Z0-9._-]+/g, "__");
   return join(dirname(args.configFile), `${safeSlug}.json`);
 }
 
@@ -1063,9 +1081,11 @@ export async function runCli(argv = process.argv.slice(2)) {
     return;
   }
 
+  const hasOwnerScope = Boolean(args.owner || existingConfig?.owner);
+
   if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
     const multi = evaluateMultiRepoPollTick(args, existingConfig);
-    if (multi.repos.length === 0) {
+    if (multi.repos.length === 0 && !hasOwnerScope) {
       console.error(
         "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
       );
@@ -1094,7 +1114,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   while (true) {
     polls += 1;
     const multi = evaluateMultiRepoPollTick(args, existingConfig);
-    if (multi.repos.length === 0) {
+    if (multi.repos.length === 0 && !hasOwnerScope) {
       console.error(
         "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
       );

@@ -148,6 +148,24 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   });
   assert.deepEqual(namedOwnerDiscovered, ["jongio/secret-repo"]);
 
+  // Case-insensitive repository normalization deduplicates mixed-case spellings across config, discovery, and --watch-run
+  const mixedCaseArgs = parseArgs(["watch", "--repo", "Acme/Project", "--watch-run", "acme/project:99"]);
+  assert.deepEqual(mixedCaseArgs.explicitRepos, ["acme/project"]);
+  assert.deepEqual(mixedCaseArgs.watchRunsByRepo, { "acme/project": [99] });
+  const mixedResolved = resolveTargetRepos(
+    parseArgs(["watch"]),
+    { repos: ["Jongio/Private-One"], owner: "@me", visibility: "private", branch: "main", mergeMode: "approval", worktreeRoot: "" },
+    loadState("/nonexistent/d-case.json"),
+    () => ({
+      ok: true,
+      stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+        { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+      ])}`,
+      stderr: "",
+    })
+  );
+  assert.deepEqual(mixedResolved, ["jongio/private-one"]);
+
   // Empty configured owner scope must return [] and NOT fall back to current git checkout
   const emptyOwnerConfig = { repos: [], owner: "jongio", visibility: "private", branch: "main", mergeMode: "approval", worktreeRoot: "" };
   const emptyResolved = resolveTargetRepos(
