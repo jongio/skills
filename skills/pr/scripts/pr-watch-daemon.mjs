@@ -443,70 +443,101 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   }
   let pr = initialPrCheck.pr;
 
-  const activeRunStatuses = ["in_progress", "queued", "waiting", "requested", "pending"];
-  const allWorkflowRuns = [];
-  const seenRunIds = new Set();
+  // Order statuses from pre-execution to running, and perform a bounded multi-pass
+  // stabilization recheck so runs transitioning (e.g., queued -> in_progress) between
+  // per-status queries cannot slip between buckets undetected.
+  const activeRunStatuses = ["pending", "requested", "waiting", "queued", "in_progress"];
+  const maxInventoryPasses = 3;
+  let allWorkflowRuns = [];
+  let previousPassSignature = null;
+  let inventoryStabilized = false;
 
-  for (const runStatus of activeRunStatuses) {
-    const statusRuns = [];
-    let page = 1;
-    while (true) {
-      const endpoint =
-        page === 1
-          ? `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100`
-          : `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100&page=${page}`;
-      const runsRes = execFn(["api", endpoint]);
-      if (!runsRes || !runsRes.ok || !runsRes.stdout) {
-        return {
-          ok: false,
-          status: "poll_error",
-          error: runsRes?.stderr || "Workflow runs inventory unavailable",
-        };
-      }
+  for (let pass = 1; pass <= maxInventoryPasses; pass += 1) {
+    const passRuns = [];
+    const seenPassRunIds = new Set();
 
-      let runsData;
-      try {
-        runsData = JSON.parse(runsRes.stdout);
-      } catch (error) {
-        return {
-          ok: false,
-          status: "poll_error",
-          error: `Invalid workflow runs JSON: ${error.message}`,
-        };
-      }
-      if (!Array.isArray(runsData?.workflow_runs)) {
-        return {
-          ok: false,
-          status: "poll_error",
-          error: "Workflow runs response missing workflow_runs array",
-        };
-      }
-
-      const pageRuns = runsData.workflow_runs;
-      statusRuns.push(...pageRuns);
-      for (const run of pageRuns) {
-        const key = run?.id ?? Symbol("run");
-        if (!seenRunIds.has(key)) {
-          seenRunIds.add(key);
-          allWorkflowRuns.push(run);
+    for (const runStatus of activeRunStatuses) {
+      const statusRuns = [];
+      let page = 1;
+      while (true) {
+        const endpoint =
+          page === 1
+            ? `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100`
+            : `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100&page=${page}`;
+        const runsRes = execFn(["api", endpoint]);
+        if (!runsRes || !runsRes.ok || !runsRes.stdout) {
+          return {
+            ok: false,
+            status: "poll_error",
+            error: runsRes?.stderr || "Workflow runs inventory unavailable",
+          };
         }
-      }
-      const totalCount =
-        typeof runsData.total_count === "number" ? runsData.total_count : statusRuns.length;
 
-      if (statusRuns.length >= totalCount) {
-        break;
+        let runsData;
+        try {
+          runsData = JSON.parse(runsRes.stdout);
+        } catch (error) {
+          return {
+            ok: false,
+            status: "poll_error",
+            error: `Invalid workflow runs JSON: ${error.message}`,
+          };
+        }
+        if (!Array.isArray(runsData?.workflow_runs)) {
+          return {
+            ok: false,
+            status: "poll_error",
+            error: "Workflow runs response missing workflow_runs array",
+          };
+        }
+
+        const pageRuns = runsData.workflow_runs;
+        statusRuns.push(...pageRuns);
+        for (const run of pageRuns) {
+          const key = run?.id ?? Symbol("run");
+          if (!seenPassRunIds.has(key)) {
+            seenPassRunIds.add(key);
+            passRuns.push(run);
+          }
+        }
+        const totalCount =
+          typeof runsData.total_count === "number" ? runsData.total_count : statusRuns.length;
+
+        if (statusRuns.length >= totalCount) {
+          break;
+        }
+        if (pageRuns.length === 0) {
+          return {
+            ok: false,
+            status: "collection_truncated",
+            collections: ["workflow_runs"],
+            error: `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`,
+          };
+        }
+        page += 1;
       }
-      if (pageRuns.length === 0) {
-        return {
-          ok: false,
-          status: "collection_truncated",
-          collections: ["workflow_runs"],
-          error: `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`,
-        };
-      }
-      page += 1;
     }
+
+    const passSignature = passRuns
+      .filter((r) => r && r.status !== "completed" && /Copilot Code Review/i.test(r.name || ""))
+      .map((r) => `${r.id ?? ""}:${r.head_sha ?? ""}`)
+      .sort()
+      .join("|");
+
+    allWorkflowRuns = passRuns;
+    if (previousPassSignature !== null && passSignature === previousPassSignature) {
+      inventoryStabilized = true;
+      break;
+    }
+    previousPassSignature = passSignature;
+  }
+
+  if (!inventoryStabilized) {
+    return {
+      ok: false,
+      status: "inventory_unstable",
+      error: "Active Copilot workflow run inventory did not stabilize across recheck passes",
+    };
   }
 
   // Revalidate PR open state and pinned head after inventory before cancelling runs or editing reviewers

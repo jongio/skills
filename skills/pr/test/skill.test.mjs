@@ -1352,6 +1352,111 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   assert.equal(raceRes.actualHead, "head_pushed_during_scan");
   assert.ok(!raceCalls.some((c) => c.includes("repos/jongio/skills/actions/runs/9001/cancel")));
   assert.ok(!raceCalls.some((c) => c[0] === "pr" && c[1] === "edit"));
+
+  // 10. Rechecks status transitions: catches a current-head run that transitions queued -> in_progress
+  // after pass 1 misses it between bucket queries, returning already_running without reviewer edits
+  let currentTransitionInProgressCalls = 0;
+  const currentTransitionCalls = [];
+  const currentTransitionRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    currentTransitionCalls.push(ghArgs);
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[1] === "repos/jongio/skills/actions/runs?status=in_progress&per_page=100") {
+      currentTransitionInProgressCalls += 1;
+      // Missed on pass 1, visible on pass 2 and pass 3 after transitioning from queued -> in_progress
+      const runs =
+        currentTransitionInProgressCalls >= 2
+          ? [
+              {
+                id: 9101,
+                name: "Running Copilot Code Review",
+                status: "in_progress",
+                head_branch: "feat/x",
+                head_sha: "head_new",
+              },
+            ]
+          : [];
+      return { ok: true, stdout: JSON.stringify({ workflow_runs: runs }), stderr: "" };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1]?.startsWith("repos/jongio/skills/actions/runs?status=")) {
+      return { ok: true, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(currentTransitionRes.ok, true);
+  assert.equal(currentTransitionRes.status, "already_running");
+  assert.equal(currentTransitionRes.activeRunId, 9101);
+  assert.ok(!currentTransitionCalls.some((c) => c[0] === "pr" && c[1] === "edit"));
+
+  // 11. Rechecks status transitions: catches a superseded-head run that transitions queued -> in_progress
+  // after pass 1 misses it, cancelling it before requesting @copilot
+  let supersededTransitionInProgressCalls = 0;
+  const supersededTransitionCalls = [];
+  const supersededTransitionRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    supersededTransitionCalls.push(ghArgs);
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[1] === "repos/jongio/skills/actions/runs?status=in_progress&per_page=100") {
+      supersededTransitionInProgressCalls += 1;
+      const runs =
+        supersededTransitionInProgressCalls >= 2
+          ? [
+              {
+                id: 9201,
+                name: "Running Copilot Code Review",
+                status: "in_progress",
+                head_branch: "feat/x",
+                head_sha: "head_old",
+              },
+            ]
+          : [];
+      return { ok: true, stdout: JSON.stringify({ workflow_runs: runs }), stderr: "" };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1]?.startsWith("repos/jongio/skills/actions/runs?status=")) {
+      return { ok: true, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(supersededTransitionRes.ok, true);
+  assert.equal(supersededTransitionRes.status, "requested");
+  assert.deepEqual(supersededTransitionRes.cancelledRunIds, [9201]);
+  assert.ok(
+    supersededTransitionCalls.some(
+      (c) => c[3] === "repos/jongio/skills/actions/runs/9201/cancel"
+    )
+  );
 });
 
 
