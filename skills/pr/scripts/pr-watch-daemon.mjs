@@ -155,10 +155,16 @@ export function isErroredCopilotReview(review) {
   return Boolean(review && typeof review.body === "string" && ERRORED_COPILOT_REVIEW_RE.test(review.body));
 }
 
-function extractBodyConcerns(body, fallbackHeadline) {
+function extractBodyConcerns(body, fallbackHeadline, resolvedCommentIds = new Set()) {
   const concerns = [];
-  for (const match of body.matchAll(/\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\)/g)) {
+  let hadInlineLinks = false;
+  for (const match of body.matchAll(/\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g)) {
+    hadInlineLinks = true;
     const title = match[1].trim();
+    const commentId = Number.parseInt(match[2], 10);
+    if (resolvedCommentIds.has(commentId)) {
+      continue;
+    }
     if (title && !concerns.includes(title)) {
       concerns.push(title);
     }
@@ -169,13 +175,18 @@ function extractBodyConcerns(body, fallbackHeadline) {
       concerns.push(title);
     }
   }
-  if (concerns.length === 0) {
+  if (concerns.length === 0 && !hadInlineLinks) {
     concerns.push(fallbackHeadline);
   }
   return concerns;
 }
 
-export function extractBodyOnlyFindings(reviews, issueComments, _currentHeadOid) {
+export function extractBodyOnlyFindings(
+  reviews,
+  issueComments,
+  _currentHeadOid,
+  resolvedCommentIds = new Set()
+) {
   const findings = [];
   const validReviews = (reviews || []).filter(
     (r) =>
@@ -214,7 +225,10 @@ export function extractBodyOnlyFindings(reviews, issueComments, _currentHeadOid)
     const reviewSubmittedMs = review.submittedAt ? Date.parse(review.submittedAt) : NaN;
     const headlineMatch = body.match(/^###\s+.+$/m);
     const headline = headlineMatch ? headlineMatch[0].trim() : review.state;
-    const concerns = extractBodyConcerns(body, headline);
+    const concerns = extractBodyConcerns(body, headline, resolvedCommentIds);
+    if (concerns.length === 0 && !isActiveChangesRequested) {
+      continue;
+    }
 
     const eligibleComments = (issueComments || []).filter((c) => {
       if (typeof c?.body !== "string" || !new RegExp(`\\b${reviewId}\\b`).test(c.body)) {
@@ -638,7 +652,23 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
       })),
     }));
 
-  const bodyFindings = extractBodyOnlyFindings(pr.reviews?.nodes || [], pr.comments?.nodes || [], headOid);
+  const resolvedCommentIds = new Set();
+  for (const t of pr.reviewThreads?.nodes || []) {
+    if (t && t.isResolved === true) {
+      for (const c of t.comments?.nodes || []) {
+        if (Number.isSafeInteger(c?.databaseId)) {
+          resolvedCommentIds.add(c.databaseId);
+        }
+      }
+    }
+  }
+
+  const bodyFindings = extractBodyOnlyFindings(
+    pr.reviews?.nodes || [],
+    pr.comments?.nodes || [],
+    headOid,
+    resolvedCommentIds
+  );
 
   // Verify every non-exempt expected reviewer has a non-dismissed, non-errored submitted review on headOid
   const headReviewerLogins = new Set(
