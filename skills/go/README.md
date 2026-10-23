@@ -13,6 +13,11 @@ Invoke `/go <context>` with an issue, conversation, code, or error.
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
 Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
 
+Scope follows affected user journeys and their shared behavior owner, not just
+edited files. Test Doctor checks equivalent entry points against one intended
+contract; `pr` receives that evidence and justified differences. This does not
+authorize broader edits or a whole-repository audit.
+
 ## Worktree choice
 
 By default, `go` works in a linked worktree. It detects and reuses an existing
@@ -52,8 +57,10 @@ npm test
 npm run eval:lint
 ```
 
-The deterministic test checks the portable skill shape. The Vally capability eval verifies that
-the agent follows the workflow.
+Deterministic tests check portable skill shape and journey-contract instruction
+wiring, not agent compliance. The existing Vally capability eval exercises the
+workflow when separately authorized; the new cross-surface scenarios have not
+been evaluated with an agent.
 
 ## License
 

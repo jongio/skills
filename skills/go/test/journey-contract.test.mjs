@@ -13,6 +13,7 @@ test("two green entry points with incompatible approval order require one intend
   assert.match(go, /Before defining touched scope, map affected user journeys, equivalent entry points, and the canonical behavior owner/);
   assert.match(go, /smallest coherent product change, not the fewest files/);
   assert.match(go, /shared sequence, approval information, cancellation, retries\/recovery, and outcome semantics/);
+  assert.match(go, /including durable effects and continuations/);
   assert.match(go, /Centralize shared sequencing rather than duplicating host logic/);
   assert.match(doctor, /one independently established intended contract, not separate expectations copied from each implementation/);
   assert.match(doctor, /approval ordering and information/);
@@ -21,6 +22,7 @@ test("two green entry points with incompatible approval order require one intend
 
 test("justified native UI and authentication differences do not require identical surfaces", () => {
   assert.match(go, /Justify capability or presentation differences/);
+  assert.match(go, /disclose capability gaps rather than silently substituting a different journey/);
   assert.match(doctor, /Allow justified capability, native UI, and authentication-adapter differences/);
   assert.match(doctor, /do not require identical pixels or duplicate every E2E/);
 });
