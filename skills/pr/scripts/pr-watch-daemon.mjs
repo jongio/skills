@@ -501,6 +501,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
           type: "NEW_PR_COMMENTS",
           headRefOid: pr.headRefOid,
           latestCommentId,
+          lastPhase: args.lastPhase || "",
           comments: newConversationComments,
         },
       ],
@@ -663,6 +664,8 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
         {
           type: "COPILOT_REVIEW_ERROR",
           headRefOid: headOid,
+          latestCommentId,
+          lastPhase: args.lastPhase || "",
           reviewId: latestHeadCopilotReview.databaseId,
           message: latestHeadCopilotReview.body,
         },
