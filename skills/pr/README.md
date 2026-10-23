@@ -82,7 +82,7 @@ Never delete a base/default branch or an advanced head, replace the expected OID
 to retry a failed guard, force-delete a branch, remove a worktree, or discard local
 changes. Verify local and remote deletion separately. Already-absent refs need no
 deletion; blocked or unavailable safe cleanup is reported as "merged with cleanup
-pending", not successful deletion.
+pending" (use `git-tidy` for worktree cleanup), not successful deletion.
 
 ## Related issues after merge
 
@@ -143,8 +143,11 @@ replace resolving addressed bot threads or the existing review and merge gates.
 Copilot review is expected by default. Request or re-request Copilot via
 `node scripts/pr-watch-daemon.mjs request-copilot --repo <owner/repo> --pr <number> --head <full-head-OID>`
 so superseded `Running Copilot Code Review` runs on the PR branch are cancelled
-and existing `@copilot` requests are toggled before re-requesting. Only an explicit
-user-authorized exception for a verified private repository with the exact allowed
+and existing `@copilot` requests are toggled before re-requesting. During `watch`
+(supporting single `--pr <number>` or multi-PR `--prs <p1[:head1],p2[:head2]>`),
+transient `Copilot encountered an error` reviews are automatically retried up to
+`--max-copilot-retries <n>` (default `2`) per head SHA (`COPILOT_REVIEW_RETRIED`).
+Only an explicit user-authorized exception for a verified private repository with the exact allowed
 owner skips requesting and waiting, including already-pending requests. Posted
 feedback and other required reviews still apply.
 
