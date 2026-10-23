@@ -322,7 +322,12 @@ function parseRetryAfterHeader(rawVal) {
   return null;
 }
 
-export function parsePrHttpResponse(raw) {
+function computeResetDelaySec(rateLimitReset) {
+  if (!Number.isFinite(rateLimitReset) || rateLimitReset <= 0) return null;
+  return Math.max(1, Math.ceil(rateLimitReset - Date.now() / 1000));
+}
+
+export function parsePrHttpResponse(raw, httpMeta = null) {
   let remaining = String(raw || "").replace(/\r\n/g, "\n");
   let lastHeaderBlock = "";
   while (/^HTTP\/[\d.]+\s+\d{3}\b/.test(remaining)) {
@@ -335,27 +340,42 @@ export function parsePrHttpResponse(raw) {
     lastHeaderBlock = remaining.slice(0, splitIndex);
     remaining = remaining.slice(splitIndex + 2).trimStart();
   }
+  const metaStatus = Number.isInteger(httpMeta?.status) ? httpMeta.status : null;
+  const metaRem =
+    httpMeta?.rateLimitRemaining !== null &&
+    httpMeta?.rateLimitRemaining !== undefined &&
+    /^\d+$/.test(String(httpMeta.rateLimitRemaining).trim())
+      ? Number.parseInt(String(httpMeta.rateLimitRemaining).trim(), 10)
+      : null;
+  const metaReset =
+    httpMeta?.rateLimitReset !== null &&
+    httpMeta?.rateLimitReset !== undefined &&
+    /^\d+$/.test(String(httpMeta.rateLimitReset).trim())
+      ? Number.parseInt(String(httpMeta.rateLimitReset).trim(), 10)
+      : null;
+  const metaRetry = httpMeta?.retryAfter ? parseRetryAfterHeader(httpMeta.retryAfter) : null;
+
   if (!lastHeaderBlock) {
     return {
-      status: 200,
-      etag: "",
-      rateLimitRemaining: null,
-      rateLimitReset: null,
-      retryAfterSec: null,
+      status: metaStatus ?? 200,
+      etag: httpMeta?.etag ? String(httpMeta.etag).trim() : "",
+      rateLimitRemaining: metaRem,
+      rateLimitReset: metaReset,
+      retryAfterSec: metaRetry,
       bodyText: remaining,
     };
   }
   const bodyText = remaining.trim();
   const statusMatch = lastHeaderBlock.match(/^HTTP\/[\d.]+\s+(\d{3})/m);
-  const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : 200;
+  const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : (metaStatus ?? 200);
   const etagMatch = lastHeaderBlock.match(/^etag:\s*(.+)$/im);
-  const etag = etagMatch ? etagMatch[1].trim() : "";
+  const etag = etagMatch ? etagMatch[1].trim() : (httpMeta?.etag ? String(httpMeta.etag).trim() : "");
   const remMatch = lastHeaderBlock.match(/^x-ratelimit-remaining:\s*(\d+)\s*$/im);
-  const rateLimitRemaining = remMatch ? Number.parseInt(remMatch[1], 10) : null;
+  const rateLimitRemaining = remMatch ? Number.parseInt(remMatch[1], 10) : metaRem;
   const resetMatch = lastHeaderBlock.match(/^x-ratelimit-reset:\s*(\d+)\s*$/im);
-  const rateLimitReset = resetMatch ? Number.parseInt(resetMatch[1], 10) : null;
+  const rateLimitReset = resetMatch ? Number.parseInt(resetMatch[1], 10) : metaReset;
   const retryMatch = lastHeaderBlock.match(/^retry-after:\s*(.+)$/im);
-  const retryAfterSec = retryMatch ? parseRetryAfterHeader(retryMatch[1]) : null;
+  const retryAfterSec = retryMatch ? parseRetryAfterHeader(retryMatch[1]) : metaRetry;
   return { status, etag, rateLimitRemaining, rateLimitReset, retryAfterSec, bodyText };
 }
 
@@ -363,6 +383,7 @@ export function computeAdaptivePrIntervalSec({
   baseIntervalSec = 15,
   consecutiveUnchangedPolls = 0,
   rateLimitRemaining = null,
+  rateLimitReset = null,
   retryAfterSec = null,
 } = {}) {
   const baseSec = Math.max(5, Number(baseIntervalSec) || 15);
@@ -374,6 +395,11 @@ export function computeAdaptivePrIntervalSec({
   }
   if (Number.isFinite(rateLimitRemaining) && rateLimitRemaining < 500) {
     intervalSec = Math.max(intervalSec, baseSec * 4, 60);
+  }
+  const resetDelaySec =
+    rateLimitRemaining === 0 ? computeResetDelaySec(rateLimitReset) : null;
+  if (Number.isFinite(resetDelaySec) && resetDelaySec > 0) {
+    intervalSec = Math.max(intervalSec, resetDelaySec);
   }
   if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
     intervalSec = Math.max(intervalSec, retryAfterSec);
@@ -527,6 +553,13 @@ function getKeepAliveWorker() {
             signal: AbortSignal.timeout(28000),
           });
           const bodyText = await res.text();
+          const httpMeta = {
+            status: res.status,
+            etag: res.headers.get("etag"),
+            rateLimitRemaining: res.headers.get("x-ratelimit-remaining"),
+            rateLimitReset: res.headers.get("x-ratelimit-reset"),
+            retryAfter: res.headers.get("retry-after"),
+          };
           let stdout = bodyText;
           if (req.includeHeaders) {
             const hdrLines = ["HTTP/2.0 " + res.status];
@@ -541,6 +574,7 @@ function getKeepAliveWorker() {
             ok: res.ok || (req.includeHeaders && res.status === 304),
             stdout,
             stderr: res.ok || res.status === 304 ? "" : (bodyText || ("HTTP " + res.status)),
+            httpMeta,
           });
         } catch (err) {
           replyPort.postMessage({
@@ -584,11 +618,12 @@ function defaultExecGh(ghArgs) {
       while (true) {
         const msg = receiveMessageOnPort(ka.port1);
         if (!msg) break;
-        if (waitRes === "ok" && msg.message?.reqId === reqId) {
+        if ((waitRes === "ok" || waitRes === "not-equal") && msg.message?.reqId === reqId) {
           return {
             ok: msg.message.ok,
             stdout: msg.message.stdout,
             stderr: msg.message.stderr,
+            httpMeta: msg.message.httpMeta,
           };
         }
       }
@@ -1066,12 +1101,44 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     "-f",
     `query=${query}`,
   ]);
+  const parsedGqlHttp = parsePrHttpResponse(
+    gqlRes?.stdout || gqlRes?.stderr || "",
+    gqlRes?.httpMeta
+  );
+  if (state?.metrics) {
+    if (parsedGqlHttp.rateLimitRemaining !== null) {
+      state.metrics.rateLimitRemaining = parsedGqlHttp.rateLimitRemaining;
+    }
+    if (parsedGqlHttp.rateLimitReset !== null) {
+      state.metrics.rateLimitReset = parsedGqlHttp.rateLimitReset;
+    }
+    if (parsedGqlHttp.retryAfterSec !== null) {
+      state.metrics.retryAfterSec = Math.max(
+        state.metrics.retryAfterSec || 0,
+        parsedGqlHttp.retryAfterSec
+      );
+    }
+  }
+  const computeGqlRetrySec = () => {
+    const resetDelaySec =
+      parsedGqlHttp.rateLimitRemaining === 0
+        ? computeResetDelaySec(parsedGqlHttp.rateLimitReset)
+        : null;
+    return Math.max(parsedGqlHttp.retryAfterSec || 0, resetDelaySec || 0, 60);
+  };
   if (!gqlRes || !gqlRes.ok) {
     const errMsg = gqlRes?.stderr || "GraphQL query failed";
-    if (/rate limit|secondary rate limit|HTTP 429/i.test(`${errMsg} ${gqlRes?.stdout || ""}`)) {
-      const retryAfterSec = 60;
+    const isHttpRateLimited =
+      parsedGqlHttp.status === 429 ||
+      (parsedGqlHttp.status === 403 &&
+        (parsedGqlHttp.rateLimitRemaining === 0 ||
+          parsedGqlHttp.retryAfterSec !== null ||
+          /rate limit/i.test(`${errMsg} ${parsedGqlHttp.bodyText}`))) ||
+      /rate limit|secondary rate limit|HTTP 429/i.test(`${errMsg} ${gqlRes?.stdout || ""}`);
+    if (isHttpRateLimited) {
+      const retryAfterSec = computeGqlRetrySec();
       if (state?.metrics) {
-        state.metrics.retryAfterSec = retryAfterSec;
+        state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, retryAfterSec);
       }
       return {
         events: [
@@ -1079,14 +1146,15 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
             type: "RATE_LIMITED",
             headRefOid: args.head || "",
             retryAfterSec,
-            rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+            rateLimitRemaining: parsedGqlHttp.rateLimitRemaining,
           },
         ],
         rateLimited: true,
         nextIntervalSec: computeAdaptivePrIntervalSec({
           baseIntervalSec: args.intervalSec,
           consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
-          rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+          rateLimitRemaining: parsedGqlHttp.rateLimitRemaining,
+          rateLimitReset: parsedGqlHttp.rateLimitReset,
           retryAfterSec,
         }),
       };
@@ -1096,7 +1164,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
 
   let parsed;
   try {
-    parsed = JSON.parse(gqlRes.stdout);
+    parsed = JSON.parse(parsedGqlHttp.bodyText || gqlRes.stdout);
   } catch (error) {
     const errMsg = `Invalid GraphQL JSON: ${error.message}`;
     return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
@@ -1106,9 +1174,9 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
       (e) => e?.type === "RATE_LIMITED" || /rate limit/i.test(e?.message || "")
     );
     if (isGqlRateLimited) {
-      const retryAfterSec = 60;
+      const retryAfterSec = computeGqlRetrySec();
       if (state?.metrics) {
-        state.metrics.retryAfterSec = retryAfterSec;
+        state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, retryAfterSec);
       }
       return {
         events: [
@@ -1116,14 +1184,15 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
             type: "RATE_LIMITED",
             headRefOid: args.head || "",
             retryAfterSec,
-            rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+            rateLimitRemaining: parsedGqlHttp.rateLimitRemaining,
           },
         ],
         rateLimited: true,
         nextIntervalSec: computeAdaptivePrIntervalSec({
           baseIntervalSec: args.intervalSec,
           consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
-          rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+          rateLimitRemaining: parsedGqlHttp.rateLimitRemaining,
+          rateLimitReset: parsedGqlHttp.rateLimitReset,
           retryAfterSec,
         }),
       };
@@ -1289,9 +1358,13 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
           parsedRunsHttp.retryAfterSec !== null ||
           /rate limit/i.test(parsedRunsHttp.bodyText || runsRes?.stderr || "")));
     if (isRateLimited) {
-      const retryAfterSec = parsedRunsHttp.retryAfterSec || 60;
+      const resetDelaySec =
+        parsedRunsHttp.rateLimitRemaining === 0
+          ? computeResetDelaySec(parsedRunsHttp.rateLimitReset)
+          : null;
+      const retryAfterSec = Math.max(parsedRunsHttp.retryAfterSec || 0, resetDelaySec || 0, 60);
       if (state?.metrics) {
-        state.metrics.retryAfterSec = retryAfterSec;
+        state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, retryAfterSec);
       }
       return {
         events: [
@@ -1307,6 +1380,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
           baseIntervalSec: args.intervalSec,
           consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
           rateLimitRemaining: parsedRunsHttp.rateLimitRemaining,
+          rateLimitReset: parsedRunsHttp.rateLimitReset,
           retryAfterSec,
         }),
       };

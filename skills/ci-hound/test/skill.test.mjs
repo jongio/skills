@@ -1010,6 +1010,45 @@ test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and ba
     computeNextPollIntervalSec(pollArgs, 0, { rateLimitRemaining: 200, retryAfterSec: null }),
     120
   );
+
+  // 4. Primary rate-limit 403 with X-RateLimit-Remaining: 0 and X-RateLimit-Reset (no Retry-After) backs off until reset
+  const futureReset = Math.floor(Date.now() / 1000) + 600;
+  const resetState = loadState("/nonexistent/state.json");
+  const resetRes = ghApiWithEtag("repos/o/r/commits/main", resetState, () => ({
+    ok: false,
+    stdout: `HTTP/2.0 403 Forbidden\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-reset: ${futureReset}\r\n\r\n{"message":"API rate limit exceeded"}`,
+    stderr: "HTTP 403",
+  }));
+  assert.equal(resetRes.rateLimited, true);
+  assert.ok(resetState.metrics.retryAfterSec >= 590);
+  assert.ok(computeNextPollIntervalSec(pollArgs, 1, resetState.metrics) >= 590);
+
+  // 5. evaluatePollTick stops further requests and defers ALL_GREEN when rate-limited
+  const deferState = loadState("/nonexistent/state.json");
+  deferState.lastMainSha = "sha1";
+  deferState.runs["500"] = {
+    id: 500,
+    name: "CI",
+    event: "push",
+    head_branch: "main",
+    head_sha: "sha1",
+    status: "completed",
+    conclusion: "success",
+  };
+  let callsDuringCooldown = 0;
+  const deferTick = evaluatePollTick(pollArgs, deferState, () => {
+    callsDuringCooldown += 1;
+    return {
+      ok: false,
+      stdout: "HTTP/2.0 429 Too Many Requests\r\nretry-after: 75\r\n\r\n{}",
+      stderr: "HTTP 429",
+    };
+  });
+  assert.equal(callsDuringCooldown, 1);
+  assert.equal(deferTick.rateLimited, true);
+  assert.equal(deferTick.events.length, 1);
+  assert.equal(deferTick.events[0].type, "RATE_LIMITED");
+  assert.equal(deferTick.nextIntervalSec, 75);
 });
 
 

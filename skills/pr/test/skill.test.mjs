@@ -1654,6 +1654,41 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(gqlRateLimitedTick.rateLimited, true);
   assert.equal(gqlRateLimitedTick.events[0].type, "RATE_LIMITED");
   assert.equal(gqlRateLimitedTick.nextIntervalSec, 60);
+
+  // GraphQL HTTP 429 with httpMeta retryAfter: 300 (even without "rate limit" body text) preserves 300s delay
+  const gql429MetaTick = evaluatePrPollTick(
+    watchArgs,
+    () => ({
+      ok: false,
+      stdout: "{}",
+      stderr: "HTTP 429",
+      httpMeta: { status: 429, retryAfter: "300", rateLimitRemaining: "10" },
+    }),
+    createPrWatchState()
+  );
+  assert.equal(gql429MetaTick.rateLimited, true);
+  assert.equal(gql429MetaTick.events[0].type, "RATE_LIMITED");
+  assert.equal(gql429MetaTick.nextIntervalSec, 300);
+
+  // Primary rate-limit 403 with X-RateLimit-Remaining: 0 and X-RateLimit-Reset (no Retry-After) backs off until reset
+  const futureReset = Math.floor(Date.now() / 1000) + 420;
+  const resetRateLimitedTick = evaluatePrPollTick(
+    watchArgs,
+    (ghArgs) => {
+      if (ghArgs[1] === "graphql") {
+        return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+      }
+      return {
+        ok: false,
+        stdout: `HTTP/2.0 403 Forbidden\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-reset: ${futureReset}\r\n\r\n{"message":"API rate limit exceeded"}`,
+        stderr: "HTTP 403",
+      };
+    },
+    createPrWatchState()
+  );
+  assert.equal(resetRateLimitedTick.rateLimited, true);
+  assert.equal(resetRateLimitedTick.events[0].type, "RATE_LIMITED");
+  assert.ok(resetRateLimitedTick.nextIntervalSec >= 410);
   assert.ok(parseGhApiArgs(["api", "-i", "repos/jongio/skills/actions/runs?head_sha=abc&per_page=100"]));
 });
 

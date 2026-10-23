@@ -339,6 +339,15 @@ function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
   const results = [];
   for (let page = 1; ; page += 1) {
     const res = ghApiWithEtag(`${baseEndpoint}&page=${page}`, state, execFn);
+    if (res.rateLimited) {
+      if (state) {
+        state.rateLimited = true;
+      }
+      if (Array.isArray(res.data)) {
+        results.push(...res.data);
+      }
+      break;
+    }
     if (!Array.isArray(res.data)) {
       throw new Error(res.error || `Repository discovery failed for ${baseEndpoint}&page=${page}`);
     }
@@ -356,6 +365,12 @@ function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
 export function discoverOwnerRepos(owner, visibility = "all", state, execFn = defaultExecGh) {
   if (!owner) {
     return [];
+  }
+  if (state) {
+    state.rateLimited = false;
+    if (state.metrics) {
+      state.metrics.retryAfterSec = null;
+    }
   }
   const effectiveVisibility = visibility || "all";
   let rawRepos = [];
@@ -379,7 +394,7 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
         byName.set(normalizeRepoSlug(r.full_name), r);
       }
     }
-    if (effectiveVisibility !== "private") {
+    if (effectiveVisibility !== "private" && !state?.rateLimited) {
       const publicOwnerRepos = fetchPaginatedRepos(
         `users/${encodeURIComponent(owner)}/repos?type=all&per_page=100`,
         state,
@@ -482,7 +497,6 @@ export function loadState(stateFile) {
 }
 
 export function saveState(stateFile, state) {
-  pruneState(state);
   mkdirSync(dirname(stateFile), { recursive: true });
   writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
@@ -585,12 +599,22 @@ export function parseHttpResponse(raw) {
   return { status, etag, rateLimitRemaining, rateLimitReset, retryAfterSec, bodyText };
 }
 
+function computeResetDelaySec(rateLimitReset) {
+  if (!Number.isFinite(rateLimitReset) || rateLimitReset <= 0) return null;
+  return Math.max(1, Math.ceil(rateLimitReset - Date.now() / 1000));
+}
+
 export function computeNextPollIntervalSec(args, activeMainRuns, metrics = {}) {
   const baseSec = activeMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec;
   let intervalSec = baseSec;
   if (Number.isFinite(metrics?.rateLimitRemaining) && metrics.rateLimitRemaining < 500) {
     const floorSec = activeMainRuns > 0 ? 60 : 120;
     intervalSec = Math.max(baseSec * 2, floorSec);
+  }
+  const resetDelaySec =
+    metrics?.rateLimitRemaining === 0 ? computeResetDelaySec(metrics?.rateLimitReset) : null;
+  if (Number.isFinite(resetDelaySec) && resetDelaySec > 0) {
+    intervalSec = Math.max(intervalSec, resetDelaySec);
   }
   if (Number.isFinite(metrics?.retryAfterSec) && metrics.retryAfterSec > 0) {
     intervalSec = Math.max(intervalSec, metrics.retryAfterSec);
@@ -628,9 +652,13 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
         parsed.retryAfterSec !== null ||
         /rate limit/i.test(parsed.bodyText || result.stderr || "")));
   if (isRateLimited) {
+    const resetDelaySec =
+      parsed.rateLimitRemaining === 0 ? computeResetDelaySec(parsed.rateLimitReset) : null;
     state.metrics.retryAfterSec = Math.max(
       state.metrics.retryAfterSec || 0,
-      parsed.retryAfterSec || 60
+      parsed.retryAfterSec || 0,
+      resetDelaySec || 0,
+      60
     );
     return {
       fromCache: Boolean(cached?.data !== undefined),
@@ -856,7 +884,7 @@ function defaultExecGh(ghArgs) {
       while (true) {
         const msg = receiveMessageOnPort(ka.port1);
         if (!msg) break;
-        if (waitRes === "ok" && msg.message?.reqId === reqId) {
+        if ((waitRes === "ok" || waitRes === "not-equal") && msg.message?.reqId === reqId) {
           return {
             ok: msg.message.ok,
             stdout: msg.message.stdout,
@@ -1059,12 +1087,17 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   state.branch = args.branch;
   state.metrics.lastPollAt = new Date().toISOString();
   state.metrics.retryAfterSec = null;
+  state.rateLimited = false;
 
   const events = [];
+  let tickRateLimited = false;
 
   const commitRes = ghApiWithEtag(`repos/${args.repo}/commits/${args.branch}`, state, execFn);
+  if (commitRes.rateLimited) {
+    tickRateLimited = true;
+  }
   const currentSha = commitRes.data?.sha || state.lastMainSha;
-  if (currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
+  if (!tickRateLimited && currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
     const prevSha = state.lastMainSha;
     state.lastMainSha = currentSha;
     if (args.wakeOnNewCommit) {
@@ -1079,12 +1112,25 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     state.lastMainSha = currentSha;
   }
 
-  const branchRunsRes = ghApiWithEtag(
-    `repos/${args.repo}/actions/runs?branch=${encodeURIComponent(args.branch)}&per_page=20`,
-    state,
-    execFn
-  );
-  const allRunsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs?per_page=25`, state, execFn);
+  let branchRunsRes = { data: null };
+  if (!tickRateLimited) {
+    branchRunsRes = ghApiWithEtag(
+      `repos/${args.repo}/actions/runs?branch=${encodeURIComponent(args.branch)}&per_page=20`,
+      state,
+      execFn
+    );
+    if (branchRunsRes.rateLimited) {
+      tickRateLimited = true;
+    }
+  }
+
+  let allRunsRes = { data: null };
+  if (!tickRateLimited) {
+    allRunsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs?per_page=25`, state, execFn);
+    if (allRunsRes.rateLimited) {
+      tickRateLimited = true;
+    }
+  }
 
   const runMap = new Map();
   for (const r of branchRunsRes.data?.workflow_runs || []) {
@@ -1106,8 +1152,15 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
   for (const watchId of trackedActiveIds) {
+    if (tickRateLimited) {
+      break;
+    }
     if (!runMap.has(watchId)) {
       const watchRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${watchId}`, state, execFn);
+      if (watchRes.rateLimited) {
+        tickRateLimited = true;
+        break;
+      }
       if (watchRes.data?.id) {
         runMap.set(watchRes.data.id, watchRes.data);
       }
@@ -1136,12 +1189,15 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       (isWatchedRun && run.status !== "completed");
 
     let jobs = prevRun?.jobs || [];
-    if (needsJobsInspection) {
+    if (needsJobsInspection && !tickRateLimited) {
       const jobsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
+      if (jobsRes.rateLimited) {
+        tickRateLimited = true;
+      }
       if (jobsRes.data?.jobs) {
         jobs = jobsRes.data.jobs;
       }
-      if (run.status === "completed" && !prevRun?.telemetryRecorded && jobs.length > 0) {
+      if (!jobsRes.rateLimited && run.status === "completed" && !prevRun?.telemetryRecorded && jobs.length > 0) {
         recordTelemetryForRun(run, jobs, state);
       }
     }
@@ -1251,8 +1307,18 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   }
 
   pruneState(state, { protectedRunIds: args.watchRunIds || [] });
+  state.rateLimited = tickRateLimited;
 
-  if (events.length === 0 && args.wakeOnAllGreen) {
+  const nextIntervalSec = computeNextPollIntervalSec(args, activeMainRuns, state.metrics);
+
+  if (tickRateLimited) {
+    events.push({
+      type: "RATE_LIMITED",
+      repo: args.repo,
+      retryAfterSec: nextIntervalSec,
+      rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
+    });
+  } else if (events.length === 0 && args.wakeOnAllGreen) {
     if (args.watchRunIds.length > 0) {
       const watchedRecords = args.watchRunIds.map((id) => state.runs[String(id)]).filter(Boolean);
       const allWatchedDone =
@@ -1291,7 +1357,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   return {
     events,
     activeMainRuns,
-    nextIntervalSec: computeNextPollIntervalSec(args, activeMainRuns, state.metrics),
+    rateLimited: tickRateLimited,
+    nextIntervalSec,
   };
 }
 
@@ -1306,6 +1373,10 @@ export function stateFileForRepo(repo, args) {
 export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) {
   const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
   const discoveryState = loadState(discoveryStateFile);
+  discoveryState.rateLimited = false;
+  if (discoveryState.metrics) {
+    discoveryState.metrics.retryAfterSec = null;
+  }
   const targetRepos = resolveTargetRepos(args, config, discoveryState, execFn);
   for (const qualifiedRepo of Object.keys(args.watchRunsByRepo || {})) {
     if (args.explicitRepos.length > 0 && !args.explicitRepos.includes(qualifiedRepo)) {
@@ -1339,46 +1410,96 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const allEvents = [];
   const reports = [];
   let totalActiveMainRuns = 0;
-  let maxNextIntervalSec = 0;
+  let anyRateLimited = Boolean(discoveryState.rateLimited);
+  let minRateLimitRemaining = Number.isFinite(discoveryState.metrics?.rateLimitRemaining)
+    ? discoveryState.metrics.rateLimitRemaining
+    : null;
+  let maxRateLimitReset = Number.isFinite(discoveryState.metrics?.rateLimitReset)
+    ? discoveryState.metrics.rateLimitReset
+    : null;
+  let maxRetryAfterSec = Number.isFinite(discoveryState.metrics?.retryAfterSec)
+    ? discoveryState.metrics.retryAfterSec
+    : null;
 
-  for (const repo of targetRepos) {
-    const repoStateFile = stateFileForRepo(repo, args);
-    const repoState = loadState(repoStateFile);
-    const qualifiedIds = args.watchRunsByRepo?.[repo] || [];
-    const repoWatchRunIds =
-      targetRepos.length === 1
-        ? [...new Set([...args.watchRunIds, ...qualifiedIds])]
-        : [...qualifiedIds];
-    const applyRepoExistingFlags = !hasAnyWatchedRuns || repoWatchRunIds.length > 0;
-    const repoArgs = {
-      ...args,
-      repo,
-      branch: effectiveBranch,
-      mergeMode: effectiveMergeMode,
-      stateFile: repoStateFile,
-      watchRunIds: repoWatchRunIds,
-      hasExistingPr: applyRepoExistingFlags ? Boolean(args.hasExistingPr) : false,
-      hasCommittedFixBranch: applyRepoExistingFlags ? Boolean(args.hasCommittedFixBranch) : false,
-      docsOrConfigOnlyStaged: applyRepoExistingFlags ? Boolean(args.docsOrConfigOnlyStaged) : false,
-      wakeOnAllGreen: hasAnyWatchedRuns
-        ? repoWatchRunIds.length > 0 && args.wakeOnAllGreen
-        : args.wakeOnAllGreen,
-    };
-    const tick = evaluatePollTick(repoArgs, repoState, execFn);
-    saveState(repoStateFile, repoState);
-    allEvents.push(...tick.events);
-    totalActiveMainRuns += tick.activeMainRuns;
-    maxNextIntervalSec = Math.max(maxNextIntervalSec, tick.nextIntervalSec || 0);
-    reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
+  const mergeRateMetrics = (metrics) => {
+    if (!metrics) return;
+    if (Number.isFinite(metrics.rateLimitRemaining)) {
+      minRateLimitRemaining =
+        minRateLimitRemaining === null
+          ? metrics.rateLimitRemaining
+          : Math.min(minRateLimitRemaining, metrics.rateLimitRemaining);
+    }
+    if (Number.isFinite(metrics.rateLimitReset)) {
+      maxRateLimitReset =
+        maxRateLimitReset === null
+          ? metrics.rateLimitReset
+          : Math.max(maxRateLimitReset, metrics.rateLimitReset);
+    }
+    if (Number.isFinite(metrics.retryAfterSec) && metrics.retryAfterSec > 0) {
+      maxRetryAfterSec =
+        maxRetryAfterSec === null
+          ? metrics.retryAfterSec
+          : Math.max(maxRetryAfterSec, metrics.retryAfterSec);
+    }
+  };
+
+  if (discoveryState.rateLimited) {
+    const discRetrySec = computeNextPollIntervalSec(args, 0, discoveryState.metrics);
+    allEvents.push({
+      type: "RATE_LIMITED",
+      repo: args.owner || config?.owner || "discovery",
+      retryAfterSec: discRetrySec,
+      rateLimitRemaining: discoveryState.metrics?.rateLimitRemaining ?? null,
+    });
+  } else {
+    for (const repo of targetRepos) {
+      const repoStateFile = stateFileForRepo(repo, args);
+      const repoState = loadState(repoStateFile);
+      const qualifiedIds = args.watchRunsByRepo?.[repo] || [];
+      const repoWatchRunIds =
+        targetRepos.length === 1
+          ? [...new Set([...args.watchRunIds, ...qualifiedIds])]
+          : [...qualifiedIds];
+      const applyRepoExistingFlags = !hasAnyWatchedRuns || repoWatchRunIds.length > 0;
+      const repoArgs = {
+        ...args,
+        repo,
+        branch: effectiveBranch,
+        mergeMode: effectiveMergeMode,
+        stateFile: repoStateFile,
+        watchRunIds: repoWatchRunIds,
+        hasExistingPr: applyRepoExistingFlags ? Boolean(args.hasExistingPr) : false,
+        hasCommittedFixBranch: applyRepoExistingFlags ? Boolean(args.hasCommittedFixBranch) : false,
+        docsOrConfigOnlyStaged: applyRepoExistingFlags ? Boolean(args.docsOrConfigOnlyStaged) : false,
+        wakeOnAllGreen: hasAnyWatchedRuns
+          ? repoWatchRunIds.length > 0 && args.wakeOnAllGreen
+          : args.wakeOnAllGreen,
+      };
+      const tick = evaluatePollTick(repoArgs, repoState, execFn);
+      saveState(repoStateFile, repoState);
+      allEvents.push(...tick.events);
+      totalActiveMainRuns += tick.activeMainRuns;
+      mergeRateMetrics(repoState.metrics);
+      reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
+      if (tick.rateLimited) {
+        anyRateLimited = true;
+        break;
+      }
+    }
   }
 
-  const baseMultiIntervalSec =
-    totalActiveMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec;
+  const nextIntervalSec = computeNextPollIntervalSec(args, totalActiveMainRuns, {
+    rateLimitRemaining: minRateLimitRemaining,
+    rateLimitReset: maxRateLimitReset,
+    retryAfterSec: maxRetryAfterSec,
+  });
+
   return {
     repos: targetRepos,
     events: allEvents,
     activeMainRuns: totalActiveMainRuns,
-    nextIntervalSec: Math.max(baseMultiIntervalSec, maxNextIntervalSec),
+    rateLimited: anyRateLimited,
+    nextIntervalSec,
     reports,
   };
 }
@@ -1423,7 +1544,7 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
     const multi = evaluateMultiRepoPollTick(args, existingConfig);
-    if (multi.repos.length === 0 && !hasOwnerScope) {
+    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
       console.error(
         "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
       );
@@ -1437,6 +1558,7 @@ export async function runCli(argv = process.argv.slice(2)) {
           tick: {
             events: multi.events,
             activeMainRuns: multi.activeMainRuns,
+            rateLimited: multi.rateLimited,
             nextIntervalSec: multi.nextIntervalSec,
           },
           report: multi.reports.length === 1 ? multi.reports[0] : multi.reports,
@@ -1452,14 +1574,15 @@ export async function runCli(argv = process.argv.slice(2)) {
   while (true) {
     polls += 1;
     const multi = evaluateMultiRepoPollTick(args, existingConfig);
-    if (multi.repos.length === 0 && !hasOwnerScope) {
+    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
       console.error(
         "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
       );
       process.exit(1);
     }
-    if (multi.events.length > 0) {
-      console.log(JSON.stringify({ repos: multi.repos, events: multi.events }, null, 2));
+    const terminalEvents = multi.events.filter((e) => e.type !== "RATE_LIMITED");
+    if (terminalEvents.length > 0) {
+      console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
       return;
     }
     if (args.maxPolls > 0 && polls >= args.maxPolls) {
