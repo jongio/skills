@@ -16,6 +16,11 @@ Plan, test, and implement the current context, then hand verified changes to pr 
 Requires `test-doctor` and `pr`, plus `doc-doctor` for PR preflight; install those skills too, or choose the full collection above.
 Only `pr` runs the documentation pass; `go` does not duplicate it.
 
+Scope follows affected user journeys and their shared behavior owner, not just
+edited files. Test Doctor checks equivalent entry points against one intended
+contract; `pr` receives that evidence and justified differences. This does not
+authorize broader edits or a whole-repository audit.
+
 ## Install with required skills
 
 The single-skill options above do not install dependencies. Use this command
