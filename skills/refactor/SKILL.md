@@ -68,6 +68,9 @@ At every level, exclude product changes: feature removal, bug fixes, changed err
 new defaults, dependency upgrades and altered user-visible behavior.
 Do not delete a feature or component because no current caller was found.
 Record such observations separately without implementing them or making them prerequisites.
+Journey divergence is a product-behavior decision: neither silently harmonize it nor call
+accidental drift an established product contract. Record it separately for behavior correction,
+without making unrelated fixes prerequisites; retain preservation and approval boundaries.
 No speculative generalized abstraction, mass formatting, or arbitrary large-file split.
 
 Idiomatic means appropriate for the actual language/framework version and local

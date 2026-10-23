@@ -23,11 +23,11 @@ Default to squash merging and deleting the PR branch after merge unless the user
 
 ## Workflow
 
-1. Inspect the current context, repository instructions, and existing work; resolve the worktree choice before tests or edits. State a brief plan and acceptance criteria; reuse valid completed work and ask only blocking questions.
-2. Invoke `test-doctor fix` on the touched scope to establish a baseline and write meaningful regression tests before implementation.
-3. Implement the smallest complete change, run focused checks, and finish the scoped Test Doctor assessment.
-4. Review the final diff for correctness and regressions; fix material findings and repeat affected checks until the acceptance criteria are met.
-5. Invoke `jongio/pr` (`pr` when installed, e.g. `/jongio-skills:pr`) with a merge request, merge mode and its user-authorization source (or default approval mode), plan, scope, worktree/base/changeset identity, and passing test/review evidence. It owns Git, remaining preflight, CI, review resolution, and merge; do not duplicate those stages. Leave `doc-doctor` to `pr`; do not invoke it separately.
+1. Inspect the current context, repository instructions, and existing work; resolve the worktree choice before tests or edits. Before defining touched scope, map affected user journeys, equivalent entry points, and the canonical behavior owner. State a brief plan and acceptance criteria for that affected behavioral scope; reuse valid completed work and ask only blocking questions. Do not turn this into a whole-repository audit or silently expand authorized edits.
+2. Invoke `test-doctor fix` on that scope to establish a baseline and write meaningful regression tests before implementation, using the journey contract and affected surfaces.
+3. Implement the smallest complete change: the smallest coherent product change, not the fewest files. For the same operation across affected surfaces, preserve the intended shared sequence, approval information, cancellation, retries/recovery, and outcome semantics. Centralize shared sequencing rather than duplicating host logic. Justify capability or presentation differences. Run focused checks and finish the scoped Test Doctor assessment.
+4. Review the final diff for correctness, regressions, introduced duplication and state complexity; fix material findings and repeat affected checks until the acceptance criteria are met.
+5. Invoke `jongio/pr` (`pr` when installed, e.g. `/jongio-skills:pr`) with a merge request, merge mode and its user-authorization source (or default approval mode), plan, scope, journey contract, affected surfaces, exception evidence, worktree/base/changeset identity, and passing test/review evidence. It owns Git, remaining preflight, CI, review resolution, and merge; do not duplicate those stages. Leave `doc-doctor` to `pr`; do not invoke it separately.
 
 ## Safety
 

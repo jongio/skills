@@ -55,6 +55,10 @@ overlap, run a suite once rather than executing it through every wrapper.
 Derive expected behavior from specifications, public contracts, requirements,
 and established sibling behavior, not just today's implementation. Record
 ambiguities rather than cementing a possible bug into a new expected value.
+For equivalent entry points, test one independently established intended contract, not
+separate expectations copied from each implementation. Identify affected surfaces and
+the canonical behavior owner. Impacted sibling paths outside the authorized audit scope
+remain unverified gaps: report them without expanding edits or claiming parity.
 Open [test quality checks](references/test-quality.md) before reviewing tests.
 
 ### 2. Collect a baseline
@@ -96,6 +100,12 @@ applicable. Keep observed defects separate from suspected risks.
 Prioritize security properties and reachable tool/CLI handlers, not filename
 matches alone. Look beyond test-file correspondence: integration tests may cover
 several modules, while a matching test file may assert almost nothing.
+
+Exercise real adapter integration seams and meaningful negative cases against that
+contract: approval ordering and information, denial/cancel, retries/idempotency/recovery,
+and durable or partial results where applicable. Do not mock the behavior under test.
+Allow justified capability, native UI, and authentication-adapter differences;
+do not require identical pixels or duplicate every E2E.
 
 Treat ratios, test counts, snapshots, sleeps, mocks, and file/network access as
 investigation signals, not automatic defects. Do not require a fixed number of
