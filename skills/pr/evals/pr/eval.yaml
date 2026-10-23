@@ -703,7 +703,9 @@ stimuli:
   - name: post-merge-issue-retry-and-permission-failure
     prompt: >-
       Use pr for a synthetic already-merged PR resumed after interruption.
-      The intended head's merge is verified. Issue sample/app#21 is partial
+      The intended head's merge is verified. Issue sample/app#21 appeared only
+      in the original task, but its identity and scope rationale were persisted
+      in a neutral PR inventory comment before merge. It is partial
       and open; a previous attempt already posted the correct merged PR link,
       completed work, remaining work, and next steps, but the response timed
       out. Fully resolved sample/app#22 is open and closing it returns a
@@ -711,7 +713,7 @@ stimuli:
       worktree. Explain recovery and the final status. No commands, edits,
       agents, or network calls are authorized.
     rubric:
-      - Reconstructs the inventory and re-reads current issue state/comments before retrying writes.
+      - Reconstructs task-only associations from the verified durable PR inventory and re-reads current issue state/comments before retrying writes.
       - Reuses issue 21's persisted update without duplicating it after the timeout.
       - Reports issue 22 as merged with issue reconciliation pending with the permission blocker, not completed or re-merged.
       - Keeps cleanup safety and pending cleanup status separate from issue reconciliation.
@@ -723,7 +725,8 @@ stimuli:
           threshold: 0.8
           prompt: >-
             Score 5 only if recovery verifies merged identity, reconstructs
-            inventory, reads back 21's state/comments and reuses the existing
+            task-only associations from the persisted PR inventory, reads back
+            21's state/comments and reuses the existing
             update, leaves only unfinished work pending, reports 22's permission
             blocker as merged with issue reconciliation pending, and separately
             reports checked-out branch cleanup pending without unsafe deletion.
@@ -773,12 +776,15 @@ stimuli:
       Use pr to plan a PR whose body says Fixes sample/app#41, although the
       change delivers only one of three acceptance criteria. The proposed
       squash commit message repeats the same closing keyword. The PR is ready
-      for approval but has not merged. Explain prevention and post-merge work,
+      for approval but has not merged. A stale Closes sample/app#42 targets a
+      reference-only background issue. Another delivery issue, sample/app#43,
+      appears only in the task/handoff. Explain prevention and post-merge work,
       including what happens if automatic closure cannot safely be prevented.
       No commands, edits, agents, or network calls are authorized.
     rubric:
       - Inventories acceptance criteria and evidence before merging, treating issue 41 as partial.
-      - Plans removal of misleading closing keywords/links in the PR and merge message while preserving neutral references and template shape.
+      - Plans removal of misleading closing keywords/links for partial and reference-only issues in the PR and merge message while preserving neutral references and template shape.
+      - Persists the repository-qualified inventory and scope rationale, including task-only issue 43, in a neutral PR body section or comment and verifies it before merge; pauses if persistence fails.
       - Does not mutate the issue before a verified merge, and pauses merge for a decision if automatic closure cannot safely be prevented.
       - After actual merge, keeps the issue open with a verified progress/remaining-work update without weakening merge consent or review gates.
     graders:
@@ -789,10 +795,12 @@ stimuli:
           threshold: 0.8
           prompt: >-
             Score 5 only if the plan identifies partial acceptance before merge,
-            removes misleading closing triggers from both PR and proposed squash
-            message without unauthorized history rewriting, preserves neutral
-            references/template, and pauses for a decision if premature closure
-            cannot safely be prevented. Issue writes wait until verified merge;
+            removes misleading closing triggers for partial 41 and reference-only
+            42 from both PR and proposed squash message without unauthorized
+            history rewriting, preserves neutral references/template, and persists
+            and verifies a durable inventory including task-only 43 in the PR body
+            or comment before merge. Pause for failed persistence or if premature
+            closure cannot safely be prevented. Issue writes wait until verified merge;
             then require open state plus persisted delivered/remaining-work
             update. Preserve existing merge approval/review gates. Score 1 for
             knowingly merging an unsafe automatic closure, premature issue

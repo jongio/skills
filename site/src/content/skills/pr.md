@@ -75,8 +75,10 @@ cleanup are reported as pending rather than retried unconditionally or claimed d
 Inventory related issues before merging, including closing links, PR references,
 the task/handoff, relevant discussion, and cross-repository work. Assess each
 issue's acceptance criteria against delivered changes and evidence; remove
-misleading closing links for incomplete work rather than treating a reference
-as permission to close.
+misleading closing links for incomplete or reference-only work rather than treating
+a reference as permission to close. Persist and verify the repository-qualified
+inventory and scope rationale in the PR body or a PR comment before merging,
+including associations present only in the task or handoff.
 
 After GitHub confirms the intended head merged, fully resolved issues must be
 verified closed; close any still open with the merged PR link and completion

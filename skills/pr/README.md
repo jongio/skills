@@ -89,7 +89,9 @@ pending", not successful deletion.
 Before merge, inventory related issues from closing links, the PR body, task/handoff,
 and relevant discussion, including cross-repository issues. Compare their acceptance
 criteria with delivered changes and evidence; remove misleading automatic closing
-links for incomplete work. Mere references do not authorize closure.
+links for incomplete or reference-only work. Mere references do not authorize closure.
+Persist and verify the repository-qualified inventory and scope rationale in the PR
+body or a PR comment before merging, including task-only or handoff-only associations.
 
 After GitHub confirms the intended head merged, verify fully resolved issues are
 closed, closing any still open with the merged PR link and completion evidence.

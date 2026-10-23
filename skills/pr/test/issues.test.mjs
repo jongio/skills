@@ -32,7 +32,15 @@ test("issue inventory is paginated, repository-qualified, and distinguishes refe
   assert.match(contract, /mere mention.*not.*permission to close/);
   assert.match(contract, /non-default base/);
   assert.match(contract, /Remove.*closing keywords.*partially resolved/);
+  assert.match(contract, /Remove.*closing keywords.*reference-only/);
   assert.match(contract, /unavailable or incomplete.*not.*no related issues/);
+});
+
+test("task and handoff associations survive interruption through a verified GitHub inventory", () => {
+  assert.match(contract, /Before merge, persist.*repository-qualified inventory.*scope rationale.*PR body.*PR comment/);
+  assert.match(contract, /task-only.*handoff-only/);
+  assert.match(contract, /read back.*persisted inventory.*pause merge/);
+  assert.match(contract, /Reuse or update.*inventory.*rather than posting duplicates/);
 });
 
 test("complete issues are closed only after confirmed delivery and persisted state verification", () => {
@@ -67,6 +75,7 @@ test("README and catalog document verified closure, partial progress, recovery, 
   for (const file of ["../README.md", "../../../site/src/content/skills/pr.md"]) {
     const text = (await read(file)).replace(/\s+/g, " ");
     assert.match(text, /related issues/i);
+    assert.match(text, /persist.*inventory.*PR body.*PR comment/i);
     assert.match(text, /fully resolved.*closed/);
     assert.match(text, /partial.*open.*remaining work/);
     assert.match(text, /already-merged.*duplicate/);
