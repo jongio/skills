@@ -7,6 +7,7 @@ import {
   extractBodyOnlyFindings,
   isErroredCopilotReview,
   parsePrWatchArgs,
+  requestCopilotReview,
 } from "../scripts/pr-watch-daemon.mjs";
 
 const skill = (await readFile(new URL("../SKILL.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
@@ -847,4 +848,188 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(phaseChangedTick.events[0].phase, "ci:passed|review:copilot-reviewing");
   assert.equal(phaseChangedTick.events[0].summary, "CI passed (1/1) | Copilot is reviewing");
 });
+
+test("requestCopilotReview cancels superseded branch runs, toggles existing requests, and guards head/state", () => {
+  assert.match(skill, /--body-file.*@'\.\.\.'@/i);
+  assert.match(skill, /pr-watch-daemon\.mjs request-copilot/);
+  assert.match(skill, /cross-model `rubber-duck` sub-agent review/);
+
+  const reqArgs = parsePrWatchArgs([
+    "request-copilot",
+    "--repo",
+    "jongio/skills",
+    "--pr",
+    "177",
+    "--head",
+    "head_new",
+  ]);
+  assert.equal(reqArgs.mode, "request-copilot");
+  assert.equal(reqArgs.pr, 177);
+  assert.equal(reqArgs.head, "head_new");
+
+  // 1. Rejects head_mismatch without cancelling runs or editing reviewers
+  const mismatchCalls = [];
+  const mismatchRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    mismatchCalls.push(ghArgs);
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        data: {
+          repository: {
+            pullRequest: {
+              state: "OPEN",
+              headRefOid: "head_other",
+              headRefName: "feat/x",
+              reviewRequests: { nodes: [] },
+            },
+          },
+        },
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(mismatchRes.ok, false);
+  assert.equal(mismatchRes.status, "head_mismatch");
+  assert.equal(mismatchRes.expectedHead, "head_new");
+  assert.equal(mismatchRes.actualHead, "head_other");
+  assert.equal(mismatchCalls.length, 1);
+
+  // 2. Rejects pr_not_open
+  const closedRes = requestCopilotReview(reqArgs, () => ({
+    ok: true,
+    stdout: JSON.stringify({
+      data: {
+        repository: {
+          pullRequest: {
+            state: "MERGED",
+            headRefOid: "head_new",
+            headRefName: "feat/x",
+            reviewRequests: { nodes: [] },
+          },
+        },
+      },
+    }),
+    stderr: "",
+  }));
+  assert.equal(closedRes.ok, false);
+  assert.equal(closedRes.status, "pr_not_open");
+  assert.equal(closedRes.state, "MERGED");
+
+  // 3. Skips when an active Copilot run on this branch already targets headRefOid
+  const activeCalls = [];
+  const alreadyRunningRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    activeCalls.push(ghArgs);
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: {
+                  nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        workflow_runs: [
+          {
+            id: 4001,
+            name: "Running Copilot Code Review",
+            status: "in_progress",
+            head_branch: "feat/x",
+            head_sha: "head_new",
+          },
+        ],
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(alreadyRunningRes.ok, true);
+  assert.equal(alreadyRunningRes.status, "already_running");
+  assert.equal(alreadyRunningRes.activeRunId, 4001);
+  assert.equal(activeCalls.length, 2);
+
+  // 4. Cancels superseded Copilot runs on the same branch/PR (leaving other branches alone)
+  // and toggles --remove-reviewer / --add-reviewer when @copilot is already requested
+  const toggleCalls = [];
+  const toggledRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    toggleCalls.push(ghArgs);
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: {
+                  nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1] === "repos/jongio/skills/actions/runs?per_page=100") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          workflow_runs: [
+            {
+              id: 5001,
+              name: "Running Copilot Code Review",
+              status: "in_progress",
+              head_branch: "feat/x",
+              head_sha: "head_old",
+            },
+            {
+              id: 5002,
+              name: "Running Copilot Code Review",
+              status: "in_progress",
+              head_branch: "feat/other-pr",
+              head_sha: "head_other_branch",
+            },
+            {
+              id: 5003,
+              name: "Skill Lint",
+              status: "in_progress",
+              head_branch: "feat/x",
+              head_sha: "head_old",
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(toggledRes.ok, true);
+  assert.equal(toggledRes.status, "requested");
+  assert.deepEqual(toggledRes.cancelledRunIds, [5001]);
+  assert.equal(toggledRes.toggledExistingRequest, true);
+  assert.deepEqual(
+    toggleCalls.slice(2),
+    [
+      ["api", "-X", "POST", "repos/jongio/skills/actions/runs/5001/cancel"],
+      ["pr", "edit", "177", "-R", "jongio/skills", "--remove-reviewer", "@copilot"],
+      ["pr", "edit", "177", "-R", "jongio/skills", "--add-reviewer", "@copilot"],
+    ]
+  );
+});
+
 

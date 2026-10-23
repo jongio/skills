@@ -55,7 +55,7 @@ export function parsePrWatchArgs(argv) {
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
-    if (token === "watch" || token === "once") {
+    if (token === "watch" || token === "once" || token === "request-copilot") {
       args.mode = token;
     } else if (token === "--mode" && argv[i + 1]) {
       args.mode = argv[++i];
@@ -300,6 +300,185 @@ function defaultExecGh(ghArgs) {
     ok: res.status === 0,
     stdout: res.stdout || "",
     stderr: res.stderr || "",
+  };
+}
+
+export function requestCopilotReview(args, execFn = defaultExecGh) {
+  const [owner, name] = args.repo.split("/");
+  const query = `query($owner: String!, $name: String!, $pr: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $pr) {
+        state
+        headRefOid
+        headRefName
+        reviewRequests(first: 100) {
+          nodes {
+            requestedReviewer {
+              __typename
+              ... on Bot { login }
+              ... on User { login }
+              ... on Team { slug name }
+              ... on Mannequin { login }
+            }
+          }
+        }
+      }
+    }
+  }`;
+
+  const gqlRes = execFn([
+    "api",
+    "graphql",
+    "-F",
+    `owner=${owner}`,
+    "-F",
+    `name=${name}`,
+    "-F",
+    `pr=${args.pr}`,
+    "-f",
+    `query=${query}`,
+  ]);
+  if (!gqlRes.ok) {
+    return {
+      ok: false,
+      status: "poll_error",
+      error: gqlRes.stderr || "GraphQL query failed",
+    };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(gqlRes.stdout);
+  } catch (error) {
+    return {
+      ok: false,
+      status: "poll_error",
+      error: `Invalid GraphQL JSON: ${error.message}`,
+    };
+  }
+  if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
+    return {
+      ok: false,
+      status: "poll_error",
+      error: parsed.errors.map((e) => e?.message || "GraphQL error").join("; "),
+    };
+  }
+  const pr = parsed?.data?.repository?.pullRequest;
+  if (!pr) {
+    return {
+      ok: false,
+      status: "poll_error",
+      error: "Pull request not found",
+    };
+  }
+
+  if (pr.state !== "OPEN") {
+    return {
+      ok: false,
+      status: "pr_not_open",
+      state: pr.state,
+    };
+  }
+
+  if (args.head && pr.headRefOid !== args.head) {
+    return {
+      ok: false,
+      status: "head_mismatch",
+      expectedHead: args.head,
+      actualHead: pr.headRefOid,
+    };
+  }
+
+  const runsRes = execFn(["api", `repos/${args.repo}/actions/runs?per_page=100`]);
+  if (!runsRes.ok || !runsRes.stdout) {
+    return {
+      ok: false,
+      status: "poll_error",
+      error: runsRes.stderr || "Workflow runs inventory unavailable",
+    };
+  }
+
+  let runsData;
+  try {
+    runsData = JSON.parse(runsRes.stdout);
+  } catch (error) {
+    return {
+      ok: false,
+      status: "poll_error",
+      error: `Invalid workflow runs JSON: ${error.message}`,
+    };
+  }
+  if (!Array.isArray(runsData?.workflow_runs)) {
+    return {
+      ok: false,
+      status: "poll_error",
+      error: "Workflow runs response missing workflow_runs array",
+    };
+  }
+
+  const matchingActiveRuns = runsData.workflow_runs.filter((run) => {
+    if (!run || run.status === "completed" || !/Copilot Code Review/i.test(run.name || "")) {
+      return false;
+    }
+    const sameBranch = Boolean(pr.headRefName && run.head_branch === pr.headRefName);
+    const samePr =
+      Array.isArray(run.pull_requests) &&
+      run.pull_requests.some((p) => p?.number === args.pr);
+    return sameBranch || samePr;
+  });
+
+  const currentHeadRun = matchingActiveRuns.find((run) => run.head_sha === pr.headRefOid);
+  if (currentHeadRun) {
+    return {
+      ok: true,
+      status: "already_running",
+      headRefOid: pr.headRefOid,
+      activeRunId: currentHeadRun.id,
+      cancelledRunIds: [],
+    };
+  }
+
+  const cancelledRunIds = [];
+  for (const run of matchingActiveRuns) {
+    if (run.head_sha !== pr.headRefOid && run.id) {
+      execFn(["api", "-X", "POST", `repos/${args.repo}/actions/runs/${run.id}/cancel`]);
+      cancelledRunIds.push(run.id);
+    }
+  }
+
+  const copilotCurrentlyRequested = (pr.reviewRequests?.nodes || []).some((n) =>
+    isCopilotBotLogin(n?.requestedReviewer?.login)
+  );
+  const toggledExistingRequest = Boolean(copilotCurrentlyRequested || cancelledRunIds.length > 0);
+  if (toggledExistingRequest) {
+    execFn(["pr", "edit", String(args.pr), "-R", args.repo, "--remove-reviewer", "@copilot"]);
+  }
+
+  const addRes = execFn([
+    "pr",
+    "edit",
+    String(args.pr),
+    "-R",
+    args.repo,
+    "--add-reviewer",
+    "@copilot",
+  ]);
+  if (!addRes.ok) {
+    return {
+      ok: false,
+      status: "request_failed",
+      headRefOid: pr.headRefOid,
+      cancelledRunIds,
+      error: addRes.stderr || "Failed to request @copilot review",
+    };
+  }
+
+  return {
+    ok: true,
+    status: "requested",
+    headRefOid: pr.headRefOid,
+    cancelledRunIds,
+    toggledExistingRequest,
   };
 }
 
@@ -831,6 +1010,14 @@ async function sleepSeconds(sec) {
 
 export async function runCli(argv = process.argv.slice(2)) {
   const args = parsePrWatchArgs(argv);
+  if (args.mode === "request-copilot") {
+    const res = requestCopilotReview(args);
+    console.log(JSON.stringify(res, null, 2));
+    if (!res.ok) {
+      process.exit(1);
+    }
+    return;
+  }
   if (args.mode === "once") {
     const tick = evaluatePrPollTick(args);
     console.log(JSON.stringify(tick, null, 2));

@@ -9,7 +9,9 @@ npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill d
 ```
 
 Invoke `/go <context>` with an issue, conversation, code, or error.
-`go` plans, tests with Test Doctor, implements, and reviews/fixes; `pr` reuses
+`go` plans, tests with Test Doctor, implements, and reviews/fixes (including a
+cross-model `rubber-duck` sub-agent review using a different model family than
+the active model when sub-agent model selection is available); `pr` reuses
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
 Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
 

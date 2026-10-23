@@ -14,6 +14,7 @@ install:
 Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge.
 
 Requires `test-doctor` and `pr`, plus `doc-doctor` for PR preflight; install those skills too, or choose the full collection above.
+Before handing off to `pr`, `go` reviews the final diff and runs a cross-model `rubber-duck` sub-agent review using a different model family than the active model when available.
 Only `pr` runs the documentation pass; `go` does not duplicate it.
 
 Scope follows affected user journeys and their shared behavior owner, not just
