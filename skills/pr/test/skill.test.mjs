@@ -549,6 +549,29 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
     [{ databaseId: 600, createdAt: "2026-10-22T20:05:00Z", body: "Review 905: addressed Fix timeout." }],
     "head123"
   );
+  assert.equal(partialFindings.length, 1);
+  assert.deepEqual(partialFindings[0].unsettledConcerns, ["Fix pagination"]);
+
+  // A review with both a resolved inline link and unlinked actionable prose still retains the prose finding
+  const mixedResolvedAndProse = `### 🟡 Changes recommended\n\nAlso fix the unlinked timeout race in the worker.\n\n- [Resolved item](https://github.com/o/r/pull/1#discussion_r4354371458)`;
+  const mixedFindings = extractBodyOnlyFindings(
+    [
+      {
+        databaseId: 906,
+        state: "COMMENTED",
+        submittedAt: "2026-10-23T03:29:22Z",
+        author: { login: "copilot-pull-request-reviewer" },
+        commit: { oid: "0b6d67c7" },
+        body: mixedResolvedAndProse,
+      },
+    ],
+    [],
+    "0b6d67c7",
+    new Set([4354371458])
+  );
+  assert.equal(mixedFindings.length, 1);
+  assert.equal(mixedFindings[0].reviewId, 906);
+
   // A review with "### 🔵 Needs a closer look" + "No open issues" + "<details>1 resolved since last review" (#discussion_r...)
   // MUST still surface as a body-only finding until cited in a PR comment!
   const needsCloserLookWithResolvedLink = `<!-- ccr-overview-v2 -->\n\n### 🔵 Needs a closer look\n\nWatched-run validation still permits silently unmonitored requests.\n\n**No open issues** 🎉\n\n<details>\n<summary><strong>1 resolved since last review</strong></summary>\n\n- [Surface uncached discovery errors](https://github.com/jongio/skills/pull/174#discussion_r4355767769)\n</details>`;
@@ -589,53 +612,59 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(gatedArgs.hasExplicitSinceCommentId, true);
   assert.deepEqual(gatedArgs.expectedReviewers, ["alice"]);
 
-  const blockedByExpectedReviewer = evaluatePrPollTick(gatedArgs, () => ({
-    ok: true,
-    stdout: JSON.stringify({
-      data: {
-        repository: {
-          pullRequest: {
-            state: "OPEN",
-            headRefOid: "head123",
-            mergeable: "MERGEABLE",
-            mergeStateStatus: "CLEAN",
-            reviewDecision: "APPROVED",
-            reviewRequests: {
-              nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
-            },
-            reviews: {
-              nodes: [
-                {
-                  databaseId: 910,
-                  state: "APPROVED",
-                  commit: { oid: "olderhead" },
-                  author: { login: "alice" },
-                  body: "LGTM on old head",
+  const blockedByExpectedReviewer = evaluatePrPollTick(gatedArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: "APPROVED",
+                reviewRequests: {
+                  nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
                 },
-              ],
-            },
-            reviewThreads: { nodes: [] },
-            comments: { nodes: [] },
-            commits: {
-              nodes: [
-                {
-                  commit: {
-                    statusCheckRollup: {
-                      state: "SUCCESS",
-                      contexts: {
-                        nodes: [{ __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }],
+                reviews: {
+                  nodes: [
+                    {
+                      databaseId: 910,
+                      state: "APPROVED",
+                      submittedAt: "2026-10-22T20:00:00Z",
+                      commit: { oid: "olderhead" },
+                      author: { login: "alice" },
+                      body: "LGTM on old head",
+                    },
+                  ],
+                },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        statusCheckRollup: {
+                          state: "SUCCESS",
+                          contexts: {
+                            nodes: [{ __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }],
+                          },
+                        },
                       },
                     },
-                  },
+                  ],
                 },
-              ],
+              },
             },
           },
-        },
-      },
-    }),
-    stderr: "",
-  }));
+        }),
+        stderr: "",
+      };
+    }
+    return { ok: true, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+  });
   assert.equal(blockedByExpectedReviewer.events.length, 0);
   assert.deepEqual(blockedByExpectedReviewer.status.pendingReviewers, ["alice"]);
 
@@ -737,7 +766,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
     };
   });
   assert.equal(ciFailedTick.events[0].type, "CI_FAILED");
-  assert.equal(ciFailedTick.events[0].failedChecks.length, 1);
+  assert.equal(ciFailedTick.events[0].failedChecks.length, 2);
   assert.ok(ciFailedTick.events[0].remediation);
 
   // 3. Phase-transition wakeup: emits PHASE_CHANGED when CI transitions from running to passed while Copilot reviews

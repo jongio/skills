@@ -163,11 +163,9 @@ function extractBodyConcerns(body, fallbackHeadline, resolvedCommentIds = new Se
     ""
   );
   const concerns = [];
-  let hadInlineLinks = false;
   for (const match of bodyWithoutResolvedDetails.matchAll(
     /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
   )) {
-    hadInlineLinks = true;
     const title = match[1].trim();
     const commentId = Number.parseInt(match[2], 10);
     if (resolvedCommentIds.has(commentId)) {
@@ -185,7 +183,16 @@ function extractBodyConcerns(body, fallbackHeadline, resolvedCommentIds = new Se
       concerns.push(title);
     }
   }
-  if (concerns.length === 0 && !hadInlineLinks) {
+  const residualProse = bodyWithoutResolvedDetails
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<details[^>]*>\s*<summary>\s*<strong>\s*\d+\s+open issues?\s*<\/strong>\s*<\/summary>[\s\S]*?<\/details>/gi, "")
+    .replace(/^\s*-\s*(?:<picture>[\s\S]*?<\/picture>\s*)?\[[^\]]+\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\).*$/gm, "")
+    .replace(/^###\s+.+$/gm, "")
+    .replace(/\*\*No open issues\*\*\s*(?:🎉)?/gi, "")
+    .replace(/<sub>[\s\S]*?<\/sub>/gi, "")
+    .trim();
+
+  if (residualProse.length > 0 && !concerns.includes(fallbackHeadline)) {
     concerns.push(fallbackHeadline);
   }
   return concerns;
@@ -524,63 +531,65 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
   const activeWorkflowRuns = [];
   const runsRes = execFn(["api", `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=100`]);
   if (!runsRes.ok || !runsRes.stdout) {
-    if (args.expectCopilot) {
-      const errMsg = runsRes.stderr || "Workflow runs inventory unavailable";
-      return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
-    }
-  } else {
-    let runsData;
-    try {
-      runsData = JSON.parse(runsRes.stdout);
-    } catch (error) {
-      if (args.expectCopilot) {
-        const errMsg = `Invalid workflow runs JSON: ${error.message}`;
-        return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
-      }
-    }
-    if (args.expectCopilot && !Array.isArray(runsData?.workflow_runs)) {
-      const errMsg = "Workflow runs response missing workflow_runs array";
-      return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
-    }
-    if (
-      args.expectCopilot &&
-      typeof runsData?.total_count === "number" &&
-      runsData.total_count > runsData.workflow_runs.length
-    ) {
-      return {
-        events: [
-          {
-            type: "COLLECTION_TRUNCATED",
-            headRefOid: headOid,
-            collections: ["workflow_runs"],
-          },
-        ],
-      };
-    }
+    const errMsg = runsRes.stderr || "Workflow runs inventory unavailable";
+    return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+  }
+  let runsData;
+  try {
+    runsData = JSON.parse(runsRes.stdout);
+  } catch (error) {
+    const errMsg = `Invalid workflow runs JSON: ${error.message}`;
+    return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+  }
+  if (!Array.isArray(runsData?.workflow_runs)) {
+    const errMsg = "Workflow runs response missing workflow_runs array";
+    return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+  }
+  if (
+    typeof runsData?.total_count === "number" &&
+    runsData.total_count > runsData.workflow_runs.length
+  ) {
+    return {
+      events: [
+        {
+          type: "COLLECTION_TRUNCATED",
+          headRefOid: headOid,
+          collections: ["workflow_runs"],
+        },
+      ],
+    };
+  }
 
-    const latestByWorkflowKey = new Map();
-    for (const run of runsData?.workflow_runs || []) {
-      if (/Copilot Code Review/i.test(run.name || "")) {
-        if (run.status !== "completed") {
-          copilotWorkflowActive = true;
-        }
-        continue;
-      }
-      const wfKey = `${run.workflow_id ?? run.path ?? run.name ?? "wf"}::${run.event ?? ""}::${run.head_branch ?? ""}`;
-      const prev = latestByWorkflowKey.get(wfKey);
-      if (!prev || (run.id ?? 0) > (prev.id ?? 0)) {
-        latestByWorkflowKey.set(wfKey, run);
-      }
-    }
-
-    for (const run of latestByWorkflowKey.values()) {
+  const latestByWorkflowKey = new Map();
+  for (const run of runsData.workflow_runs) {
+    if (/Copilot Code Review/i.test(run.name || "")) {
       if (run.status !== "completed") {
-        activeWorkflowRuns.push(run.name || "workflow");
-      } else if (
-        run.conclusion &&
-        !["success", "skipped", "neutral"].includes(run.conclusion.toLowerCase()) &&
-        contexts.length === 0
-      ) {
+        copilotWorkflowActive = true;
+      }
+      continue;
+    }
+    const wfKey = `${run.workflow_id ?? run.path ?? run.name ?? "wf"}::${run.event ?? ""}::${run.head_branch ?? ""}`;
+    const prev = latestByWorkflowKey.get(wfKey);
+    if (!prev || (run.id ?? 0) > (prev.id ?? 0)) {
+      latestByWorkflowKey.set(wfKey, run);
+    }
+  }
+
+  for (const run of latestByWorkflowKey.values()) {
+    if (run.status !== "completed") {
+      activeWorkflowRuns.push(run.name || "workflow");
+    } else if (
+      run.conclusion &&
+      !["success", "skipped", "neutral"].includes(run.conclusion.toLowerCase())
+    ) {
+      const runIdMarker = run.id ? `/runs/${run.id}` : "";
+      const alreadyRecorded = failedChecks.some(
+        (fc) =>
+          (runIdMarker && typeof fc.url === "string" && fc.url.includes(runIdMarker)) ||
+          (fc.url && fc.url === run.html_url) ||
+          fc.name === run.name
+      );
+      if (!alreadyRecorded) {
         failedChecks.push({
           name: run.name || "workflow",
           conclusion: run.conclusion.toUpperCase(),
@@ -839,11 +848,14 @@ export async function runCli(argv = process.argv.slice(2)) {
       console.error(JSON.stringify(tick, null, 2));
       process.exit(1);
     }
-    if (tick.events.length > 0) {
+    const terminalEvents = tick.events.filter((e) => e.type !== "PHASE_CHANGED");
+    if (terminalEvents.length > 0) {
       console.log(JSON.stringify(tick, null, 2));
       return;
     }
-    if (!baselinePhase && tick.status?.phase) {
+    // Emit live status and nonterminal phase changes to stdout while continuing to watch
+    console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
+    if (tick.status?.phase) {
       baselinePhase = tick.status.phase;
     }
     if (!hasCommentBaseline && Number.isSafeInteger(tick.status?.latestCommentId)) {
