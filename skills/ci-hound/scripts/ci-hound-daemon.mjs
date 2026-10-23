@@ -176,7 +176,8 @@ export function parseArgs(argv) {
       const colonIdx = rawWatch.indexOf(":");
       if (colonIdx !== -1) {
         const rawRepoPart = rawWatch.slice(0, colonIdx).trim();
-        const idPart = Number.parseInt(rawWatch.slice(colonIdx + 1).trim(), 10);
+        const rawIdPart = rawWatch.slice(colonIdx + 1).trim();
+        const idPart = /^[1-9]\d*$/.test(rawIdPart) ? Number.parseInt(rawIdPart, 10) : NaN;
         if (!isValidRepoSlug(rawRepoPart) || !Number.isSafeInteger(idPart) || idPart <= 0) {
           throw new Error(`Invalid --watch-run "${rawWatch}". Expected "<runId>" or "<owner>/<repo>:<runId>".`);
         }
@@ -186,7 +187,7 @@ export function parseArgs(argv) {
           args.watchRunsByRepo[repoPart].push(idPart);
         }
       } else {
-        const idPart = Number.parseInt(rawWatch, 10);
+        const idPart = /^[1-9]\d*$/.test(rawWatch) ? Number.parseInt(rawWatch, 10) : NaN;
         if (!Number.isSafeInteger(idPart) || idPart <= 0) {
           throw new Error(`Invalid --watch-run "${rawWatch}". Expected "<runId>" or "<owner>/<repo>:<runId>".`);
         }
@@ -215,6 +216,9 @@ export function parseArgs(argv) {
     }
   }
 
+  if (args.mode === "setup" && (args.watchRunIds.length > 0 || Object.keys(args.watchRunsByRepo).length > 0)) {
+    throw new Error("--watch-run cannot be used with `setup` mode.");
+  }
   if (args.mergeMode !== "approval" && args.mergeMode !== "auto") {
     throw new Error(`Invalid --merge mode "${args.mergeMode}". Expected "approval" or "auto".`);
   }

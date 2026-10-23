@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  computePrPhase,
+  evaluatePrPollTick,
+  extractBodyOnlyFindings,
+  isErroredCopilotReview,
+  parsePrWatchArgs,
+} from "../scripts/pr-watch-daemon.mjs";
 
 const skill = (await readFile(new URL("../SKILL.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 const evalSpec = (await readFile(new URL("../evals/pr/eval.yaml", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
@@ -307,3 +314,537 @@ test("review and merge evals distinguish exemptions, completion, approval, and a
   assert.match(nonExempt, /repository, PR number, authorized strategy and full --match-head-commit/);
   assert.match(nonExempt, /merged-state verification/);
 });
+
+test("pr-watch-daemon detects unresolved threads, body-only findings, errored Copilot reviews, and merge readiness", () => {
+  const args = parsePrWatchArgs([
+    "watch",
+    "--repo",
+    "jongio/skills",
+    "--pr",
+    "174",
+    "--head",
+    "head123",
+    "--interval",
+    "10",
+    "--since-comment-id",
+    "500",
+  ]);
+  assert.equal(args.repo, "jongio/skills");
+  assert.equal(args.pr, 174);
+  assert.equal(args.head, "head123");
+  assert.equal(args.intervalSec, 10);
+  assert.equal(args.sinceCommentId, 500);
+  assert.throws(() => parsePrWatchArgs(["watch", "--repo", "bad", "--pr", "1"]), /Invalid or missing --repo/);
+  assert.throws(() => parsePrWatchArgs(["watch", "--repo", "a/b", "--pr", "0"]), /Invalid or missing --pr/);
+
+  assert.equal(
+    isErroredCopilotReview({
+      body: "Copilot encountered an error and was unable to review this pull request. You can try again by re-requesting a review.",
+    }),
+    true
+  );
+
+  // 1. Errored Copilot review without active run emits COPILOT_REVIEW_ERROR instead of PR_READY_TO_MERGE
+  const erroredTick = evaluatePrPollTick(args, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: null,
+                reviewRequests: { nodes: [] },
+                reviews: {
+                  nodes: [
+                    {
+                      databaseId: 901,
+                      state: "COMMENTED",
+                      submittedAt: "2026-10-22T20:00:00Z",
+                      commit: { oid: "head123" },
+                      author: { login: "copilot-pull-request-reviewer" },
+                      body: "Copilot encountered an error and was unable to review this pull request.",
+                    },
+                  ],
+                },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        statusCheckRollup: {
+                          state: "SUCCESS",
+                          contexts: {
+                            nodes: [
+                              { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return { ok: true, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+  });
+  assert.equal(erroredTick.events[0].type, "COPILOT_REVIEW_ERROR");
+
+  // 2. Body-only finding ("1 previously missed issue") and unresolved thread emit FEEDBACK_ACTION_NEEDED
+  const feedbackTick = evaluatePrPollTick(args, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: null,
+                reviewRequests: { nodes: [] },
+                reviews: {
+                  nodes: [
+                    {
+                      databaseId: 902,
+                      state: "COMMENTED",
+                      submittedAt: "2026-10-22T20:00:00Z",
+                      commit: { oid: "head123" },
+                      author: { login: "copilot-pull-request-reviewer" },
+                      body: "### 🔵 Needs a closer look\n**No open issues**\n<details><summary><strong>1 previously missed issue</strong></summary>Fix X</details>",
+                    },
+                  ],
+                },
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: "PRRT_1",
+                      isResolved: false,
+                      isOutdated: false,
+                      path: "src/index.mjs",
+                      line: 10,
+                      comments: { nodes: [{ databaseId: 77, author: { login: "copilot" }, body: "Fix Y" }] },
+                    },
+                  ],
+                },
+                comments: { nodes: [] },
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        statusCheckRollup: {
+                          state: "SUCCESS",
+                          contexts: {
+                            nodes: [
+                              { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return { ok: true, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+  });
+  assert.equal(feedbackTick.events[0].type, "FEEDBACK_ACTION_NEEDED");
+  assert.equal(feedbackTick.events[0].unresolvedThreads.length, 1);
+  assert.equal(feedbackTick.events[0].bodyFindings.length, 1);
+  assert.equal(feedbackTick.events[0].bodyFindings[0].reviewId, 902);
+
+  // Once a PR comment cites reviewId 902 after submittedAt, extractBodyOnlyFindings clears it;
+  // an older comment created before review.submittedAt does NOT clear it, and an unaddressed
+  // CHANGES_REQUESTED review on an older commit remains blocking.
+  assert.equal(
+    extractBodyOnlyFindings(
+      [
+        {
+          databaseId: 902,
+          state: "COMMENTED",
+          submittedAt: "2026-10-22T20:00:00Z",
+          commit: { oid: "head123" },
+          body: "### 🔵 Needs a closer look",
+        },
+      ],
+      [{ databaseId: 501, createdAt: "2026-10-22T19:00:00Z", body: "Addressed review 902 early." }],
+      "head123"
+    ).length,
+    1
+  );
+  assert.equal(
+    extractBodyOnlyFindings(
+      [
+        {
+          databaseId: 902,
+          state: "COMMENTED",
+          submittedAt: "2026-10-22T20:00:00Z",
+          commit: { oid: "head123" },
+          body: "### 🔵 Needs a closer look",
+        },
+      ],
+      [{ databaseId: 501, createdAt: "2026-10-22T20:05:00Z", body: "Addressed review 902 in commit abc." }],
+      "head123"
+    ).length,
+    0
+  );
+  assert.equal(
+    extractBodyOnlyFindings(
+      [
+        {
+          databaseId: 888,
+          state: "CHANGES_REQUESTED",
+          submittedAt: "2026-10-22T20:00:00Z",
+          author: { login: "alice" },
+          commit: { oid: "olderhead" },
+          body: "",
+        },
+        {
+          databaseId: 889,
+          state: "COMMENTED",
+          submittedAt: "2026-10-22T20:05:00Z",
+          author: { login: "alice" },
+          commit: { oid: "head123" },
+          body: "Please also check the timeout before merging.",
+        },
+      ],
+      [],
+      "head123"
+    ).length,
+    2,
+    "Later COMMENTED review must not clear earlier CHANGES_REQUESTED decision, and unclassified COMMENTED body must surface"
+  );
+
+  // Partial disposition of a multi-concern body leaves unsettled concerns active
+  const multiConcernBody =
+    "### 🟡 Changes recommended\n- [Fix timeout](https://github.com/o/r/pull/1#discussion_r1)\n- [Fix pagination](https://github.com/o/r/pull/1#discussion_r2)";
+  const partialFindings = extractBodyOnlyFindings(
+    [
+      {
+        databaseId: 905,
+        state: "COMMENTED",
+        submittedAt: "2026-10-22T20:00:00Z",
+        author: { login: "copilot-pull-request-reviewer" },
+        commit: { oid: "head123" },
+        body: multiConcernBody,
+      },
+    ],
+    [{ databaseId: 600, createdAt: "2026-10-22T20:05:00Z", body: "Review 905: addressed Fix timeout." }],
+    "head123"
+  );
+  assert.equal(partialFindings.length, 1);
+  assert.deepEqual(partialFindings[0].unsettledConcerns, ["Fix pagination"]);
+
+  // A review with both a resolved inline link and unlinked actionable prose still retains the prose finding
+  const mixedResolvedAndProse = `### 🟡 Changes recommended\n\nAlso fix the unlinked timeout race in the worker.\n\n- [Resolved item](https://github.com/o/r/pull/1#discussion_r4354371458)`;
+  const mixedFindings = extractBodyOnlyFindings(
+    [
+      {
+        databaseId: 906,
+        state: "COMMENTED",
+        submittedAt: "2026-10-23T03:29:22Z",
+        author: { login: "copilot-pull-request-reviewer" },
+        commit: { oid: "0b6d67c7" },
+        body: mixedResolvedAndProse,
+      },
+    ],
+    [],
+    "0b6d67c7",
+    new Set([4354371458])
+  );
+  assert.equal(mixedFindings.length, 1);
+  assert.equal(mixedFindings[0].reviewId, 906);
+
+  // A review with "### 🔵 Needs a closer look" + "No open issues" + "<details>1 resolved since last review" (#discussion_r...)
+  // MUST still surface as a body-only finding until cited in a PR comment!
+  const needsCloserLookWithResolvedLink = `<!-- ccr-overview-v2 -->\n\n### 🔵 Needs a closer look\n\nWatched-run validation still permits silently unmonitored requests.\n\n**No open issues** 🎉\n\n<details>\n<summary><strong>1 resolved since last review</strong></summary>\n\n- [Surface uncached discovery errors](https://github.com/jongio/skills/pull/174#discussion_r4355767769)\n</details>`;
+  const closerLookFindings = extractBodyOnlyFindings(
+    [
+      {
+        databaseId: 5623556560,
+        state: "COMMENTED",
+        submittedAt: "2026-10-23T03:29:22Z",
+        author: { login: "copilot-pull-request-reviewer" },
+        commit: { oid: "0b6d67c7" },
+        body: needsCloserLookWithResolvedLink,
+      },
+    ],
+    [],
+    "0b6d67c7",
+    new Set([4355767769])
+  );
+  assert.equal(closerLookFindings.length, 1);
+  assert.equal(closerLookFindings[0].reviewId, 5623556560);
+
+  // 4. --no-copilot ignores pending Copilot requests, Team requests stay pending,
+  // --expected-reviewers requires current-head review, and REVIEW_REQUIRED blocks PR_READY_TO_MERGE
+  const gatedArgs = parsePrWatchArgs([
+    "watch",
+    "--repo",
+    "jongio/skills",
+    "--pr",
+    "175",
+    "--head",
+    "head123",
+    "--no-copilot",
+    "--expected-reviewers",
+    "alice",
+    "--since-comment-id",
+    "0",
+  ]);
+  assert.equal(gatedArgs.hasExplicitSinceCommentId, true);
+  assert.deepEqual(gatedArgs.expectedReviewers, ["alice"]);
+
+  const blockedByExpectedReviewer = evaluatePrPollTick(gatedArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: "APPROVED",
+                reviewRequests: {
+                  nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
+                },
+                reviews: {
+                  nodes: [
+                    {
+                      databaseId: 910,
+                      state: "APPROVED",
+                      submittedAt: "2026-10-22T20:00:00Z",
+                      commit: { oid: "olderhead" },
+                      author: { login: "alice" },
+                      body: "LGTM on old head",
+                    },
+                  ],
+                },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        statusCheckRollup: {
+                          state: "SUCCESS",
+                          contexts: {
+                            nodes: [{ __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return { ok: true, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+  });
+  assert.equal(blockedByExpectedReviewer.events.length, 0);
+  assert.deepEqual(blockedByExpectedReviewer.status.pendingReviewers, ["alice"]);
+
+  // Unavailable workflow_runs inventory surfaces POLL_ERROR instead of assuming idle Copilot
+  const workflowErrTick = evaluatePrPollTick(args, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: "APPROVED",
+                reviewRequests: { nodes: [] },
+                reviews: { nodes: [] },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return { ok: false, stdout: "", stderr: "HTTP 503" };
+  });
+  assert.equal(workflowErrTick.events[0].type, "POLL_ERROR");
+  assert.match(workflowErrTick.error, /503/);
+
+  // 5. CI_FAILED is emitted when statusCheckRollup fails, and activeWorkflowRuns blocks readiness when checks haven't started
+  const ciFailedTick = evaluatePrPollTick(args, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "UNSTABLE",
+                reviewDecision: null,
+                reviewRequests: { nodes: [] },
+                reviews: { nodes: [] },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        statusCheckRollup: {
+                          state: "FAILURE",
+                          contexts: {
+                            nodes: [
+                              {
+                                __typename: "CheckRun",
+                                name: "Detect statusline changes",
+                                status: "COMPLETED",
+                                conclusion: "FAILURE",
+                                detailsUrl: "https://github.com/jongio/skills/actions/runs/1/job/2",
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        workflow_runs: [
+          {
+            id: 10,
+            workflow_id: 1,
+            name: "Statusline performance",
+            event: "pull_request",
+            head_branch: "feat/x",
+            status: "completed",
+            conclusion: "failure",
+            html_url: "https://github.com/jongio/skills/actions/runs/1",
+          },
+        ],
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(ciFailedTick.events[0].type, "CI_FAILED");
+  assert.equal(ciFailedTick.events[0].failedChecks.length, 2);
+  assert.ok(ciFailedTick.events[0].remediation);
+
+  // 3. Phase-transition wakeup: emits PHASE_CHANGED when CI transitions from running to passed while Copilot reviews
+  const phaseInfo = computePrPhase({
+    totalChecksCount: 7,
+    passedChecksCount: 5,
+    pendingChecks: ["lint", "git-tidy-tests"],
+    expectCopilot: true,
+    copilotWorkflowActive: true,
+  });
+  assert.equal(phaseInfo.phase, "ci:running|review:copilot-reviewing");
+  assert.match(phaseInfo.summary, /CI running \(5\/7 passed; active: lint, git-tidy-tests\) \| Copilot is reviewing/);
+
+  const phaseChangeArgs = parsePrWatchArgs([
+    "watch",
+    "--repo",
+    "jongio/skills",
+    "--pr",
+    "174",
+    "--head",
+    "head123",
+    "--last-phase",
+    "ci:running|review:copilot-reviewing",
+  ]);
+  const phaseChangedTick = evaluatePrPollTick(phaseChangeArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: null,
+                reviewRequests: {
+                  nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
+                },
+                reviews: { nodes: [] },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        statusCheckRollup: {
+                          state: "SUCCESS",
+                          contexts: {
+                            nodes: [
+                              { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        workflow_runs: [{ name: "Running Copilot Code Review", status: "in_progress" }],
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(phaseChangedTick.events.length, 1);
+  assert.equal(phaseChangedTick.events[0].type, "PHASE_CHANGED");
+  assert.equal(phaseChangedTick.events[0].previousPhase, "ci:running|review:copilot-reviewing");
+  assert.equal(phaseChangedTick.events[0].phase, "ci:passed|review:copilot-reviewing");
+  assert.equal(phaseChangedTick.events[0].summary, "CI passed (1/1) | Copilot is reviewing");
+});
+
