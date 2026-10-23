@@ -29,6 +29,8 @@ export function parsePrWatchArgs(argv) {
     maxPolls: 0,
     expectCopilot: true,
     sinceCommentId: 0,
+    lastPhase: "",
+    emitPhaseChanges: true,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -51,6 +53,10 @@ export function parsePrWatchArgs(argv) {
       args.expectCopilot = false;
     } else if (token === "--since-comment-id" && argv[i + 1]) {
       args.sinceCommentId = Math.max(0, Number.parseInt(argv[++i], 10) || 0);
+    } else if (token === "--last-phase" && argv[i + 1]) {
+      args.lastPhase = argv[++i].trim();
+    } else if (token === "--no-phase-events") {
+      args.emitPhaseChanges = false;
     }
   }
 
@@ -66,6 +72,55 @@ export function parsePrWatchArgs(argv) {
   return args;
 }
 
+export function computePrPhase({
+  totalChecksCount = 0,
+  passedChecksCount = 0,
+  pendingChecks = [],
+  expectCopilot = true,
+  copilotWorkflowActive = false,
+  copilotRequested = false,
+  validHeadCopilotReviewsCount = 0,
+  pendingReviewers = [],
+} = {}) {
+  let ciPhase = "ci:none";
+  let ciLabel = "CI not started";
+  if (totalChecksCount > 0) {
+    if (pendingChecks.length > 0) {
+      ciPhase = "ci:running";
+      const sampleActive = pendingChecks.slice(0, 3).join(", ");
+      ciLabel = `CI running (${passedChecksCount}/${totalChecksCount} passed; active: ${sampleActive})`;
+    } else {
+      ciPhase = "ci:passed";
+      ciLabel = `CI passed (${passedChecksCount}/${totalChecksCount})`;
+    }
+  }
+
+  let reviewPhase = "review:none";
+  let reviewLabel = "No review pending";
+  if (expectCopilot) {
+    if (copilotWorkflowActive) {
+      reviewPhase = "review:copilot-reviewing";
+      reviewLabel = "Copilot is reviewing";
+    } else if (copilotRequested) {
+      reviewPhase = "review:copilot-queued";
+      reviewLabel = "Copilot review queued";
+    } else if (validHeadCopilotReviewsCount > 0) {
+      reviewPhase = "review:copilot-done";
+      reviewLabel = "Copilot review completed";
+    } else {
+      reviewPhase = "review:copilot-waiting";
+      reviewLabel = "Waiting for Copilot review";
+    }
+  } else if (pendingReviewers.length > 0) {
+    reviewPhase = "review:waiting";
+    reviewLabel = `Waiting for reviewers (${pendingReviewers.join(", ")})`;
+  }
+
+  return {
+    phase: `${ciPhase}|${reviewPhase}`,
+    summary: `${ciLabel} | ${reviewLabel}`,
+  };
+}
 export function isErroredCopilotReview(review) {
   return Boolean(review && typeof review.body === "string" && ERRORED_COPILOT_REVIEW_RE.test(review.body));
 }
@@ -410,11 +465,57 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     };
   }
 
+  const totalChecksCount = contexts.length;
+  const passedChecksCount = totalChecksCount - pendingChecks.length - failedChecks.length;
+  const phaseInfo = computePrPhase({
+    totalChecksCount,
+    passedChecksCount,
+    pendingChecks,
+    expectCopilot: args.expectCopilot,
+    copilotWorkflowActive,
+    copilotRequested,
+    validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
+    pendingReviewers,
+  });
+
+  if (args.emitPhaseChanges && args.lastPhase && phaseInfo.phase !== args.lastPhase) {
+    return {
+      events: [
+        {
+          type: "PHASE_CHANGED",
+          headRefOid: headOid,
+          previousPhase: args.lastPhase,
+          phase: phaseInfo.phase,
+          summary: phaseInfo.summary,
+        },
+      ],
+      status: {
+        headRefOid: headOid,
+        phase: phaseInfo.phase,
+        summary: phaseInfo.summary,
+        totalChecksCount,
+        passedChecksCount,
+        pendingChecksCount: pendingChecks.length,
+        pendingChecks,
+        pendingReviewers,
+        copilotWorkflowActive,
+        validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
+        unresolvedThreadsCount: unresolvedThreads.length,
+        bodyFindingsCount: bodyFindings.length,
+      },
+    };
+  }
+
   return {
     events: [],
     status: {
       headRefOid: headOid,
+      phase: phaseInfo.phase,
+      summary: phaseInfo.summary,
+      totalChecksCount,
+      passedChecksCount,
       pendingChecksCount: pendingChecks.length,
+      pendingChecks,
       pendingReviewers,
       copilotWorkflowActive,
       validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
@@ -435,13 +536,17 @@ export async function runCli(argv = process.argv.slice(2)) {
     return;
   }
 
+  let baselinePhase = args.lastPhase;
   let polls = 0;
   while (true) {
     polls += 1;
-    const tick = evaluatePrPollTick(args);
+    const tick = evaluatePrPollTick({ ...args, lastPhase: baselinePhase });
     if (tick.events.length > 0) {
       console.log(JSON.stringify(tick, null, 2));
       return;
+    }
+    if (!baselinePhase && tick.status?.phase) {
+      baselinePhase = tick.status.phase;
     }
     if (args.maxPolls > 0 && polls >= args.maxPolls) {
       console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], status: tick.status }, null, 2));

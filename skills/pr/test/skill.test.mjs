@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  computePrPhase,
   evaluatePrPollTick,
   extractBodyOnlyFindings,
   isErroredCopilotReview,
@@ -476,5 +477,83 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
     ).length,
     0
   );
+
+  // 3. Phase-transition wakeup: emits PHASE_CHANGED when CI transitions from running to passed while Copilot reviews
+  const phaseInfo = computePrPhase({
+    totalChecksCount: 7,
+    passedChecksCount: 5,
+    pendingChecks: ["lint", "git-tidy-tests"],
+    expectCopilot: true,
+    copilotWorkflowActive: true,
+  });
+  assert.equal(phaseInfo.phase, "ci:running|review:copilot-reviewing");
+  assert.match(phaseInfo.summary, /CI running \(5\/7 passed; active: lint, git-tidy-tests\) \| Copilot is reviewing/);
+
+  const phaseChangeArgs = parsePrWatchArgs([
+    "watch",
+    "--repo",
+    "jongio/skills",
+    "--pr",
+    "174",
+    "--head",
+    "head123",
+    "--last-phase",
+    "ci:running|review:copilot-reviewing",
+  ]);
+  const phaseChangedTick = evaluatePrPollTick(phaseChangeArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: null,
+                reviewRequests: {
+                  nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
+                },
+                reviews: { nodes: [] },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        statusCheckRollup: {
+                          state: "SUCCESS",
+                          contexts: {
+                            nodes: [
+                              { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        workflow_runs: [{ name: "Running Copilot Code Review", status: "in_progress" }],
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(phaseChangedTick.events.length, 1);
+  assert.equal(phaseChangedTick.events[0].type, "PHASE_CHANGED");
+  assert.equal(phaseChangedTick.events[0].previousPhase, "ci:running|review:copilot-reviewing");
+  assert.equal(phaseChangedTick.events[0].phase, "ci:passed|review:copilot-reviewing");
+  assert.equal(phaseChangedTick.events[0].summary, "CI passed (1/1) | Copilot is reviewing");
 });
 
