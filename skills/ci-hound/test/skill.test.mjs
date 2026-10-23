@@ -166,6 +166,17 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   );
   assert.deepEqual(mixedResolved, ["jongio/private-one"]);
 
+  // Uncached discovery error throws instead of silently returning a partial/empty watchlist
+  assert.throws(
+    () =>
+      discoverOwnerRepos("@me", "private", loadState("/nonexistent/d-err.json"), () => ({
+        ok: false,
+        stdout: "HTTP/2.0 403 Forbidden\n\n",
+        stderr: "HTTP 403",
+      })),
+    /403/
+  );
+
   // Empty configured owner scope must return [] and NOT fall back to current git checkout
   const emptyOwnerConfig = { repos: [], owner: "jongio", visibility: "private", branch: "main", mergeMode: "approval", worktreeRoot: "" };
   const emptyResolved = resolveTargetRepos(

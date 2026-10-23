@@ -334,7 +334,10 @@ function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
   const results = [];
   for (let page = 1; ; page += 1) {
     const res = ghApiWithEtag(`${baseEndpoint}&page=${page}`, state, execFn);
-    if (!Array.isArray(res.data) || res.data.length === 0) {
+    if (!Array.isArray(res.data)) {
+      throw new Error(res.error || `Repository discovery failed for ${baseEndpoint}&page=${page}`);
+    }
+    if (res.data.length === 0) {
       break;
     }
     results.push(...res.data);
@@ -434,7 +437,7 @@ export function detectRepoFromGit(cwd = process.cwd()) {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
-    const match = remote.match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/i);
+    const match = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/i);
     return match ? normalizeRepoSlug(match[1]) : "";
   } catch {
     return "";
