@@ -202,6 +202,21 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
     /Unqualified --watch-run requires a single target repository/
   );
   assert.throws(() => parseArgs(["watch", "--watch-run", "bad:id"]), /Invalid --watch-run/);
+  assert.throws(
+    () =>
+      evaluateMultiRepoPollTick(
+        parseArgs(["watch", "--repo", "acme/one", "--watch-run", "acme/two:99"]),
+        reloaded,
+        () => ({ ok: true, stdout: "[]", stderr: "" })
+      ),
+    /Watched run repository "acme\/two" is not in the explicit/
+  );
+  const multiHeaderParsed = parseHttpResponse(
+    'HTTP/1.1 100 Continue\r\n\r\nHTTP/2.0 200 OK\r\nETag: "e-final"\r\n\r\n{"ok":true}'
+  );
+  assert.equal(multiHeaderParsed.status, 200);
+  assert.equal(multiHeaderParsed.etag, '"e-final"');
+  assert.equal(multiHeaderParsed.bodyText, '{"ok":true}');
 
   const watchArgs = parseArgs(["watch", "--config-file", configFile]);
   const multiTick = evaluateMultiRepoPollTick(watchArgs, reloaded, (ghArgs) => {

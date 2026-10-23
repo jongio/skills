@@ -361,7 +361,11 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
         execFn
       );
       for (const r of publicOwnerRepos) {
-        if (isValidRepoSlug(r?.full_name) && !byName.has(r.full_name)) {
+        if (
+          isValidRepoSlug(r?.full_name) &&
+          (!r?.owner?.login || r.owner.login.toLowerCase() === lowerOwner) &&
+          !byName.has(r.full_name)
+        ) {
           byName.set(r.full_name, r);
         }
       }
@@ -457,16 +461,25 @@ export function saveState(stateFile, state) {
 }
 
 export function parseHttpResponse(raw) {
-  const normalized = raw.replace(/\r\n/g, "\n");
-  const splitIndex = normalized.indexOf("\n\n");
-  if (splitIndex === -1) {
-    return { status: 200, etag: "", bodyText: normalized };
+  let remaining = raw.replace(/\r\n/g, "\n");
+  let lastHeaderBlock = "";
+  while (/^HTTP\/[\d.]+\s+\d{3}\b/.test(remaining)) {
+    const splitIndex = remaining.indexOf("\n\n");
+    if (splitIndex === -1) {
+      lastHeaderBlock = remaining;
+      remaining = "";
+      break;
+    }
+    lastHeaderBlock = remaining.slice(0, splitIndex);
+    remaining = remaining.slice(splitIndex + 2).trimStart();
   }
-  const headerBlock = normalized.slice(0, splitIndex);
-  const bodyText = normalized.slice(splitIndex + 2).trim();
-  const statusMatch = headerBlock.match(/^HTTP\/[\d.]+\s+(\d{3})/m);
+  if (!lastHeaderBlock) {
+    return { status: 200, etag: "", bodyText: remaining };
+  }
+  const bodyText = remaining.trim();
+  const statusMatch = lastHeaderBlock.match(/^HTTP\/[\d.]+\s+(\d{3})/m);
   const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : 200;
-  const etagMatch = headerBlock.match(/^etag:\s*(.+)$/im);
+  const etagMatch = lastHeaderBlock.match(/^etag:\s*(.+)$/im);
   const etag = etagMatch ? etagMatch[1].trim() : "";
   return { status, etag, bodyText };
 }
@@ -943,6 +956,11 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const discoveryState = loadState(discoveryStateFile);
   const targetRepos = resolveTargetRepos(args, config, discoveryState, execFn);
   for (const qualifiedRepo of Object.keys(args.watchRunsByRepo || {})) {
+    if (args.explicitRepos.length > 0 && !args.explicitRepos.includes(qualifiedRepo)) {
+      throw new Error(
+        `Watched run repository "${qualifiedRepo}" is not in the explicit --repo/--repos list.`
+      );
+    }
     if (!targetRepos.includes(qualifiedRepo)) {
       targetRepos.push(qualifiedRepo);
     }
