@@ -99,6 +99,9 @@ export function parsePrWatchArgs(argv) {
   if (!Number.isSafeInteger(args.pr) || args.pr <= 0) {
     throw new Error(`Invalid or missing --pr "${args.pr}". Expected a positive pull request number.`);
   }
+  if (args.mode === "request-copilot" && !args.head) {
+    throw new Error('Missing or invalid --head "<oid>" for request-copilot.');
+  }
   return args;
 }
 
@@ -304,6 +307,13 @@ function defaultExecGh(ghArgs) {
 }
 
 export function requestCopilotReview(args, execFn = defaultExecGh) {
+  if (!args?.head || typeof args.head !== "string" || !args.head.trim()) {
+    return {
+      ok: false,
+      status: "missing_head",
+      error: 'Missing or invalid --head "<oid>" for request-copilot.',
+    };
+  }
   const [owner, name] = args.repo.split("/");
   const query = `query($owner: String!, $name: String!, $pr: Int!) {
     repository(owner: $owner, name: $name) {
@@ -330,130 +340,181 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
     }
   }`;
 
-  const gqlRes = execFn([
-    "api",
-    "graphql",
-    "-F",
-    `owner=${owner}`,
-    "-F",
-    `name=${name}`,
-    "-F",
-    `pr=${args.pr}`,
-    "-f",
-    `query=${query}`,
-  ]);
-  if (!gqlRes.ok) {
-    return {
-      ok: false,
-      status: "poll_error",
-      error: gqlRes.stderr || "GraphQL query failed",
-    };
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(gqlRes.stdout);
-  } catch (error) {
-    return {
-      ok: false,
-      status: "poll_error",
-      error: `Invalid GraphQL JSON: ${error.message}`,
-    };
-  }
-  if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
-    return {
-      ok: false,
-      status: "poll_error",
-      error: parsed.errors.map((e) => e?.message || "GraphQL error").join("; "),
-    };
-  }
-  const pr = parsed?.data?.repository?.pullRequest;
-  if (!pr) {
-    return {
-      ok: false,
-      status: "poll_error",
-      error: "Pull request not found",
-    };
-  }
-
-  if (pr.state !== "OPEN") {
-    return {
-      ok: false,
-      status: "pr_not_open",
-      state: pr.state,
-    };
-  }
-
-  if (args.head && pr.headRefOid !== args.head) {
-    return {
-      ok: false,
-      status: "head_mismatch",
-      expectedHead: args.head,
-      actualHead: pr.headRefOid,
-    };
-  }
-
-  if (pr.reviewRequests?.pageInfo?.hasNextPage) {
-    return {
-      ok: false,
-      status: "collection_truncated",
-      collections: ["reviewRequests"],
-      error: "PR reviewRequests exceeded 100 entries",
-    };
-  }
-
-  const allWorkflowRuns = [];
-  let page = 1;
-  while (true) {
-    const endpoint =
-      page === 1
-        ? `repos/${args.repo}/actions/runs?per_page=100`
-        : `repos/${args.repo}/actions/runs?per_page=100&page=${page}`;
-    const runsRes = execFn(["api", endpoint]);
-    if (!runsRes || !runsRes.ok || !runsRes.stdout) {
+  const fetchValidatedPr = () => {
+    const gqlRes = execFn([
+      "api",
+      "graphql",
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `name=${name}`,
+      "-F",
+      `pr=${args.pr}`,
+      "-f",
+      `query=${query}`,
+    ]);
+    if (!gqlRes || !gqlRes.ok) {
       return {
         ok: false,
-        status: "poll_error",
-        error: runsRes?.stderr || "Workflow runs inventory unavailable",
+        result: {
+          ok: false,
+          status: "poll_error",
+          error: gqlRes?.stderr || "GraphQL query failed",
+        },
       };
     }
 
-    let runsData;
+    let parsed;
     try {
-      runsData = JSON.parse(runsRes.stdout);
+      parsed = JSON.parse(gqlRes.stdout);
     } catch (error) {
       return {
         ok: false,
-        status: "poll_error",
-        error: `Invalid workflow runs JSON: ${error.message}`,
+        result: {
+          ok: false,
+          status: "poll_error",
+          error: `Invalid GraphQL JSON: ${error.message}`,
+        },
       };
     }
-    if (!Array.isArray(runsData?.workflow_runs)) {
+    if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
       return {
         ok: false,
-        status: "poll_error",
-        error: "Workflow runs response missing workflow_runs array",
+        result: {
+          ok: false,
+          status: "poll_error",
+          error: parsed.errors.map((e) => e?.message || "GraphQL error").join("; "),
+        },
+      };
+    }
+    const prNode = parsed?.data?.repository?.pullRequest;
+    if (!prNode) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "poll_error",
+          error: "Pull request not found",
+        },
       };
     }
 
-    const pageRuns = runsData.workflow_runs;
-    allWorkflowRuns.push(...pageRuns);
-    const totalCount =
-      typeof runsData.total_count === "number" ? runsData.total_count : allWorkflowRuns.length;
-
-    if (allWorkflowRuns.length >= totalCount) {
-      break;
-    }
-    if (pageRuns.length === 0) {
+    if (prNode.state !== "OPEN") {
       return {
         ok: false,
-        status: "collection_truncated",
-        collections: ["workflow_runs"],
-        error: `Workflow runs inventory truncated at ${allWorkflowRuns.length}/${totalCount}`,
+        result: {
+          ok: false,
+          status: "pr_not_open",
+          state: prNode.state,
+        },
       };
     }
-    page += 1;
+
+    if (prNode.headRefOid !== args.head) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "head_mismatch",
+          expectedHead: args.head,
+          actualHead: prNode.headRefOid,
+        },
+      };
+    }
+
+    if (prNode.reviewRequests?.pageInfo?.hasNextPage) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "collection_truncated",
+          collections: ["reviewRequests"],
+          error: "PR reviewRequests exceeded 100 entries",
+        },
+      };
+    }
+
+    return { ok: true, pr: prNode };
+  };
+
+  const initialPrCheck = fetchValidatedPr();
+  if (!initialPrCheck.ok) {
+    return initialPrCheck.result;
   }
+  let pr = initialPrCheck.pr;
+
+  const activeRunStatuses = ["in_progress", "queued", "waiting", "requested", "pending"];
+  const allWorkflowRuns = [];
+  const seenRunIds = new Set();
+
+  for (const runStatus of activeRunStatuses) {
+    const statusRuns = [];
+    let page = 1;
+    while (true) {
+      const endpoint =
+        page === 1
+          ? `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100`
+          : `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100&page=${page}`;
+      const runsRes = execFn(["api", endpoint]);
+      if (!runsRes || !runsRes.ok || !runsRes.stdout) {
+        return {
+          ok: false,
+          status: "poll_error",
+          error: runsRes?.stderr || "Workflow runs inventory unavailable",
+        };
+      }
+
+      let runsData;
+      try {
+        runsData = JSON.parse(runsRes.stdout);
+      } catch (error) {
+        return {
+          ok: false,
+          status: "poll_error",
+          error: `Invalid workflow runs JSON: ${error.message}`,
+        };
+      }
+      if (!Array.isArray(runsData?.workflow_runs)) {
+        return {
+          ok: false,
+          status: "poll_error",
+          error: "Workflow runs response missing workflow_runs array",
+        };
+      }
+
+      const pageRuns = runsData.workflow_runs;
+      statusRuns.push(...pageRuns);
+      for (const run of pageRuns) {
+        const key = run?.id ?? Symbol("run");
+        if (!seenRunIds.has(key)) {
+          seenRunIds.add(key);
+          allWorkflowRuns.push(run);
+        }
+      }
+      const totalCount =
+        typeof runsData.total_count === "number" ? runsData.total_count : statusRuns.length;
+
+      if (statusRuns.length >= totalCount) {
+        break;
+      }
+      if (pageRuns.length === 0) {
+        return {
+          ok: false,
+          status: "collection_truncated",
+          collections: ["workflow_runs"],
+          error: `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`,
+        };
+      }
+      page += 1;
+    }
+  }
+
+  // Revalidate PR open state and pinned head after inventory before cancelling runs or editing reviewers
+  const refreshedPrCheck = fetchValidatedPr();
+  if (!refreshedPrCheck.ok) {
+    return refreshedPrCheck.result;
+  }
+  pr = refreshedPrCheck.pr;
 
   const baseRepoLower = (args.repo || "").toLowerCase();
   const expectedHeadRepoLower = (
@@ -482,15 +543,6 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   });
 
   const currentHeadRun = matchingActiveRuns.find((run) => run.head_sha === pr.headRefOid);
-  if (currentHeadRun) {
-    return {
-      ok: true,
-      status: "already_running",
-      headRefOid: pr.headRefOid,
-      activeRunId: currentHeadRun.id,
-      cancelledRunIds: [],
-    };
-  }
 
   const cancelledRunIds = [];
   for (const run of matchingActiveRuns) {
@@ -513,6 +565,16 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
       }
       cancelledRunIds.push(run.id);
     }
+  }
+
+  if (currentHeadRun) {
+    return {
+      ok: true,
+      status: "already_running",
+      headRefOid: pr.headRefOid,
+      activeRunId: currentHeadRun.id,
+      cancelledRunIds,
+    };
   }
 
   const copilotCurrentlyRequested = (pr.reviewRequests?.nodes || []).some((n) =>
