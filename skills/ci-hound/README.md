@@ -10,6 +10,8 @@ Continuously monitor GitHub Actions workflows with a zero-token ETag-cached back
 - **Two-Tier Monitoring**:
   1. **Tier 1 (`main` branch — `push`, `workflow_dispatch`, `schedule`)**: Instant job-level failure detection, cross-platform desktop + audio alert, and isolated worktree auto-repair.
   2. **Tier 2 (All runs including `pull_request`)**: Harvests step/job durations, queue wait times, and recurring flake signatures even when nothing merges to `main`.
+- **Multi-Repo & Portfolio Setup (`/ci-hound setup`)**:
+  - Watch the current repository by default, or configure a persistent watchlist across any set of repositories (`--repos owner/repo1,owner/repo2`, `--add-repo`, `--remove-repo`) or dynamic account scopes (`--all-my-repos --visibility private`, `--owner <login> --visibility <all|private|public>`).
 - **Context-Aware `go` & `pr` Delivery**:
   - Routes **new incident repairs and new optimizations** through **`go`** (`/jongio-skills:go` -> `test-doctor fix` -> `pr`) so every fix ships with deterministic regression tests and full PR monitoring/merge.
   - Routes **existing fix worktrees and open in-flight PRs** directly through **`pr`** (`/jongio-skills:pr`) for CI/review monitoring, thread resolution, and head-pinned squash merge (`--merge=approval` default or `--merge=auto`).
@@ -25,20 +27,26 @@ Reload your agent skills, then invoke `/ci-hound`, `/ci-hound status`, `/ci-houn
 ## CLI Usage
 
 ```sh
-# Watch main and wake when all current runs finish green or any job fails
-node skills/ci-hound/scripts/ci-hound-daemon.mjs watch --repo owner/repo
+# Configure ci-hound to watch all of your private repositories
+node skills/ci-hound/scripts/ci-hound-daemon.mjs setup --all-my-repos --visibility private
 
-# Watch main continuously (wake only on failure)
+# Configure ci-hound for specific repositories
+node skills/ci-hound/scripts/ci-hound-daemon.mjs setup --repos owner/repo1,owner/repo2
+
+# Watch configured repositories (or current repo) and wake when any job fails
+node skills/ci-hound/scripts/ci-hound-daemon.mjs watch --no-wake-on-green
+
+# Watch a single specific repository
 node skills/ci-hound/scripts/ci-hound-daemon.mjs watch --repo owner/repo --no-wake-on-green
 
 # Watch a specific dispatched release run to completion
 node skills/ci-hound/scripts/ci-hound-daemon.mjs watch --repo owner/repo --watch-run 123456789
 
 # Print live status & telemetry summary
-node skills/ci-hound/scripts/ci-hound-daemon.mjs status --repo owner/repo
+node skills/ci-hound/scripts/ci-hound-daemon.mjs status
 
 # Print ranked bottleneck & flake optimization report
-node skills/ci-hound/scripts/ci-hound-daemon.mjs optimize --repo owner/repo
+node skills/ci-hound/scripts/ci-hound-daemon.mjs optimize
 ```
 
 ## Development

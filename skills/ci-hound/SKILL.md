@@ -14,10 +14,36 @@ Continuously monitor GitHub Actions workflows with a zero-token ETag-cached back
 
 | Invocation | Behavior |
 | --- | --- |
-| `/ci-hound [--merge=approval\|auto]` | Start the background daemon (`scripts/ci-hound-daemon.mjs`) in an async shell to watch `main` for failures, harvest repo-wide telemetry, and deliver fixes via `go` / `pr`. |
-| `/ci-hound status` | Run a single delta poll and display current `main` health, active runs, ETag 304 cache efficiency, and top slow/failing steps. |
+| `/ci-hound [--merge=approval\|auto]` | Start the background daemon (`scripts/ci-hound-daemon.mjs`) in an async shell to watch the configured repository watchlist (or active repo) for `main` failures, harvest telemetry, and deliver fixes via `go` / `pr`. |
+| `/ci-hound setup ...` | Configure which repositories `ci-hound` watches across sessions (`--all-my-repos --visibility private`, `--owner <login> --visibility <all\|private\|public>`, `--repos <owner/repo,...>`, `--add-repo <owner/repo>`, `--remove-repo <owner/repo>`, `--worktree-root <path>`, `--merge <approval\|auto>`). |
+| `/ci-hound status` | Run a single delta poll across all watched repositories and display health, active runs, ETag 304 cache efficiency, and top slow/failing steps. |
 | `/ci-hound optimize [--merge=approval\|auto]` | Analyze collected job/step durations, queue wait times, and flake sightings across `main` and PR runs, then deliver a high-ROI optimization PR via `go` / `pr`. |
 | `/ci-hound stop` | Stop the active `ci-hound` background shell session. |
+
+## Multi-Repository Setup (`/ci-hound setup`)
+
+`ci-hound` is not limited to the current working directory. Users can configure a persistent watchlist in `~/.copilot/ci-hound/config.json`:
+
+- **All private repos owned by the user** (`/ci-hound setup for all my private repos`):
+  ```sh
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --all-my-repos --visibility private
+  ```
+- **All repos (or public/private repos) for a user or org**:
+  ```sh
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --owner <login> --visibility <all|private|public>
+  ```
+- **Specific repository or list of repositories**:
+  ```sh
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --repos owner/repo1,owner/repo2
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --add-repo owner/repo3
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --remove-repo owner/repo1
+  ```
+- **Reset to current checkout only**:
+  ```sh
+  node <skill-dir>/scripts/ci-hound-daemon.mjs setup --clear-repos
+  ```
+
+When watching multiple repositories, the daemon maintains a separate ETag-cached state file per repository (`~/.copilot/ci-hound/<owner>__<repo>.json`) and includes `repo: "<owner>/<repo>"` on every emitted event so repairs and worktrees target the exact repository that failed.
 
 ## `go` vs `pr` Delivery Routing
 
@@ -35,31 +61,31 @@ Every repair or optimization created or tracked by `ci-hound` must be monitored 
 
 ## Workflow
 
-1. **Confirm target repository, branch, and merge mode**:
-   - Auto-detect `<owner>/<repo>` from `git remote get-url origin` unless specified via `--repo <owner/repo>`.
-   - Default branch is `main` unless overridden via `--branch <branch>`.
+1. **Confirm target scope, branch, and merge mode**:
+   - Check the saved watchlist in `~/.copilot/ci-hound/config.json` first. Pass `--repo <owner/repo>` or `--repos <owner/repo,...>` only when the user explicitly requests a repository override; when no watchlist is configured and no override is given, `ci-hound-daemon.mjs` automatically falls back to the current git checkout.
+   - Default branch is `main` unless overridden via `--branch <branch>` or configured in `config.json`.
    - Resolve `--merge=approval` (default) or `--merge=auto` for this invocation.
 2. **Start the zero-token background watcher (`watch` mode)**:
-   - Never use a 1-minute recurring prompt schedule for idle polling. Instead, launch the bundled Node.js daemon in an async background shell (`shellId: "ci-hound"`):
+   - Never use a 1-minute recurring prompt schedule for idle polling. Instead, launch the bundled Node.js daemon in an async background shell (`shellId: "ci-hound"`), preserving the configured watchlist unless an explicit `--repo` / `--repos` override was requested:
      ```sh
-     node <skill-dir>/scripts/ci-hound-daemon.mjs watch --repo <owner/repo> --branch main --merge <approval|auto>
+     node <skill-dir>/scripts/ci-hound-daemon.mjs watch --merge <approval|auto>
      ```
    - To keep watching continuously even when `main` is currently green (waking only on a job/workflow failure or new commit), pass `--no-wake-on-green` (and optionally `--wake-on-commit` or `--watch-run <runId>`).
    - The daemon uses HTTP `If-None-Match` (`ETag`) caching (`304 Not Modified` costs 0 GitHub API rate-limit quota), an `updated_at` delta cursor so completed runs are never re-queried, and adaptive intervals (`15s` while `main` runs are active, `60s` when idle).
 3. **Act on wakeup events**:
    - **`JOB_FAILED` / `WORKFLOW_FAILED` (Tier 1: `main` or watched run failure)**:
-     1. The daemon immediately fires a native desktop + audio alert and exits with structured JSON identifying `runId`, `jobId`, `workflow`, `jobName`, `sha`, `url`, `deliverySkill`, and `mergeMode`.
-     2. **Immediately re-arm `ci-hound-daemon.mjs`** in the background (preserving the resolved `--repo`, `--branch`, `--state-file`, and `--merge` options) before starting RCA or invoking `go` / `pr`, so `main` never goes unmonitored during delivery, CI, or review waits.
-     3. Fetch the failed job logs (`gh api repos/<owner>/<repo>/actions/jobs/<jobId>/logs`) and diagnose the root cause using [references/actions-optimizations.md](references/actions-optimizations.md).
-     4. Check whether an existing fix worktree, staged docs/config edit, or open PR already targets this issue:
+     1. The daemon immediately fires a native desktop + audio alert and exits with structured JSON identifying `repo`, `runId`, `jobId`, `workflow`, `jobName`, `sha`, `url`, `deliverySkill`, and `mergeMode`.
+     2. **Immediately re-arm `ci-hound-daemon.mjs`** in the background (preserving the full configured watchlist or invocation options without narrowing to a single `--repo`) before starting RCA or invoking `go` / `pr`, so all watched repositories remain monitored during delivery, CI, or review waits.
+     3. Use the event's `repo` (`<event.repo>`) to fetch the failed job logs (`gh api repos/<event.repo>/actions/jobs/<jobId>/logs`) and diagnose the root cause using [references/actions-optimizations.md](references/actions-optimizations.md).
+     4. Check whether an existing fix worktree, staged docs/config edit, or open PR already targets this issue in `<event.repo>`:
         - **Existing worktree or open PR (`deliverySkill: "pr"`)**: Do not create a duplicate branch or worktree. Invoke **`pr`** (`/jongio-skills:pr` with the resolved `--merge` mode) directly against that existing worktree and PR identity.
-        - **New repair (`deliverySkill: "go"`)**: Create a fresh git worktree outside the repository (`<worktree-root>/<repo>/<fix-branch>` off `origin/<branch>`) so you never disturb the user's active working tree, then invoke **`go`** (`/jongio-skills:go` with the resolved `--merge` mode) to run `test-doctor fix`, implement and verify the smallest complete fix (plus `actionlint`/`shellcheck`/Podman `act` when touching `.github/workflows/`), and hand off to **`pr`** (`/jongio-skills:pr`).
-     5. Monitor the PR through **`pr`** until all CI checks and expected reviews (including Copilot) complete on the current head, all actionable review findings (including review-body-only findings) are fixed and replied to with commit links, and the PR is either merged (under `--merge=auto` or user confirmation) or reported as `awaiting merge approval; not merged`. When monitoring multiple PRs, report a concise status table (PR link, CI status, approval state, unresolved comment count, current action).
+        - **New repair (`deliverySkill: "go"`)**: Create a fresh git worktree outside the repository (`<worktree-root>/<repo>/<fix-branch>` off `origin/<branch>` for `<event.repo>`) so you never disturb the user's active working tree, then invoke **`go`** (`/jongio-skills:go` with the resolved `--merge` mode) to run `test-doctor fix`, implement and verify the smallest complete fix (plus `actionlint`/`shellcheck`/Podman `act` when touching `.github/workflows/`), and hand off to **`pr`** (`/jongio-skills:pr`).
+     5. Monitor the PR through **`pr`** until all CI checks and expected reviews (including Copilot) complete on the current head, all actionable review findings (including review-body-only findings) are fixed within the PR's intended scope (do not auto-expand scope for tangential suggestions) and replied to with commit links (including a PR comment citing each Copilot review body ID and heading), and the PR is either merged (under `--merge=auto` or user confirmation) or reported as `awaiting merge approval; not merged`. When monitoring PRs, report status tables with a timestamp, PR links, CI status, approval state, unresolved comment count, and current action.
    - **`WATCHED_RUNS_GREEN` / `ALL_GREEN`**:
-     1. Execute any queued green-gated action requested by the user (such as dispatching `source-release.yml` on `main` and re-arming with `--watch-run <releaseRunId>`).
+     1. Execute any queued green-gated action requested by the user for `<event.repo>` (such as dispatching `source-release.yml` on `main` and re-arming with `--watch-run <event.repo>:<releaseRunId>`).
      2. Otherwise re-arm `ci-hound-daemon.mjs` with `--no-wake-on-green` to stay on guard for future merges or failures.
 4. **Proactive Workflow Optimization (`optimize` mode, Tier 2 telemetry across `main` + PRs)**:
-   - Run `node <skill-dir>/scripts/ci-hound-daemon.mjs optimize --repo <owner/repo> --merge <approval|auto>`.
+   - Run `node <skill-dir>/scripts/ci-hound-daemon.mjs optimize --merge <approval|auto>` (passing `--repo <owner/repo>` only when the user asks to optimize a specific repository).
    - Review `slowJobs`, `slowSteps`, and `recentFailures` (harvested from both `main` and `pull_request` runs even when no merges occur).
    - Deliver at most **one** focused, verified optimization/reliability PR at a time in an isolated worktree via **`go`** -> **`pr`** (or **`pr`** directly for an existing branch/PR) when `main` is healthy.
 

@@ -4,13 +4,20 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  applySetupConfig,
   buildOptimizationReport,
+  discoverOwnerRepos,
+  evaluateMultiRepoPollTick,
   evaluatePollTick,
   ghApiWithEtag,
+  isValidRepoSlug,
+  loadConfig,
   loadState,
   matchFlakePattern,
   parseArgs,
   parseHttpResponse,
+  resolveTargetRepos,
+  saveConfig,
   saveState,
   selectDeliverySkill,
 } from "../scripts/ci-hound-daemon.mjs";
@@ -38,11 +45,343 @@ test("portable skill frontmatter contains name, description, and version metadat
   assert.match(frontmatter[1], /^  version: "[^"]+"$/m);
 });
 
-test("skill includes workflow, go/pr routing, safety, and exit criteria", () => {
+test("skill includes workflow, setup, go/pr routing, safety, and exit criteria", () => {
+  assert.match(skill, /^## Multi-Repository Setup \(`\/ci-hound setup`\)$/m);
   assert.match(skill, /^## `go` vs `pr` Delivery Routing$/m);
   assert.match(skill, /^## Workflow$/m);
   assert.match(skill, /^## Safety$/m);
   assert.match(skill, /^## Exit Criteria$/m);
+});
+
+test("setup config, owner repo discovery, and multi-repo polling resolve and isolate repositories", async (t) => {
+  disableAlertsForTest(t);
+  const tempDir = await mkdtemp(path.join(tmpdir(), "ci-hound-setup-"));
+  t.after(() => rm(tempDir, { recursive: true, force: true }));
+  const configFile = path.join(tempDir, "config.json");
+
+  assert.equal(isValidRepoSlug("jongio/skills"), true);
+  assert.equal(isValidRepoSlug("invalid-slug"), false);
+  assert.equal(isValidRepoSlug("../escape"), false);
+  assert.throws(() => parseArgs(["setup", "--repos", "bad-slug"]), /Invalid repository slug/);
+  assert.throws(() => parseArgs(["setup", "--visibility", "secret"]), /Invalid --visibility/);
+  assert.throws(() => parseArgs(["setup", "--owner", "bad/owner"]), /Invalid --owner/);
+
+  const setupArgs = parseArgs([
+    "setup",
+    "--config-file",
+    configFile,
+    "--all-my-repos",
+    "--visibility=private",
+    "--add-repo",
+    "github/evals",
+    "--merge=auto",
+  ]);
+  const saved = applySetupConfig(setupArgs, loadConfig(configFile));
+  saveConfig(configFile, saved);
+  const reloaded = loadConfig(configFile);
+  assert.equal(reloaded.owner, "@me");
+  assert.equal(reloaded.visibility, "private");
+  assert.deepEqual(reloaded.repos, ["github/evals"]);
+  assert.equal(reloaded.mergeMode, "auto");
+
+  // Incremental add/remove without --merge preserves existing mergeMode
+  const modified = applySetupConfig(
+    parseArgs(["setup", "--add-repo", "jongio/skills", "--remove-repo", "github/evals"]),
+    reloaded
+  );
+  assert.deepEqual(modified.repos, ["jongio/skills"]);
+  assert.equal(modified.mergeMode, "auto");
+
+  // Replacing repos with an explicit --repos list clears inherited owner and visibility filters
+  const replaced = applySetupConfig(parseArgs(["setup", "--repos", "acme/one"]), modified);
+  assert.deepEqual(replaced.repos, ["acme/one"]);
+  assert.equal(replaced.owner, "");
+  assert.equal(replaced.visibility, "");
+
+  const discoveryState = loadState("/nonexistent/discovery.json");
+  const page1Repos = Array.from({ length: 100 }, (_, idx) => ({
+    full_name: `jongio/archived-${idx}`,
+    owner: { login: "jongio" },
+    private: true,
+    archived: true,
+    disabled: false,
+  }));
+  const discovered = discoverOwnerRepos("@me", "private", discoveryState, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100&page=1") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\nETag: "p1"\n\n${JSON.stringify(page1Repos)}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100&page=2") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\nETag: "p2"\n\n${JSON.stringify([
+          { full_name: "jongio/private-page2", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+          { full_name: "jongio/public-one", owner: { login: "jongio" }, private: false, archived: false, disabled: false },
+        ])}`,
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected discovery endpoint: ${endpoint}`);
+  });
+  assert.deepEqual(discovered, ["jongio/private-page2"]);
+  assert.ok(discoveryState.etags["user/repos?affiliation=owner&visibility=private&per_page=100&page=1"]);
+  assert.ok(discoveryState.etags["user/repos?affiliation=owner&visibility=private&per_page=100&page=2"]);
+
+  // Named owner discovery finds private repos via authenticated user/repos and public repos via users/<owner>/repos
+  const namedOwnerDiscovered = discoverOwnerRepos("jongio", "private", loadState("/nonexistent/d2.json"), (ghArgs) => {
+    assert.equal(
+      ghArgs[2],
+      "user/repos?affiliation=owner,organization_member,collaborator&visibility=private&per_page=100&page=1"
+    );
+    return {
+      ok: true,
+      stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+        { full_name: "jongio/secret-repo", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+        { full_name: "other/secret-repo", owner: { login: "other" }, private: true, archived: false, disabled: false },
+      ])}`,
+      stderr: "",
+    };
+  });
+  assert.deepEqual(namedOwnerDiscovered, ["jongio/secret-repo"]);
+
+  // Case-insensitive repository normalization deduplicates mixed-case spellings across config, discovery, and --watch-run
+  const mixedCaseArgs = parseArgs(["watch", "--repo", "Acme/Project", "--watch-run", "acme/project:99"]);
+  assert.deepEqual(mixedCaseArgs.explicitRepos, ["acme/project"]);
+  assert.deepEqual(mixedCaseArgs.watchRunsByRepo, { "acme/project": [99] });
+  const mixedResolved = resolveTargetRepos(
+    parseArgs(["watch"]),
+    { repos: ["Jongio/Private-One"], owner: "@me", visibility: "private", branch: "main", mergeMode: "approval", worktreeRoot: "" },
+    loadState("/nonexistent/d-case.json"),
+    () => ({
+      ok: true,
+      stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+        { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+      ])}`,
+      stderr: "",
+    })
+  );
+  assert.deepEqual(mixedResolved, ["jongio/private-one"]);
+
+  // Uncached discovery error throws instead of silently returning a partial/empty watchlist
+  assert.throws(
+    () =>
+      discoverOwnerRepos("@me", "private", loadState("/nonexistent/d-err.json"), () => ({
+        ok: false,
+        stdout: "HTTP/2.0 403 Forbidden\n\n",
+        stderr: "HTTP 403",
+      })),
+    /403/
+  );
+
+  // Empty configured owner scope must return [] and NOT fall back to current git checkout
+  const emptyOwnerConfig = { repos: [], owner: "jongio", visibility: "private", branch: "main", mergeMode: "approval", worktreeRoot: "" };
+  const emptyResolved = resolveTargetRepos(
+    parseArgs(["watch"]),
+    emptyOwnerConfig,
+    loadState("/nonexistent/d3.json"),
+    () => ({ ok: true, stdout: "HTTP/2.0 200 OK\n\n[]", stderr: "" })
+  );
+  assert.deepEqual(emptyResolved, []);
+
+  // Rejects explicit --state-file when multiple target repositories resolve
+  assert.throws(
+    () =>
+      evaluateMultiRepoPollTick(
+        parseArgs(["watch", "--config-file", configFile, "--state-file", path.join(tempDir, "shared.json")]),
+        reloaded,
+        (ghArgs) => {
+          if (ghArgs[2].startsWith("user/repos?")) {
+            return {
+              ok: true,
+              stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+                { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+              ])}`,
+              stderr: "",
+            };
+          }
+          throw new Error("Should not poll any repository when --state-file is shared across multiple repos");
+        }
+      ),
+    /Cannot use a single --state-file when monitoring multiple repositories/
+  );
+
+  // Rejects unqualified --watch-run when multiple target repositories resolve
+  assert.throws(
+    () =>
+      evaluateMultiRepoPollTick(
+        parseArgs(["watch", "--config-file", configFile, "--watch-run", "12345"]),
+        reloaded,
+        (ghArgs) => {
+          if (ghArgs[2].startsWith("user/repos?")) {
+            return {
+              ok: true,
+              stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+                { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+              ])}`,
+              stderr: "",
+            };
+          }
+          throw new Error("Should not poll any repository when unqualified --watch-run is ambiguous");
+        }
+      ),
+    /Unqualified --watch-run requires a single target repository/
+  );
+  assert.throws(() => parseArgs(["watch", "--watch-run", "bad:id"]), /Invalid --watch-run/);
+  assert.throws(
+    () =>
+      evaluateMultiRepoPollTick(
+        parseArgs(["watch", "--repo", "acme/one", "--watch-run", "acme/two:99"]),
+        reloaded,
+        () => ({ ok: true, stdout: "[]", stderr: "" })
+      ),
+    /Watched run repository "acme\/two" is not in the explicit/
+  );
+  const multiHeaderParsed = parseHttpResponse(
+    'HTTP/1.1 100 Continue\r\n\r\nHTTP/2.0 200 OK\r\nETag: "e-final"\r\n\r\n{"ok":true}'
+  );
+  assert.equal(multiHeaderParsed.status, 200);
+  assert.equal(multiHeaderParsed.etag, '"e-final"');
+  assert.equal(multiHeaderParsed.bodyText, '{"ok":true}');
+
+  const watchArgs = parseArgs(["watch", "--config-file", configFile]);
+  const multiTick = evaluateMultiRepoPollTick(watchArgs, reloaded, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100&page=1") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+          { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+        ])}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.startsWith("repos/") && endpoint.endsWith("/commits/main")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha123"}', stderr: "" };
+    }
+    if (endpoint === "repos/jongio/private-one/actions/runs?branch=main&per_page=20") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 7001,
+              name: "CI",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha123",
+              status: "completed",
+              conclusion: "failure",
+              updated_at: "2026-10-22T19:00:00Z",
+              html_url: "https://github.com/jongio/private-one/actions/runs/7001",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.includes("/actions/runs")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"workflow_runs":[],"jobs":[]}', stderr: "" };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+
+  assert.deepEqual(multiTick.repos, ["github/evals", "jongio/private-one"]);
+  assert.equal(multiTick.events.length, 1);
+  assert.equal(multiTick.events[0].repo, "jongio/private-one");
+  assert.equal(multiTick.events[0].type, "WORKFLOW_FAILED");
+  assert.equal(multiTick.events[0].deliverySkill, "go");
+  assert.equal(multiTick.events[0].mergeMode, "auto");
+
+  // Supports repository-qualified --watch-run <owner/repo>:<runId> across multiple repositories
+  // and scopes --existing-worktree only to the repository with watched runs
+  const qualifiedWatchArgs = parseArgs([
+    "watch",
+    "--config-file",
+    configFile,
+    "--watch-run",
+    "github/evals:9999",
+    "--existing-worktree",
+  ]);
+  const qualifiedTick = evaluateMultiRepoPollTick(qualifiedWatchArgs, reloaded, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint.startsWith("user/repos?")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+          { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+          { full_name: "jongio/private-two", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+        ])}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.startsWith("repos/") && endpoint.endsWith("/commits/main")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha123"}', stderr: "" };
+    }
+    if (endpoint === "repos/jongio/private-two/actions/runs?branch=main&per_page=20") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 7002,
+              name: "CI",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha123",
+              status: "completed",
+              conclusion: "failure",
+              updated_at: "2026-10-22T19:05:00Z",
+              html_url: "https://github.com/jongio/private-two/actions/runs/7002",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/9999") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          id: 9999,
+          name: "Release",
+          event: "workflow_dispatch",
+          head_branch: "main",
+          head_sha: "sha123",
+          status: "completed",
+          conclusion: "success",
+          updated_at: "2026-10-22T19:05:00Z",
+          html_url: "https://github.com/github/evals/actions/runs/9999",
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.includes("/actions/runs")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"workflow_runs":[],"jobs":[]}', stderr: "" };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(qualifiedTick.events.length, 2);
+  const evalsWatchedEvent = qualifiedTick.events.find((e) => e.repo === "github/evals");
+  const unrelatedFailEvent = qualifiedTick.events.find((e) => e.repo === "jongio/private-two");
+  assert.equal(evalsWatchedEvent.type, "WATCHED_RUNS_GREEN");
+  assert.deepEqual(evalsWatchedEvent.watchRunIds, [9999]);
+  assert.equal(unrelatedFailEvent.type, "WORKFLOW_FAILED");
+  assert.equal(
+    unrelatedFailEvent.deliverySkill,
+    "go",
+    "--existing-worktree must not leak to repositories without watched runs"
+  );
+
+  const cleared = applySetupConfig(parseArgs(["setup", "--clear-repos"]), reloaded);
+  assert.deepEqual(cleared.repos, []);
+  assert.equal(cleared.owner, "");
+  assert.deepEqual(resolveTargetRepos(parseArgs(["watch", "--repo", "github/evals"]), cleared, discoveryState), [
+    "github/evals",
+  ]);
 });
 
 test("selectDeliverySkill routes new failures and optimizations to go and existing worktrees/PRs to pr", () => {
