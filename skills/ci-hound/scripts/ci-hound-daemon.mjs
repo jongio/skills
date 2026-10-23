@@ -1251,6 +1251,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       (isWatchedRun && run.status !== "completed");
 
     let jobs = prevRun?.jobs || [];
+    let jobsFetchRateLimited = false;
     if (needsJobsInspection) {
       if (tickRateLimited) {
         continue;
@@ -1260,8 +1261,35 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         tickRateLimited = true;
         continue;
       }
-      if (jobsRes.data?.jobs) {
-        jobs = jobsRes.data.jobs;
+      if (Array.isArray(jobsRes.data?.jobs)) {
+        const collectedJobs = [...jobsRes.data.jobs];
+        const totalJobsExpected =
+          typeof jobsRes.data.total_count === "number"
+            ? jobsRes.data.total_count
+            : collectedJobs.length;
+        let page = 2;
+        while (collectedJobs.length < totalJobsExpected && page <= 10) {
+          const pageRes = ghApiWithEtag(
+            `repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50&page=${page}`,
+            state,
+            execFn
+          );
+          if (pageRes.rateLimited) {
+            tickRateLimited = true;
+            jobsFetchRateLimited = true;
+            break;
+          }
+          const pageJobs = pageRes.data?.jobs;
+          if (!Array.isArray(pageJobs) || pageJobs.length === 0) {
+            break;
+          }
+          collectedJobs.push(...pageJobs);
+          page += 1;
+        }
+        if (jobsFetchRateLimited) {
+          continue;
+        }
+        jobs = collectedJobs;
       }
       if (run.status === "completed" && !prevRun?.telemetryRecorded && jobs.length > 0) {
         recordTelemetryForRun(run, jobs, state);
@@ -1447,26 +1475,28 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     sha: state.lastMainSha,
     activeRuns: activeRunProgress,
   });
-  const statusPayload = {
-    timestamp: state.metrics.lastPollAt,
-    repo: args.repo,
-    branch: args.branch,
-    sha: state.lastMainSha,
-    phase: phaseInfo.phase,
-    summary: phaseInfo.summary,
-    activeMainRuns,
-    activeRuns: activeRunProgress,
-    nextIntervalSec,
-    cacheHits304: state.metrics?.cacheHits304 || 0,
-    rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
-  };
+  const statusPayload = tickRateLimited
+    ? null
+    : {
+        timestamp: state.metrics.lastPollAt,
+        repo: args.repo,
+        branch: args.branch,
+        sha: state.lastMainSha,
+        phase: phaseInfo.phase,
+        summary: phaseInfo.summary,
+        activeMainRuns,
+        activeRuns: activeRunProgress,
+        nextIntervalSec,
+        cacheHits304: state.metrics?.cacheHits304 || 0,
+        rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
+      };
 
   return {
     events,
     activeMainRuns,
     rateLimited: tickRateLimited,
     nextIntervalSec,
-    status: statusPayload,
+    ...(statusPayload ? { status: statusPayload } : {}),
   };
 }
 

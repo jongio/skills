@@ -135,6 +135,11 @@ export function parsePrWatchArgs(argv) {
     args.pr = args.prs[0];
   } else if (args.pr > 0 && args.prs.length === 0) {
     args.prs = [args.pr];
+  } else if (args.pr > 0 && !args.prs.includes(args.pr)) {
+    args.prs.unshift(args.pr);
+  }
+  if (args.pr > 0 && args.head && !args.prHeads[args.pr]) {
+    args.prHeads[args.pr] = args.head;
   }
   if (args.prs.length === 1 && !args.head && args.prHeads[args.prs[0]]) {
     args.head = args.prHeads[args.prs[0]];
@@ -1927,7 +1932,9 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
       };
     }
     const entry = multiState[prNumber];
-    const prHead = args.prHeads?.[prNumber] ?? (targetPrs.length === 1 ? args.head : "");
+    const prHead =
+      args.prHeads?.[prNumber] ??
+      (prNumber === args.pr || targetPrs.length === 1 ? args.head : "");
     const prArgs = {
       ...args,
       pr: prNumber,
