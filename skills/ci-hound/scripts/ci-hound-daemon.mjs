@@ -1268,7 +1268,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
             ? jobsRes.data.total_count
             : collectedJobs.length;
         let page = 2;
-        while (collectedJobs.length < totalJobsExpected && page <= 10) {
+        while (collectedJobs.length < totalJobsExpected) {
           const pageRes = ghApiWithEtag(
             `repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50&page=${page}`,
             state,
