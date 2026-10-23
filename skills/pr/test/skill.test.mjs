@@ -627,6 +627,72 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(workflowErrTick.events[0].type, "POLL_ERROR");
   assert.match(workflowErrTick.error, /503/);
 
+  // 5. CI_FAILED is emitted when either statusCheckRollup or workflow_runs reports a failure
+  const ciFailedTick = evaluatePrPollTick(args, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "UNSTABLE",
+                reviewDecision: null,
+                reviewRequests: { nodes: [] },
+                reviews: { nodes: [] },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        statusCheckRollup: {
+                          state: "FAILURE",
+                          contexts: {
+                            nodes: [
+                              {
+                                __typename: "CheckRun",
+                                name: "Detect statusline changes",
+                                status: "COMPLETED",
+                                conclusion: "FAILURE",
+                                detailsUrl: "https://github.com/jongio/skills/actions/runs/1/job/2",
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        workflow_runs: [
+          {
+            name: "Statusline performance",
+            status: "completed",
+            conclusion: "failure",
+            html_url: "https://github.com/jongio/skills/actions/runs/1",
+          },
+        ],
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(ciFailedTick.events[0].type, "CI_FAILED");
+  assert.equal(ciFailedTick.events[0].failedChecks.length, 2);
+  assert.ok(ciFailedTick.events[0].remediation);
+
   // 3. Phase-transition wakeup: emits PHASE_CHANGED when CI transitions from running to passed while Copilot reviews
   const phaseInfo = computePrPhase({
     totalChecksCount: 7,

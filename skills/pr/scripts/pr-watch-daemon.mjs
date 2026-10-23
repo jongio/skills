@@ -445,36 +445,67 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     }
   }
 
-  if (failedChecks.length > 0) {
-    return {
-      events: [{ type: "CI_FAILED", headRefOid: headOid, failedChecks }],
-    };
-  }
-
-  // Check if Running Copilot Code Review workflow run is active on headOid
+  // Check Actions workflow runs on headOid for both active Copilot reviews and workflow-level CI failures
   let copilotWorkflowActive = false;
-  if (args.expectCopilot) {
-    const runsRes = execFn(["api", `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=20`]);
-    if (!runsRes.ok || !runsRes.stdout) {
+  const runsRes = execFn(["api", `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=20`]);
+  if (!runsRes.ok || !runsRes.stdout) {
+    if (args.expectCopilot) {
       const errMsg = runsRes.stderr || "Workflow runs inventory unavailable";
       return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
     }
+  } else {
     let runsData;
     try {
       runsData = JSON.parse(runsRes.stdout);
     } catch (error) {
-      const errMsg = `Invalid workflow runs JSON: ${error.message}`;
-      return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+      if (args.expectCopilot) {
+        const errMsg = `Invalid workflow runs JSON: ${error.message}`;
+        return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
+      }
     }
-    if (!Array.isArray(runsData?.workflow_runs)) {
+    if (args.expectCopilot && !Array.isArray(runsData?.workflow_runs)) {
       const errMsg = "Workflow runs response missing workflow_runs array";
       return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
     }
-    copilotWorkflowActive = runsData.workflow_runs.some(
-      (r) =>
-        /Copilot Code Review/i.test(r.name || "") &&
-        r.status !== "completed"
-    );
+    for (const run of runsData?.workflow_runs || []) {
+      if (/Copilot Code Review/i.test(run.name || "")) {
+        if (run.status !== "completed") {
+          copilotWorkflowActive = true;
+        }
+        continue;
+      }
+      if (
+        run.status === "completed" &&
+        run.conclusion &&
+        !["success", "skipped", "neutral"].includes(run.conclusion.toLowerCase())
+      ) {
+        const alreadyRecorded = failedChecks.some(
+          (fc) => fc.url === run.html_url || fc.name === run.name
+        );
+        if (!alreadyRecorded) {
+          failedChecks.push({
+            name: run.name,
+            conclusion: run.conclusion.toUpperCase(),
+            url: run.html_url,
+          });
+        }
+      }
+    }
+  }
+
+  if (failedChecks.length > 0) {
+    return {
+      events: [
+        {
+          type: "CI_FAILED",
+          timestamp: new Date().toISOString(),
+          headRefOid: headOid,
+          failedChecks,
+          remediation:
+            "Inspect the failed job logs via `gh api repos/<owner>/<repo>/actions/jobs/<jobId>/logs`, fix the root cause (or rebase if base SHA drifted during push), commit, push, and restart pr-watch-daemon.mjs.",
+        },
+      ],
+    };
   }
 
   const rawPendingReviewers = (pr.reviewRequests?.nodes || [])
