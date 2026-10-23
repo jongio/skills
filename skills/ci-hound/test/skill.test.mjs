@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   applySetupConfig,
   buildOptimizationReport,
+  computeNextPollIntervalSec,
   discoverOwnerRepos,
   evaluateMultiRepoPollTick,
   evaluatePollTick,
@@ -15,7 +16,9 @@ import {
   loadState,
   matchFlakePattern,
   parseArgs,
+  parseGhApiArgs,
   parseHttpResponse,
+  pruneState,
   resolveTargetRepos,
   saveConfig,
   saveState,
@@ -918,6 +921,150 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
   assert.equal(prBranchTick.events.length, 1);
   assert.equal(prBranchTick.events[0].type, "WORKFLOW_FAILED");
   assert.equal(prBranchTick.events[0].deliverySkill, "pr");
+});
+
+test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and back off under rate pressure", () => {
+  // 1. parseGhApiArgs parses REST (-i, -H, -X) and GraphQL (-F typed, -f raw) requests for keep-alive execution
+  const restReq = parseGhApiArgs([
+    "api",
+    "-i",
+    "repos/github/evals/actions/runs?per_page=25",
+    "-H",
+    'If-None-Match: "etag-1"',
+  ]);
+  assert.deepEqual(restReq, {
+    url: "https://api.github.com/repos/github/evals/actions/runs?per_page=25",
+    method: "GET",
+    includeHeaders: true,
+    headers: { "If-None-Match": '"etag-1"' },
+    body: undefined,
+  });
+
+  const gqlReq = parseGhApiArgs([
+    "api",
+    "graphql",
+    "-F",
+    "owner=jongio",
+    "-F",
+    "name=skills",
+    "-F",
+    "pr=178",
+    "-f",
+    "query=query($pr: Int!) { node }",
+  ]);
+  assert.equal(gqlReq.url, "https://api.github.com/graphql");
+  assert.equal(gqlReq.method, "POST");
+  assert.deepEqual(JSON.parse(gqlReq.body), {
+    query: "query($pr: Int!) { node }",
+    variables: { owner: "jongio", name: "skills", pr: 178 },
+  });
+
+  // 2. pruneState removes completed run jobs payloads from state.etags, retains active main runs and protected watched runs,
+  // and evicts stale unrefreshed non-main/PR active runs beyond maxRuns
+  const bloatedState = loadState("/nonexistent/state.json");
+  bloatedState.branch = "main";
+  bloatedState.runs["99"] = {
+    id: 99,
+    head_branch: "feat/old-pr",
+    event: "pull_request",
+    status: "in_progress",
+    telemetryRecorded: false,
+  };
+  bloatedState.runs["100"] = { id: 100, status: "completed", telemetryRecorded: true };
+  bloatedState.runs["101"] = {
+    id: 101,
+    head_branch: "main",
+    event: "push",
+    status: "in_progress",
+    telemetryRecorded: false,
+  };
+  bloatedState.etags["repos/o/r/actions/runs/100/jobs?per_page=50"] = {
+    etag: '"e100"',
+    data: { jobs: [{ id: 1 }] },
+    updatedAt: "2026-10-23T01:00:00Z",
+  };
+  bloatedState.etags["repos/o/r/actions/runs/101/jobs?per_page=50"] = {
+    etag: '"e101"',
+    data: { jobs: [{ id: 2 }] },
+    updatedAt: "2026-10-23T01:05:00Z",
+  };
+  pruneState(bloatedState, { maxRuns: 50, maxEtags: 50 });
+  assert.equal(bloatedState.etags["repos/o/r/actions/runs/100/jobs?per_page=50"], undefined);
+  assert.ok(bloatedState.etags["repos/o/r/actions/runs/101/jobs?per_page=50"]);
+
+  // Protected watched run IDs and active main runs are never evicted, while stale PR in_progress run 99 is evicted
+  for (let id = 200; id < 210; id += 1) {
+    bloatedState.runs[String(id)] = { id, status: "completed", telemetryRecorded: true };
+  }
+  pruneState(bloatedState, { maxRuns: 3, maxEtags: 50, protectedRunIds: [100] });
+  assert.ok(bloatedState.runs["100"]);
+  assert.ok(bloatedState.runs["101"]);
+  assert.equal(bloatedState.runs["99"], undefined);
+
+  // 3. Rate-limit headers and 429/403 secondary rate limits trigger interval backoff and preserve cached data
+  const rlState = loadState("/nonexistent/state.json");
+  rlState.etags["repos/o/r/commits/main"] = {
+    etag: '"cached-sha"',
+    data: { sha: "abc12345" },
+    updatedAt: "2026-10-23T01:00:00Z",
+  };
+  const rlRes = ghApiWithEtag("repos/o/r/commits/main", rlState, () => ({
+    ok: false,
+    stdout:
+      "HTTP/2.0 429 Too Many Requests\r\nx-ratelimit-remaining: 12\r\nretry-after: 90\r\n\r\n{\"message\":\"You have exceeded a secondary rate limit\"}",
+    stderr: "HTTP 429",
+  }));
+  assert.equal(rlRes.rateLimited, true);
+  assert.equal(rlRes.fromCache, true);
+  assert.deepEqual(rlRes.data, { sha: "abc12345" });
+  assert.equal(rlState.metrics.rateLimitRemaining, 12);
+  assert.equal(rlState.metrics.retryAfterSec, 90);
+
+  const pollArgs = parseArgs(["watch", "--repo", "o/r"]);
+  assert.equal(computeNextPollIntervalSec(pollArgs, 1, rlState.metrics), 90);
+  assert.equal(
+    computeNextPollIntervalSec(pollArgs, 0, { rateLimitRemaining: 200, retryAfterSec: null }),
+    120
+  );
+
+  // 4. Primary rate-limit 403 with X-RateLimit-Remaining: 0 and X-RateLimit-Reset (no Retry-After) backs off until reset
+  const futureReset = Math.floor(Date.now() / 1000) + 600;
+  const resetState = loadState("/nonexistent/state.json");
+  const resetRes = ghApiWithEtag("repos/o/r/commits/main", resetState, () => ({
+    ok: false,
+    stdout: `HTTP/2.0 403 Forbidden\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-reset: ${futureReset}\r\n\r\n{"message":"API rate limit exceeded"}`,
+    stderr: "HTTP 403",
+  }));
+  assert.equal(resetRes.rateLimited, true);
+  assert.ok(resetState.metrics.retryAfterSec >= 590);
+  assert.ok(computeNextPollIntervalSec(pollArgs, 1, resetState.metrics) >= 590);
+
+  // 5. evaluatePollTick stops further requests and defers ALL_GREEN when rate-limited
+  const deferState = loadState("/nonexistent/state.json");
+  deferState.lastMainSha = "sha1";
+  deferState.runs["500"] = {
+    id: 500,
+    name: "CI",
+    event: "push",
+    head_branch: "main",
+    head_sha: "sha1",
+    status: "completed",
+    conclusion: "success",
+  };
+  let callsDuringCooldown = 0;
+  const deferTick = evaluatePollTick(pollArgs, deferState, () => {
+    callsDuringCooldown += 1;
+    return {
+      ok: false,
+      stdout: "HTTP/2.0 429 Too Many Requests\r\nretry-after: 75\r\n\r\n{}",
+      stderr: "HTTP 429",
+    };
+  });
+  assert.equal(callsDuringCooldown, 1);
+  assert.equal(deferTick.rateLimited, true);
+  assert.equal(deferTick.events.length, 1);
+  assert.equal(deferTick.events[0].type, "RATE_LIMITED");
+  assert.equal(deferTick.nextIntervalSec, 75);
 });
 
 

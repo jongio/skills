@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_threads";
 
 export const FLAKE_PATTERNS = [
   {
@@ -338,6 +339,15 @@ function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
   const results = [];
   for (let page = 1; ; page += 1) {
     const res = ghApiWithEtag(`${baseEndpoint}&page=${page}`, state, execFn);
+    if (res.rateLimited) {
+      if (state) {
+        state.rateLimited = true;
+      }
+      if (Array.isArray(res.data)) {
+        results.push(...res.data);
+      }
+      break;
+    }
     if (!Array.isArray(res.data)) {
       throw new Error(res.error || `Repository discovery failed for ${baseEndpoint}&page=${page}`);
     }
@@ -355,6 +365,12 @@ function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
 export function discoverOwnerRepos(owner, visibility = "all", state, execFn = defaultExecGh) {
   if (!owner) {
     return [];
+  }
+  if (state) {
+    state.rateLimited = false;
+    if (state.metrics) {
+      state.metrics.retryAfterSec = null;
+    }
   }
   const effectiveVisibility = visibility || "all";
   let rawRepos = [];
@@ -378,7 +394,7 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
         byName.set(normalizeRepoSlug(r.full_name), r);
       }
     }
-    if (effectiveVisibility !== "private") {
+    if (effectiveVisibility !== "private" && !state?.rateLimited) {
       const publicOwnerRepos = fetchPaginatedRepos(
         `users/${encodeURIComponent(owner)}/repos?type=all&per_page=100`,
         state,
@@ -485,8 +501,76 @@ export function saveState(stateFile, state) {
   writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
 }
 
+export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunIds = [] } = {}) {
+  if (!state || typeof state !== "object") {
+    return state;
+  }
+  const protectedSet = new Set((protectedRunIds || []).map((id) => String(id)));
+  if (state.etags && typeof state.etags === "object") {
+    for (const endpoint of Object.keys(state.etags)) {
+      const jobsMatch = endpoint.match(/\/actions\/runs\/(\d+)\/jobs\b/);
+      if (jobsMatch) {
+        const runRecord = state.runs?.[jobsMatch[1]];
+        if (runRecord && runRecord.status === "completed" && runRecord.telemetryRecorded) {
+          delete state.etags[endpoint];
+        }
+      }
+    }
+    const etagEntries = Object.entries(state.etags);
+    if (etagEntries.length > maxEtags) {
+      etagEntries.sort((a, b) => {
+        const ta = Date.parse(a[1]?.updatedAt || "") || 0;
+        const tb = Date.parse(b[1]?.updatedAt || "") || 0;
+        return tb - ta;
+      });
+      for (const [oldEndpoint] of etagEntries.slice(maxEtags)) {
+        delete state.etags[oldEndpoint];
+      }
+    }
+  }
+  if (state.runs && typeof state.runs === "object") {
+    const targetBranch = state.branch || "main";
+    const allRunIds = Object.keys(state.runs).sort((a, b) => Number(b) - Number(a));
+    if (allRunIds.length > maxRuns) {
+      let keptCount = 0;
+      for (const runId of allRunIds) {
+        const runRecord = state.runs[runId];
+        const isTrackedActiveMainRun = Boolean(
+          runRecord &&
+            runRecord.status !== "completed" &&
+            runRecord.head_branch === targetBranch &&
+            !isPullRequestRunEvent(runRecord.event)
+        );
+        if (protectedSet.has(runId) || isTrackedActiveMainRun) {
+          keptCount += 1;
+          continue;
+        }
+        if (keptCount < maxRuns) {
+          keptCount += 1;
+        } else {
+          delete state.runs[runId];
+        }
+      }
+    }
+  }
+  return state;
+}
+
+function parseRetryAfterHeader(rawVal) {
+  if (!rawVal) return null;
+  const trimmed = String(rawVal).trim();
+  if (/^\d+$/.test(trimmed)) {
+    return Number.parseInt(trimmed, 10);
+  }
+  const dateMs = Date.parse(trimmed);
+  if (Number.isFinite(dateMs)) {
+    return Math.max(1, Math.ceil((dateMs - Date.now()) / 1000));
+  }
+  return null;
+}
+
 export function parseHttpResponse(raw) {
-  let remaining = raw.replace(/\r\n/g, "\n");
+  let remaining = String(raw || "").replace(/\r\n/g, "\n");
   let lastHeaderBlock = "";
   while (/^HTTP\/[\d.]+\s+\d{3}\b/.test(remaining)) {
     const splitIndex = remaining.indexOf("\n\n");
@@ -499,14 +583,50 @@ export function parseHttpResponse(raw) {
     remaining = remaining.slice(splitIndex + 2).trimStart();
   }
   if (!lastHeaderBlock) {
-    return { status: 200, etag: "", bodyText: remaining };
+    return {
+      status: 200,
+      etag: "",
+      rateLimitRemaining: null,
+      rateLimitReset: null,
+      retryAfterSec: null,
+      bodyText: remaining,
+    };
   }
   const bodyText = remaining.trim();
   const statusMatch = lastHeaderBlock.match(/^HTTP\/[\d.]+\s+(\d{3})/m);
   const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : 200;
   const etagMatch = lastHeaderBlock.match(/^etag:\s*(.+)$/im);
   const etag = etagMatch ? etagMatch[1].trim() : "";
-  return { status, etag, bodyText };
+  const remMatch = lastHeaderBlock.match(/^x-ratelimit-remaining:\s*(\d+)\s*$/im);
+  const rateLimitRemaining = remMatch ? Number.parseInt(remMatch[1], 10) : null;
+  const resetMatch = lastHeaderBlock.match(/^x-ratelimit-reset:\s*(\d+)\s*$/im);
+  const rateLimitReset = resetMatch ? Number.parseInt(resetMatch[1], 10) : null;
+  const retryMatch = lastHeaderBlock.match(/^retry-after:\s*(.+)$/im);
+  const retryAfterSec = retryMatch ? parseRetryAfterHeader(retryMatch[1]) : null;
+  return { status, etag, rateLimitRemaining, rateLimitReset, retryAfterSec, bodyText };
+}
+
+function computeResetDelaySec(rateLimitReset) {
+  if (!Number.isFinite(rateLimitReset) || rateLimitReset <= 0) return null;
+  return Math.max(1, Math.ceil(rateLimitReset - Date.now() / 1000));
+}
+
+export function computeNextPollIntervalSec(args, activeMainRuns, metrics = {}) {
+  const baseSec = activeMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec;
+  let intervalSec = baseSec;
+  if (Number.isFinite(metrics?.rateLimitRemaining) && metrics.rateLimitRemaining < 500) {
+    const floorSec = activeMainRuns > 0 ? 60 : 120;
+    intervalSec = Math.max(baseSec * 2, floorSec);
+  }
+  const resetDelaySec =
+    metrics?.rateLimitRemaining === 0 ? computeResetDelaySec(metrics?.rateLimitReset) : null;
+  if (Number.isFinite(resetDelaySec) && resetDelaySec > 0) {
+    intervalSec = Math.max(intervalSec, resetDelaySec);
+  }
+  if (Number.isFinite(metrics?.retryAfterSec) && metrics.retryAfterSec > 0) {
+    intervalSec = Math.max(intervalSec, metrics.retryAfterSec);
+  }
+  return intervalSec;
 }
 
 export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
@@ -518,9 +638,41 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
   state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   const result = execFn(ghArgs);
   const parsed = parseHttpResponse(result.stdout || "");
+  if (parsed.rateLimitRemaining !== null) {
+    state.metrics.rateLimitRemaining = parsed.rateLimitRemaining;
+  }
+  if (parsed.rateLimitReset !== null) {
+    state.metrics.rateLimitReset = parsed.rateLimitReset;
+  }
+  if (parsed.retryAfterSec !== null) {
+    state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, parsed.retryAfterSec);
+  }
+
   if (parsed.status === 304 && cached?.data !== undefined) {
     state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
     return { fromCache: true, data: cached.data };
+  }
+  const isRateLimited =
+    parsed.status === 429 ||
+    (parsed.status === 403 &&
+      (parsed.rateLimitRemaining === 0 ||
+        parsed.retryAfterSec !== null ||
+        /rate limit/i.test(parsed.bodyText || result.stderr || "")));
+  if (isRateLimited) {
+    const resetDelaySec =
+      parsed.rateLimitRemaining === 0 ? computeResetDelaySec(parsed.rateLimitReset) : null;
+    state.metrics.retryAfterSec = Math.max(
+      state.metrics.retryAfterSec || 0,
+      parsed.retryAfterSec || 0,
+      resetDelaySec || 0,
+      60
+    );
+    return {
+      fromCache: Boolean(cached?.data !== undefined),
+      data: cached?.data ?? null,
+      rateLimited: true,
+      error: result.stderr || `HTTP ${parsed.status} rate limited`,
+    };
   }
   if (!result.ok && parsed.status !== 304) {
     return { fromCache: false, data: cached?.data ?? null, error: result.stderr || `HTTP ${parsed.status}` };
@@ -536,7 +688,225 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
   }
 }
 
+export function parseGhApiArgs(ghArgs) {
+  if (!Array.isArray(ghArgs) || ghArgs[0] !== "api") {
+    return null;
+  }
+  let includeHeaders = false;
+  let method = "";
+  const headers = {};
+  let endpoint = "";
+  const rawFields = {};
+  const typedFields = {};
+
+  for (let i = 1; i < ghArgs.length; i += 1) {
+    const token = ghArgs[i];
+    if (token === "-i" || token === "--include") {
+      includeHeaders = true;
+    } else if ((token === "-X" || token === "--method") && ghArgs[i + 1]) {
+      method = String(ghArgs[++i]).toUpperCase();
+    } else if ((token === "-H" || token === "--header") && ghArgs[i + 1]) {
+      const rawHeader = String(ghArgs[++i]);
+      const colonIdx = rawHeader.indexOf(":");
+      if (colonIdx <= 0) return null;
+      headers[rawHeader.slice(0, colonIdx).trim()] = rawHeader.slice(colonIdx + 1).trim();
+    } else if ((token === "-f" || token === "--raw-field") && ghArgs[i + 1]) {
+      const pair = String(ghArgs[++i]);
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx <= 0) return null;
+      rawFields[pair.slice(0, eqIdx)] = pair.slice(eqIdx + 1);
+    } else if ((token === "-F" || token === "--field") && ghArgs[i + 1]) {
+      const pair = String(ghArgs[++i]);
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx <= 0) return null;
+      const key = pair.slice(0, eqIdx);
+      const val = pair.slice(eqIdx + 1);
+      if (val.startsWith("@")) return null;
+      if (/^-?\d+$/.test(val)) {
+        typedFields[key] = Number.parseInt(val, 10);
+      } else if (val === "true" || val === "false") {
+        typedFields[key] = val === "true";
+      } else if (val === "null") {
+        typedFields[key] = null;
+      } else {
+        typedFields[key] = val;
+      }
+    } else if (token.startsWith("-")) {
+      return null;
+    } else if (!endpoint) {
+      endpoint = token;
+    } else {
+      return null;
+    }
+  }
+
+  if (!endpoint) {
+    return null;
+  }
+
+  if (endpoint === "graphql") {
+    const query = rawFields.query ?? typedFields.query;
+    if (typeof query !== "string" || !query) {
+      return null;
+    }
+    const variables = { ...rawFields, ...typedFields };
+    delete variables.query;
+    return {
+      url: "https://api.github.com/graphql",
+      method: method || "POST",
+      includeHeaders,
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ query, variables }),
+    };
+  }
+
+  if (Object.keys(rawFields).length > 0 || Object.keys(typedFields).length > 0) {
+    return null;
+  }
+
+  const normalizedEndpoint = endpoint.replace(/^\/+/, "");
+  const url = /^https?:\/\//i.test(endpoint)
+    ? endpoint
+    : `https://api.github.com/${normalizedEndpoint}`;
+  return {
+    url,
+    method: method || "GET",
+    includeHeaders,
+    headers,
+    body: undefined,
+  };
+}
+
+let keepAliveWorkerState = null;
+let nextWorkerReqId = 0;
+
+function resolveGhTokenOnce() {
+  const envToken = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim();
+  if (envToken) {
+    return envToken;
+  }
+  try {
+    return execFileSync("gh", ["auth", "token"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5000,
+    }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function getKeepAliveWorker() {
+  if (process.env.GH_HOST || process.env.CI_HOUND_DISABLE_KEEPALIVE === "1") {
+    return null;
+  }
+  if (keepAliveWorkerState !== null) {
+    return keepAliveWorkerState;
+  }
+  const token = resolveGhTokenOnce();
+  if (!token) {
+    keepAliveWorkerState = false;
+    return false;
+  }
+  try {
+    const { port1, port2 } = new MessageChannel();
+    const workerCode = `
+      const { parentPort } = require("node:worker_threads");
+      let replyPort = null;
+      parentPort.on("message", async (msg) => {
+        if (msg.initPort) {
+          replyPort = msg.initPort;
+          return;
+        }
+        const { reqId, token, req, signalBuf } = msg;
+        const signal = new Int32Array(signalBuf);
+        try {
+          const res = await fetch(req.url, {
+            method: req.method,
+            headers: {
+              Accept: "application/vnd.github+json",
+              Authorization: "Bearer " + token,
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "jongio-skills-daemon",
+              ...req.headers,
+            },
+            body: req.body,
+            signal: AbortSignal.timeout(28000),
+          });
+          const bodyText = await res.text();
+          let stdout = bodyText;
+          if (req.includeHeaders) {
+            const hdrLines = ["HTTP/2.0 " + res.status];
+            for (const h of ["etag", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after"]) {
+              const v = res.headers.get(h);
+              if (v !== null && v !== undefined && v !== "") hdrLines.push(h + ": " + v);
+            }
+            stdout = hdrLines.join("\\r\\n") + "\\r\\n\\r\\n" + bodyText;
+          }
+          replyPort.postMessage({
+            reqId,
+            ok: res.ok || (req.includeHeaders && res.status === 304),
+            stdout,
+            stderr: res.ok || res.status === 304 ? "" : (bodyText || ("HTTP " + res.status)),
+          });
+        } catch (err) {
+          replyPort.postMessage({
+            reqId,
+            ok: false,
+            transportError: true,
+            stdout: "",
+            stderr: err && err.message ? err.message : String(err),
+          });
+        } finally {
+          Atomics.store(signal, 0, 1);
+          Atomics.notify(signal, 0, 1);
+        }
+      });
+    `;
+    const worker = new Worker(workerCode, { eval: true });
+    worker.unref();
+    worker.postMessage({ initPort: port2 }, [port2]);
+    keepAliveWorkerState = { worker, port1, token };
+    return keepAliveWorkerState;
+  } catch {
+    keepAliveWorkerState = false;
+    return false;
+  }
+}
+
 function defaultExecGh(ghArgs) {
+  const parsedReq = parseGhApiArgs(ghArgs);
+  if (parsedReq) {
+    const ka = getKeepAliveWorker();
+    if (ka) {
+      const reqId = (nextWorkerReqId += 1);
+      const signalBuf = new SharedArrayBuffer(4);
+      const signal = new Int32Array(signalBuf);
+      ka.worker.postMessage({
+        reqId,
+        token: ka.token,
+        req: parsedReq,
+        signalBuf,
+      });
+      const waitRes = Atomics.wait(signal, 0, 0, 30000);
+      while (true) {
+        const msg = receiveMessageOnPort(ka.port1);
+        if (!msg) break;
+        if ((waitRes === "ok" || waitRes === "not-equal") && msg.message?.reqId === reqId) {
+          const isReadOnlyRequest =
+            parsedReq.method === "GET" || parsedReq.url.endsWith("/graphql");
+          if (msg.message.transportError && isReadOnlyRequest) {
+            break;
+          }
+          return {
+            ok: msg.message.ok,
+            stdout: msg.message.stdout,
+            stderr: msg.message.stderr,
+          };
+        }
+      }
+    }
+  }
   const res = spawnSync("gh", ghArgs, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
@@ -729,12 +1099,20 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   state.repo = args.repo;
   state.branch = args.branch;
   state.metrics.lastPollAt = new Date().toISOString();
+  state.metrics.rateLimitRemaining = null;
+  state.metrics.rateLimitReset = null;
+  state.metrics.retryAfterSec = null;
+  state.rateLimited = false;
 
   const events = [];
+  let tickRateLimited = false;
 
   const commitRes = ghApiWithEtag(`repos/${args.repo}/commits/${args.branch}`, state, execFn);
+  if (commitRes.rateLimited) {
+    tickRateLimited = true;
+  }
   const currentSha = commitRes.data?.sha || state.lastMainSha;
-  if (currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
+  if (!tickRateLimited && currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
     const prevSha = state.lastMainSha;
     state.lastMainSha = currentSha;
     if (args.wakeOnNewCommit) {
@@ -749,12 +1127,25 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     state.lastMainSha = currentSha;
   }
 
-  const branchRunsRes = ghApiWithEtag(
-    `repos/${args.repo}/actions/runs?branch=${encodeURIComponent(args.branch)}&per_page=20`,
-    state,
-    execFn
-  );
-  const allRunsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs?per_page=25`, state, execFn);
+  let branchRunsRes = { data: null };
+  if (!tickRateLimited) {
+    branchRunsRes = ghApiWithEtag(
+      `repos/${args.repo}/actions/runs?branch=${encodeURIComponent(args.branch)}&per_page=20`,
+      state,
+      execFn
+    );
+    if (branchRunsRes.rateLimited) {
+      tickRateLimited = true;
+    }
+  }
+
+  let allRunsRes = { data: null };
+  if (!tickRateLimited) {
+    allRunsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs?per_page=25`, state, execFn);
+    if (allRunsRes.rateLimited) {
+      tickRateLimited = true;
+    }
+  }
 
   const runMap = new Map();
   for (const r of branchRunsRes.data?.workflow_runs || []) {
@@ -776,8 +1167,15 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
   for (const watchId of trackedActiveIds) {
+    if (tickRateLimited) {
+      break;
+    }
     if (!runMap.has(watchId)) {
       const watchRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${watchId}`, state, execFn);
+      if (watchRes.rateLimited) {
+        tickRateLimited = true;
+        break;
+      }
       if (watchRes.data?.id) {
         runMap.set(watchRes.data.id, watchRes.data);
       }
@@ -807,7 +1205,14 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
 
     let jobs = prevRun?.jobs || [];
     if (needsJobsInspection) {
+      if (tickRateLimited) {
+        continue;
+      }
       const jobsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
+      if (jobsRes.rateLimited) {
+        tickRateLimited = true;
+        continue;
+      }
       if (jobsRes.data?.jobs) {
         jobs = jobsRes.data.jobs;
       }
@@ -920,12 +1325,19 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
 
-  const runIdsDescending = Object.keys(state.runs).sort((a, b) => Number(b) - Number(a));
-  for (const oldId of runIdsDescending.slice(100)) {
-    delete state.runs[oldId];
-  }
+  pruneState(state, { protectedRunIds: args.watchRunIds || [] });
+  state.rateLimited = tickRateLimited;
 
-  if (events.length === 0 && args.wakeOnAllGreen) {
+  const nextIntervalSec = computeNextPollIntervalSec(args, activeMainRuns, state.metrics);
+
+  if (tickRateLimited) {
+    events.push({
+      type: "RATE_LIMITED",
+      repo: args.repo,
+      retryAfterSec: nextIntervalSec,
+      rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
+    });
+  } else if (events.length === 0 && args.wakeOnAllGreen) {
     if (args.watchRunIds.length > 0) {
       const watchedRecords = args.watchRunIds.map((id) => state.runs[String(id)]).filter(Boolean);
       const allWatchedDone =
@@ -964,7 +1376,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   return {
     events,
     activeMainRuns,
-    nextIntervalSec: activeMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec,
+    rateLimited: tickRateLimited,
+    nextIntervalSec,
   };
 }
 
@@ -979,6 +1392,12 @@ export function stateFileForRepo(repo, args) {
 export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) {
   const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
   const discoveryState = loadState(discoveryStateFile);
+  discoveryState.rateLimited = false;
+  if (discoveryState.metrics) {
+    discoveryState.metrics.rateLimitRemaining = null;
+    discoveryState.metrics.rateLimitReset = null;
+    discoveryState.metrics.retryAfterSec = null;
+  }
   const targetRepos = resolveTargetRepos(args, config, discoveryState, execFn);
   for (const qualifiedRepo of Object.keys(args.watchRunsByRepo || {})) {
     if (args.explicitRepos.length > 0 && !args.explicitRepos.includes(qualifiedRepo)) {
@@ -1012,42 +1431,96 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const allEvents = [];
   const reports = [];
   let totalActiveMainRuns = 0;
+  let anyRateLimited = Boolean(discoveryState.rateLimited);
+  let minRateLimitRemaining = Number.isFinite(discoveryState.metrics?.rateLimitRemaining)
+    ? discoveryState.metrics.rateLimitRemaining
+    : null;
+  let maxRateLimitReset = Number.isFinite(discoveryState.metrics?.rateLimitReset)
+    ? discoveryState.metrics.rateLimitReset
+    : null;
+  let maxRetryAfterSec = Number.isFinite(discoveryState.metrics?.retryAfterSec)
+    ? discoveryState.metrics.retryAfterSec
+    : null;
 
-  for (const repo of targetRepos) {
-    const repoStateFile = stateFileForRepo(repo, args);
-    const repoState = loadState(repoStateFile);
-    const qualifiedIds = args.watchRunsByRepo?.[repo] || [];
-    const repoWatchRunIds =
-      targetRepos.length === 1
-        ? [...new Set([...args.watchRunIds, ...qualifiedIds])]
-        : [...qualifiedIds];
-    const applyRepoExistingFlags = !hasAnyWatchedRuns || repoWatchRunIds.length > 0;
-    const repoArgs = {
-      ...args,
-      repo,
-      branch: effectiveBranch,
-      mergeMode: effectiveMergeMode,
-      stateFile: repoStateFile,
-      watchRunIds: repoWatchRunIds,
-      hasExistingPr: applyRepoExistingFlags ? Boolean(args.hasExistingPr) : false,
-      hasCommittedFixBranch: applyRepoExistingFlags ? Boolean(args.hasCommittedFixBranch) : false,
-      docsOrConfigOnlyStaged: applyRepoExistingFlags ? Boolean(args.docsOrConfigOnlyStaged) : false,
-      wakeOnAllGreen: hasAnyWatchedRuns
-        ? repoWatchRunIds.length > 0 && args.wakeOnAllGreen
-        : args.wakeOnAllGreen,
-    };
-    const tick = evaluatePollTick(repoArgs, repoState, execFn);
-    saveState(repoStateFile, repoState);
-    allEvents.push(...tick.events);
-    totalActiveMainRuns += tick.activeMainRuns;
-    reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
+  const mergeRateMetrics = (metrics) => {
+    if (!metrics) return;
+    if (Number.isFinite(metrics.rateLimitRemaining)) {
+      minRateLimitRemaining =
+        minRateLimitRemaining === null
+          ? metrics.rateLimitRemaining
+          : Math.min(minRateLimitRemaining, metrics.rateLimitRemaining);
+    }
+    if (Number.isFinite(metrics.rateLimitReset)) {
+      maxRateLimitReset =
+        maxRateLimitReset === null
+          ? metrics.rateLimitReset
+          : Math.max(maxRateLimitReset, metrics.rateLimitReset);
+    }
+    if (Number.isFinite(metrics.retryAfterSec) && metrics.retryAfterSec > 0) {
+      maxRetryAfterSec =
+        maxRetryAfterSec === null
+          ? metrics.retryAfterSec
+          : Math.max(maxRetryAfterSec, metrics.retryAfterSec);
+    }
+  };
+
+  if (discoveryState.rateLimited) {
+    const discRetrySec = computeNextPollIntervalSec(args, 0, discoveryState.metrics);
+    allEvents.push({
+      type: "RATE_LIMITED",
+      repo: args.owner || config?.owner || "discovery",
+      retryAfterSec: discRetrySec,
+      rateLimitRemaining: discoveryState.metrics?.rateLimitRemaining ?? null,
+    });
+  } else {
+    for (const repo of targetRepos) {
+      const repoStateFile = stateFileForRepo(repo, args);
+      const repoState = loadState(repoStateFile);
+      const qualifiedIds = args.watchRunsByRepo?.[repo] || [];
+      const repoWatchRunIds =
+        targetRepos.length === 1
+          ? [...new Set([...args.watchRunIds, ...qualifiedIds])]
+          : [...qualifiedIds];
+      const applyRepoExistingFlags = !hasAnyWatchedRuns || repoWatchRunIds.length > 0;
+      const repoArgs = {
+        ...args,
+        repo,
+        branch: effectiveBranch,
+        mergeMode: effectiveMergeMode,
+        stateFile: repoStateFile,
+        watchRunIds: repoWatchRunIds,
+        hasExistingPr: applyRepoExistingFlags ? Boolean(args.hasExistingPr) : false,
+        hasCommittedFixBranch: applyRepoExistingFlags ? Boolean(args.hasCommittedFixBranch) : false,
+        docsOrConfigOnlyStaged: applyRepoExistingFlags ? Boolean(args.docsOrConfigOnlyStaged) : false,
+        wakeOnAllGreen: hasAnyWatchedRuns
+          ? repoWatchRunIds.length > 0 && args.wakeOnAllGreen
+          : args.wakeOnAllGreen,
+      };
+      const tick = evaluatePollTick(repoArgs, repoState, execFn);
+      saveState(repoStateFile, repoState);
+      allEvents.push(...tick.events);
+      totalActiveMainRuns += tick.activeMainRuns;
+      mergeRateMetrics(repoState.metrics);
+      reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
+      if (tick.rateLimited) {
+        anyRateLimited = true;
+        break;
+      }
+    }
   }
+
+  const nextIntervalSec = computeNextPollIntervalSec(args, totalActiveMainRuns, {
+    rateLimitRemaining: minRateLimitRemaining,
+    rateLimitReset: maxRateLimitReset,
+    retryAfterSec: maxRetryAfterSec,
+  });
 
   return {
     repos: targetRepos,
     events: allEvents,
     activeMainRuns: totalActiveMainRuns,
-    nextIntervalSec: totalActiveMainRuns > 0 ? args.activeIntervalSec : args.idleIntervalSec,
+    rateLimited: anyRateLimited,
+    nextIntervalSec,
     reports,
   };
 }
@@ -1092,7 +1565,7 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
     const multi = evaluateMultiRepoPollTick(args, existingConfig);
-    if (multi.repos.length === 0 && !hasOwnerScope) {
+    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
       console.error(
         "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
       );
@@ -1106,6 +1579,7 @@ export async function runCli(argv = process.argv.slice(2)) {
           tick: {
             events: multi.events,
             activeMainRuns: multi.activeMainRuns,
+            rateLimited: multi.rateLimited,
             nextIntervalSec: multi.nextIntervalSec,
           },
           report: multi.reports.length === 1 ? multi.reports[0] : multi.reports,
@@ -1121,14 +1595,15 @@ export async function runCli(argv = process.argv.slice(2)) {
   while (true) {
     polls += 1;
     const multi = evaluateMultiRepoPollTick(args, existingConfig);
-    if (multi.repos.length === 0 && !hasOwnerScope) {
+    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
       console.error(
         "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
       );
       process.exit(1);
     }
-    if (multi.events.length > 0) {
-      console.log(JSON.stringify({ repos: multi.repos, events: multi.events }, null, 2));
+    const terminalEvents = multi.events.filter((e) => e.type !== "RATE_LIMITED");
+    if (terminalEvents.length > 0) {
+      console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
       return;
     }
     if (args.maxPolls > 0 && polls >= args.maxPolls) {

@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  computeAdaptivePrIntervalSec,
   computePrPhase,
+  createPrWatchState,
   evaluatePrPollTick,
   extractBodyOnlyFindings,
   isErroredCopilotReview,
+  parseGhApiArgs,
   parsePrWatchArgs,
   requestCopilotReview,
 } from "../scripts/pr-watch-daemon.mjs";
@@ -1506,6 +1509,252 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   assert.equal(unrelatedNoiseRes.ok, true);
   assert.equal(unrelatedNoiseRes.status, "requested");
   assert.deepEqual(unrelatedNoiseRes.cancelledRunIds, []);
+});
+
+test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate-limit backoff", () => {
+  const watchArgs = parsePrWatchArgs([
+    "watch",
+    "--repo",
+    "jongio/skills",
+    "--pr",
+    "178",
+    "--head",
+    "head123",
+  ]);
+  const state = createPrWatchState();
+  const seenRunsArgs = [];
+  let runsCallCount = 0;
+
+  const gqlRunningPayload = JSON.stringify({
+    data: {
+      repository: {
+        pullRequest: {
+          state: "OPEN",
+          headRefOid: "head123",
+          mergeable: "MERGEABLE",
+          mergeStateStatus: "CLEAN",
+          reviewDecision: null,
+          reviewRequests: {
+            nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
+          },
+          reviews: { nodes: [] },
+          reviewThreads: { nodes: [] },
+          comments: { nodes: [] },
+          commits: {
+            nodes: [
+              {
+                commit: {
+                  statusCheckRollup: {
+                    state: "PENDING",
+                    contexts: {
+                      nodes: [
+                        { __typename: "CheckRun", name: "lint", status: "IN_PROGRESS", conclusion: null },
+                      ],
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  });
+
+  const execWithEtag = (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+    }
+    seenRunsArgs.push(ghArgs);
+    runsCallCount += 1;
+    if (runsCallCount === 1) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\r\netag: "runs-etag-1"\r\nx-ratelimit-remaining: 4500\r\n\r\n${JSON.stringify({
+          total_count: 1,
+          workflow_runs: [{ id: 1, name: "Running Copilot Code Review", status: "in_progress" }],
+        })}`,
+        stderr: "",
+      };
+    }
+    return {
+      ok: true,
+      stdout: 'HTTP/2.0 304 Not Modified\r\netag: "runs-etag-1"\r\nx-ratelimit-remaining: 4500\r\n\r\n',
+      stderr: "",
+    };
+  };
+
+  // First tick caches ETag; second tick sends If-None-Match and reuses cached workflow_runs on 304
+  const tick1 = evaluatePrPollTick(watchArgs, execWithEtag, state);
+  assert.equal(tick1.status.phase, "ci:running|review:copilot-reviewing");
+  assert.equal(tick1.status.cacheHits304, 0);
+  assert.equal(tick1.nextIntervalSec, 15);
+
+  const tick2 = evaluatePrPollTick(
+    { ...watchArgs, lastPhase: tick1.status.phase },
+    execWithEtag,
+    state
+  );
+  assert.equal(tick2.status.phase, "ci:running|review:copilot-reviewing");
+  assert.equal(tick2.status.cacheHits304, 1);
+  assert.deepEqual(seenRunsArgs[1].slice(-2), ["-H", 'If-None-Match: "runs-etag-1"']);
+
+  // Adaptive interval steps up after 4 and 12 unchanged polls, and widens on low rateLimitRemaining or retryAfterSec
+  assert.equal(computeAdaptivePrIntervalSec({ baseIntervalSec: 15, consecutiveUnchangedPolls: 3 }), 15);
+  assert.equal(computeAdaptivePrIntervalSec({ baseIntervalSec: 15, consecutiveUnchangedPolls: 4 }), 30);
+  assert.equal(computeAdaptivePrIntervalSec({ baseIntervalSec: 15, consecutiveUnchangedPolls: 12 }), 45);
+  assert.equal(
+    computeAdaptivePrIntervalSec({
+      baseIntervalSec: 15,
+      consecutiveUnchangedPolls: 1,
+      rateLimitRemaining: 250,
+    }),
+    60
+  );
+  assert.equal(
+    computeAdaptivePrIntervalSec({
+      baseIntervalSec: 15,
+      consecutiveUnchangedPolls: 1,
+      retryAfterSec: 75,
+    }),
+    75
+  );
+
+  // HTTP 429 rate-limit response emits RATE_LIMITED with retryAfterSec backoff instead of crashing
+  const rateLimitedTick = evaluatePrPollTick(
+    watchArgs,
+    (ghArgs) => {
+      if (ghArgs[1] === "graphql") {
+        return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+      }
+      return {
+        ok: false,
+        stdout: "HTTP/2.0 429 Too Many Requests\r\nretry-after: 90\r\nx-ratelimit-remaining: 0\r\n\r\n{}",
+        stderr: "HTTP 429",
+      };
+    },
+    createPrWatchState()
+  );
+  assert.equal(rateLimitedTick.rateLimited, true);
+  assert.equal(rateLimitedTick.events[0].type, "RATE_LIMITED");
+  assert.equal(rateLimitedTick.nextIntervalSec, 90);
+
+  // GraphQL RATE_LIMITED errors also emit RATE_LIMITED instead of crashing with POLL_ERROR
+  const gqlRateLimitedTick = evaluatePrPollTick(
+    watchArgs,
+    () => ({
+      ok: true,
+      stdout: JSON.stringify({
+        errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded" }],
+      }),
+      stderr: "",
+    }),
+    createPrWatchState()
+  );
+  assert.equal(gqlRateLimitedTick.rateLimited, true);
+  assert.equal(gqlRateLimitedTick.events[0].type, "RATE_LIMITED");
+  assert.equal(gqlRateLimitedTick.nextIntervalSec, 60);
+
+  // GraphQL HTTP 429 with httpMeta retryAfter: 300 (even without "rate limit" body text) preserves 300s delay
+  const gql429MetaTick = evaluatePrPollTick(
+    watchArgs,
+    () => ({
+      ok: false,
+      stdout: "{}",
+      stderr: "HTTP 429",
+      httpMeta: { status: 429, retryAfter: "300", rateLimitRemaining: "10" },
+    }),
+    createPrWatchState()
+  );
+  assert.equal(gql429MetaTick.rateLimited, true);
+  assert.equal(gql429MetaTick.events[0].type, "RATE_LIMITED");
+  assert.equal(gql429MetaTick.nextIntervalSec, 300);
+
+  // Primary rate-limit 403 with X-RateLimit-Remaining: 0 and X-RateLimit-Reset (no Retry-After) backs off until reset
+  const futureReset = Math.floor(Date.now() / 1000) + 420;
+  const resetRateLimitedTick = evaluatePrPollTick(
+    watchArgs,
+    (ghArgs) => {
+      if (ghArgs[1] === "graphql") {
+        return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+      }
+      return {
+        ok: false,
+        stdout: `HTTP/2.0 403 Forbidden\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-reset: ${futureReset}\r\n\r\n{"message":"API rate limit exceeded"}`,
+        stderr: "HTTP 403",
+      };
+    },
+    createPrWatchState()
+  );
+  assert.equal(resetRateLimitedTick.rateLimited, true);
+  assert.equal(resetRateLimitedTick.events[0].type, "RATE_LIMITED");
+  assert.ok(resetRateLimitedTick.nextIntervalSec >= 410);
+
+  // Low GraphQL quota (100 remaining) is not overwritten by high REST quota (4500 remaining)
+  const splitQuotaState = createPrWatchState();
+  const splitQuotaTick = evaluatePrPollTick(
+    watchArgs,
+    (ghArgs) => {
+      if (ghArgs[1] === "graphql") {
+        return {
+          ok: true,
+          stdout: gqlRunningPayload,
+          stderr: "",
+          httpMeta: { status: 200, rateLimitRemaining: "100", rateLimitReset: String(futureReset) },
+        };
+      }
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\r\nx-ratelimit-remaining: 4500\r\n\r\n${JSON.stringify({
+          total_count: 1,
+          workflow_runs: [{ id: 1, name: "Running Copilot Code Review", status: "in_progress" }],
+        })}`,
+        stderr: "",
+      };
+    },
+    splitQuotaState
+  );
+  assert.equal(splitQuotaTick.nextIntervalSec, 60);
+  assert.equal(splitQuotaState.metrics.rateLimitRemaining, 100);
+
+  // once-mode (state === null) still classifies REST httpMeta 429 and preserves retryAfter: 300
+  const onceRest429Tick = evaluatePrPollTick(watchArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+    }
+    return {
+      ok: false,
+      stdout: "{}",
+      stderr: "HTTP 429",
+      httpMeta: { status: 429, retryAfter: "300", rateLimitRemaining: "5" },
+    };
+  });
+  assert.equal(onceRest429Tick.rateLimited, true);
+  assert.equal(onceRest429Tick.events[0].type, "RATE_LIMITED");
+  assert.equal(onceRest429Tick.nextIntervalSec, 300);
+
+  // --no-phase-events still resets consecutiveUnchangedPolls and nextIntervalSec on a phase transition
+  state.consecutiveUnchangedPolls = 12;
+  const noPhaseEventsTick = evaluatePrPollTick(
+    parsePrWatchArgs([
+      "watch",
+      "--repo",
+      "jongio/skills",
+      "--pr",
+      "178",
+      "--head",
+      "head123",
+      "--last-phase",
+      "ci:passed|review:copilot-queued",
+      "--no-phase-events",
+    ]),
+    execWithEtag,
+    state
+  );
+  assert.equal(noPhaseEventsTick.events.length, 0);
+  assert.equal(state.consecutiveUnchangedPolls, 0);
+  assert.equal(noPhaseEventsTick.nextIntervalSec, 15);
+  assert.ok(parseGhApiArgs(["api", "-i", "repos/jongio/skills/actions/runs?head_sha=abc&per_page=100"]));
 });
 
 
