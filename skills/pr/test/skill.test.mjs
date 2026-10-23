@@ -229,6 +229,10 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "squash-and-cleanup-defaults",
     "merge-queue-deferred-cleanup",
     "post-merge-branch-advanced",
+    "post-merge-complete-and-partial-issues",
+    "post-merge-issue-retry-and-permission-failure",
+    "post-merge-unknown-and-cross-repository-issues",
+    "pre-merge-partial-closing-link",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
   assert.equal((evalSpec.match(/type: skill-invocation/g) ?? []).length, cases.length);
@@ -1756,5 +1760,4 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(noPhaseEventsTick.nextIntervalSec, 15);
   assert.ok(parseGhApiArgs(["api", "-i", "repos/jongio/skills/actions/runs?head_sha=abc&per_page=100"]));
 });
-
 

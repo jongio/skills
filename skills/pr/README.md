@@ -84,6 +84,25 @@ changes. Verify local and remote deletion separately. Already-absent refs need n
 deletion; blocked or unavailable safe cleanup is reported as "merged with cleanup
 pending", not successful deletion.
 
+## Related issues after merge
+
+Before merge, inventory related issues from closing links, the PR body, task/handoff,
+and relevant discussion, including cross-repository issues. Compare their acceptance
+criteria with delivered changes and evidence; remove misleading automatic closing
+links for incomplete work. Mere references do not authorize closure.
+
+After GitHub confirms the intended head merged, verify fully resolved issues are
+closed, closing any still open with the merged PR link and completion evidence.
+Keep partially resolved issues open with an update describing completed and remaining
+work and next steps. Correct an incomplete issue automatically closed by this PR;
+do not reopen unrelated intentional closures without a decision.
+
+An already-merged PR uses the same check on resume, avoiding duplicate updates.
+Re-read GitHub state and comments to verify writes, including after timeouts.
+Unknown scope, incomplete discovery, permissions, or failed verification are reported
+as **merged with issue reconciliation pending**, independently of branch cleanup.
+See the shared [issue reconciliation contract](references/issue-reconciliation.md).
+
 ## Progress and blocked work
 
 During long-running execution, report the current stage, elapsed time, last
@@ -153,7 +172,7 @@ npm run eval:lint
 Deterministic tests check portable skill shape, instruction contracts, and
 registration. Synthetic capability scenarios cover owner-specific exceptions,
 exact-head review completion, authorized pinned merges, documentation preflight,
-progress and approval waits, and feedback including body-only findings; linting
+progress and approval waits, related-issue reconciliation, and feedback including body-only findings; linting
 them does not establish agent behavior.
 
 ## License
