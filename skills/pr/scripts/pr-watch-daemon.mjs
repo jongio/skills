@@ -163,9 +163,11 @@ function extractBodyConcerns(body, fallbackHeadline, resolvedCommentIds = new Se
     ""
   );
   const concerns = [];
+  let hadInlineLinks = false;
   for (const match of bodyWithoutResolvedDetails.matchAll(
     /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
   )) {
+    hadInlineLinks = true;
     const title = match[1].trim();
     const commentId = Number.parseInt(match[2], 10);
     if (resolvedCommentIds.has(commentId)) {
@@ -192,7 +194,10 @@ function extractBodyConcerns(body, fallbackHeadline, resolvedCommentIds = new Se
     .replace(/<sub>[\s\S]*?<\/sub>/gi, "")
     .trim();
 
-  if (residualProse.length > 0 && !concerns.includes(fallbackHeadline)) {
+  if (
+    (residualProse.length > 0 || (concerns.length === 0 && !hadInlineLinks)) &&
+    !concerns.includes(fallbackHeadline)
+  ) {
     concerns.push(fallbackHeadline);
   }
   return concerns;
