@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_threads";
@@ -277,9 +277,30 @@ export function loadConfig(configFile) {
   };
 }
 
+function writeJsonAtomically(filePath, value) {
+  mkdirSync(dirname(filePath), { recursive: true });
+  const content = `${JSON.stringify(value, null, 2)}\n`;
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(tempPath, content, "utf8");
+    try {
+      renameSync(tempPath, filePath);
+    } catch {
+      writeFileSync(filePath, content, "utf8");
+    }
+  } finally {
+    try {
+      if (existsSync(tempPath)) {
+        rmSync(tempPath, { force: true });
+      }
+    } catch {
+      // Ignore cleanup race
+    }
+  }
+}
+
 export function saveConfig(configFile, config) {
-  mkdirSync(dirname(configFile), { recursive: true });
-  writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  writeJsonAtomically(configFile, config);
 }
 
 export function applySetupConfig(args, existingConfig) {
@@ -497,8 +518,7 @@ export function loadState(stateFile) {
 }
 
 export function saveState(stateFile, state) {
-  mkdirSync(dirname(stateFile), { recursive: true });
-  writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  writeJsonAtomically(stateFile, state);
 }
 
 export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunIds = [] } = {}) {
@@ -506,28 +526,6 @@ export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunI
     return state;
   }
   const protectedSet = new Set((protectedRunIds || []).map((id) => String(id)));
-  if (state.etags && typeof state.etags === "object") {
-    for (const endpoint of Object.keys(state.etags)) {
-      const jobsMatch = endpoint.match(/\/actions\/runs\/(\d+)\/jobs\b/);
-      if (jobsMatch) {
-        const runRecord = state.runs?.[jobsMatch[1]];
-        if (runRecord && runRecord.status === "completed" && runRecord.telemetryRecorded) {
-          delete state.etags[endpoint];
-        }
-      }
-    }
-    const etagEntries = Object.entries(state.etags);
-    if (etagEntries.length > maxEtags) {
-      etagEntries.sort((a, b) => {
-        const ta = Date.parse(a[1]?.updatedAt || "") || 0;
-        const tb = Date.parse(b[1]?.updatedAt || "") || 0;
-        return tb - ta;
-      });
-      for (const [oldEndpoint] of etagEntries.slice(maxEtags)) {
-        delete state.etags[oldEndpoint];
-      }
-    }
-  }
   if (state.runs && typeof state.runs === "object") {
     const targetBranch = state.branch || "main";
     const allRunIds = Object.keys(state.runs).sort((a, b) => Number(b) - Number(a));
@@ -550,6 +548,28 @@ export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunI
         } else {
           delete state.runs[runId];
         }
+      }
+    }
+  }
+  if (state.etags && typeof state.etags === "object") {
+    for (const endpoint of Object.keys(state.etags)) {
+      const jobsMatch = endpoint.match(/\/actions\/runs\/(\d+)\/jobs\b/);
+      if (jobsMatch) {
+        const runRecord = state.runs?.[jobsMatch[1]];
+        if (!runRecord || (runRecord.status === "completed" && runRecord.telemetryRecorded)) {
+          delete state.etags[endpoint];
+        }
+      }
+    }
+    const etagEntries = Object.entries(state.etags);
+    if (etagEntries.length > maxEtags) {
+      etagEntries.sort((a, b) => {
+        const ta = Date.parse(a[1]?.updatedAt || "") || 0;
+        const tb = Date.parse(b[1]?.updatedAt || "") || 0;
+        return tb - ta;
+      });
+      for (const [oldEndpoint] of etagEntries.slice(maxEtags)) {
+        delete state.etags[oldEndpoint];
       }
     }
   }
@@ -1095,6 +1115,36 @@ function isPullRequestRunEvent(event) {
   return event === "pull_request" || event === "pull_request_target";
 }
 
+export function computeCiHoundPhase({
+  repo = "",
+  branch = "main",
+  sha = "",
+  activeRuns = [],
+} = {}) {
+  const shortSha = (sha || "").slice(0, 8) || "unknown";
+  if (!Array.isArray(activeRuns) || activeRuns.length === 0) {
+    return {
+      phase: `${branch}:idle:${shortSha}`,
+      summary: `${repo}@${shortSha} (${branch}): idle (0 active runs)`,
+    };
+  }
+  const sorted = [...activeRuns].sort((a, b) => (a.id || 0) - (b.id || 0));
+  const phaseParts = sorted.map(
+    (r) => `${r.id}:${r.completedJobsCount ?? 0}/${r.totalJobsCount ?? 0}`
+  );
+  const summaryParts = sorted.map((r) => {
+    const activeSample = Array.isArray(r.inProgressJobs)
+      ? r.inProgressJobs.slice(0, 3).join(", ")
+      : "";
+    const activeDetail = activeSample ? `; active: ${activeSample}` : "";
+    return `${r.name || "workflow"} (${r.completedJobsCount ?? 0}/${r.totalJobsCount ?? 0} jobs passed${activeDetail})`;
+  });
+  return {
+    phase: `${branch}:running:${shortSha}:${phaseParts.join("|")}`,
+    summary: `${repo}@${shortSha} (${branch}): ${summaryParts.join(" | ")}`,
+  };
+}
+
 export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   state.repo = args.repo;
   state.branch = args.branch;
@@ -1184,6 +1234,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   const workflowRuns = [...runMap.values()];
 
   let activeMainRuns = 0;
+  const activeRunProgress = [];
 
   for (const run of workflowRuns) {
     const runKey = String(run.id);
@@ -1219,6 +1270,27 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       if (run.status === "completed" && !prevRun?.telemetryRecorded && jobs.length > 0) {
         recordTelemetryForRun(run, jobs, state);
       }
+    }
+
+    if ((isMainBranch || isWatchedRun) && run.status !== "completed") {
+      const completedJobsCount = jobs.filter(
+        (j) => j.status === "completed" && (j.conclusion === "success" || j.conclusion === "skipped")
+      ).length;
+      const inProgressJobs = jobs
+        .filter((j) => j.status !== "completed")
+        .map((j) => {
+          const activeStep = (j.steps || []).find((s) => s.status === "in_progress");
+          return activeStep ? `${j.name} [${activeStep.name}]` : j.name;
+        });
+      activeRunProgress.push({
+        id: run.id,
+        name: run.name,
+        headSha: run.head_sha,
+        totalJobsCount: jobs.length,
+        completedJobsCount,
+        inProgressJobsCount: inProgressJobs.length,
+        inProgressJobs,
+      });
     }
 
     state.runs[runKey] = {
@@ -1373,11 +1445,32 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
 
+  const phaseInfo = computeCiHoundPhase({
+    repo: args.repo,
+    branch: args.branch,
+    sha: state.lastMainSha,
+    activeRuns: activeRunProgress,
+  });
+  const statusPayload = {
+    timestamp: state.metrics.lastPollAt,
+    repo: args.repo,
+    branch: args.branch,
+    sha: state.lastMainSha,
+    phase: phaseInfo.phase,
+    summary: phaseInfo.summary,
+    activeMainRuns,
+    activeRuns: activeRunProgress,
+    nextIntervalSec,
+    cacheHits304: state.metrics?.cacheHits304 || 0,
+    rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
+  };
+
   return {
     events,
     activeMainRuns,
     rateLimited: tickRateLimited,
     nextIntervalSec,
+    status: statusPayload,
   };
 }
 
@@ -1430,6 +1523,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
 
   const allEvents = [];
   const reports = [];
+  const statuses = [];
   let totalActiveMainRuns = 0;
   let anyRateLimited = Boolean(discoveryState.rateLimited);
   let minRateLimitRemaining = Number.isFinite(discoveryState.metrics?.rateLimitRemaining)
@@ -1499,6 +1593,9 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       const tick = evaluatePollTick(repoArgs, repoState, execFn);
       saveState(repoStateFile, repoState);
       allEvents.push(...tick.events);
+      if (tick.status) {
+        statuses.push(tick.status);
+      }
       totalActiveMainRuns += tick.activeMainRuns;
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
@@ -1521,6 +1618,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     activeMainRuns: totalActiveMainRuns,
     rateLimited: anyRateLimited,
     nextIntervalSec,
+    statuses,
     reports,
   };
 }
@@ -1581,6 +1679,7 @@ export async function runCli(argv = process.argv.slice(2)) {
             activeMainRuns: multi.activeMainRuns,
             rateLimited: multi.rateLimited,
             nextIntervalSec: multi.nextIntervalSec,
+            statuses: multi.statuses,
           },
           report: multi.reports.length === 1 ? multi.reports[0] : multi.reports,
         },
@@ -1591,6 +1690,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     return;
   }
 
+  const lastPhaseByRepo = new Map();
   let polls = 0;
   while (true) {
     polls += 1;
@@ -1605,6 +1705,34 @@ export async function runCli(argv = process.argv.slice(2)) {
     if (terminalEvents.length > 0) {
       console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
       return;
+    }
+    const phaseChanges = [];
+    for (const st of multi.statuses || []) {
+      const prevPhase = lastPhaseByRepo.get(st.repo);
+      if (prevPhase && prevPhase !== st.phase) {
+        phaseChanges.push({
+          type: "PHASE_CHANGED",
+          timestamp: st.timestamp,
+          repo: st.repo,
+          previousPhase: prevPhase,
+          phase: st.phase,
+          summary: st.summary,
+        });
+      }
+      lastPhaseByRepo.set(st.repo, st.phase);
+    }
+    if (phaseChanges.length > 0 || multi.activeMainRuns > 0) {
+      console.log(
+        JSON.stringify(
+          {
+            repos: multi.repos,
+            events: phaseChanges,
+            statuses: multi.statuses,
+          },
+          null,
+          2
+        )
+      );
     }
     if (args.maxPolls > 0 && polls >= args.maxPolls) {
       console.log(JSON.stringify({ repos: multi.repos, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));

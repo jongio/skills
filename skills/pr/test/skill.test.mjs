@@ -5,6 +5,7 @@ import {
   computeAdaptivePrIntervalSec,
   computePrPhase,
   createPrWatchState,
+  evaluateMultiPrPollTick,
   evaluatePrPollTick,
   extractBodyOnlyFindings,
   isErroredCopilotReview,
@@ -1759,5 +1760,117 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(state.consecutiveUnchangedPolls, 0);
   assert.equal(noPhaseEventsTick.nextIntervalSec, 15);
   assert.ok(parseGhApiArgs(["api", "-i", "repos/jongio/skills/actions/runs?head_sha=abc&per_page=100"]));
+
+  // Auto-retries COPILOT_REVIEW_ERROR up to maxCopilotRetries when watch state is provided, then emits COPILOT_REVIEW_ERROR
+  const retryState = createPrWatchState();
+  const retryWatchArgs = parsePrWatchArgs([
+    "watch",
+    "--repo",
+    "jongio/skills",
+    "--pr",
+    "178",
+    "--head",
+    "head123",
+    "--max-copilot-retries",
+    "1",
+  ]);
+  const makeErrorExec = (reviewId) => (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head123",
+                headRefName: "feat/x",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: null,
+                reviewRequests: { nodes: [] },
+                reviews: {
+                  nodes: [
+                    {
+                      databaseId: reviewId,
+                      state: "COMMENTED",
+                      submittedAt: "2026-10-23T12:00:00Z",
+                      commit: { oid: "head123" },
+                      author: { login: "copilot-pull-request-reviewer" },
+                      body: "Copilot encountered an error and was unable to review this pull request.",
+                    },
+                  ],
+                },
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                commits: {
+                  nodes: [
+                    {
+                      commit: {
+                        statusCheckRollup: {
+                          state: "SUCCESS",
+                          contexts: {
+                            nodes: [
+                              { __typename: "CheckRun", name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      ghArgs[0] === "api" &&
+      ghArgs.some((a) => typeof a === "string" && a.startsWith("repos/jongio/skills/actions/runs"))
+    ) {
+      return { ok: true, stdout: JSON.stringify({ workflow_runs: [] }), stderr: "" };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  };
+  const retriedTick = evaluatePrPollTick(retryWatchArgs, makeErrorExec(9901), retryState);
+  assert.equal(retriedTick.events[0].type, "COPILOT_REVIEW_RETRIED");
+  assert.equal(retriedTick.events[0].attempt, 1);
+  assert.equal(retriedTick.events[0].reviewId, 9901);
+
+  const exhaustedTick = evaluatePrPollTick(retryWatchArgs, makeErrorExec(9902), retryState);
+  assert.equal(exhaustedTick.events[0].type, "COPILOT_REVIEW_ERROR");
+  assert.equal(exhaustedTick.events[0].reviewId, 9902);
+
+  // Multi-PR polling via --prs 178:head123,179:head123 aggregates statuses and tags events with pr number
+  const multiArgs = parsePrWatchArgs([
+    "watch",
+    "--repo",
+    "jongio/skills",
+    "--prs",
+    "178:head123,179:head123",
+  ]);
+  assert.deepEqual(multiArgs.prs, [178, 179]);
+  assert.deepEqual(multiArgs.prHeads, { 178: "head123", 179: "head123" });
+  const multiState = {};
+  const multiExec = (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+    }
+    return {
+      ok: true,
+      stdout: `HTTP/2.0 200 OK\r\netag: "runs-etag-multi"\r\nx-ratelimit-remaining: 4500\r\n\r\n${JSON.stringify({
+        total_count: 1,
+        workflow_runs: [{ id: 1, name: "Running Copilot Code Review", status: "in_progress" }],
+      })}`,
+      stderr: "",
+    };
+  };
+  const multiTick = evaluateMultiPrPollTick(multiArgs, multiExec, multiState);
+  assert.deepEqual(multiTick.prs, [178, 179]);
+  assert.equal(multiTick.statuses.length, 2);
+  assert.equal(multiTick.statuses[0].pr, 178);
+  assert.equal(multiTick.statuses[1].pr, 179);
 });
 
