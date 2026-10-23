@@ -652,7 +652,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(workflowErrTick.events[0].type, "POLL_ERROR");
   assert.match(workflowErrTick.error, /503/);
 
-  // 5. CI_FAILED is emitted when either statusCheckRollup or workflow_runs reports a failure
+  // 5. CI_FAILED is emitted when statusCheckRollup fails, and activeWorkflowRuns blocks readiness when checks haven't started
   const ciFailedTick = evaluatePrPollTick(args, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return {
@@ -704,7 +704,11 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
       stdout: JSON.stringify({
         workflow_runs: [
           {
+            id: 10,
+            workflow_id: 1,
             name: "Statusline performance",
+            event: "pull_request",
+            head_branch: "feat/x",
             status: "completed",
             conclusion: "failure",
             html_url: "https://github.com/jongio/skills/actions/runs/1",
@@ -715,7 +719,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
     };
   });
   assert.equal(ciFailedTick.events[0].type, "CI_FAILED");
-  assert.equal(ciFailedTick.events[0].failedChecks.length, 2);
+  assert.equal(ciFailedTick.events[0].failedChecks.length, 1);
   assert.ok(ciFailedTick.events[0].remediation);
 
   // 3. Phase-transition wakeup: emits PHASE_CHANGED when CI transitions from running to passed while Copilot reviews

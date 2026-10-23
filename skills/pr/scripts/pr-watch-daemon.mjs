@@ -106,6 +106,7 @@ export function computePrPhase({
   totalChecksCount = 0,
   passedChecksCount = 0,
   pendingChecks = [],
+  activeWorkflowRuns = [],
   expectCopilot = true,
   copilotWorkflowActive = false,
   copilotRequested = false,
@@ -114,10 +115,11 @@ export function computePrPhase({
 } = {}) {
   let ciPhase = "ci:none";
   let ciLabel = "CI not started";
-  if (totalChecksCount > 0) {
-    if (pendingChecks.length > 0) {
+  if (totalChecksCount > 0 || activeWorkflowRuns.length > 0) {
+    if (pendingChecks.length > 0 || activeWorkflowRuns.length > 0) {
       ciPhase = "ci:running";
-      const sampleActive = pendingChecks.slice(0, 3).join(", ");
+      const activeNames = pendingChecks.length > 0 ? pendingChecks : activeWorkflowRuns;
+      const sampleActive = activeNames.slice(0, 3).join(", ");
       ciLabel = `CI running (${passedChecksCount}/${totalChecksCount} passed; active: ${sampleActive})`;
     } else {
       ciPhase = "ci:passed";
@@ -509,8 +511,9 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     }
   }
 
-  // Check Actions workflow runs on headOid for both active Copilot reviews and workflow-level CI failures
+  // Check Actions workflow runs on headOid for both active Copilot reviews and latest workflow-level state
   let copilotWorkflowActive = false;
+  const activeWorkflowRuns = [];
   const runsRes = execFn(["api", `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=100`]);
   if (!runsRes.ok || !runsRes.stdout) {
     if (args.expectCopilot) {
@@ -546,6 +549,8 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
         ],
       };
     }
+
+    const latestByWorkflowKey = new Map();
     for (const run of runsData?.workflow_runs || []) {
       if (/Copilot Code Review/i.test(run.name || "")) {
         if (run.status !== "completed") {
@@ -553,21 +558,26 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
         }
         continue;
       }
-      if (
-        run.status === "completed" &&
+      const wfKey = `${run.workflow_id ?? run.path ?? run.name ?? "wf"}::${run.event ?? ""}::${run.head_branch ?? ""}`;
+      const prev = latestByWorkflowKey.get(wfKey);
+      if (!prev || (run.id ?? 0) > (prev.id ?? 0)) {
+        latestByWorkflowKey.set(wfKey, run);
+      }
+    }
+
+    for (const run of latestByWorkflowKey.values()) {
+      if (run.status !== "completed") {
+        activeWorkflowRuns.push(run.name || "workflow");
+      } else if (
         run.conclusion &&
-        !["success", "skipped", "neutral"].includes(run.conclusion.toLowerCase())
+        !["success", "skipped", "neutral"].includes(run.conclusion.toLowerCase()) &&
+        contexts.length === 0
       ) {
-        const alreadyRecorded = failedChecks.some(
-          (fc) => fc.url === run.html_url || fc.name === run.name
-        );
-        if (!alreadyRecorded) {
-          failedChecks.push({
-            name: run.name,
-            conclusion: run.conclusion.toUpperCase(),
-            url: run.html_url,
-          });
-        }
+        failedChecks.push({
+          name: run.name || "workflow",
+          conclusion: run.conclusion.toUpperCase(),
+          url: run.html_url,
+        });
       }
     }
   }
@@ -714,6 +724,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     mergeGatesSatisfied &&
     contexts.length > 0 &&
     pendingChecks.length === 0 &&
+    activeWorkflowRuns.length === 0 &&
     unresolvedThreads.length === 0 &&
     bodyFindings.length === 0
   ) {
@@ -741,6 +752,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     totalChecksCount,
     passedChecksCount,
     pendingChecks,
+    activeWorkflowRuns,
     expectCopilot: args.expectCopilot,
     copilotWorkflowActive,
     copilotRequested,
@@ -757,6 +769,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh) {
     passedChecksCount,
     pendingChecksCount: pendingChecks.length,
     pendingChecks,
+    activeWorkflowRuns,
     pendingReviewers: combinedPendingReviewers,
     copilotWorkflowActive,
     validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
