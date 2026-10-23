@@ -1839,9 +1839,25 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(retriedTick.events[0].attempt, 1);
   assert.equal(retriedTick.events[0].reviewId, 9901);
 
+  // Subsequent poll seeing the same reviewId before the new review request is visible stays in grace period
+  const graceTick = evaluatePrPollTick(retryWatchArgs, makeErrorExec(9901), retryState);
+  assert.equal(graceTick.events.length, 0);
+  assert.equal(graceTick.status.phase, "ci:passed|review:copilot-queued");
+
+  // Once a new errored reviewId appears after retry budget is exhausted, emits terminal COPILOT_REVIEW_ERROR
   const exhaustedTick = evaluatePrPollTick(retryWatchArgs, makeErrorExec(9902), retryState);
   assert.equal(exhaustedTick.events[0].type, "COPILOT_REVIEW_ERROR");
   assert.equal(exhaustedTick.events[0].reviewId, 9902);
+
+  // Single-PR --prs 178:expected normalizes args.head for single-target dispatch
+  const singlePinArgs = parsePrWatchArgs(["watch", "--repo", "jongio/skills", "--prs", "178:expected123"]);
+  assert.equal(singlePinArgs.pr, 178);
+  assert.equal(singlePinArgs.head, "expected123");
+
+  // Multi-PR once mode disables auto-retries so one-shot inspection stays observational
+  const multiOnceArgs = parsePrWatchArgs(["once", "--repo", "jongio/skills", "--prs", "178:head123,179:head123"]);
+  const multiOnceTick = evaluateMultiPrPollTick(multiOnceArgs, makeErrorExec(9903), {});
+  assert.equal(multiOnceTick.events[0].type, "COPILOT_REVIEW_ERROR");
 
   // Multi-PR polling via --prs 178:head123,179:head123 aggregates statuses and tags events with pr number
   const multiArgs = parsePrWatchArgs([

@@ -136,6 +136,9 @@ export function parsePrWatchArgs(argv) {
   } else if (args.pr > 0 && args.prs.length === 0) {
     args.prs = [args.pr];
   }
+  if (args.prs.length === 1 && !args.head && args.prHeads[args.prs[0]]) {
+    args.head = args.prHeads[args.prs[0]];
+  }
 
   if (!args.repo) {
     args.repo = detectRepoFromGit();
@@ -1291,9 +1294,10 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     };
   }
 
-  if (args.head && pr.headRefOid !== args.head) {
+  const expectedHead = args.head || args.prHeads?.[args.pr] || "";
+  if (expectedHead && pr.headRefOid !== expectedHead) {
     return {
-      events: [{ type: "HEAD_CHANGED", expectedHead: args.head, currentHead: pr.headRefOid }],
+      events: [{ type: "HEAD_CHANGED", expectedHead, currentHead: pr.headRefOid }],
     };
   }
 
@@ -1571,6 +1575,18 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
   const latestHeadCopilotReview = allHeadCopilotReviews.at(-1);
 
   if (
+    state &&
+    (copilotWorkflowActive ||
+      copilotRequested ||
+      validHeadCopilotReviews.length > 0 ||
+      !isErroredCopilotReview(latestHeadCopilotReview) ||
+      latestHeadCopilotReview.databaseId !== state.pendingRetryReviewId)
+  ) {
+    state.pendingRetryReviewId = null;
+    state.pendingRetryGracePolls = 0;
+  }
+
+  if (
     args.expectCopilot &&
     !copilotWorkflowActive &&
     !copilotRequested &&
@@ -1583,6 +1599,53 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     const alreadyRetriedThisReview = Boolean(
       reviewId && state?.retriedCopilotReviewIds?.includes(reviewId)
     );
+    const totalChecksCount = contexts.length;
+    const passedChecksCount = totalChecksCount - pendingChecks.length - failedChecks.length;
+    const queuedPendingReviewers = [
+      ...new Set([...pendingReviewers, "copilot-pull-request-reviewer"]),
+    ];
+    const retryPhaseInfo = computePrPhase({
+      totalChecksCount,
+      passedChecksCount,
+      pendingChecks,
+      activeWorkflowRuns,
+      expectCopilot: args.expectCopilot,
+      copilotWorkflowActive: false,
+      copilotRequested: true,
+      validHeadCopilotReviewsCount: 0,
+      pendingReviewers: queuedPendingReviewers,
+    });
+    if (
+      alreadyRetriedThisReview &&
+      state?.pendingRetryReviewId === reviewId &&
+      (state?.pendingRetryGracePolls || 0) > 0
+    ) {
+      state.pendingRetryGracePolls -= 1;
+      const nowIso = new Date().toISOString();
+      return {
+        events: [],
+        status: {
+          timestamp: nowIso,
+          headRefOid: headOid,
+          latestCommentId,
+          phase: retryPhaseInfo.phase,
+          summary: `${retryPhaseInfo.summary} (waiting for retried Copilot review)`,
+          totalChecksCount,
+          passedChecksCount,
+          pendingChecksCount: pendingChecks.length,
+          pendingChecks,
+          activeWorkflowRuns,
+          pendingReviewers: queuedPendingReviewers,
+          copilotWorkflowActive: false,
+          validHeadCopilotReviewsCount: 0,
+          unresolvedThreadsCount: 0,
+          bodyFindingsCount: 0,
+          nextIntervalSec: args.intervalSec,
+          cacheHits304: state.metrics?.cacheHits304 || 0,
+        },
+        nextIntervalSec: args.intervalSec,
+      };
+    }
     let retryAttempted = false;
     let retryFailureStatus;
     if (state && maxRetries > 0 && prevRetries < maxRetries && !alreadyRetriedThisReview) {
@@ -1592,6 +1655,8 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
         state.copilotErrorRetriesByHead[headOid] = prevRetries + 1;
         if (reviewId) {
           state.retriedCopilotReviewIds.push(reviewId);
+          state.pendingRetryReviewId = reviewId;
+          state.pendingRetryGracePolls = 2;
         }
         const nowIso = new Date().toISOString();
         const attempt = prevRetries + 1;
@@ -1613,14 +1678,14 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
             timestamp: nowIso,
             headRefOid: headOid,
             latestCommentId,
-            phase: "ci:passed|review:copilot-queued",
-            summary: `Copilot review error (${reviewId}); auto-retried (${attempt}/${maxRetries})`,
-            totalChecksCount: contexts.length,
-            passedChecksCount: contexts.length - pendingChecks.length - failedChecks.length,
+            phase: retryPhaseInfo.phase,
+            summary: `Copilot review error (${reviewId}); auto-retried (${attempt}/${maxRetries}) | ${retryPhaseInfo.summary}`,
+            totalChecksCount,
+            passedChecksCount,
             pendingChecksCount: pendingChecks.length,
             pendingChecks,
             activeWorkflowRuns,
-            pendingReviewers: ["copilot-pull-request-reviewer"],
+            pendingReviewers: queuedPendingReviewers,
             copilotWorkflowActive: false,
             validHeadCopilotReviewsCount: 0,
             unresolvedThreadsCount: 0,
@@ -1867,6 +1932,7 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
       ...args,
       pr: prNumber,
       head: prHead,
+      maxCopilotRetries: args.mode === "once" ? 0 : args.maxCopilotRetries,
       lastPhase: entry.lastPhase,
       hasExplicitSinceCommentId: entry.hasExplicitSinceCommentId,
       sinceCommentId: entry.sinceCommentId,
@@ -1961,15 +2027,6 @@ export async function runCli(argv = process.argv.slice(2)) {
     while (true) {
       polls += 1;
       const multi = evaluateMultiPrPollTick(args, defaultExecGh, multiState);
-      if (multi.rateLimited) {
-        console.log(JSON.stringify(multi, null, 2));
-        if (args.maxPolls > 0 && polls >= args.maxPolls) {
-          console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
-          return;
-        }
-        await sleepSeconds(multi.nextIntervalSec || 60);
-        continue;
-      }
       if (multi.error) {
         console.error(JSON.stringify(multi, null, 2));
         process.exit(1);
@@ -1978,6 +2035,15 @@ export async function runCli(argv = process.argv.slice(2)) {
       if (terminalEvents.length > 0) {
         console.log(JSON.stringify(multi, null, 2));
         return;
+      }
+      if (multi.rateLimited) {
+        console.log(JSON.stringify(multi, null, 2));
+        if (args.maxPolls > 0 && polls >= args.maxPolls) {
+          console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+          return;
+        }
+        await sleepSeconds(multi.nextIntervalSec || 60);
+        continue;
       }
       console.log(JSON.stringify({ prs: multi.prs, events: multi.events, statuses: multi.statuses }, null, 2));
       if (args.maxPolls > 0 && polls >= args.maxPolls) {

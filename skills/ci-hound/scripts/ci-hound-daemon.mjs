@@ -283,11 +283,7 @@ function writeJsonAtomically(filePath, value) {
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   try {
     writeFileSync(tempPath, content, "utf8");
-    try {
-      renameSync(tempPath, filePath);
-    } catch {
-      writeFileSync(filePath, content, "utf8");
-    }
+    renameSync(tempPath, filePath);
   } finally {
     try {
       if (existsSync(tempPath)) {
@@ -1721,7 +1717,10 @@ export async function runCli(argv = process.argv.slice(2)) {
       }
       lastPhaseByRepo.set(st.repo, st.phase);
     }
-    if (phaseChanges.length > 0 || multi.activeMainRuns > 0) {
+    const hasActiveRuns =
+      multi.activeMainRuns > 0 ||
+      (multi.statuses || []).some((st) => (st.activeRuns?.length || 0) > 0);
+    if (phaseChanges.length > 0 || hasActiveRuns) {
       console.log(
         JSON.stringify(
           {
