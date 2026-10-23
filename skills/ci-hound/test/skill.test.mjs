@@ -93,28 +93,95 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   assert.equal(modified.mergeMode, "auto");
 
   const discoveryState = loadState("/nonexistent/discovery.json");
+  const page1Repos = Array.from({ length: 100 }, (_, idx) => ({
+    full_name: `jongio/archived-${idx}`,
+    owner: { login: "jongio" },
+    private: true,
+    archived: true,
+    disabled: false,
+  }));
   const discovered = discoverOwnerRepos("@me", "private", discoveryState, (ghArgs) => {
-    assert.equal(ghArgs[2], "user/repos?affiliation=owner&visibility=private&per_page=100");
+    const endpoint = ghArgs[2];
+    if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100&page=1") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\nETag: "p1"\n\n${JSON.stringify(page1Repos)}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100&page=2") {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\nETag: "p2"\n\n${JSON.stringify([
+          { full_name: "jongio/private-page2", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+          { full_name: "jongio/public-one", owner: { login: "jongio" }, private: false, archived: false, disabled: false },
+        ])}`,
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected discovery endpoint: ${endpoint}`);
+  });
+  assert.deepEqual(discovered, ["jongio/private-page2"]);
+  assert.ok(discoveryState.etags["user/repos?affiliation=owner&visibility=private&per_page=100&page=1"]);
+  assert.ok(discoveryState.etags["user/repos?affiliation=owner&visibility=private&per_page=100&page=2"]);
+
+  // Named owner discovery finds private repos via authenticated user/repos and public repos via users/<owner>/repos
+  const namedOwnerDiscovered = discoverOwnerRepos("jongio", "private", loadState("/nonexistent/d2.json"), (ghArgs) => {
+    assert.equal(
+      ghArgs[2],
+      "user/repos?affiliation=owner,organization_member,collaborator&visibility=private&per_page=100&page=1"
+    );
     return {
       ok: true,
       stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
-        { full_name: "jongio/private-one", private: true, archived: false, disabled: false },
-        { full_name: "jongio/public-one", private: false, archived: false, disabled: false },
-        { full_name: "jongio/archived-one", private: true, archived: true, disabled: false },
+        { full_name: "jongio/secret-repo", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+        { full_name: "other/secret-repo", owner: { login: "other" }, private: true, archived: false, disabled: false },
       ])}`,
       stderr: "",
     };
   });
-  assert.deepEqual(discovered, ["jongio/private-one"]);
+  assert.deepEqual(namedOwnerDiscovered, ["jongio/secret-repo"]);
+
+  // Empty configured owner scope must return [] and NOT fall back to current git checkout
+  const emptyOwnerConfig = { repos: [], owner: "jongio", visibility: "private", branch: "main", mergeMode: "approval", worktreeRoot: "" };
+  const emptyResolved = resolveTargetRepos(
+    parseArgs(["watch"]),
+    emptyOwnerConfig,
+    loadState("/nonexistent/d3.json"),
+    () => ({ ok: true, stdout: "HTTP/2.0 200 OK\n\n[]", stderr: "" })
+  );
+  assert.deepEqual(emptyResolved, []);
+
+  // Rejects explicit --state-file when multiple target repositories resolve
+  assert.throws(
+    () =>
+      evaluateMultiRepoPollTick(
+        parseArgs(["watch", "--config-file", configFile, "--state-file", path.join(tempDir, "shared.json")]),
+        reloaded,
+        (ghArgs) => {
+          if (ghArgs[2].startsWith("user/repos?")) {
+            return {
+              ok: true,
+              stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
+                { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
+              ])}`,
+              stderr: "",
+            };
+          }
+          throw new Error("Should not poll any repository when --state-file is shared across multiple repos");
+        }
+      ),
+    /Cannot use a single --state-file when monitoring multiple repositories/
+  );
 
   const watchArgs = parseArgs(["watch", "--config-file", configFile]);
   const multiTick = evaluateMultiRepoPollTick(watchArgs, reloaded, (ghArgs) => {
     const endpoint = ghArgs[2];
-    if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100") {
+    if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100&page=1") {
       return {
         ok: true,
         stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify([
-          { full_name: "jongio/private-one", private: true, archived: false, disabled: false },
+          { full_name: "jongio/private-one", owner: { login: "jongio" }, private: true, archived: false, disabled: false },
         ])}`,
         stderr: "",
       };

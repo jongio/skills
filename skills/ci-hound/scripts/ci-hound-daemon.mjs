@@ -286,20 +286,63 @@ export function applySetupConfig(args, existingConfig) {
   return next;
 }
 
+function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
+  const results = [];
+  for (let page = 1; ; page += 1) {
+    const res = ghApiWithEtag(`${baseEndpoint}&page=${page}`, state, execFn);
+    if (!Array.isArray(res.data) || res.data.length === 0) {
+      break;
+    }
+    results.push(...res.data);
+    if (res.data.length < 100) {
+      break;
+    }
+  }
+  return results;
+}
+
 export function discoverOwnerRepos(owner, visibility = "all", state, execFn = defaultExecGh) {
   if (!owner) {
     return [];
   }
   const effectiveVisibility = visibility || "all";
-  const endpoint =
-    owner === "@me"
-      ? `user/repos?affiliation=owner&visibility=${effectiveVisibility}&per_page=100`
-      : `users/${encodeURIComponent(owner)}/repos?type=all&per_page=100`;
-  const res = ghApiWithEtag(endpoint, state, execFn);
-  if (!Array.isArray(res.data)) {
-    return [];
+  let rawRepos = [];
+  if (owner === "@me") {
+    rawRepos = fetchPaginatedRepos(
+      `user/repos?affiliation=owner&visibility=${effectiveVisibility}&per_page=100`,
+      state,
+      execFn
+    );
+  } else {
+    const lowerOwner = owner.toLowerCase();
+    const accessible = fetchPaginatedRepos(
+      `user/repos?affiliation=owner,organization_member,collaborator&visibility=${effectiveVisibility}&per_page=100`,
+      state,
+      execFn
+    ).filter((r) => typeof r?.owner?.login === "string" && r.owner.login.toLowerCase() === lowerOwner);
+
+    const byName = new Map();
+    for (const r of accessible) {
+      if (isValidRepoSlug(r?.full_name)) {
+        byName.set(r.full_name, r);
+      }
+    }
+    if (effectiveVisibility !== "private") {
+      const publicOwnerRepos = fetchPaginatedRepos(
+        `users/${encodeURIComponent(owner)}/repos?type=all&per_page=100`,
+        state,
+        execFn
+      );
+      for (const r of publicOwnerRepos) {
+        if (isValidRepoSlug(r?.full_name) && !byName.has(r.full_name)) {
+          byName.set(r.full_name, r);
+        }
+      }
+    }
+    rawRepos = [...byName.values()];
   }
-  return res.data
+
+  return rawRepos
     .filter((r) => {
       if (!r || r.archived || r.disabled || !isValidRepoSlug(r.full_name)) {
         return false;
@@ -321,13 +364,15 @@ export function resolveTargetRepos(args, config, discoveryState, execFn = defaul
   }
   const effectiveOwner = args.owner || config?.owner || "";
   const effectiveVisibility = args.visibility || config?.visibility || "all";
+  const hasConfiguredRepos = Array.isArray(config?.repos) && config.repos.length > 0;
+  const hasConfiguredScope = Boolean(effectiveOwner || hasConfiguredRepos);
   const combined = new Set(config?.repos || []);
   if (effectiveOwner) {
     for (const r of discoverOwnerRepos(effectiveOwner, effectiveVisibility, discoveryState, execFn)) {
       combined.add(r);
     }
   }
-  if (combined.size > 0) {
+  if (hasConfiguredScope) {
     return [...combined];
   }
   return args.repo ? [args.repo] : [];
@@ -873,6 +918,9 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   if (args.owner || config?.owner) {
     saveState(discoveryStateFile, discoveryState);
   }
+  if (args.explicitStateFile && targetRepos.length > 1) {
+    throw new Error("Cannot use a single --state-file when monitoring multiple repositories.");
+  }
 
   const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
   const effectiveMergeMode = args.explicitMergeMode
@@ -921,12 +969,16 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (args.mode === "setup") {
     const updatedConfig = applySetupConfig(args, existingConfig);
     saveConfig(args.configFile, updatedConfig);
-    const discoveryState = loadState(join(dirname(args.configFile), "_discovery.json"));
+    const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
+    const discoveryState = loadState(discoveryStateFile);
     const resolvedRepos = resolveTargetRepos(
       { ...args, explicitRepos: [] },
       updatedConfig,
       discoveryState
     );
+    if (updatedConfig.owner) {
+      saveState(discoveryStateFile, discoveryState);
+    }
     console.log(
       JSON.stringify(
         {
@@ -942,16 +994,14 @@ export async function runCli(argv = process.argv.slice(2)) {
     return;
   }
 
-  const previewRepos = resolveTargetRepos(args, existingConfig, loadState(join(dirname(args.configFile), "_discovery.json")));
-  if (previewRepos.length === 0) {
-    console.error(
-      "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
-    );
-    process.exit(1);
-  }
-
   if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
     const multi = evaluateMultiRepoPollTick(args, existingConfig);
+    if (multi.repos.length === 0) {
+      console.error(
+        "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
+      );
+      process.exit(1);
+    }
     console.log(
       JSON.stringify(
         {
@@ -975,6 +1025,12 @@ export async function runCli(argv = process.argv.slice(2)) {
   while (true) {
     polls += 1;
     const multi = evaluateMultiRepoPollTick(args, existingConfig);
+    if (multi.repos.length === 0) {
+      console.error(
+        "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
+      );
+      process.exit(1);
+    }
     if (multi.events.length > 0) {
       console.log(JSON.stringify({ repos: multi.repos, events: multi.events }, null, 2));
       return;
