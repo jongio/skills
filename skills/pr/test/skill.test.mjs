@@ -1030,6 +1030,226 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
       ["pr", "edit", "177", "-R", "jongio/skills", "--add-reviewer", "@copilot"],
     ]
   );
+
+  // 5. Does NOT match another PR's run when both PRs share the same branch name (e.g. fork PRs on patch-1)
+  const forkArgs = parsePrWatchArgs([
+    "request-copilot",
+    "--repo",
+    "jongio/skills",
+    "--pr",
+    "177",
+    "--head",
+    "head_new",
+  ]);
+  const forkCalls = [];
+  const forkRes = requestCopilotReview(forkArgs, (ghArgs) => {
+    forkCalls.push(ghArgs);
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "patch-1",
+                headRepository: { nameWithOwner: "alice/skills" },
+                reviewRequests: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1] === "repos/jongio/skills/actions/runs?per_page=100") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          workflow_runs: [
+            {
+              id: 6001,
+              name: "Running Copilot Code Review",
+              status: "in_progress",
+              head_branch: "patch-1",
+              head_sha: "head_other_fork",
+              pull_requests: [{ number: 199 }],
+            },
+            {
+              id: 6002,
+              name: "Running Copilot Code Review",
+              status: "in_progress",
+              head_branch: "patch-1",
+              head_sha: "head_bob_fork",
+              head_repository: { full_name: "bob/skills" },
+              pull_requests: [],
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(forkRes.ok, true);
+  assert.equal(forkRes.status, "requested");
+  assert.deepEqual(forkRes.cancelledRunIds, []);
+
+  // 6. Paginates workflow_runs beyond page 1 and detects an active review on page 2
+  const pagedRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1] === "repos/jongio/skills/actions/runs?per_page=100") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          total_count: 2,
+          workflow_runs: [
+            {
+              id: 7001,
+              name: "Skill Lint",
+              status: "completed",
+              head_branch: "main",
+              head_sha: "main_sha",
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (
+      ghArgs[0] === "api" &&
+      ghArgs[1] === "repos/jongio/skills/actions/runs?per_page=100&page=2"
+    ) {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          total_count: 2,
+          workflow_runs: [
+            {
+              id: 7002,
+              name: "Running Copilot Code Review",
+              status: "in_progress",
+              head_branch: "feat/x",
+              head_sha: "head_new",
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    return { ok: false, stdout: "", stderr: "unexpected call" };
+  });
+  assert.equal(pagedRes.ok, true);
+  assert.equal(pagedRes.status, "already_running");
+  assert.equal(pagedRes.activeRunId, 7002);
+
+  // 7. Stops and returns cancel_failed when cancelling a superseded run fails
+  const cancelFailCalls = [];
+  const cancelFailRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    cancelFailCalls.push(ghArgs);
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1] === "repos/jongio/skills/actions/runs?per_page=100") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          workflow_runs: [
+            {
+              id: 8001,
+              name: "Running Copilot Code Review",
+              status: "in_progress",
+              head_branch: "feat/x",
+              head_sha: "head_old",
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[3] === "repos/jongio/skills/actions/runs/8001/cancel") {
+      return { ok: false, stdout: "", stderr: "HTTP 403 Forbidden" };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(cancelFailRes.ok, false);
+  assert.equal(cancelFailRes.status, "cancel_failed");
+  assert.equal(cancelFailRes.runId, 8001);
+  assert.deepEqual(cancelFailRes.cancelledRunIds, []);
+  assert.equal(cancelFailCalls.length, 3);
+
+  // 8. Stops and returns remove_reviewer_failed when removing the existing @copilot request fails
+  const removeFailCalls = [];
+  const removeFailRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    removeFailCalls.push(ghArgs);
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: {
+                  nodes: [{ requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" } }],
+                },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1] === "repos/jongio/skills/actions/runs?per_page=100") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({ workflow_runs: [] }),
+        stderr: "",
+      };
+    }
+    if (ghArgs.includes("--remove-reviewer")) {
+      return { ok: false, stdout: "", stderr: "GraphQL: Could not remove reviewer" };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(removeFailRes.ok, false);
+  assert.equal(removeFailRes.status, "remove_reviewer_failed");
+  assert.equal(removeFailCalls.length, 3);
 });
 
 
