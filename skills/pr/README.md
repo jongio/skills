@@ -8,8 +8,10 @@ A concise checklist workflow for taking changes from local commit and preflight 
 npx skills add jongio/skills --skill pr --skill test-doctor --skill doc-doctor
 ```
 
-Reload your agent skills, then invoke `/pr`. Preflight uses `test-doctor` for tests
-and `doc-doctor` for the diff and affected documentation. `pr` owns the documentation
+Reload your agent skills, then invoke `/pr`. Preflight uses `test-doctor` for tests,
+`doc-doctor` for the diff and affected documentation, and a diff + cross-model
+`rubber-duck` sub-agent review when invoked directly without `go` (reusing matching
+`go` Step 4 review evidence under the identity rule). `pr` owns the documentation
 pass, including when called by `go`; matching passing evidence is reused, and
 later edits invalidate affected evidence rather than triggering duplicate checks.
 
@@ -117,17 +119,22 @@ replace resolving addressed bot threads or the existing review and merge gates.
 
 ## Review and merge gates
 
-Copilot review is expected by default. Only an explicit user-authorized exception
-for a verified private repository with the exact allowed owner skips requesting
-and waiting, including already-pending requests. Posted feedback and other
-required reviews still apply.
+Copilot review is expected by default. Request or re-request Copilot via
+`node scripts/pr-watch-daemon.mjs request-copilot --repo <owner/repo> --pr <number> --head <full-head-OID>`
+so superseded `Running Copilot Code Review` runs on the PR branch are cancelled
+and existing `@copilot` requests are toggled before re-requesting. Only an explicit
+user-authorized exception for a verified private repository with the exact allowed
+owner skips requesting and waiting, including already-pending requests. Posted
+feedback and other required reviews still apply.
 
 Every expected reviewer must submit a non-dismissed review on the full current
 head OID. `COMMENTED` completes a review but is not approval; new pushes invalidate
 head-specific review and check evidence. Required approvals and unresolved change
 requests remain separate gates.
 
-PR bodies preserve the repository template and record exact validation commands
+PR bodies, comments, and review replies preserve the repository template and
+pass Markdown via `--body-file` or single-quoted `@'...'@` literals (avoiding
+shell backtick corruption), recording exact validation commands
 and results, including checks not run. A merge also requires authorization under
 the selected merge mode, no merge conflicts, applicable enforced base-freshness
 or merge-queue requirements, green CI,

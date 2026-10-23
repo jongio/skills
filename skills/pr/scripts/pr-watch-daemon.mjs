@@ -55,7 +55,7 @@ export function parsePrWatchArgs(argv) {
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
-    if (token === "watch" || token === "once") {
+    if (token === "watch" || token === "once" || token === "request-copilot") {
       args.mode = token;
     } else if (token === "--mode" && argv[i + 1]) {
       args.mode = argv[++i];
@@ -98,6 +98,9 @@ export function parsePrWatchArgs(argv) {
   }
   if (!Number.isSafeInteger(args.pr) || args.pr <= 0) {
     throw new Error(`Invalid or missing --pr "${args.pr}". Expected a positive pull request number.`);
+  }
+  if (args.mode === "request-copilot" && !args.head) {
+    throw new Error('Missing or invalid --head "<oid>" for request-copilot.');
   }
   return args;
 }
@@ -300,6 +303,362 @@ function defaultExecGh(ghArgs) {
     ok: res.status === 0,
     stdout: res.stdout || "",
     stderr: res.stderr || "",
+  };
+}
+
+export function requestCopilotReview(args, execFn = defaultExecGh) {
+  if (!args?.head || typeof args.head !== "string" || !args.head.trim()) {
+    return {
+      ok: false,
+      status: "missing_head",
+      error: 'Missing or invalid --head "<oid>" for request-copilot.',
+    };
+  }
+  const [owner, name] = args.repo.split("/");
+  const query = `query($owner: String!, $name: String!, $pr: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $pr) {
+        state
+        headRefOid
+        headRefName
+        headRepository {
+          nameWithOwner
+        }
+        reviewRequests(first: 100) {
+          pageInfo { hasNextPage }
+          nodes {
+            requestedReviewer {
+              __typename
+              ... on Bot { login }
+              ... on User { login }
+              ... on Team { slug name }
+              ... on Mannequin { login }
+            }
+          }
+        }
+      }
+    }
+  }`;
+
+  const fetchValidatedPr = () => {
+    const gqlRes = execFn([
+      "api",
+      "graphql",
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `name=${name}`,
+      "-F",
+      `pr=${args.pr}`,
+      "-f",
+      `query=${query}`,
+    ]);
+    if (!gqlRes || !gqlRes.ok) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "poll_error",
+          error: gqlRes?.stderr || "GraphQL query failed",
+        },
+      };
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(gqlRes.stdout);
+    } catch (error) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "poll_error",
+          error: `Invalid GraphQL JSON: ${error.message}`,
+        },
+      };
+    }
+    if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "poll_error",
+          error: parsed.errors.map((e) => e?.message || "GraphQL error").join("; "),
+        },
+      };
+    }
+    const prNode = parsed?.data?.repository?.pullRequest;
+    if (!prNode) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "poll_error",
+          error: "Pull request not found",
+        },
+      };
+    }
+
+    if (prNode.state !== "OPEN") {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "pr_not_open",
+          state: prNode.state,
+        },
+      };
+    }
+
+    if (prNode.headRefOid !== args.head) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "head_mismatch",
+          expectedHead: args.head,
+          actualHead: prNode.headRefOid,
+        },
+      };
+    }
+
+    if (prNode.reviewRequests?.pageInfo?.hasNextPage) {
+      return {
+        ok: false,
+        result: {
+          ok: false,
+          status: "collection_truncated",
+          collections: ["reviewRequests"],
+          error: "PR reviewRequests exceeded 100 entries",
+        },
+      };
+    }
+
+    return { ok: true, pr: prNode };
+  };
+
+  const initialPrCheck = fetchValidatedPr();
+  if (!initialPrCheck.ok) {
+    return initialPrCheck.result;
+  }
+  let pr = initialPrCheck.pr;
+
+  const isMatchingActivePrRun = (run, targetPr) => {
+    if (!run || run.status === "completed" || !/Copilot Code Review/i.test(run.name || "")) {
+      return false;
+    }
+    const hasExplicitPrs = Array.isArray(run.pull_requests) && run.pull_requests.length > 0;
+    if (hasExplicitPrs) {
+      return run.pull_requests.some((p) => p?.number === args.pr);
+    }
+    const sameBranch = Boolean(targetPr.headRefName && run.head_branch === targetPr.headRefName);
+    if (!sameBranch) {
+      return false;
+    }
+    const baseRepoLower = (args.repo || "").toLowerCase();
+    const expectedHeadRepoLower = (
+      targetPr.headRepository?.nameWithOwner ||
+      args.repo ||
+      ""
+    ).toLowerCase();
+    const runHeadRepoLower = (run.head_repository?.full_name || "").toLowerCase();
+    if (expectedHeadRepoLower !== baseRepoLower) {
+      return runHeadRepoLower === expectedHeadRepoLower;
+    }
+    return !runHeadRepoLower || runHeadRepoLower === expectedHeadRepoLower;
+  };
+
+  // Order statuses from pre-execution to running, and perform a bounded multi-pass
+  // stabilization recheck so runs transitioning (e.g., queued -> in_progress) between
+  // per-status queries cannot slip between buckets undetected.
+  const activeRunStatuses = ["pending", "requested", "waiting", "queued", "in_progress"];
+  const maxInventoryPasses = 3;
+  let allWorkflowRuns = [];
+  let previousPassSignature = null;
+  let inventoryStabilized = false;
+
+  for (let pass = 1; pass <= maxInventoryPasses; pass += 1) {
+    const passRuns = [];
+    const seenPassRunIds = new Set();
+
+    for (const runStatus of activeRunStatuses) {
+      const statusRuns = [];
+      let page = 1;
+      while (true) {
+        const endpoint =
+          page === 1
+            ? `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100`
+            : `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100&page=${page}`;
+        const runsRes = execFn(["api", endpoint]);
+        if (!runsRes || !runsRes.ok || !runsRes.stdout) {
+          return {
+            ok: false,
+            status: "poll_error",
+            error: runsRes?.stderr || "Workflow runs inventory unavailable",
+          };
+        }
+
+        let runsData;
+        try {
+          runsData = JSON.parse(runsRes.stdout);
+        } catch (error) {
+          return {
+            ok: false,
+            status: "poll_error",
+            error: `Invalid workflow runs JSON: ${error.message}`,
+          };
+        }
+        if (!Array.isArray(runsData?.workflow_runs)) {
+          return {
+            ok: false,
+            status: "poll_error",
+            error: "Workflow runs response missing workflow_runs array",
+          };
+        }
+
+        const pageRuns = runsData.workflow_runs;
+        statusRuns.push(...pageRuns);
+        for (const run of pageRuns) {
+          const key = run?.id ?? Symbol("run");
+          if (!seenPassRunIds.has(key)) {
+            seenPassRunIds.add(key);
+            passRuns.push(run);
+          }
+        }
+        const totalCount =
+          typeof runsData.total_count === "number" ? runsData.total_count : statusRuns.length;
+
+        if (statusRuns.length >= totalCount) {
+          break;
+        }
+        if (pageRuns.length === 0) {
+          return {
+            ok: false,
+            status: "collection_truncated",
+            collections: ["workflow_runs"],
+            error: `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`,
+          };
+        }
+        page += 1;
+      }
+    }
+
+    const passSignature = passRuns
+      .filter((r) => isMatchingActivePrRun(r, pr))
+      .map((r) => `${r.id ?? ""}:${r.head_sha ?? ""}`)
+      .sort()
+      .join("|");
+
+    allWorkflowRuns = passRuns;
+    if (previousPassSignature !== null && passSignature === previousPassSignature) {
+      inventoryStabilized = true;
+      break;
+    }
+    previousPassSignature = passSignature;
+  }
+
+  if (!inventoryStabilized) {
+    return {
+      ok: false,
+      status: "inventory_unstable",
+      error: "Active Copilot workflow run inventory did not stabilize across recheck passes",
+    };
+  }
+
+  // Revalidate PR open state and pinned head after inventory before cancelling runs or editing reviewers
+  const refreshedPrCheck = fetchValidatedPr();
+  if (!refreshedPrCheck.ok) {
+    return refreshedPrCheck.result;
+  }
+  pr = refreshedPrCheck.pr;
+
+  const matchingActiveRuns = allWorkflowRuns.filter((run) => isMatchingActivePrRun(run, pr));
+
+  const currentHeadRun = matchingActiveRuns.find((run) => run.head_sha === pr.headRefOid);
+
+  const cancelledRunIds = [];
+  for (const run of matchingActiveRuns) {
+    if (run.head_sha !== pr.headRefOid && run.id) {
+      const cancelRes = execFn([
+        "api",
+        "-X",
+        "POST",
+        `repos/${args.repo}/actions/runs/${run.id}/cancel`,
+      ]);
+      if (!cancelRes || !cancelRes.ok) {
+        return {
+          ok: false,
+          status: "cancel_failed",
+          headRefOid: pr.headRefOid,
+          runId: run.id,
+          cancelledRunIds,
+          error: cancelRes?.stderr || `Failed to cancel superseded Copilot review run ${run.id}`,
+        };
+      }
+      cancelledRunIds.push(run.id);
+    }
+  }
+
+  if (currentHeadRun) {
+    return {
+      ok: true,
+      status: "already_running",
+      headRefOid: pr.headRefOid,
+      activeRunId: currentHeadRun.id,
+      cancelledRunIds,
+    };
+  }
+
+  const copilotCurrentlyRequested = (pr.reviewRequests?.nodes || []).some((n) =>
+    isCopilotBotLogin(n?.requestedReviewer?.login)
+  );
+  const toggledExistingRequest = Boolean(copilotCurrentlyRequested || cancelledRunIds.length > 0);
+  if (toggledExistingRequest) {
+    const removeRes = execFn([
+      "pr",
+      "edit",
+      String(args.pr),
+      "-R",
+      args.repo,
+      "--remove-reviewer",
+      "@copilot",
+    ]);
+    if (!removeRes || !removeRes.ok) {
+      return {
+        ok: false,
+        status: "remove_reviewer_failed",
+        headRefOid: pr.headRefOid,
+        cancelledRunIds,
+        error: removeRes?.stderr || "Failed to remove existing @copilot reviewer request",
+      };
+    }
+  }
+
+  const addRes = execFn([
+    "pr",
+    "edit",
+    String(args.pr),
+    "-R",
+    args.repo,
+    "--add-reviewer",
+    "@copilot",
+  ]);
+  if (!addRes.ok) {
+    return {
+      ok: false,
+      status: "request_failed",
+      headRefOid: pr.headRefOid,
+      cancelledRunIds,
+      error: addRes.stderr || "Failed to request @copilot review",
+    };
+  }
+
+  return {
+    ok: true,
+    status: "requested",
+    headRefOid: pr.headRefOid,
+    cancelledRunIds,
+    toggledExistingRequest,
   };
 }
 
@@ -831,6 +1190,14 @@ async function sleepSeconds(sec) {
 
 export async function runCli(argv = process.argv.slice(2)) {
   const args = parsePrWatchArgs(argv);
+  if (args.mode === "request-copilot") {
+    const res = requestCopilotReview(args);
+    console.log(JSON.stringify(res, null, 2));
+    if (!res.ok) {
+      process.exit(1);
+    }
+    return;
+  }
   if (args.mode === "once") {
     const tick = evaluatePrPollTick(args);
     console.log(JSON.stringify(tick, null, 2));

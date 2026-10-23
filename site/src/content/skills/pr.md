@@ -14,7 +14,9 @@ install:
 A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge.
 
 Requires `test-doctor` and `doc-doctor`. PR preflight owns the documentation pass,
-including when called by `go`, and reuses matching passing evidence.
+including when called by `go`, and reuses matching passing evidence (including
+`go` Step 4's diff + cross-model `rubber-duck` sub-agent review, or running both
+when invoked directly without `go`).
 
 Preserves the PR template and records exact validation commands and results.
 Expects Copilot review unless an explicitly authorized, verified private-owner

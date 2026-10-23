@@ -51,7 +51,10 @@ test("published go usage documents the worktree default and explicit stay option
 });
 
 test("plans, tests, implements, and reviews before invoking pr without copying its delivery logic", () => {
+  assert.ok(skill.split("\n").length <= 60, "keep SKILL.md short and sweet");
   assert.match(skill, /^1\..*plan[\s\S]*^2\..*Invoke `test-doctor fix`[\s\S]*^3\..*Implement[\s\S]*^4\..*Review[\s\S]*^5\..*Invoke `jongio\/pr`/m);
+  assert.match(skill, /`rubber-duck` sub-agent review.*different model family than the currently active model/);
+  assert.match(pr, /Reuse passing `go` Step 4 review evidence under the identity rule.*cross-model `rubber-duck` sub-agent review.*when invoked directly without `go`/);
   assert.match(skill, /passing test\/review evidence/);
   assert.doesNotMatch(skill, /git (?:commit|push|rebase)|gh pr (?:create|merge)|--auto/);
   assert.match(pr, /Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits\./);
