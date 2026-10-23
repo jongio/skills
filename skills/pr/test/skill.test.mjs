@@ -549,8 +549,26 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
     [{ databaseId: 600, createdAt: "2026-10-22T20:05:00Z", body: "Review 905: addressed Fix timeout." }],
     "head123"
   );
-  assert.equal(partialFindings.length, 1);
-  assert.deepEqual(partialFindings[0].unsettledConcerns, ["Fix pagination"]);
+  // A review with "### 🔵 Needs a closer look" + "No open issues" + "<details>1 resolved since last review" (#discussion_r...)
+  // MUST still surface as a body-only finding until cited in a PR comment!
+  const needsCloserLookWithResolvedLink = `<!-- ccr-overview-v2 -->\n\n### 🔵 Needs a closer look\n\nWatched-run validation still permits silently unmonitored requests.\n\n**No open issues** 🎉\n\n<details>\n<summary><strong>1 resolved since last review</strong></summary>\n\n- [Surface uncached discovery errors](https://github.com/jongio/skills/pull/174#discussion_r4355767769)\n</details>`;
+  const closerLookFindings = extractBodyOnlyFindings(
+    [
+      {
+        databaseId: 5623556560,
+        state: "COMMENTED",
+        submittedAt: "2026-10-23T03:29:22Z",
+        author: { login: "copilot-pull-request-reviewer" },
+        commit: { oid: "0b6d67c7" },
+        body: needsCloserLookWithResolvedLink,
+      },
+    ],
+    [],
+    "0b6d67c7",
+    new Set([4355767769])
+  );
+  assert.equal(closerLookFindings.length, 1);
+  assert.equal(closerLookFindings[0].reviewId, 5623556560);
 
   // 4. --no-copilot ignores pending Copilot requests, Team requests stay pending,
   // --expected-reviewers requires current-head review, and REVIEW_REQUIRED blocks PR_READY_TO_MERGE

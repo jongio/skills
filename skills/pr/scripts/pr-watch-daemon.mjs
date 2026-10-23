@@ -158,9 +158,15 @@ export function isErroredCopilotReview(review) {
 }
 
 function extractBodyConcerns(body, fallbackHeadline, resolvedCommentIds = new Set()) {
+  const bodyWithoutResolvedDetails = body.replace(
+    /<details[^>]*>\s*<summary>\s*<strong>\s*\d+\s+resolved since last review\s*<\/strong>\s*<\/summary>[\s\S]*?<\/details>/gi,
+    ""
+  );
   const concerns = [];
   let hadInlineLinks = false;
-  for (const match of body.matchAll(/\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g)) {
+  for (const match of bodyWithoutResolvedDetails.matchAll(
+    /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
+  )) {
     hadInlineLinks = true;
     const title = match[1].trim();
     const commentId = Number.parseInt(match[2], 10);
@@ -171,7 +177,9 @@ function extractBodyConcerns(body, fallbackHeadline, resolvedCommentIds = new Se
       concerns.push(title);
     }
   }
-  for (const match of body.matchAll(/<summary>[\s\S]*?<\/picture>\s*([^<\n]+)<\/summary>/gi)) {
+  for (const match of bodyWithoutResolvedDetails.matchAll(
+    /<summary>[\s\S]*?<\/picture>\s*([^<\n]+)<\/summary>/gi
+  )) {
     const title = match[1].trim();
     if (title && !concerns.includes(title)) {
       concerns.push(title);
