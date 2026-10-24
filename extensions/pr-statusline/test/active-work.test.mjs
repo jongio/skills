@@ -309,3 +309,34 @@ test("a fresh selector-free reopen can explicitly restore a dismissed PR", () =>
 	assert.equal(tracker.state.prs[0].generation, 1);
 	assert.ok(!tracker.state.ignored.includes(pr));
 });
+
+for (const [command, expected] of [
+	["gh pr checkout --force 42 --repo other/project", ["https://github.com/other/project/pull/42"]],
+	["gh pr checkout --repo other/project --branch 99 42", ["https://github.com/other/project/pull/42"]],
+	['gh pr checkout --worktree "42" 43 --repo other/project', ["https://github.com/other/project/pull/43"]],
+	['gh pr checkout --worktree "C:\\path with 99" --branch "123" 43 --repo other/project', ["https://github.com/other/project/pull/43"]],
+	['gh -Rother/project pr checkout --force "42"', ["https://github.com/other/project/pull/42"]],
+	["gh pr co --force 42 --repo other/project", ["https://github.com/other/project/pull/42"]],
+	["gh pr checkout 42 --repo github.example.com/other/project", ["https://github.example.com/other/project/pull/42"]],
+	["gh pr checkout 42 --repo https://github.example.com/other/project", ["https://github.example.com/other/project/pull/42"]],
+	["Set-Location C:\\other-project; gh pr checkout 42", []],
+	["cd C:\\other-project; gh pr checkout 42 --repo other/project", ["https://github.com/other/project/pull/42"]],
+	["Push-Location C:\\other-project; gh pr checkout https://github.com/other/project/pull/42", ["https://github.com/other/project/pull/42"]],
+	["gh pr checkout 42 --repo not-a-qualified-repo", []],
+	["gh pr checkout 42 --repo http://github.example.com/other/project", []],
+	["gh pr checkout feature-42 --branch 99 --repo other/project", []],
+	["gh pr checkout --force https://github.com/other/project/pull/42", ["https://github.com/other/project/pull/42"]],
+	["gh pr checkout -Rother/project -b99 42", ["https://github.com/other/project/pull/42"]],
+]) {
+	test(`root and agent checkout targets agree without guessing: ${command}`, () => {
+		const prs = new SessionTracker("checkout-root");
+		const agents = new SubagentTracker("checkout-agent");
+		for (const tracker of [prs, agents]) tracker.observe(event("session.start", { repository: "acme/app" }));
+		agents.observe(event("subagent.started", { agentId: "worker", agentType: "general-purpose" }));
+		prs.observe(start("checkout", command));
+		agents.observe(start("checkout", command, "powershell", {}, "worker"));
+		for (const tracker of [prs, agents]) tracker.observe(complete("checkout", "Switched to branch feature"));
+		assert.deepEqual(prs.state.prs.map((item) => item.url), expected, "root target");
+		assert.deepEqual(agents.agents.get("worker").prs, expected, "agent target");
+	});
+}

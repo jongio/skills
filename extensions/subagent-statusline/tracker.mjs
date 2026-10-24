@@ -100,6 +100,27 @@ function extractPrUrls(text) {
 	return found;
 }
 
+function extractGhPrNumber(command) {
+	const match = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(?:view|diff|checks|checkout|co|edit|review|comment|merge|close|reopen|ready)\b([^;&|\r\n]*)/.exec(command);
+	if (!match) return null;
+	const tokens = match[1].match(/"(?:\\.|`.|[^"\\`])*"|'(?:''|[^'])*'|\S+/g) ?? [];
+	let flags = true;
+	for (let i = 0; i < tokens.length; i++) {
+		const token = tokens[i].replace(/^["']|["']$/g, "");
+		if (flags && token === "--") {
+			flags = false;
+			continue;
+		}
+		if (flags && /^(?:-R|--repo|-B|--base|-H|--head|-t|--title|-b|--body|--branch|--worktree|-F|--body-file|-r|--reviewer|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template)$/.test(token)) {
+			i++;
+			continue;
+		}
+		if (flags && token.startsWith("-")) continue;
+		return /^[1-9]\d*$/.test(token) ? token : null;
+	}
+	return null;
+}
+
 export function readState(sessionId, home = configHome()) {
 	let raw;
 	try {
@@ -354,18 +375,22 @@ export class SubagentTracker {
 
 			const agentId = event.agentId || data.agentId;
 			if (agentId && this.agents.has(agentId)) {
-				const ghSubcommand = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+(checkout|create|edit|review|comment|merge|ready|reopen)\b/.exec(command)?.[1];
+				const targetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
+				const ghSubcommand = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(checkout|co|create|edit|review|comment|merge|ready|reopen)\b/.exec(targetText)?.[1];
 				const isPrCmd = Boolean(ghSubcommand) ||
 					/(?:^|[_-])(?:create_pull_request|update_pull_request|merge_pull_request)$/.test(name);
 				if (isPrCmd) {
-					const explicitRepo = /(?:--repo|-R)(?:[=\s]+)["']?([\w.-]+\/[\w.-]+)(?![\w./-])/.exec(command)?.[1] ??
-						(args.owner && args.repo ? `${args.owner}/${args.repo}` : this.repository);
-					const numMatch = /\bgh(?:\s+\S+)*\s+pr\s+(?:checkout|edit|review|comment|merge|ready|reopen)\s+([1-9]\d*)\b/.exec(command)?.[1] ??
-						args.pullNumber ?? args.pull_number;
-					const targetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
+					const repoArgument = /(?:--repo(?:=|\s+)|-R(?:=?|\s+))["']?(?:https:\/\/)?((?:[\w.-]+\/)?[\w.-]+\/[\w.-]+)(?![\w./-])/.exec(targetText)?.[1]?.split("/");
+					const explicitRepo = repoArgument?.slice(-2).join("/") ??
+						(args.owner && args.repo ? `${args.owner}/${args.repo}` : null);
+					const changedDirectory = /\b(?:cd|Set-Location|Push-Location)\b|\bgh\s+-C\b/i.test(targetText);
+					const hasRepoArgument = /(?:^|\s)(?:--repo(?:=|\s|$)|-R)/.test(targetText);
+					const repository = explicitRepo ?? (changedDirectory || hasRepoArgument ? null : this.repository);
+					const host = repoArgument?.length === 3 ? repoArgument[0] : this.host;
+					const numMatch = args.pullNumber ?? args.pull_number ?? extractGhPrNumber(targetText);
 					const targets = extractPrUrls(targetText);
-					if (explicitRepo && /^[1-9]\d*$/.test(String(numMatch))) {
-						targets.push(`https://${this.host}/${explicitRepo}/pull/${numMatch}`);
+					if (repository && /^[1-9]\d*$/.test(String(numMatch))) {
+						targets.push(`https://${host}/${repository}/pull/${numMatch}`);
 					}
 					for (const prUrl of targets) this.linkPr(agentId, prUrl);
 					this.agentToolCalls.set(data.toolCallId, {

@@ -114,18 +114,22 @@ function urls(text, repository = null, host = "github.com") {
 }
 
 function extractGhPrNumber(command) {
-	const match = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+(?:view|diff|checks|checkout|edit|review|comment|merge|close|reopen|ready)\b([^;&|\r\n]*)/.exec(command);
+	const match = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(?:view|diff|checks|checkout|co|edit|review|comment|merge|close|reopen|ready)\b([^;&|\r\n]*)/.exec(command);
 	if (!match) return null;
-	const tokens = match[1].trim().split(/\s+/).filter(Boolean);
+	const tokens = match[1].match(/"(?:\\.|`.|[^"\\`])*"|'(?:''|[^'])*'|\S+/g) ?? [];
+	let flags = true;
 	for (let i = 0; i < tokens.length; i++) {
 		const token = tokens[i].replace(/^["']|["']$/g, "");
-		if (token === "--") continue;
-		if (/^(?:-R|--repo|-B|--base|-H|--head|-t|--title|-b|--body|-F|--body-file|-r|--reviewer|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template)$/.test(token)) {
+		if (flags && token === "--") {
+			flags = false;
+			continue;
+		}
+		if (flags && /^(?:-R|--repo|-B|--base|-H|--head|-t|--title|-b|--body|--branch|--worktree|-F|--body-file|-r|--reviewer|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template)$/.test(token)) {
 			i++;
 			continue;
 		}
-		if (token.startsWith("-")) continue;
-		if (/^[1-9]\d*$/.test(token)) return token;
+		if (flags && token.startsWith("-")) continue;
+		return /^[1-9]\d*$/.test(token) ? token : null;
 	}
 	return null;
 }
@@ -288,7 +292,8 @@ export class SessionTracker {
 		if (event.type === "tool.execution_start") {
 			const args = data.arguments ?? {};
 			const name = data.mcpToolName ?? data.toolName ?? "";
-			const command = args.command ?? "";
+			const command = String(args.command ?? "");
+			const commandTargetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
 			if (/(?:^|[._-])session_prs$/.test(name) && args.action === "add") {
 				try {
 					this.add(args.reference, false, prSource);
@@ -308,22 +313,25 @@ export class SessionTracker {
 			const otherSessionState = new RegExp(`\\.copilot[\\\\/]session-state(?:[\\\\/](?!${safeSessionId}\\b)|$)`, "i");
 			const isDiagnostic = /\.copilot[\\/]pr-statusline\b|events\.jsonl\b|smoke\.test\.mjs\b/i.test(command) ||
 				otherSessionState.test(command);
-			const ghSubcommand = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+(view|diff|checks|checkout|edit|review|comment|merge|close|reopen|ready|create)\b/.exec(command)?.[1];
+			const ghSubcommand = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(view|diff|checks|checkout|co|edit|review|comment|merge|close|reopen|ready|create)\b/.exec(commandTargetText)?.[1];
 			const mcpTargeted = /(?:^|[_-])(?:pull_request_read|create_pull_request|update_pull_request|merge_pull_request|pull_request_review_write|add_comment_to_pending_review)$/.test(name);
 			const mcpWrite = mcpTargeted && !/(?:^|[_-])pull_request_read$/.test(name);
 			const merging = ghSubcommand === "merge" || /(?:^|[_-])merge_pull_request$/.test(name);
 			const closing = ghSubcommand === "close";
 			const reopening = ghSubcommand === "reopen";
 			const isProcessFilter = /\bGet-CimInstance\b|\bWhere-Object\b|\b-like\s+['"]\*/i.test(command);
-			const api = isProcessFilter ? null : /repos\/([\w.-]+\/[\w.-]+)\/pulls\/([1-9]\d*)(?!\d)/.exec(command);
-			const changedDirectory = /\b(?:cd|Set-Location|Push-Location)\b|\bgh\s+-C\b/i.test(command);
-			const explicitRepo = /(?:--repo|-R)(?:[=\s]+)["']?([\w.-]+\/[\w.-]+)(?![\w./-])/.exec(command)?.[1] ??
+			const api = isProcessFilter ? null : /repos\/([\w.-]+\/[\w.-]+)\/pulls\/([1-9]\d*)(?!\d)/.exec(commandTargetText);
+			const changedDirectory = /\b(?:cd|Set-Location|Push-Location)\b|\bgh\s+-C\b/i.test(commandTargetText);
+			const repoArgument = /(?:--repo(?:=|\s+)|-R(?:=?|\s+))["']?(?:https:\/\/)?((?:[\w.-]+\/)?[\w.-]+\/[\w.-]+)(?![\w./-])/.exec(commandTargetText)?.[1]?.split("/");
+			const explicitRepo = repoArgument?.slice(-2).join("/") ??
 				(args.owner && args.repo ? `${args.owner}/${args.repo}` : null);
-			const repository = explicitRepo ?? (changedDirectory ? null : this.repository);
-			const apiWrite = api && /(?:--method|-X)(?:=|\s+)["']?(?:POST|PATCH|PUT|DELETE)\b/i.test(command);
+			const hasRepoArgument = /(?:^|\s)(?:--repo(?:=|\s|$)|-R)/.test(commandTargetText);
+			const repository = explicitRepo ?? (changedDirectory || hasRepoArgument ? null : this.repository);
+			const host = repoArgument?.length === 3 ? repoArgument[0] : this.host;
+			const apiWrite = api && /(?:--method|-X)(?:=|\s+)["']?(?:POST|PATCH|PUT|DELETE)\b/i.test(commandTargetText);
 			const targeted = !isDiagnostic &&
 				(Boolean(ghSubcommand && !["view", "diff", "checks"].includes(ghSubcommand)) || mcpWrite || apiWrite);
-			const hasListCommand = /\bgh\s+(?:(?:-R|--repo)(?:=|\s+)\S+\s+)*pr\s+(?:list|status)\b|\bgh\s+search\b|\brepos\/[\w.-]+\/[\w.-]+\/pulls(?=[?'"\s]|$)/i.test(command);
+			const hasListCommand = /\bgh\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+\s+)*pr\s+(?:list|status)\b|\bgh\s+search\b|\brepos\/[\w.-]+\/[\w.-]+\/pulls(?=[?'"\s]|$)/i.test(commandTargetText);
 			const replayedBeforeInput = history &&
 				(!event.timestamp || Date.parse(event.timestamp) <= this.lastUserInputAt);
 			const call = { targeted, closing, merging, reopening: reopening && !replayedBeforeInput && !consumed,
@@ -332,20 +340,17 @@ export class SessionTracker {
 				this.add(reference, call.reopening, call.source);
 			};
 			if (call.targeted) {
-				const commandTargetText = command
-					? command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "")
-					: "";
 				for (const pr of urls(commandTargetText, this.repository, this.host)) {
 					call.targets.push(pr.url);
 					if (!closing) addTarget(pr.url);
 				}
-				const number = args.pullNumber ?? args.pull_number ?? extractGhPrNumber(command);
+				const number = args.pullNumber ?? args.pull_number ?? extractGhPrNumber(commandTargetText);
 				if (api) {
 					const targetUrl = `https://${this.host}/${api[1]}/pull/${api[2]}`;
 					call.targets.push(targetUrl);
 					if (!closing) addTarget(targetUrl);
 				} else if (repository && /^[1-9]\d*$/.test(String(number))) {
-					const targetUrl = `https://${this.host}/${repository}/pull/${number}`;
+					const targetUrl = `https://${host}/${repository}/pull/${number}`;
 					call.targets.push(targetUrl);
 					if (!closing) addTarget(targetUrl);
 				}
