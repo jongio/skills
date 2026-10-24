@@ -280,8 +280,14 @@ export function createSessionAttention({
 		}
 	}
 	reload();
-	const onConfigChange = () => {
-		if (!stopped) { failed = false; lastError = null; reload({ explicitDisable: true }); }
+	const onConfigChange = (current, previous) => {
+		if (!stopped) {
+			failed = false;
+			lastError = null;
+			const changed = current.mtimeMs !== previous.mtimeMs || current.ino !== previous.ino ||
+				current.nlink !== previous.nlink;
+			reload({ explicitDisable: changed });
+		}
 	};
 	if (watch) watchFile(attentionConfigPath(home), { persistent: false, interval: 1000 }, onConfigChange);
 

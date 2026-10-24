@@ -412,6 +412,19 @@ test("a preview while attention is off survives unrelated live and background ev
 	} finally { attention.stop(); }
 }));
 
+test("the initial missing-preferences watch notification cannot cancel an opt-out preview", async () => fixture(async (home) => {
+	const { attention, helper } = controller(home, { watch: true });
+	try {
+		await attention.preview();
+		await new Promise((resolve) => setTimeout(resolve, 1200));
+		assert.equal(existsSync(attentionConfigPath(home)), false);
+		assert.equal(helper.children[0].child.stdin.writableEnded, false);
+		attention.configure({ enabled: false });
+		await flush();
+		assert.equal(helper.children[0].child.stdin.writableEnded, true);
+	} finally { attention.stop(); }
+}));
+
 test("explicit off cancels a preview still compiling and prevents a later native launch", async () => fixture(async (home) => {
 	let finish;
 	const { attention, helper } = controller(home, { build: () => new Promise((resolve) => { finish = resolve; }) });
