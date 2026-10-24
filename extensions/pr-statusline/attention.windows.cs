@@ -342,6 +342,15 @@ internal static class TerminalAttention
         return target != IntPtr.Zero && GetForegroundWindow() == target;
     }
 
+    private static bool IsEditingKey(int key, bool released, bool control, bool shift, bool alt, bool windows)
+    {
+        if (released || windows || key == 0x10 || key == 0x11 || key == 0x12 || key == 0x5B || key == 0x5C ||
+            (key >= 0xA0 && key <= 0xA5)) return false;
+        if (alt && (key == 0x09 || key == 0x1B || key == 0x20 || key == 0x73)) return false;
+        if (control && (key == 0x09 || (shift && (key == 0x4E || key == 0x54)))) return false;
+        return true;
+    }
+
     private static void ObserveInput(IntPtr input)
     {
         if (!TargetFocused()) return;
@@ -352,10 +361,9 @@ internal static class TerminalAttention
         if (type == 1)
         {
             int key = (ushort)Marshal.ReadInt16(inputBuffer, (int)InputHeaderSize + 6);
-            if ((Marshal.ReadInt16(inputBuffer, (int)InputHeaderSize + 2) & 1) != 0 ||
-                key == 0x10 || key == 0x11 || key == 0x12 || key == 0x5B || key == 0x5C ||
-                (key >= 0xA0 && key <= 0xA5) || GetAsyncKeyState(0x11) < 0 ||
-                GetAsyncKeyState(0x12) < 0 || GetAsyncKeyState(0x5B) < 0 || GetAsyncKeyState(0x5C) < 0) return;
+            bool released = (Marshal.ReadInt16(inputBuffer, (int)InputHeaderSize + 2) & 1) != 0;
+            if (!IsEditingKey(key, released, GetAsyncKeyState(0x11) < 0, GetAsyncKeyState(0x10) < 0,
+                GetAsyncKeyState(0x12) < 0, GetAsyncKeyState(0x5B) < 0 || GetAsyncKeyState(0x5C) < 0)) return;
             focus.Interact(GetForegroundWindow(), FocusClock.ElapsedMilliseconds);
         }
         else if (type == 0 && (Marshal.ReadInt16(inputBuffer, (int)InputHeaderSize + 4) & 0x0D55) != 0)
@@ -579,6 +587,23 @@ internal static class TerminalAttention
         tracker.Observe(new IntPtr(1), 1000);
         CheckLatch(!laterAlert.Show(true, tracker.SettledInputSequence, tracker.Settled));
         CheckLatch(!laterPreview.Show(true, tracker.SettledInputSequence, tracker.Settled));
+        CheckLatch(IsEditingKey(0x56, false, true, true, false, false));
+        CheckLatch(IsEditingKey(0x56, false, true, false, false, false));
+        CheckLatch(IsEditingKey(0x43, false, true, true, false, false));
+        CheckLatch(IsEditingKey(0x41, false, true, false, false, false));
+        CheckLatch(IsEditingKey(0x46, false, false, false, true, false));
+        CheckLatch(!IsEditingKey(0x56, true, true, true, false, false));
+        CheckLatch(!IsEditingKey(0x11, false, true, false, false, false));
+        CheckLatch(!IsEditingKey(0x4E, false, true, true, false, false));
+        CheckLatch(!IsEditingKey(0x54, false, true, true, false, false));
+        CheckLatch(!IsEditingKey(0x09, false, true, false, false, false));
+        CheckLatch(!IsEditingKey(0x09, false, false, false, true, false));
+        CheckLatch(!IsEditingKey(0x56, false, false, false, false, true));
+        var pasted = new AttentionLatch();
+        pasted.Update(question, true, tracker.InputSequence);
+        if (IsEditingKey(0x56, false, true, true, false, false)) tracker.Interact(new IntPtr(1), 1100);
+        tracker.Observe(new IntPtr(1), 1400);
+        CheckLatch(!pasted.Show(true, tracker.SettledInputSequence, tracker.Settled));
         Emit(new { type = "selfTest", passed = true });
     }
 
