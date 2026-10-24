@@ -17,6 +17,9 @@ try {
 	const tracker = new IssueTracker("issue-session");
 	tracker.observe(event("session.start", { context: { repository: "Azure/azure-dev", repositoryHost: "github.com" } }));
 	tracker.observe(event("user.message", { content: "Work on issue #3315 and https://github.com/Azure/azure-dev/issues/3318" }));
+	assert.deepEqual(tracker.state.issues, [], "a reference alone does not enroll an issue");
+	tracker.manage("add", "Azure/azure-dev#3318");
+	tracker.manage("add", "Azure/azure-dev#3315");
 	assert.deepEqual(tracker.state.issues.map((i) => i.label), [
 		"Azure/azure-dev#3318",
 		"Azure/azure-dev#3315",
@@ -43,6 +46,10 @@ try {
 		[
 			JSON.stringify(event("session.start", { context: { repository: "Azure/azure-dev", repositoryHost: "github.com" } })),
 			JSON.stringify(event("user.message", { content: "Fix issue #3315 and https://github.com/Azure/azure-dev/issues/3318" }, undefined, new Date(1000).toISOString())),
+			...[3315, 3318].map((number) => JSON.stringify(event("tool.execution_start", {
+				toolCallId: `track-${number}`, toolName: "session_issues",
+				arguments: { action: "add", reference: `Azure/azure-dev#${number}` },
+			}))),
 		].join("\n") + "\n",
 	);
 
@@ -62,6 +69,9 @@ try {
 			closedByPullRequestsReferences: { nodes: [] },
 		},
 	};
+	const owned = new IssueTracker("live-issues");
+	for (const number of [3315, 3318]) owned.manage("add", `Azure/azure-dev#${number}`);
+	writeState(owned.snapshot(), home);
 
 	const plain = render(
 		{ session_id: "live-issues", transcript_path: transcriptDir },
@@ -78,6 +88,7 @@ try {
 			JSON.stringify(event("tool.execution_complete", { toolCallId: "close-3318", success: true, result: { content: "Closed issue #3318" } }, undefined, new Date(3100).toISOString())),
 		].join("\n") + "\n",
 	);
+	mockIssues["https://github.com/Azure/azure-dev/issues/3318"].state = "CLOSED";
 	const afterCloseColored = render(
 		{ session_id: "live-issues", transcript_path: transcriptDir },
 		{ home, links: true, color: true, now: 3200, fetchIssueStatus: (url) => mockIssues[url] ?? null },

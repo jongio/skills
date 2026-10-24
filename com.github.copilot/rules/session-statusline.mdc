@@ -1,0 +1,22 @@
+---
+description: Keep session statusline pills limited to work this session owns
+alwaysApply: true
+---
+
+# Active session pills
+
+When the session statusline tools are available, explicitly add an issue or PR
+with `session_issues` or `session_prs` only when this session takes on its
+implementation, review, repair, or active monitoring. All PR and issue enrollment
+is explicit: shell commands, GitHub writes/results, and read-only lookups never
+enroll targets automatically. Actual session agent launches are tracked automatically.
+
+Never add pills for references, examples, attachments, memories, plans, search/list
+results, delegated prompts/results, or other sessions' work alone. Remove a target
+when this session stops working on it. Honor manual clear/remove: do not re-add
+an entry without new work or an explicit request.
+
+Use the `session-statusline` skill for manual list/add/remove/clear/refresh requests.
+Clearing pills must not close work, stop agents, delete transcripts or worktrees,
+or change enabled components. Do not scan other sessions or edit raw tracking
+files. If the extension tools are unavailable, do not claim tracking changed.

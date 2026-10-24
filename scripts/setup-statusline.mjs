@@ -131,9 +131,10 @@ export function configureStatuslines({
 	const sourceComposer = join(repoRoot, "extensions", "pr-statusline", "compose.mjs");
 	copyFileSync(sourceComposer, composerPath);
 
-	// The unified PR entry point exposes commands backed by sibling trackers.
+	// One SDK controller owns tool names; sibling renderers still need their runtime modules.
 	const requiredRuntime = new Set(validEnabled);
-	if (requiredRuntime.has("pr-statusline")) {
+	const unifiedControls = requiredRuntime.has("pr-statusline") || existsSync(join(extRoot, "pr-statusline", "extension.mjs"));
+	if (unifiedControls) {
 		for (const item of EXTENSION_CATALOG) requiredRuntime.add(item.id);
 	}
 	for (const item of EXTENSION_CATALOG) {
@@ -142,6 +143,11 @@ export function configureStatuslines({
 		const dstDir = join(extRoot, item.id);
 		mkdirSync(dstDir, { recursive: true });
 		for (const file of item.files) {
+			if (file === "extension.mjs" && unifiedControls && item.id !== "pr-statusline") {
+				const entry = join(dstDir, file);
+				if (existsSync(entry)) renameSync(entry, `${entry}.disabled-${Date.now()}-${process.pid}`);
+				continue;
+			}
 			const srcFile = join(srcDir, file);
 			if (existsSync(srcFile)) {
 				copyFileSync(srcFile, join(dstDir, file));

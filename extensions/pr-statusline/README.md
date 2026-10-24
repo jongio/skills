@@ -11,8 +11,9 @@ A composable GitHub Copilot CLI status line that tracks the pull requests **this
 With both PR and subagent statuslines enabled, positively identified
 subagent-only PRs contribute to one overall subagent summary instead of
 individual detailed PR pills. PRs directly worked on by the main session remain
-detailed, even if an agent also references them. Unknown ownership, including
-older cache entries without provable provenance, stays detailed. Disabling or
+detailed, even if an agent also references them. Explicitly owned entries whose
+root/agent provenance cannot be proved stay detailed. Unowned legacy entries
+are dropped. Disabling or
 dismissing the subagent summary restores those PR details; no arbitrary item
 limit drops PRs or issues. Standalone PR rendering remains detailed.
 
@@ -257,19 +258,24 @@ Using `Azure/azure-dev` as an example checkout:
   later cache polls don't move that first-observed boundary. Scheduled prompts,
   skill injections and subagent messages don't dismiss it. Older merged caches
   without an observation time conservatively start a fresh boundary on first
-  load. Dismissal survives collector saves; explicit re-add/reopen starts a new
+  load. Dismissal survives collector saves; explicit re-add starts a new
   tracking revision.
 - **Slate (Neutral):** Draft PR (``).
 
-## How PRs are discovered and refreshed
+## How PRs are enrolled and refreshed
 
 1. **Session-scoped transcript tailing (`tracker.mjs`):**
-   `render.mjs` incrementally reads new bytes from the active session's `events.jsonl` transcript (from a persisted `transcriptOffset` in `$COPILOT_HOME/pr-statusline/<session_id>.json`) plus `workspace.yaml`. It extracts PRs from:
-   - User prompts and attached GitHub PR references
-   - Active branch / `pr-review-*` worktree metadata in `workspace.yaml`
-   - Targeted `gh pr` commands (`view`, `checks`, `create`, `edit`, `review`, `comment`, `merge`, `close`, `reopen`, `ready`), `gh api repos/<owner>/<repo>/pulls/<number>`, and GitHub MCP PR tools
-   - Scheduled watch prompts (`manage_schedule`)
-   It ignores `gh pr list`/`search` output, exploratory subagents, skill-injected examples, and other sessions' transcripts.
+   Add PRs through the loaded `session_prs` tool or `/session-prs add` command
+   only when this session takes on implementation, review, repair, or active
+   monitoring. All PR enrollment is explicit. Shell commands, GitHub writes and
+   responses, references, attachments, workspace/branch names, remote metadata,
+   schedules, delegated prompts/results, and historical control-call attempts
+   never enroll PRs. `render.mjs` tails the active session's transcript for
+   activity and dismissal metadata, not to infer new ownership.
+   Explicit ownership persists across restarts. On upgrade, unowned legacy
+   entries are dropped; explicitly re-add any work this session still owns.
+   A lost or corrupt ownership cache likewise requires explicit re-enrollment.
+   Existing tracked PRs continue refreshing normally.
 2. **Single-query GraphQL status + shared cache (`github.mjs`):**
    Live PR status is fetched via `gh api graphql` (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (20s TTL while checks are running, including mixed running/failed checks, 45s TTL when settled, with in-flight deduplication locks). A restarted check's active status takes precedence over a leftover conclusion; the pill changes on the next successful refresh, not optimistically when a rerun command is issued. It does **not** use Copilot AI model requests or touch Copilot's internal databases.
 3. **Automatic cleanup & manual controls:**
@@ -293,10 +299,17 @@ The unified SDK extension provides a separate command from Copilot's built-in
 | `/session-statusline clear` | Dismiss this session's current PR, issue, subagent, and worktree entries. Does not delete transcripts, affect other sessions, or change component selections. |
 | `/session-statusline setup` | Open the component picker. Optional selections such as `all`, `none`, or `prs issues` also work. `/statusline-setup` remains a compatibility alias. |
 
+The `session-statusline` skill in the `jongio-skills` plugin maps natural-language
+requests such as "clear the footer pills" to the session-bound `session_statusline`,
+`session_prs`, `session_issues`, and `session_subagents` tools. Per-component clear
+is available through `/session-prs clear`, `/session-issues clear`, and
+`/session-subagents clear`; `/session-subagents remove <agent-id>` dismisses one
+agent without stopping it. Use `/session-subagents list` to find tracked IDs.
+
 **Clear is not refresh or hide.** Clear saves a session-specific replay boundary,
 so old transcript events, unchanged workspace metadata, and collector saves do
-not immediately restore dismissed entries. New activity after that boundary can
-track entries again, including previously cleared references. A new successful
+not immediately restore dismissed entries. PRs and issues require a new explicit
+add; actual new agent launches remain automatic. A new successful
 shell command or directory context can restore the current worktree entry.
 Root and subagent directory context is retained for resolving new relative
 commands without making those dismissed directories visible again.
@@ -322,6 +335,22 @@ already-running SDK collector and register the new command. Clear and refresh
 themselves require no restart once the updated extension is loaded. Recovery
 commands are registered by the unified PR SDK entry point; PR installs include
 its sibling runtime dependencies even when those footer components are hidden.
+The installer keeps one unified SDK controller to avoid duplicate tool names.
+Existing standalone sibling entry points are preserved as
+`extension.mjs.disabled-*` backups, not loaded alongside the unified controller.
+Toggling footer components does not remove the installed unified controls.
+Plugin startup also handles existing standalone installations: it preserves
+their entrypoints as backups, retires only those statusline SDK controllers in
+the current session, and then claims the unified tool names. Work agents and
+saved component selections are unchanged.
+This handover uses live registrations even if another session has already moved
+the shared entrypoint files; an already-moved backup does not block startup.
+Legacy inferred tracking is dropped on first load; explicitly re-add any work
+this session still owns. Ownership is never reconstructed from shell history,
+workspace names, or remote metadata.
+Legacy migration reads the complete available history in 1 MiB I/O chunks,
+reassembling records that cross chunk boundaries. Saved dismissals survive
+old and new shell reopen commands; only an explicit add can resume tracking.
 State writes and worktree replay use per-session, cross-process locks. A lock
 timeout reports its exact path rather than overwriting potentially active state.
 If a process crashed while holding a lock, stop the session's collectors before

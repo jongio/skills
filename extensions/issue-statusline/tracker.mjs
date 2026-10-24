@@ -23,23 +23,7 @@ export {
 
 const INITIAL_HEAD_BYTES = 64 * 1024;
 const INITIAL_TAIL_BYTES = 16 * 1024 * 1024;
-const PLACEHOLDER_REPOS = new Set([
-	"owner/repo",
-	"org/repo",
-	"o/r",
-	"your-org/your-repo",
-	"example/repo",
-	"octo/api",
-	"octocat/hello-world",
-	"project/repo",
-	"org/project",
-	"test-owner/test-repo",
-	"foo/bar",
-	"backup/check",
-	"myorg/repo",
-	"secretorg/secretrepo",
-	"fixture/reference",
-]);
+const READ_CHUNK_BYTES = 1024 * 1024;
 const RELEVANT_EVENT_LINE = /"type"\s*:\s*"(?:session\.(?:start|resume|context_changed)|user\.message|tool\.execution_(?:start|complete))"/;
 
 export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");
@@ -81,48 +65,6 @@ export function issueReference(reference) {
 	};
 }
 
-function extractIssues(text, repository = null, host = "github.com") {
-	const source = String(text ?? "");
-	const found = [];
-	const push = (ref) => {
-		try {
-			const item = issueReference(ref);
-			if (!PLACEHOLDER_REPOS.has(item.label.split("#")[0].toLowerCase())) found.push(item);
-		} catch {
-			// Ignore invalid references.
-		}
-	};
-	for (const [url] of source.matchAll(/https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/issues\/[1-9]\d*/g)) {
-		push(url);
-	}
-	for (const match of source.matchAll(/\b(?:issue|bug|feature|triage|work\s+on|fix(?:es|ed)?|close[sd]?|resolve[sd]?)\b[^\r\n]{0,40}?\b([\w.-]+\/[\w.-]+#[1-9]\d*)\b/gi)) {
-		push(match[1]);
-	}
-	if (repository && !PLACEHOLDER_REPOS.has(repository.toLowerCase())) {
-		for (const match of source.matchAll(/\b(?:issue|fix(?:es|ed)?|close[sd]?|resolve[sd]?)[ \t]+#([1-9]\d*)\b/gi)) {
-			push(`https://${host}/${repository}/issues/${match[1]}`);
-		}
-	}
-	return found;
-}
-
-function extractGhIssueNumber(command) {
-	const match = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+issue\s+(?:view|edit|comment|close|reopen|develop|create)\b([^;&|\r\n]*)/.exec(command);
-	if (!match) return null;
-	const tokens = match[1].trim().split(/\s+/).filter(Boolean);
-	for (let i = 0; i < tokens.length; i++) {
-		const token = tokens[i].replace(/^["']|["']$/g, "");
-		if (token === "--") continue;
-		if (/^(?:-R|--repo|-t|--title|-b|--body|-F|--body-file|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template|-b|--branch)$/.test(token)) {
-			i++;
-			continue;
-		}
-		if (token.startsWith("-")) continue;
-		if (/^[1-9]\d*$/.test(token)) return token;
-	}
-	return null;
-}
-
 export function readState(sessionId, home = configHome()) {
 	let raw;
 	try {
@@ -136,7 +78,7 @@ export function readState(sessionId, home = configHome()) {
 			!Array.isArray(state.issues) || !Array.isArray(state.ignored)) {
 		throw new Error("Invalid issue statusline state.");
 	}
-	state.issues = state.issues.map((item) => ({
+	state.issues = state.issues.filter((item) => item.owned === true || item.simulated).map((item) => ({
 		...issueReference(item.url),
 		...issueContextFields(item),
 		...(typeof item.title === "string" && item.title ? { title: item.title } : {}),
@@ -144,6 +86,7 @@ export function readState(sessionId, home = configHome()) {
 		...(Number.isFinite(item.checkedAt) ? { checkedAt: item.checkedAt } : {}),
 		...(Number.isFinite(item.closedAt) ? { closedAt: item.closedAt } : {}),
 		...(item.simulated ? { simulated: true } : {}),
+		...(item.owned === true ? { owned: true } : {}),
 	}));
 	state.ignored = state.ignored.map((url) => issueReference(url).url);
 	return state;
@@ -169,10 +112,12 @@ export class IssueTracker {
 		statePath(sessionId);
 		this.state = {
 			version: 1,
+			activeTrackingVersion: 2,
 			sessionId,
 			clearedAt: previous?.clearedAt ?? 0,
 			clearedWorkspace: previous?.clearedWorkspace ?? null,
-			issues: [...(previous?.issues ?? [])],
+			issues: (previous?.issues ?? []).filter((issue) => previous?.version !== 1 || issue.owned === true || issue.simulated)
+				.map((issue) => ({ ...issue, ...(previous?.version !== 1 ? { owned: true } : {}) })),
 			ignored: [...(previous?.ignored ?? [])],
 			updatedAt: previous?.updatedAt ?? Date.now(),
 			transcriptOffset: Number.isInteger(previous?.transcriptOffset) && previous.transcriptOffset >= 0
@@ -182,16 +127,16 @@ export class IssueTracker {
 		this.repository = previous?.repository ?? null;
 		this.host = previous?.host ?? "github.com";
 		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
-		this.calls = new Map(Object.entries(previous?.calls ?? {}));
 	}
 
 	add(reference, explicit = false) {
 		const item = issueReference(reference);
-		if (PLACEHOLDER_REPOS.has(item.label.split("#")[0].toLowerCase())) return;
 		if (explicit) this.state.ignored = this.state.ignored.filter((url) => url !== item.url);
 		if (!this.state.ignored.includes(item.url) && !this.state.issues.some((i) => i.url === item.url)) {
-			this.state.issues.push(item);
+			this.state.issues.push({ ...item, owned: true });
 		}
+		const existing = this.state.issues.find((issue) => issue.url === item.url);
+		if (existing) existing.owned = true;
 	}
 
 	manage(action, reference) {
@@ -235,103 +180,17 @@ export class IssueTracker {
 					}
 				}
 			}
-			if (!isSkillInjection && !/\btriage\b/i.test(content)) {
-				for (const item of extractIssues(content, this.repository, this.host)) {
-					this.add(item.url);
-				}
-			}
-			for (const attachment of data.attachments ?? []) {
-				if (attachment.type === "github_reference" && attachment.referenceType === "issue") {
-					this.add(attachment.url);
-				}
-			}
 		}
 
 		if (event.type === "tool.execution_start") {
 			const args = data.arguments ?? {};
-			const name = data.mcpToolName ?? data.toolName ?? "";
 			const command = String(args.command ?? "");
-			const safeSessionId = this.state.sessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-			const otherSessionState = new RegExp(`\\.copilot[\\\\/]session-state(?:[\\\\/](?!${safeSessionId}\\b)|$)`, "i");
-			const isDiagnostic = /\.copilot[\\/](?:pr-statusline|issue-statusline|subagent-statusline)\b|events\.jsonl\b|smoke\.test\.mjs\b/i.test(command) ||
-				otherSessionState.test(command);
-			if (isDiagnostic) return;
-
 			if (/\bgh\s+issue\s+(?:edit|comment|close|reopen|develop)\b/.test(command)) {
 				for (const item of this.state.issues) {
 					if (!item.simulated) item.checkedAt = 0;
 				}
 			}
 
-			// Detect swarm / issue worktree paths only when they belong to this session
-			if (this.repository) {
-				const swarmMatch = new RegExp(`\\bswarm-\\d+-${this.state.sessionId.slice(0, 8)}-([1-9]\\d*)\\b`, "i").exec(command);
-				if (swarmMatch) {
-					this.add(`https://${this.host}/${this.repository}/issues/${swarmMatch[1]}`);
-				}
-			}
-
-			const isBatchLoop = /\bforeach\b|\bForEach-Object\b|\bgh\s+issue\s+list\b|\bgh\s+search\b/i.test(command);
-			const ghSubcommand = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+issue\s+(view|edit|comment|close|reopen|develop|create)\b/.exec(command)?.[1];
-			const mcpTargeted = /(?:^|[_-])(?:issue_read|issue_write|create_issue|update_issue)$/.test(name);
-			const closing = ghSubcommand === "close" || (/(?:^|[_-])(?:issue_write|update_issue)$/.test(name) && String(args.state ?? "").toLowerCase() === "closed");
-			const reopening = ghSubcommand === "reopen";
-			const isPrPollCommand = /\brepos\/[\w.-]+\/[\w.-]+\/pulls\/[1-9]\d*\b/.test(command) || /\bpullRequest\s*\(/.test(command);
-			const api = isPrPollCommand
-				? null
-				: /repos\/([\w.-]+\/[\w.-]+)\/issues\/([1-9]\d*)(?![\d/])/.exec(command);
-
-			const changedDirectory = /\b(?:cd|Set-Location|Push-Location)\b|\bgh\s+-C\b/i.test(command);
-			const explicitRepo = /(?:--repo|-R)(?:[=\s]+)["']?([\w.-]+\/[\w.-]+)(?![\w./-])/.exec(command)?.[1] ??
-				(args.owner && args.repo ? `${args.owner}/${args.repo}` : null);
-			const repository = explicitRepo ?? (changedDirectory ? null : this.repository);
-			const targeted = !isBatchLoop && (Boolean(ghSubcommand) || mcpTargeted || Boolean(api));
-
-			if (targeted) {
-				const commandTargetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
-				const call = { targeted: true, closing, scrapeResultUrls: ghSubcommand === "create" || /(?:^|[_-])create_issue$/.test(name), targets: [] };
-				for (const item of extractIssues(commandTargetText, this.repository, this.host)) {
-					call.targets.push(item.url);
-					if (!closing) this.add(item.url, reopening);
-				}
-				const number = args.issue_number ?? args.issueNumber ?? extractGhIssueNumber(command);
-				if (api) {
-					const targetUrl = `https://${this.host}/${api[1]}/issues/${api[2]}`;
-					call.targets.push(targetUrl);
-					if (!closing) this.add(targetUrl, reopening);
-				} else if (repository && /^[1-9]\d*$/.test(String(number))) {
-					const targetUrl = `https://${this.host}/${repository}/issues/${number}`;
-					call.targets.push(targetUrl);
-					if (!closing) this.add(targetUrl, reopening);
-				}
-				this.calls.set(data.toolCallId, call);
-			}
-		}
-
-		if (event.type === "tool.execution_complete") {
-			const call = this.calls.get(data.toolCallId);
-			this.calls.delete(data.toolCallId);
-			if (call?.targeted && data.success) {
-				const result = data.result ?? {};
-				const resultIssues = call.scrapeResultUrls
-					? extractIssues(`${result.content ?? ""}\n${JSON.stringify(result.structuredContent ?? {})}`)
-					: [];
-				if (call.closing) {
-					const ts = event.timestamp ? Date.parse(event.timestamp) : NaN;
-					const closedAt = Number.isFinite(ts) ? ts : (this.lastUserInputAt || Date.now());
-					for (const targetUrl of [...call.targets, ...resultIssues.map((i) => i.url)]) {
-						this.add(targetUrl);
-						const existing = this.state.issues.find((i) => i.url === issueReference(targetUrl).url);
-						if (existing) {
-							existing.closedAt = closedAt;
-							existing.status = `${ICONS.closed} Closed`;
-							existing.checkedAt = closedAt;
-						}
-					}
-				} else {
-					for (const item of resultIssues) this.add(item.url);
-				}
-			}
 		}
 	}
 
@@ -342,34 +201,42 @@ export class IssueTracker {
 			repository: this.repository,
 			host: this.host,
 			lastUserInputAt: this.lastUserInputAt,
-			calls: Object.fromEntries(this.calls),
 		};
 	}
 }
 
 function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false) {
 	if (length <= 0) return startOffset;
-	const chunk = Buffer.allocUnsafe(length);
-	const bytesRead = readSync(fd, chunk, 0, length, startOffset);
-	if (bytesRead <= 0) return startOffset;
-	let sliceStart = 0;
-	if (skipFirstPartialLine) {
-		const firstNewline = chunk.subarray(0, bytesRead).indexOf(0x0a);
-		if (firstNewline === -1) return startOffset;
-		sliceStart = firstNewline + 1;
-	}
-	const lastNewline = chunk.subarray(0, bytesRead).lastIndexOf(0x0a);
-	if (lastNewline < sliceStart) return startOffset;
-	const text = chunk.subarray(sliceStart, lastNewline + 1).toString("utf8");
-	for (const line of text.split("\n")) {
-		if (!line.trim() || !RELEVANT_EVENT_LINE.test(line)) continue;
-		try {
-			tracker.observe(JSON.parse(line));
-		} catch {
-			// Ignore malformed transcript lines.
+	const buffer = Buffer.allocUnsafe(Math.min(length, READ_CHUNK_BYTES));
+	let position = startOffset, completed = startOffset;
+	let fragments = [];
+	while (position < startOffset + length) {
+		const bytesRead = readSync(fd, buffer, 0, Math.min(buffer.length, startOffset + length - position), position);
+		if (bytesRead <= 0) break;
+		const chunk = buffer.subarray(0, bytesRead);
+		let from = 0;
+		for (let newline = chunk.indexOf(0x0a); newline !== -1; newline = chunk.indexOf(0x0a, from)) {
+			completed = position + newline + 1;
+			if (skipFirstPartialLine) skipFirstPartialLine = false;
+			else {
+				const part = chunk.subarray(from, newline);
+				const line = (fragments.length ? Buffer.concat([...fragments, part]) : part).toString("utf8");
+				if (line.trim() && RELEVANT_EVENT_LINE.test(line)) {
+					try {
+						const event = JSON.parse(line);
+						tracker.observe(event);
+					} catch {
+						// Ignore malformed transcript lines.
+					}
+				}
+			}
+			fragments = [];
+			from = newline + 1;
 		}
+		if (!skipFirstPartialLine && from < bytesRead) fragments.push(Buffer.from(chunk.subarray(from)));
+		position += bytesRead;
 	}
-	return startOffset + lastNewline + 1;
+	return completed;
 }
 
 function inspectWorkspaceMetadata(tracker, sessionDir) {
@@ -379,23 +246,10 @@ function inspectWorkspaceMetadata(tracker, sessionDir) {
 	try {
 		const raw = readFileSync(wsPath, "utf8");
 		const repo = /^repository:\s*(\S+)\s*$/m.exec(raw)?.[1];
-		const branch = /^branch:\s*(\S+)\s*$/m.exec(raw)?.[1];
-		const name = /^name:\s*(.+?)\s*$/m.exec(raw)?.[1];
-		if (tracker.state.clearedAt && JSON.stringify([repo ?? null, branch ?? null, name ?? null]) ===
-			JSON.stringify(tracker.state.clearedWorkspace)) return false;
 		if (repo && !tracker.repository) {
 			tracker.repository = repo;
 			changed = true;
 		}
-		const before = tracker.state.issues.length;
-		if (name && !/\btriage\b/i.test(name)) {
-			for (const item of extractIssues(name, tracker.repository, tracker.host)) tracker.add(item.url);
-		}
-		if (tracker.repository && branch) {
-			const issueBranch = /^(?:issue|bug|feat|fix)[/-]([1-9]\d*)(?:[/-]|$)/i.exec(branch);
-			if (issueBranch) tracker.add(`https://${tracker.host}/${tracker.repository}/issues/${issueBranch[1]}`);
-		}
-		if (tracker.state.issues.length !== before) changed = true;
 	} catch {
 		// Ignore workspace.yaml read errors.
 	}
@@ -445,7 +299,8 @@ export function syncSession(payload, {
 	}
 	if (!hasTranscript && !hasWorkspace && !previous) return { state: null };
 
-	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
+	const migrate = previous && previous.activeTrackingVersion !== 2;
+	const reset = hasTranscript && (!previous || migrate || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new IssueTracker(
 		sessionId,
 		reset && previous ? { issues: previous.issues, ignored: previous.ignored,
@@ -453,7 +308,7 @@ export function syncSession(payload, {
 			...(previous.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.state.transcriptOffset;
-	let changed = (hasTranscript || hasWorkspace) && (!previous || reset);
+	let changed = Boolean(migrate) || (hasTranscript || hasWorkspace) && (!previous || reset);
 
 	if ((hasTranscript || hasWorkspace) && inspectWorkspaceMetadata(tracker, sessionDir)) {
 		changed = true;
@@ -463,12 +318,12 @@ export function syncSession(payload, {
 		const fd = openSync(transcriptFile, "r");
 		try {
 			let nextOffset = offset;
-			if (offset === 0 && stat.size > INITIAL_HEAD_BYTES + INITIAL_TAIL_BYTES) {
-				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES, false);
+			if (!migrate && offset === 0 && stat.size > INITIAL_HEAD_BYTES + INITIAL_TAIL_BYTES) {
+				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES);
 				const tailStart = stat.size - INITIAL_TAIL_BYTES;
 				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true);
 			} else {
-				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset, false);
+				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset);
 			}
 			if (nextOffset !== offset) {
 				tracker.state.transcriptOffset = nextOffset;
@@ -494,6 +349,7 @@ export function syncSession(payload, {
 				const byUrl = new Map(tracker.state.issues.map((i) => [i.url, i]));
 				tracker.state.ignored = [...latest.ignored];
 				tracker.state.issues = latest.issues
+					.filter((i) => i.owned === true || i.simulated)
 					.filter((i) => !tracker.state.ignored.includes(i.url))
 					.map((i) => byUrl.get(i.url) ?? i);
 			}

@@ -1,7 +1,9 @@
-import { dirname } from "node:path";
+import { renameSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { collect } from "./collector.mjs";
+import { configHome } from "./tracker.mjs";
 import { createSessionAttention, runAttentionCommand } from "./attention.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
 import {
@@ -10,12 +12,13 @@ import {
 } from "./compose.mjs";
 import {
 	IssueTracker,
-	readState as readIssueState,
+	syncSession as syncIssues,
 	writeState as writeIssueState,
 } from "../issue-statusline/tracker.mjs";
 import {
 	readState as readSubagentState,
 	SubagentTracker,
+	syncSession as syncAgents,
 	writeState as writeSubagentState,
 } from "../subagent-statusline/tracker.mjs";
 
@@ -25,12 +28,27 @@ const { firstRun } = ensurePluginStatuslineRegistered("pr-statusline", dirname(f
 
 let collector;
 let attention;
-function manage(action, reference) {
+function manage(action, reference, invocation) {
 	if (!collector) throw new Error("PR statusline is still loading.");
-	return collector.manage(action, reference);
+	return collector.manage(action, reference, invocation?.toolCallId);
 }
 
-const session = await joinSession({
+function manageAgents(action, id) {
+	const tracker = syncAgents({ session_id: session.sessionId }).tracker ?? new SubagentTracker(session.sessionId);
+	const agents = tracker.manage(action, id);
+	writeSubagentState(tracker.snapshot());
+	return agents;
+}
+
+function updateSession(action) {
+	if (!collector) throw new Error("Session statusline is still loading; retry shortly.");
+	const payload = { session_id: session.sessionId };
+	const result = action === "clear" ? clearSessionStatusline(payload) : refreshSessionStatusline(payload);
+	collector.reload();
+	return result;
+}
+
+const configuration = {
 	commands: [
 		{
 			name: "session-attention",
@@ -53,10 +71,7 @@ const session = await joinSession({
 					if (action === "setup") {
 						await runInteractiveStatuslinePicker(session, { args: selection.join(" ") });
 					} else if ((action === "clear" || action === "refresh") && !selection.length) {
-						if (!collector) throw new Error("Session statusline is still loading; retry shortly.");
-						const payload = { session_id: session.sessionId };
-						await session.log(action === "clear" ? clearSessionStatusline(payload) : refreshSessionStatusline(payload));
-						collector.reload();
+						await session.log(updateSession(action));
 					} else {
 						await session.log("Usage: /session-statusline [refresh | clear | setup [all | none | prs issues subagents worktrees]]");
 					}
@@ -99,7 +114,7 @@ const session = await joinSession({
 			handler: async ({ args }) => {
 				try {
 					const [action = "list", reference] = args.trim().split(/\s+/);
-					const tracker = new IssueTracker(session.sessionId, readIssueState(session.sessionId));
+					const tracker = new IssueTracker(session.sessionId, syncIssues({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
 					const issues = tracker.manage(action, reference);
 					writeIssueState(tracker.snapshot());
 					await session.log(issues.length ? issues.map((i) => `${i.label}: ${i.url}`).join("\n") : "No tracked session issues.");
@@ -110,22 +125,54 @@ const session = await joinSession({
 		},
 		{
 			name: "session-subagents",
-			description: "Session subagent statusline: list or clear",
+			description: "Session subagent statusline: list, remove <agent-id>, or clear",
 			handler: async ({ args }) => {
-				const action = args.trim().split(/\s+/)[0] || "list";
-				const tracker = new SubagentTracker(session.sessionId, readSubagentState(session.sessionId));
-				if (action === "clear") {
-					tracker.clear();
-					writeSubagentState(tracker.snapshot());
-					await session.log("Cleared subagent statusline.");
-					return;
+				try {
+					const [action = "list", id] = args.trim().split(/\s+/).filter(Boolean);
+					const agents = manageAgents(action, id);
+					const tracker = new SubagentTracker(session.sessionId, readSubagentState(session.sessionId));
+					const c = tracker.counts();
+					await session.log(action === "clear" ? "Cleared subagent statusline." :
+						`Subagents: ${c.starting} starting, ${c.exploring} exploring, ${c.inPr} in PR, ${c.merged} merged, ${c.done} done, ${c.failed} failed\n${agents.map((a) => `${a.id}: ${a.name} (${a.status})`).join("\n")}`);
+				} catch (error) {
+					await session.log(`Usage: /session-subagents [list | remove <agent-id> | clear] (${error.message})`);
 				}
-				const c = tracker.counts();
-				await session.log(`Subagents: ${c.starting} starting, ${c.exploring} exploring, ${c.inPr} in PR, ${c.merged} merged, ${c.done} done, ${c.failed} failed`);
 			},
 		},
 	],
 	tools: [
+		{
+			name: "session_statusline",
+			description: "Clear or refresh only this session's statusline pills. Clear dismisses entries without changing enabled components, deleting work, or stopping agents.",
+			parameters: {
+				type: "object",
+				properties: { action: { type: "string", enum: ["clear", "refresh"] } },
+				required: ["action"],
+				additionalProperties: false,
+			},
+			handler: ({ action }) => {
+				if (!["clear", "refresh"].includes(action)) throw new Error("Use clear or refresh.");
+				try {
+					return updateSession(action);
+				} catch (error) {
+					return { resultType: "failure", textResultForLlm: error instanceof Error ? error.message : String(error) };
+				}
+			},
+		},
+		{
+			name: "session_subagents",
+			description: "List, remove an agent pill, or clear agent pills belonging to this session. Does not stop agents or affect other sessions.",
+			parameters: {
+				type: "object",
+				properties: {
+					action: { type: "string", enum: ["list", "remove", "clear"] },
+					id: { type: "string", description: "Tracked agent ID; required for remove" },
+				},
+				required: ["action"],
+				additionalProperties: false,
+			},
+			handler: ({ action, id }) => JSON.stringify(manageAgents(action, id)),
+		},
 		{
 			name: "statusline_setup",
 			description: "Configure which Copilot CLI statusline extensions are enabled (Pull Requests, GitHub Issues, Subagents, Branch/Worktree). Omit arguments to open the interactive picker.",
@@ -156,7 +203,7 @@ const session = await joinSession({
 				required: ["action"],
 				additionalProperties: false,
 			},
-			handler: ({ action, reference }) => JSON.stringify(manage(action, reference)),
+			handler: ({ action, reference }, invocation) => JSON.stringify(manage(action, reference, invocation)),
 		},
 		{
 			name: "session_issues",
@@ -171,14 +218,34 @@ const session = await joinSession({
 				additionalProperties: false,
 			},
 			handler: ({ action, reference }) => {
-				const tracker = new IssueTracker(session.sessionId, readIssueState(session.sessionId));
+				const tracker = new IssueTracker(session.sessionId, syncIssues({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
 				const issues = tracker.manage(action, reference);
 				writeIssueState(tracker.snapshot());
 				return JSON.stringify(issues);
 			},
 		},
 	],
-});
+};
+
+const bootstrap = await joinSession({ tools: [] });
+const { extensions } = await bootstrap.rpc.extensions.list();
+const current = extensions.find((entry) => entry.pid === process.pid);
+if (!current) throw new Error("Cannot verify the current statusline controller; restart Copilot before migrating.");
+const standalone = ["pr", "issue", "subagent", "worktree"].map((name) => ({
+	id: `user:${name}-statusline`,
+	file: join(configHome(), "extensions", `${name}-statusline`, "extension.mjs"),
+}));
+for (const entry of standalone.filter((entry) => entry.id !== current.id)) {
+	try {
+		renameSync(entry.file, `${entry.file}.disabled-${Date.now()}-${process.pid}`);
+	} catch (error) {
+		if (error.code !== "ENOENT") throw error;
+	}
+	if (extensions.some((extension) => extension.id === entry.id)) await bootstrap.rpc.extensions.disable({ id: entry.id });
+}
+// Remove the bootstrap subscriber before registering the final SDK handlers.
+await bootstrap.disconnect();
+const session = await joinSession(configuration);
 
 attention = createSessionAttention({ ownerProcessId: process.ppid });
 collector = await collect(session, { attention });
