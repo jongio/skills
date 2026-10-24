@@ -250,3 +250,62 @@ test("rejected enrollment history cannot prevent collector startup or later live
 	} finally { collector.stop(); }
 	assert.equal(unsubscribed, true);
 }));
+
+for (const [command, content] of [
+	["gh pr edit --add-label active", pr],
+	["gh pr review --approve", pr],
+	["gh pr ready", pr],
+	["gh pr comment --body done", `${pr}#issuecomment-123`],
+	["gh pr merge --squash", pr],
+]) {
+	test(`selector-free ${command} recovers its standalone successful target for root and agent tracking`, () => {
+		const prs = new SessionTracker("implicit-root");
+		const agents = new SubagentTracker("implicit-agent");
+		for (const tracker of [prs, agents]) tracker.observe(event("session.start", { repository: "acme/app" }));
+		agents.observe(event("subagent.started", { agentId: "worker", agentType: "general-purpose" }));
+		prs.observe(start("write", command));
+		agents.observe(start("write", command, "powershell", {}, "worker"));
+		for (const tracker of [prs, agents]) tracker.observe(complete("write", `${content}\n`));
+		assert.deepEqual(prs.state.prs.map((item) => item.url), [pr]);
+		assert.equal(prs.state.prs[0].provenance.root, true);
+		assert.deepEqual(agents.agents.get("worker").prs, [pr]);
+		assert.equal(prs.state.prs[0].mergedAt, undefined, "command success is not remote merge confirmation");
+		assert.deepEqual(agents.agents.get("worker").mergedPrs, []);
+	});
+}
+
+test("implicit target recovery rejects incidental, compound, failed, read-only and unrelated explicit-target results", () => {
+	for (const [command, content, success, expected] of [
+		["gh pr edit --add-label active", `Related: ${pr}`, true, []],
+		["gh pr edit --add-label active", `${pr}\nhttps://github.com/acme/app/pull/99`, true, []],
+		["gh pr edit --add-label active", JSON.stringify({ url: pr }), true, []],
+		["gh pr edit --add-label active", `${pr}/files`, true, []],
+		["gh pr edit --add-label active; gh pr view 42 --json url", pr, true, []],
+		["gh pr edit --add-label active", pr, false, []],
+		["gh pr view", pr, true, []],
+		["gh pr edit 43 --add-label active", pr, true, ["https://github.com/acme/app/pull/43"]],
+	]) {
+		const prs = new SessionTracker("non-target-root");
+		const agents = new SubagentTracker("non-target-agent");
+		for (const tracker of [prs, agents]) tracker.observe(event("session.start", { repository: "acme/app" }));
+		agents.observe(event("subagent.started", { agentId: "worker", agentType: "general-purpose" }));
+		prs.observe(start("operation", command));
+		agents.observe(start("operation", command, "powershell", {}, "worker"));
+		for (const tracker of [prs, agents]) {
+			tracker.observe(event("tool.execution_complete", { toolCallId: "operation", success, result: { content } }));
+		}
+		assert.deepEqual(prs.state.prs.map((item) => item.url), expected, command);
+		assert.deepEqual(agents.agents.get("worker").prs, expected, command);
+	}
+});
+
+test("a fresh selector-free reopen can explicitly restore a dismissed PR", () => {
+	const tracker = new SessionTracker("implicit-reopen");
+	tracker.manage("add", pr);
+	tracker.manage("remove", pr);
+	tracker.observe(start("reopen", "gh pr reopen"));
+	tracker.observe(complete("reopen", pr));
+	assert.deepEqual(tracker.state.prs.map((item) => item.url), [pr]);
+	assert.equal(tracker.state.prs[0].generation, 1);
+	assert.ok(!tracker.state.ignored.includes(pr));
+});

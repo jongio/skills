@@ -29,6 +29,7 @@ export {
 
 const INITIAL_HEAD_BYTES = 64 * 1024;
 const INITIAL_TAIL_BYTES = 16 * 1024 * 1024;
+const SUCCESSFUL_PR_URL = /^\s*(https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*)\/?(?:#(?:issuecomment-|discussion_r)[1-9]\d*)?\s*$/;
 const PLACEHOLDER_REPOS = new Set([
 	"owner/repo",
 	"org/repo",
@@ -322,11 +323,12 @@ export class SessionTracker {
 			const targeted = !isDiagnostic &&
 				(Boolean(ghSubcommand && !["view", "diff", "checks"].includes(ghSubcommand)) || mcpWrite || apiWrite);
 			const hasListCommand = /\bgh\s+(?:(?:-R|--repo)(?:=|\s+)\S+\s+)*pr\s+(?:list|status)\b|\bgh\s+search\b|\brepos\/[\w.-]+\/[\w.-]+\/pulls(?=[?'"\s]|$)/i.test(command);
-			const call = { targeted, closing, merging, source: prSource, scrapeResultUrls: false, targets: [] };
+			const replayedBeforeInput = history &&
+				(!event.timestamp || Date.parse(event.timestamp) <= this.lastUserInputAt);
+			const call = { targeted, closing, merging, reopening: reopening && !replayedBeforeInput,
+				source: prSource, scrapeResultUrls: false, targets: [] };
 			const addTarget = (reference) => {
-				const replayedBeforeInput = history &&
-					(!event.timestamp || Date.parse(event.timestamp) <= this.lastUserInputAt);
-				this.add(reference, reopening && !replayedBeforeInput, call.source);
+				this.add(reference, call.reopening, call.source);
 			};
 			if (call.targeted) {
 				const commandTargetText = command
@@ -348,9 +350,10 @@ export class SessionTracker {
 				}
 				call.scrapeResultUrls = !closing && !hasListCommand && (
 					ghSubcommand === "create" ||
-					/(?:^|[_-])create_pull_request$/.test(name) ||
-					(ghSubcommand === "checkout" && call.targets.length === 0)
+					/(?:^|[_-])create_pull_request$/.test(name)
 				);
+				call.recoverTarget = !closing && !hasListCommand && !call.scrapeResultUrls &&
+					Boolean(ghSubcommand) && call.targets.length === 0 && !/[;&|\r\n]/.test(commandTargetText);
 				this.calls.set(data.toolCallId, call);
 			}
 		}
@@ -362,7 +365,7 @@ export class SessionTracker {
 				const result = data.result ?? {};
 				const resultPrs = call.scrapeResultUrls
 					? urls(`${result.content ?? ""}\n${JSON.stringify(result.structuredContent ?? {})}`)
-					: [];
+					: (call.recoverTarget ? urls(SUCCESSFUL_PR_URL.exec(String(result.content ?? ""))?.[1]) : []);
 				if (call.closing) {
 					const closedTargets = [...call.targets];
 					if (closedTargets.length === 0) {
@@ -383,7 +386,7 @@ export class SessionTracker {
 					}
 				} else {
 					for (const pr of resultPrs) {
-						this.add(pr.url, false, call.source);
+						this.add(pr.url, call.reopening, call.source);
 					}
 				}
 			}

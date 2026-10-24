@@ -166,6 +166,9 @@ Using `Azure/azure-dev` as an example checkout:
    `list`/`search` output, examples, or other sessions' transcripts. Explicitly
    add read-only review/watch targets. Existing tracked PRs still refresh normally.
    On upgrade, legacy reference-only caches are rebuilt from active evidence.
+   A successful write without an explicit selector can enroll its target when
+   the entire CLI result is one PR URL (including a comment fragment). Ambiguous
+   output, compound commands, failed operations, and lookups cannot use this fallback.
 2. **Single-query GraphQL status + shared cache (`github.mjs`):**
    Live PR status is fetched via `gh api graphql` (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (20s TTL while checks are running, including mixed running/failed checks, 45s TTL when settled, with in-flight deduplication locks). A restarted check's active status takes precedence over a leftover conclusion; the pill changes on the next successful refresh, not optimistically when a rerun command is issued. It does **not** use Copilot AI model requests or touch Copilot's internal databases.
 3. **Automatic cleanup & manual controls:**

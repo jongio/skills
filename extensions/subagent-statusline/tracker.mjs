@@ -7,6 +7,7 @@ import { dismissSettledAgents, observeSettlement } from "./settlement.mjs";
 
 const INITIAL_HEAD_BYTES = 64 * 1024;
 const INITIAL_TAIL_BYTES = 16 * 1024 * 1024;
+const SUCCESSFUL_PR_URL = /^\s*(https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*)\/?(?:#(?:issuecomment-|discussion_r)[1-9]\d*)?\s*$/;
 const RELEVANT_EVENT_LINE = /"type"\s*:\s*"(?:session\.(?:start|resume|context_changed)|user\.message|tool\.execution_(?:start|complete)|subagent\.(?:started|completed|failed))"/;
 
 export const ICONS = {
@@ -369,6 +370,8 @@ export class SubagentTracker {
 					this.agentToolCalls.set(data.toolCallId, {
 						agentId, targets,
 						created: ghSubcommand === "create" || /(?:^|[_-])create_pull_request$/.test(name),
+						recoverTarget: Boolean(ghSubcommand) && ghSubcommand !== "create" &&
+							targets.length === 0 && !/[;&|\r\n]/.test(targetText),
 					});
 				}
 			}
@@ -394,8 +397,10 @@ export class SubagentTracker {
 			}
 			const subCall = this.agentToolCalls.get(data.toolCallId);
 			this.agentToolCalls.delete(data.toolCallId);
-			if (subCall?.created && data.success) {
-				for (const prUrl of extractPrUrls(text)) {
+			if (subCall && data.success) {
+				const targets = subCall.created ? extractPrUrls(text) :
+					(subCall.recoverTarget ? extractPrUrls(SUCCESSFUL_PR_URL.exec(String(result.content ?? ""))?.[1]) : []);
+				for (const prUrl of targets) {
 					this.linkPr(subCall.agentId, prUrl, false, eventTime);
 				}
 			}
