@@ -32,7 +32,9 @@ accepts the same flag. `/daemon-notifications status` lists subscriptions;
 
 Normal stdout, desktop failure alerts, host completion wake-ups, and re-arming
 remain unchanged. A timeline message is not proof that an agent woke up.
-Repeated unchanged progress is coalesced, completed records are deduplicated on
+Repeated unchanged progress is coalesced per target, with at most 128 retained
+target watermarks per subscription. Unrelated repositories, PRs, runs, and heads
+do not suppress each other's first update. Completed records are deduplicated on
 restart, partial/malformed records are ignored, and event storage is bounded.
 Delivery is not exactly-once across a crash between logging and acknowledgment.
 Disabling the bridge does not stop a watcher; stop it through its owning host.

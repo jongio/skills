@@ -20,7 +20,7 @@ export async function prefetchStatuses(kind, items, {
     if (item.simulated) continue;
     const host = new URL(item.url).hostname;
     let scope;
-    try { scope = fetchStatus ? "injected" : await statuslineGitHub.cacheScope(host, { signal }); }
+    try { scope = fetchStatus ? "injected" : await statuslineGitHub.cacheScope(host, { signal, target: item.url }); }
     catch (error) { results.set(item.url, error); continue; }
     const entry = read(home)[item.url];
     if (!force && entry?.scope === scope && entry.retryAt > now) {
@@ -58,7 +58,7 @@ export async function prefetchStatuses(kind, items, {
             cache[item.url] = {
               info, scope: info.cacheScope || scope, checkedAt: now, refreshingUntil: 0,
               ttlMs: ["CLOSED", "MERGED", "NOT_FOUND"].includes(state) ? 120000
-                : kind === "pr" && info.statusCheckRollup?.some((check) => ["QUEUED", "IN_PROGRESS"].includes(check.status)) ? 20000 : 45000,
+                : kind === "pr" && module.summarizePrStatus(info)?.includes(module.OCTICONS.running) ? 20000 : 45000,
             };
             write(cache, home);
           });
@@ -151,14 +151,14 @@ export async function refreshTracker(kind, sessionId, {
       const branch = /^branch:\s*(\S+)/m.exec(workspace)?.[1];
       if (repository && branch && !["main", "master", "HEAD"].includes(branch)) {
         const github = await import("./pr-statusline/github.mjs");
-        const scope = await statuslineGitHub.cacheScope(tracker.host);
         const key = `branch:${tracker.host}/${repository}:${branch}`;
+        const scope = await statuslineGitHub.cacheScope(tracker.host, { signal, target: key });
         const cache = github.readPrCache(home);
         let data = cache[key]?.scope === scope && now - cache[key].checkedAt < 45000 ? cache[key].data : undefined;
         if (data === undefined) {
           data = await github.queryBranchPrWithGh(repository, branch, { host: tracker.host, signal });
           withStateLock(join(home, "pr-statusline", "pr-cache.json"), () => {
-            github.writePrCache({ ...github.readPrCache(home), [key]: { data, scope, checkedAt: now, ttlMs: 45000 } }, home);
+            github.writePrCache({ ...github.readPrCache(home), [key]: { data, scope: data.cacheScope || scope, checkedAt: now, ttlMs: 45000 } }, home);
           });
         }
         const synced = module.syncSession({ session_id: sessionId }, { home, now, fetchPrStatus: false }).state;

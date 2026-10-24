@@ -48,9 +48,11 @@ export function createGitHubClient({
   const host = githubHost(configuredHost || env.GH_HOST || "github.com");
   const base = new URL(baseUrl || apiBaseUrl(host));
   const enterprise = host !== "github.com" && !host.endsWith(".ghe.com");
+  const environmentHost = githubHost(env.GH_HOST || "github.com");
+  const publicTokenHost = environmentHost.endsWith(".ghe.com") ? environmentHost : "github.com";
   const explicitToken = ((enterprise
-    ? env.GH_ENTERPRISE_TOKEN || env.GITHUB_ENTERPRISE_TOKEN
-    : env.GH_TOKEN || env.GITHUB_TOKEN) || "").trim();
+    ? !env.GH_HOST || host === environmentHost ? env.GH_ENTERPRISE_TOKEN || env.GITHUB_ENTERPRISE_TOKEN : ""
+    : host === publicTokenHost ? env.GH_TOKEN || env.GITHUB_TOKEN : "") || "").trim();
   const credentialEnv = { ...env };
   for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete credentialEnv[name];
   let credential;
@@ -58,6 +60,7 @@ export function createGitHubClient({
   let dispatcher;
   let closed = false;
   const clients = new Map();
+  const targetCredentials = new Map();
   const identity = (token) => createHash("sha256").update(`${host}\0${token}`).digest("hex");
   const resolveCredential = async (signal, user, refresh = false) => {
     if (explicitToken && !user) return { token: explicitToken, source: "environment" };
@@ -67,12 +70,18 @@ export function createGitHubClient({
       const result = await run(["auth", "token", "--hostname", host, ...(user ? ["--user", user] : [])], { signal, env: credentialEnv });
       const token = result.ok ? result.stdout.trim() : "";
       if (!token) throw new Error(`GitHub authentication required for ${host}; sign in with gh or configure a token.`);
-      const value = { token, source: "gh" };
+      const value = { token, source: "gh", ...(user ? { user } : {}) };
       if (!user) credential = value;
       return value;
     })();
     if (!user) resolving = pending;
     try { return await pending; } finally { if (!user) resolving = null; }
+  };
+  const credentialsForTarget = async (target, signal) => {
+    const primary = await resolveCredential(signal);
+    const primaryScope = identity(primary.token);
+    const selected = targetCredentials.get(target);
+    return { auth: selected?.primaryScope === primaryScope ? selected.auth : primary, primaryScope };
   };
   const transport = suppliedFetch || (async (url, options) => {
     dispatcher ??= new EnvHttpProxyAgent({
@@ -123,7 +132,10 @@ export function createGitHubClient({
     }
     const queryStart = String(input.query || "").replace(/^(?:\s|#[^\n]*(?:\n|$))*/, "");
     const safe = graphql ? /^(?:query\b|\{)/.test(queryStart) : method === "GET" || method === "HEAD";
+    const target = secondaryAccounts && safe && typeof options.target === "string" &&
+      options.target.length <= 2048 ? options.target : undefined;
     let auth;
+    let primaryScope;
     let refreshed = false;
     let retried = false;
     let fallbackAccounts;
@@ -136,7 +148,7 @@ export function createGitHubClient({
     try {
       while (true) {
         signal.throwIfAborted();
-        auth ??= await resolveCredential(signal);
+        if (!auth) ({ auth, primaryScope } = await credentialsForTarget(target, signal));
         let response;
         try {
           response = await octokit(auth).request({
@@ -157,9 +169,14 @@ export function createGitHubClient({
           (meta.status === 403 && (meta.rateLimitRemaining === 0 || meta.retryAfterSec !== null || /rate limit/i.test(message)));
         if (meta.status === 401 && safe && auth.source === "gh" && !refreshed && !signal.aborted) {
           refreshed = true;
-          credential = undefined;
+          if (!auth.user) {
+            credential = undefined;
+            targetCredentials.clear();
+          }
+          targetCredentials.delete(target);
           clients.clear();
-          auth = await resolveCredential(signal, undefined, true);
+          auth = await resolveCredential(signal, auth.user, true);
+          if (!auth.user) primaryScope = identity(auth.token);
           for (const key of Object.keys(requestHeaders)) {
             if (key.toLowerCase() === "if-none-match") delete requestHeaders[key];
           }
@@ -171,17 +188,29 @@ export function createGitHubClient({
           continue;
         }
         if (secondaryAccounts && !explicitToken && safe && /Could not resolve to a Repository/i.test(message)) {
+          targetCredentials.delete(target);
           if (!fallbackAccounts) {
             const status = await run(["auth", "status", "--hostname", host, "--json", "hosts"], { signal, env: credentialEnv });
-            try { fallbackAccounts = JSON.parse(status.stdout)?.hosts?.[host]?.filter((a) => !a.active).map((a) => a.login).filter(Boolean) || []; }
+            try { fallbackAccounts = JSON.parse(status.stdout)?.hosts?.[host]?.filter((a) => !a.active).map((a) => a.login).filter((user) => user && user !== auth.user) || []; }
             catch { fallbackAccounts = []; }
           }
           const user = fallbackAccounts.shift();
-          if (user) { auth = await resolveCredential(signal, user, true); continue; }
+          if (user) {
+            auth = await resolveCredential(signal, user, true);
+            for (const key of Object.keys(requestHeaders)) {
+              if (key.toLowerCase() === "if-none-match") delete requestHeaders[key];
+            }
+            continue;
+          }
         }
         // Octokit throws for a conditional 304 as well as actual HTTP failures.
         const ok = (meta.status === 304 || meta.status >= 200 && meta.status < 300 && !response.error) &&
           errors.length === 0 && !signal.aborted;
+        if (ok && target && auth.user) {
+          targetCredentials.delete(target);
+          targetCredentials.set(target, { auth, primaryScope });
+          for (const key of [...targetCredentials.keys()].slice(0, -128)) targetCredentials.delete(key);
+        }
         return {
           ok, status: meta.status, headers: response.headers, data: response.data,
           cacheScope: identity(auth.token), rateLimited, budget: graphql ? "graphql" : "rest",
@@ -199,15 +228,17 @@ export function createGitHubClient({
   }
   return {
     host, request,
-    async cacheScope({ signal } = {}) {
+    async cacheScope({ signal, target } = {}) {
       const deadline = AbortSignal.timeout(5000);
-      return identity((await resolveCredential(signal ? AbortSignal.any([signal, deadline]) : deadline)).token);
+      const { auth } = await credentialsForTarget(target, signal ? AbortSignal.any([signal, deadline]) : deadline);
+      return identity(auth.token);
     },
     async close() {
       closed = true;
       for (const control of active) control.abort();
       await dispatcher?.close();
       clients.clear();
+      targetCredentials.clear();
     },
   };
 }

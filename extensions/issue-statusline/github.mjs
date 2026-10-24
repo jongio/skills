@@ -129,7 +129,7 @@ export async function queryIssueStatusWithGh(url, { request, signal } = {}) {
   const response = await request({
     kind: "graphql", query: ISSUE_STATUS_GRAPHQL,
     variables: { owner, name, number: Number(number) },
-  }, parsed.hostname, { signal });
+  }, parsed.hostname, { signal, target: url });
   if (!response.ok) {
     if (/Could not resolve to an Issue/i.test(response.error || "")) return { state: "NOT_FOUND" };
     throw Object.assign(new Error(response.error || "GitHub status unavailable"), { response });

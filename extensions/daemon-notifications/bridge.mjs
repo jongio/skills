@@ -16,7 +16,11 @@ export function createNotificationBridge(session, { home, interval = 5000, now =
   subscriptions = Object.assign(Object.create(null), subscriptions);
   for (const key of Object.keys(subscriptions)) {
     if (!valid(key) || !subscriptions[key] || typeof subscriptions[key] !== "object") delete subscriptions[key];
-    else subscriptions[key].streams = Object.assign(Object.create(null), subscriptions[key].streams || {});
+    else {
+      subscriptions[key].streams = Object.assign(Object.create(null), subscriptions[key].streams || {});
+      subscriptions[key].targets = Object.assign(Object.create(null),
+        Object.fromEntries(Object.entries(subscriptions[key].targets || {}).slice(-128)));
+    }
   }
   let timer;
   let busy = false;
@@ -51,12 +55,19 @@ export function createNotificationBridge(session, { home, interval = 5000, now =
               !/^[A-Z_]{2,64}$/.test(event.type || "")) continue;
           subscription.streams ??= Object.create(null);
           if (event.sequence <= (subscription.streams[event.stream] || 0)) continue;
-          if (event.type !== "STATUS" || !subscription.lastStatusAt || now() - subscription.lastStatusAt >= 60000 ||
-              event.phase !== subscription.lastPhase) {
+          subscription.targets ??= Object.create(null);
+          const target = JSON.stringify([event.source || name, event.repo, event.pr, event.runId,
+            event.headRefOid || event.sha].map(clean));
+          const previous = subscription.targets[target];
+          if (event.type !== "STATUS" || !Number.isFinite(previous?.lastStatusAt) ||
+              now() - previous.lastStatusAt >= 60000 || event.phase !== previous.lastPhase) {
             await session.log(`[${clean(event.source || name)}] ${clean(event.repo)}${event.pr ? `#${clean(event.pr)}` : ""} ${clean(event.type)} ${clean(event.summary || event.phase)}`.trim());
-            if (event.type === "STATUS") subscription.lastStatusAt = now();
+            if (event.type === "STATUS") {
+              delete subscription.targets[target];
+              subscription.targets[target] = { lastStatusAt: now(), lastPhase: event.phase };
+              for (const key of Object.keys(subscription.targets).slice(0, -128)) delete subscription.targets[key];
+            }
           }
-          subscription.lastPhase = event.phase;
           subscription.stream = event.stream;
           subscription.sequence = event.sequence;
           subscription.streams[event.stream] = event.sequence;

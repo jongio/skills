@@ -7,6 +7,8 @@ import { refreshTracker } from "../../github-refresh.mjs";
 import { statuslineGitHub } from "../../github-transport.mjs";
 import { collect } from "../collector.mjs";
 import { SessionTracker, readState, writeState } from "../tracker.mjs";
+import { readPrCache, OCTICONS } from "../github.mjs";
+import { clearSessionStatusline } from "../session-statusline.mjs";
 import { IssueTracker, readState as readIssues, writeState as writeIssues, syncSession as syncIssues } from "../../issue-statusline/tracker.mjs";
 import { reconcilePrStates } from "../lifecycle.mjs";
 
@@ -116,6 +118,7 @@ test("optional branch discovery failure does not block known PRs and issues", as
   const reports = [];
   const collector = await collect(session(id), { home, report: (message) => reports.push(message) });
   t.after(() => collector.stop());
+  await collector.initialPoll;
   assert.equal(readState(id, home).prs[0].title, "Updated PR");
   assert.equal(readIssues(id, home).issues[0].title, "Updated issue");
   assert.ok(reports.some((message) => /discovery/i.test(message)));
@@ -129,6 +132,7 @@ test("successful remote recovery clears a running collector's stale flag", async
   mockGitHub(t, () => ({ state: "OPEN", title: "Recovered" }));
   const collector = await collect(session(id), { home });
   t.after(() => collector.stop());
+  await collector.initialPoll;
   assert.equal(readState(id, home).prs[0].stale, false);
   assert.equal(collector.tracker.state.prs[0].stale, false);
 });
@@ -158,8 +162,60 @@ test("cached recovery clears stale state without requiring a newer observation t
   t.mock.method(Date, "now", () => 3000);
   const collector = await collect(session(id), { home });
   t.after(() => collector.stop());
+  await collector.initialPoll;
   assert.equal(calls, 1, "the valid cached observation is reused");
   assert.equal(readState(id, home).prs[0].checkedAt, 1000);
   assert.equal(readState(id, home).prs[0].stale, false);
   assert.equal(collector.tracker.state.prs[0].stale, false);
+});
+
+for (const check of [
+  { state: "PENDING", context: "commit-status" },
+  { status: "WAITING", name: "waiting-check" },
+  { status: "REQUESTED", name: "requested-check" },
+  { missing: true },
+]) {
+  test(`running-check TTL follows the rendered classification: ${check.context || check.name || "missing required"}`, async (t) => {
+    const home = fixture(t), id = "running-ttl";
+    seed("pr", home, id);
+    let calls = 0;
+    mockGitHub(t, () => {
+      calls++;
+      return { state: "OPEN", commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: check.missing ? [] : [check] } } } }] },
+        baseRef: { branchProtectionRule: { requiredStatusCheckContexts: check.missing ? ["required-check"] : [] } } };
+    });
+    await refreshTracker("pr", id, { home, now: 1000 });
+    assert.ok(readState(id, home).prs[0].status.includes(OCTICONS.running));
+    assert.equal(readPrCache(home)[refs.pr].ttlMs, 20000);
+    await refreshTracker("pr", id, { home, now: 31000 });
+    assert.equal(calls, 2, "a healthy collector refreshes the running observation before reusing an expired cache");
+  });
+}
+
+test("local controls initialize while the first remote poll is blocked, and stop cancels it", async (t) => {
+  const home = fixture(t), id = "slow-start";
+  seed("pr", home, id);
+  const entered = Promise.withResolvers(), finish = Promise.withResolvers();
+  let requestSignal;
+  t.mock.method(statuslineGitHub, "cacheScope", async () => "fixture");
+  t.mock.method(statuslineGitHub, "request", async (_input, _host, { signal }) => {
+    requestSignal = signal;
+    entered.resolve();
+    await finish.promise;
+    return { ok: true, cacheScope: "fixture", data: { data: { repository: { pullRequest: { state: "OPEN" } } } } };
+  });
+  const started = collect(session(id), { home, report: () => {} });
+  t.after(async () => { finish.resolve(); (await started).stop(); });
+  await entered.promise;
+  let deadline;
+  const collector = await Promise.race([started, new Promise((_, reject) => {
+    deadline = setTimeout(() => reject(new Error("collector still blocked on remote startup")), 250);
+  })]).finally(() => clearTimeout(deadline));
+  collector.manage("add", "https://github.com/acme/project/pull/3");
+  clearSessionStatusline({ session_id: id }, { home });
+  collector.stop();
+  assert.equal(requestSignal.aborted, true);
+  finish.resolve();
+  await collector.initialPoll;
+  assert.deepEqual(readState(id, home).prs, []);
 });

@@ -30,6 +30,11 @@ belong only to this package.
   once, never override an explicit environment token or switch the active account.
 - Enterprise host selection, secondary-account statusline access, proxy settings,
   and `NO_PROXY` are handled independently of Copilot credentials.
+- `GH_TOKEN`/`GITHUB_TOKEN` belong to github.com unless `GH_HOST` selects one
+  `*.ghe.com` tenant. They are never reused for another tenant or public host.
+- Secondary-account choices are memory-only and bounded to 128 targets. Pass the
+  same `target` to `request()` and `cacheScope()` to reuse the selected identity;
+  replacing the primary credential invalidates those associations.
 - Rate-limit headers return to the scheduler without hidden SDK sleeping.
 - Failures cannot renew cached success evidence. Callers must check response
   validity and inventory completeness before reporting readiness.

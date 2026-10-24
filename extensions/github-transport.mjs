@@ -2,10 +2,10 @@ const clients = new Map();
 export function gitHubEnvironmentForHost(host, env = process.env) {
   host = String(host).toLowerCase();
   const selected = { ...env };
-  if (host !== "github.com" && !host.endsWith(".ghe.com") &&
-      host !== String(env.GH_HOST || "github.com").toLowerCase()) {
-    for (const name of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete selected[name];
-  }
+  const environmentHost = String(env.GH_HOST || "github.com").toLowerCase();
+  const publicTokenHost = environmentHost.endsWith(".ghe.com") ? environmentHost : "github.com";
+  if (host !== publicTokenHost) for (const name of ["GH_TOKEN", "GITHUB_TOKEN"]) delete selected[name];
+  if (host !== environmentHost) for (const name of ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) delete selected[name];
   return selected;
 }
 export function requestedGitHubEnvironment(env = process.env) {

@@ -195,3 +195,55 @@ test("secondary-account fallback stays on its host without changing the active g
   assert.ok(commands.every((args) => args.includes("github.com")));
   assert.ok(commands.every((args) => !args.includes("switch")));
 });
+
+test("public-family tokens are bound to the selected GHE host or github.com", async (t) => {
+  for (const variable of ["GH_TOKEN", "GITHUB_TOKEN"]) {
+    for (const host of ["one.ghe.com", "two.ghe.com", "github.com"]) {
+      const lookups = [];
+      const { client, calls } = await fixture(t, (_req, res) => json(res, 200, {}), {
+        host, env: { GH_HOST: "one.ghe.com", [variable]: "one-host-token", NO_PROXY: "*" },
+        run: async (args) => { lookups.push(args); return { ok: true, stdout: "host-specific-token" }; },
+      });
+      assert.equal((await client.request({ endpoint: "user" })).ok, true);
+      assert.equal(calls[0].auth, host === "one.ghe.com" ? "token one-host-token" : "token host-specific-token");
+      assert.equal(lookups.length, host === "one.ghe.com" ? 0 : 1);
+      assert.ok(lookups.every((args) => args.includes(host)));
+    }
+  }
+});
+
+test("secondary credentials remain target-scoped and invalidate when the primary identity changes", async (t) => {
+  let primaryLookups = 0;
+  let rejectPrimary = false;
+  const { client, calls } = await fixture(t, (req, res) => {
+    const owner = JSON.parse(calls.at(-1).body).variables?.owner;
+    if (rejectPrimary && req.headers.authorization === "token primary-1") {
+      rejectPrimary = false;
+      return json(res, 401, { message: "Bad credentials" });
+    }
+    json(res, 200, owner === "private" && !req.headers.authorization.includes("secondary")
+      ? { errors: [{ message: "Could not resolve to a Repository" }] }
+      : { data: { repository: { name: "repo" } } });
+  }, {
+    env: { NO_PROXY: "*" }, secondaryAccounts: true,
+    run: async (args) => ({ ok: true, stdout: args[1] === "status"
+      ? JSON.stringify({ hosts: { "github.com": [{ active: false, login: "secondary" }] } })
+      : args.includes("--user") ? "secondary-token" : `primary-${++primaryLookups}` }),
+  });
+  const target = "https://github.com/private/repo/pull/1";
+  const input = { kind: "graphql", query: "query($owner:String!){repository(owner:$owner){name}}", variables: { owner: "private" } };
+  const primary = await client.cacheScope();
+  const first = await client.request(input, { target });
+  assert.equal(first.ok, true);
+  assert.notEqual(first.cacheScope, primary);
+  assert.equal(await client.cacheScope({ target }), first.cacheScope);
+  const before = calls.length;
+  assert.equal((await client.request(input, { target })).ok, true);
+  assert.equal(calls.length, before + 1, "reuse the selected credential without repeating the failed primary read");
+  assert.equal(calls.at(-1).auth, "token secondary-token");
+  assert.equal(await client.cacheScope({ target: "another-target" }), primary);
+  rejectPrimary = true;
+  assert.equal((await client.request({ ...input, variables: { owner: "public" } }, { target: "another-target" })).ok, true);
+  assert.equal(calls.at(-1).auth, "token primary-2");
+  assert.equal(await client.cacheScope({ target }), await client.cacheScope(), "primary replacement invalidates old target associations");
+});

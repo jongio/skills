@@ -310,7 +310,7 @@ export async function queryPrStatusWithGh(url, { request, signal } = {}) {
   const response = await request({
     kind: "graphql", query: PR_STATUS_GRAPHQL,
     variables: { owner, name, number: Number(number) },
-  }, parsed.hostname, { signal });
+  }, parsed.hostname, { signal, target: url });
   if (!response.ok) {
     if (/Could not resolve to a PullRequest/i.test(response.error || "")) return { state: "NOT_FOUND" };
     throw Object.assign(new Error(response.error || "GitHub status unavailable"), { response });
@@ -328,12 +328,15 @@ export async function queryBranchPrWithGh(repository, branch, { request, host = 
   const [owner, name] = String(repository ?? "").split("/");
   if (!owner || !name || !branch) return null;
   request ??= (await import("../github-transport.mjs")).statuslineGitHub.request;
-  const response = await request({ kind: "graphql", query: BRANCH_PR_GRAPHQL, variables: { owner, name, head: branch } }, host, { signal });
+  const response = await request({ kind: "graphql", query: BRANCH_PR_GRAPHQL, variables: { owner, name, head: branch } }, host,
+    { signal, target: `branch:${host}/${repository}:${branch}` });
   if (!response.ok) throw new Error(response.error || "Branch PR discovery unavailable");
   const nodes = response.data?.data?.repository?.pullRequests?.nodes;
   if (!Array.isArray(nodes)) throw new Error("GitHub response missing branch PR inventory");
   if (nodes.some((item) => !["OPEN", "CLOSED", "MERGED"].includes(item?.state))) throw new Error("GitHub response has invalid branch PR state");
-  return nodes?.length ? normalizeGraphqlPr(nodes[0]) : { state: "NONE" };
+  const info = nodes.length ? normalizeGraphqlPr(nodes[0]) : { state: "NONE" };
+  Object.defineProperty(info, "cacheScope", { value: response.cacheScope });
+  return info;
 }
 export function refreshTrackedPrStatuses(tracker, {
 	home,

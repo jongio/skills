@@ -70,6 +70,37 @@ test("expired standalone observations are visibly stale without a network refres
   writeState(tracker.snapshot(), home);
   assert.match(renderPr({ session_id: "expired" }, { home, now: 100000, color: false, links: false }), /stale/);
 });
+test("secondary-account observations reuse the real bundled adapter cache across collector ticks", async (t) => {
+  const home = fixture(t);
+  let calls = 0;
+  const server = createServer((request, response) => {
+    calls++;
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify(request.headers.authorization === "token secondary-token"
+      ? { data: { repository: { issue: { state: "OPEN", title: "Private issue" } } } }
+      : { errors: [{ message: "Could not resolve to a Repository" }] }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const client = createGitHubClient({
+    baseUrl: `http://127.0.0.1:${server.address().port}`, env: { NO_PROXY: "*" }, secondaryAccounts: true,
+    run: async (args) => ({ ok: true, stdout: args[1] === "status"
+      ? JSON.stringify({ hosts: { "github.com": [{ active: false, login: "secondary" }] } })
+      : args.includes("--user") ? "secondary-token" : "primary-token" }),
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await client.close();
+    await new Promise((resolve) => server.close(resolve));
+  });
+  t.mock.method(statuslineGitHub, "request", (input, _host, options) => client.request(input, options));
+  t.mock.method(statuslineGitHub, "cacheScope", (_host, options) => client.cacheScope(options));
+  const url = "https://github.com/private/repo/issues/2";
+  assert.equal((await prefetchStatuses("issue", [{ url }], { home, now: 1000 }))(url).title, "Private issue");
+  assert.equal(calls, 2);
+  assert.equal((await prefetchStatuses("issue", [{ url }], { home, now: 2000 }))(url).title, "Private issue");
+  assert.equal(calls, 2, "the second tick uses the credential-matched cached observation");
+  assert.equal(readIssueCache(home)[url].checkedAt, 1000);
+});
 test("SDK token access is explicit, minimal, and restricted to named GitHub credentials", () => {
   assert.deepEqual(requestedGitHubEnvironment({}), []);
   assert.deepEqual(requestedGitHubEnvironment({ COPILOT_STATUSLINE_TOKEN_ENV: "GH_TOKEN,GH_TOKEN" }), ["GH_TOKEN"]);
@@ -78,6 +109,12 @@ test("SDK token access is explicit, minimal, and restricted to named GitHub cred
   assert.equal(gitHubEnvironmentForHost("enterprise.example", env).GH_ENTERPRISE_TOKEN, "fixture-enterprise");
   assert.equal(gitHubEnvironmentForHost("unrelated.example", env).GH_ENTERPRISE_TOKEN, undefined);
   assert.equal(gitHubEnvironmentForHost("unrelated.example", env).GH_TOKEN, undefined);
+  const ghe = { GH_HOST: "one.ghe.com", GH_TOKEN: "fixture-ghe", GITHUB_TOKEN: "fixture-ghe-alias" };
+  assert.equal(gitHubEnvironmentForHost("one.ghe.com", ghe).GH_TOKEN, "fixture-ghe");
+  for (const host of ["two.ghe.com", "github.com"]) {
+    assert.equal(gitHubEnvironmentForHost(host, ghe).GH_TOKEN, undefined);
+    assert.equal(gitHubEnvironmentForHost(host, ghe).GITHUB_TOKEN, undefined);
+  }
 });
 test("background branch discovery preserves clear boundaries and discovers later work", async (t) => {
   const home = fixture(t);
@@ -270,7 +307,12 @@ test("both plugin notification entry points register opt-in tools without model 
       }
     });
 
-    test("the real statusline adapter never forwards an enterprise environment token to an unrelated link", () => {
+    test("the real statusline adapter never forwards an environment token to an unrelated host", () => {
+      for (const profile of [
+        { host: "enterprise.example", variable: "GH_ENTERPRISE_TOKEN", denied: ["unrelated.example"] },
+        { host: "one.ghe.com", variable: "GH_TOKEN", denied: ["two.ghe.com", "github.com"] },
+        { host: "one.ghe.com", variable: "GITHUB_TOKEN", denied: ["two.ghe.com", "github.com"] },
+      ]) {
       const code = `
         import assert from "node:assert/strict";
         import { createServer } from "node:http";
@@ -296,10 +338,12 @@ test("both plugin notification entry points register opt-in tools without model 
         const { queryPrStatusWithGh } = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "pr-statusline", "github.mjs")).href)});
         const { statuslineGitHub } = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "github-transport.mjs")).href)});
         try {
-          await assert.rejects(queryPrStatusWithGh("https://unrelated.example/fixture/repo/pull/1"), /authentication required/);
+          for (const host of ${JSON.stringify(profile.denied)}) {
+            await assert.rejects(queryPrStatusWithGh("https://" + host + "/fixture/repo/pull/1"), /authentication required/);
+          }
           assert.equal(requests.length, 0);
-          assert.equal((await queryPrStatusWithGh("https://enterprise.example/fixture/repo/pull/1")).state, "OPEN");
-          assert.deepEqual(requests, ["token fixture-enterprise"]);
+          assert.equal((await queryPrStatusWithGh(${JSON.stringify(`https://${profile.host}/fixture/repo/pull/1`)})).state, "OPEN");
+          assert.deepEqual(requests, ["token fixture-host"]);
         } finally {
           server.closeAllConnections();
           await statuslineGitHub.close();
@@ -308,8 +352,9 @@ test("both plugin notification entry points register opt-in tools without model 
       `;
       const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
         cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,
-        env: { ...process.env, GH_HOST: "enterprise.example", GH_ENTERPRISE_TOKEN: "fixture-enterprise",
-          GITHUB_ENTERPRISE_TOKEN: "", GH_TOKEN: "", GITHUB_TOKEN: "" },
+        env: { ...process.env, GH_HOST: profile.host, GH_ENTERPRISE_TOKEN: "",
+          GITHUB_ENTERPRISE_TOKEN: "", GH_TOKEN: "", GITHUB_TOKEN: "", [profile.variable]: "fixture-host" },
       });
       assert.equal(result.status, 0, result.stderr);
+      }
     });

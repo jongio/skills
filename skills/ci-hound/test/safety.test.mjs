@@ -45,16 +45,19 @@ test(`credential replacement during ${changeAt} cannot establish watched-run rea
   const args = parseArgs(["once", "--repo", "fixture/repo", "--watch-run", "1"]);
   const state = loadState("");
   let scope = "before";
+  let secondJobPages = 0;
   const run = { id: 1, name: "CI", event: "push", head_branch: "main", head_sha: "head",
     status: "completed", conclusion: "success", updated_at: "current" };
   const request = async ({ endpoint }) => {
+    const secondJobsPage = endpoint.includes("/jobs?") && new URLSearchParams(endpoint.split("?")[1]).get("page") === "2";
+    if (secondJobsPage) secondJobPages++;
     if ((changeAt === "inventory" && endpoint.includes("?per_page=25")) ||
         (changeAt === "jobs" && endpoint.includes("/jobs?")) ||
-        (changeAt === "page" && endpoint.includes("page=2"))) scope = "after";
+        (changeAt === "page" && secondJobsPage)) scope = "after";
     const job = (id) => ({ id, name: "Tests", status: "completed", conclusion: "success", steps: [] });
     const data = endpoint.includes("/commits/") ? { sha: "head" }
       : endpoint.includes("/jobs?") ? changeAt === "page"
-        ? { jobs: endpoint.includes("page=2") ? [job(51)] : Array.from({ length: 50 }, (_, index) => job(index + 1)), total_count: 51 }
+        ? { jobs: secondJobsPage ? [job(51)] : Array.from({ length: 50 }, (_, index) => job(index + 1)), total_count: 51 }
         : { jobs: [job(2)], total_count: 1 }
         : { workflow_runs: [run] };
     return { ok: true, status: 200, cacheScope: scope, headers: {}, data };
@@ -63,5 +66,6 @@ test(`credential replacement during ${changeAt} cannot establish watched-run rea
   const tick = await native_evaluatePollTick(args, state, request);
   assert.ok(!tick.events.some((event) => /GREEN/.test(event.type)));
   assert.equal(tick.events[0].type, "POLL_ERROR");
+  if (changeAt === "page") assert.equal(secondJobPages, 1, "the credential transition occurs on the second jobs page");
 });
 }

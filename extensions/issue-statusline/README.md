@@ -34,6 +34,8 @@ the host asks permission before granting the collector those filtered values.
 Without that opt-in, the collector uses bounded `gh` credential discovery.
 For enterprise environment tokens, also set `GH_HOST` to the intended server;
 unrelated hosts found in links cannot inherit that token.
+For a `*.ghe.com` tenant, this includes `GH_TOKEN`/`GITHUB_TOKEN`; neither
+another tenant nor github.com inherits the selected tenant's token.
 
 ### Option 1: Install as a Copilot Plugin or Interactive Script (Recommended)
 

@@ -125,11 +125,12 @@ export async function collect(session, { home, interval = 15000, report = consol
 			polling = false;
 		}
 	}
-	await poll();
+	const initialPoll = poll();
 	const timer = setInterval(poll, interval);
 	timer.unref();
 	return {
 		tracker,
+		initialPoll,
 		manage(action, reference) {
 			reload();
 			const prs = tracker.manage(action, reference);

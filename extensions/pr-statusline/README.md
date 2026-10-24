@@ -165,7 +165,7 @@ Using `Azure/azure-dev` as an example checkout:
    - Scheduled watch prompts (`manage_schedule`)
    It ignores `gh pr list`/`search` output, exploratory subagents, skill-injected examples, and other sessions' transcripts.
 2. **Single-query GraphQL status + shared cache (`github.mjs`):**
-   Live PR status is fetched via `gh api graphql` (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (20s TTL while checks are running, including mixed running/failed checks, 45s TTL when settled, with in-flight deduplication locks). A restarted check's active status takes precedence over a leftover conclusion; the pill changes on the next successful refresh, not optimistically when a rerun command is issued. It does **not** use Copilot AI model requests or touch Copilot's internal databases.
+   Live PR status is fetched through Octokit GraphQL (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (20s TTL while checks are running, including mixed running/failed checks, 45s TTL when settled, with in-flight deduplication locks). A restarted check's active status takes precedence over a leftover conclusion; the pill changes on the next successful refresh, not optimistically when a rerun command is issued. It does **not** use Copilot AI model requests or touch Copilot's internal databases.
 3. **Automatic cleanup & manual controls:**
    Closed PRs are removed automatically. Merged PRs remain until the next real user message after this session detects the merge. When the SDK extension (`extension.mjs`) is loaded, you can also manage the list manually:
 
@@ -228,6 +228,8 @@ SDK collector performs asynchronous Octokit refreshes with host/credential-scope
 caches. A cold footer can show tracked links before remote metadata arrives;
 failed refreshes keep last-known observations marked stale rather than claiming
 new success or merge state. Git comparisons still use bounded local Git reads.
+Local controls initialize before the first background poll finishes, so a slow
+GitHub response does not block tracking or clearing this session.
 
 `/session-statusline refresh` awaits a real refresh and reports partial failures.
 For standalone installs without a running SDK collector, refresh explicitly:
@@ -251,6 +253,10 @@ files. Standalone headless refresh uses its ordinary process environment.
 For enterprise environment tokens, also set `GH_HOST` to the intended server.
 An unrelated hostname discovered in a link cannot inherit that server's token;
 host-specific `gh` keystore lookup is the fallback instead.
+This also applies to `GH_TOKEN`/`GITHUB_TOKEN` when `GH_HOST` selects a
+`*.ghe.com` tenant: another tenant or github.com requires its own credential.
+Secondary-account choices are retained per target within the running client,
+so healthy cached observations do not repeat account discovery on every tick.
 
 The optional daemon notification bridge is separate from footer selection.
 Install it with `node scripts\setup-statusline.mjs --notifications`, then use
