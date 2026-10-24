@@ -82,7 +82,28 @@ Never delete a base/default branch or an advanced head, replace the expected OID
 to retry a failed guard, force-delete a branch, remove a worktree, or discard local
 changes. Verify local and remote deletion separately. Already-absent refs need no
 deletion; blocked or unavailable safe cleanup is reported as "merged with cleanup
-pending", not successful deletion.
+pending" (use `git-tidy` for worktree cleanup), not successful deletion.
+
+## Related issues after merge
+
+Before merge, inventory related issues from closing links, the PR body, task/handoff,
+and relevant discussion, including cross-repository issues. Compare their acceptance
+criteria with delivered changes and evidence; remove misleading automatic closing
+links for incomplete or reference-only work. Mere references do not authorize closure.
+Persist and verify the repository-qualified inventory and scope rationale in the PR
+body or a PR comment before merging, including task-only or handoff-only associations.
+
+After GitHub confirms the intended head merged, verify fully resolved issues are
+closed, closing any still open with the merged PR link and completion evidence.
+Keep partially resolved issues open with an update describing completed and remaining
+work and next steps. Correct an incomplete issue automatically closed by this PR;
+do not reopen unrelated intentional closures without a decision.
+
+An already-merged PR uses the same check on resume, avoiding duplicate updates.
+Re-read GitHub state and comments to verify writes, including after timeouts.
+Unknown scope, incomplete discovery, permissions, or failed verification are reported
+as **merged with issue reconciliation pending**, independently of branch cleanup.
+See the shared [issue reconciliation contract](references/issue-reconciliation.md).
 
 ## Progress and blocked work
 
@@ -122,8 +143,11 @@ replace resolving addressed bot threads or the existing review and merge gates.
 Copilot review is expected by default. Request or re-request Copilot via
 `node scripts/pr-watch-daemon.mjs request-copilot --repo <owner/repo> --pr <number> --head <full-head-OID>`
 so superseded `Running Copilot Code Review` runs on the PR branch are cancelled
-and existing `@copilot` requests are toggled before re-requesting. Only an explicit
-user-authorized exception for a verified private repository with the exact allowed
+and existing `@copilot` requests are toggled before re-requesting. During `watch`
+(supporting single `--pr <number>` or multi-PR `--prs <p1[:head1],p2[:head2]>`),
+transient `Copilot encountered an error` reviews are automatically retried up to
+`--max-copilot-retries <n>` (default `2`) per head SHA (`COPILOT_REVIEW_RETRIED`).
+Only an explicit user-authorized exception for a verified private repository with the exact allowed
 owner skips requesting and waiting, including already-pending requests. Posted
 feedback and other required reviews still apply.
 
@@ -153,7 +177,7 @@ npm run eval:lint
 Deterministic tests check portable skill shape, instruction contracts, and
 registration. Synthetic capability scenarios cover owner-specific exceptions,
 exact-head review completion, authorized pinned merges, documentation preflight,
-progress and approval waits, and feedback including body-only findings; linting
+progress and approval waits, related-issue reconciliation, and feedback including body-only findings; linting
 them does not establish agent behavior.
 
 ## License

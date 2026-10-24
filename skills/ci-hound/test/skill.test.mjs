@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   applySetupConfig,
   buildOptimizationReport,
+  computeCiHoundPhase,
   computeNextPollIntervalSec,
   discoverOwnerRepos,
   evaluateMultiRepoPollTick,
@@ -992,14 +993,45 @@ test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and ba
   assert.equal(bloatedState.etags["repos/o/r/actions/runs/100/jobs?per_page=50"], undefined);
   assert.ok(bloatedState.etags["repos/o/r/actions/runs/101/jobs?per_page=50"]);
 
-  // Protected watched run IDs and active main runs are never evicted, while stale PR in_progress run 99 is evicted
+  // Protected watched run IDs and active main runs are never evicted, while stale PR in_progress run 99 is evicted,
+  // and orphaned runs/<id>/jobs ETag entries for evicted runs (like 98 and 200) are also deleted!
+  bloatedState.etags["repos/o/r/actions/runs/98/jobs?per_page=50"] = {
+    etag: '"e98-orphaned"',
+    data: { jobs: [{ id: 98 }] },
+    updatedAt: "2026-10-23T01:00:00Z",
+  };
   for (let id = 200; id < 210; id += 1) {
-    bloatedState.runs[String(id)] = { id, status: "completed", telemetryRecorded: true };
+    bloatedState.runs[String(id)] = { id, status: "completed", telemetryRecorded: false };
+    bloatedState.etags[`repos/o/r/actions/runs/${id}/jobs?per_page=50`] = {
+      etag: `"e${id}"`,
+      data: { jobs: [{ id }] },
+      updatedAt: "2026-10-23T01:00:00Z",
+    };
   }
   pruneState(bloatedState, { maxRuns: 3, maxEtags: 50, protectedRunIds: [100] });
   assert.ok(bloatedState.runs["100"]);
   assert.ok(bloatedState.runs["101"]);
   assert.equal(bloatedState.runs["99"], undefined);
+  assert.equal(bloatedState.etags["repos/o/r/actions/runs/98/jobs?per_page=50"], undefined);
+  assert.equal(bloatedState.etags["repos/o/r/actions/runs/200/jobs?per_page=50"], undefined);
+
+  // computeCiHoundPhase summarizes active runs and job counts for live watch streaming
+  const phaseInfo = computeCiHoundPhase({
+    repo: "github/evals",
+    branch: "main",
+    sha: "c9af6f7baca34995",
+    activeRuns: [
+      {
+        id: 39974417712,
+        name: "Release",
+        completedJobsCount: 13,
+        totalJobsCount: 20,
+        inProgressJobs: ["Retained artifacts (macos-15, VS Code minimum) [Verify installed bytes]"],
+      },
+    ],
+  });
+  assert.equal(phaseInfo.phase, "main:running:c9af6f7b:39974417712:13/20");
+  assert.match(phaseInfo.summary, /Release \(13\/20 jobs passed; active: Retained artifacts/);
 
   // 3. Rate-limit headers and 429/403 secondary rate limits trigger interval backoff and preserve cached data
   const rlState = loadState("/nonexistent/state.json");

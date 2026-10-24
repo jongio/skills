@@ -69,3 +69,25 @@ For required merge queues, verify the queue strategy matches the authorized
 strategy and wait for confirmed merge, not just queue admission, before cleanup.
 Verify local and remote deletion separately; failed guards or unavailable safe
 cleanup are reported as pending rather than retried unconditionally or claimed done.
+
+## Related issues after merge
+
+Inventory related issues before merging, including closing links, PR references,
+the task/handoff, relevant discussion, and cross-repository work. Assess each
+issue's acceptance criteria against delivered changes and evidence; remove
+misleading closing links for incomplete or reference-only work rather than treating
+a reference as permission to close. Persist and verify the repository-qualified
+inventory and scope rationale in the PR body or a PR comment before merging,
+including associations present only in the task or handoff.
+
+After GitHub confirms the intended head merged, fully resolved issues must be
+verified closed; close any still open with the merged PR link and completion
+evidence. Keep partial issues open with a verified progress update describing
+completed and remaining work and next steps. Correct accidental closure by this
+PR, but ask before reopening unrelated intentional closures.
+
+Resuming an already-merged PR runs the same check without duplicate updates.
+Verify actual issue state and persisted comments, re-reading after timeouts.
+Unknown scope, incomplete discovery, permission failures, or unverified writes
+leave delivery **merged with issue reconciliation pending**, separately from
+any pending branch cleanup.

@@ -3,7 +3,8 @@ description: >-
   Capability eval for the pr skill. Verifies preflight checklist execution,
   verified owner-specific private repository exceptions, exact-head review
   completion, embedded review-body findings, bot vs human comment resolution,
-  bounded progress reporting, and authorized head-pinned merge.
+  bounded progress reporting, authorized head-pinned merge, and verified
+  post-merge related-issue reconciliation.
 type: capability
 
 defaults:
@@ -662,6 +663,148 @@ stimuli:
             with cleanup pending when blocked. Score 1 for bundled deletion,
             check-then-unconditional-delete, using S or B as the expected OID,
             false deletion claims, or commands/writes.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: post-merge-complete-and-partial-issues
+    prompt: >-
+      Use pr to plan follow-through after GitHub confirms the intended PR head
+      merged. A complete paginated inventory identifies sample/app#11, whose
+      acceptance criteria all pass but which remains open; sample/app#12, which
+      is already auto-closed and fully complete; and sample/app#13, where this
+      PR delivered only one of three requirements and the issue is still open.
+      The PR also mentions sample/app#14 as background only. Explain required
+      actions and verification. No commands, edits, agents, or network calls
+      are authorized.
+    rubric:
+      - Closes fully resolved issue 11 with completed reason, merged PR link, and evidence, then verifies persisted closed state.
+      - Verifies already-closed complete issue 12 without redundant writes.
+      - Keeps partial issue 13 open with completed work, remaining requirements, and next steps linked to the merged PR, verifying the persisted update.
+      - Leaves reference-only issue 14 unchanged and reports all verified dispositions.
+    graders:
+      - type: diff-empty
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the plan closes 11 as completed with PR/evidence,
+            verifies 12 without redundant writes, leaves 13 open with delivered
+            and remaining work plus next steps, and leaves background-only 14
+            unchanged. Require read-back verification of state and comments,
+            not command success or closing keywords alone. Score 1 for closing
+            partial issues, ignoring still-open completed work, claiming the
+            merge alone completes delivery, or any calls/writes.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: post-merge-issue-retry-and-permission-failure
+    prompt: >-
+      Use pr for a synthetic already-merged PR resumed after interruption.
+      The intended head's merge is verified. Issue sample/app#21 appeared only
+      in the original task, but its identity and scope rationale were persisted
+      in a neutral PR inventory comment before merge. It is partial
+      and open; a previous attempt already posted the correct merged PR link,
+      completed work, remaining work, and next steps, but the response timed
+      out. Fully resolved sample/app#22 is open and closing it returns a
+      permission failure. Local branch cleanup is also blocked by a checked-out
+      worktree. Explain recovery and the final status. No commands, edits,
+      agents, or network calls are authorized.
+    rubric:
+      - Reconstructs task-only associations from the verified durable PR inventory and re-reads current issue state/comments before retrying writes.
+      - Reuses issue 21's persisted update without duplicating it after the timeout.
+      - Reports issue 22 as merged with issue reconciliation pending with the permission blocker, not completed or re-merged.
+      - Keeps cleanup safety and pending cleanup status separate from issue reconciliation.
+    graders:
+      - type: diff-empty
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if recovery verifies merged identity, reconstructs
+            task-only associations from the persisted PR inventory, reads back
+            21's state/comments and reuses the existing
+            update, leaves only unfinished work pending, reports 22's permission
+            blocker as merged with issue reconciliation pending, and separately
+            reports checked-out branch cleanup pending without unsafe deletion.
+            Score 1 for duplicate comments, retrying the merge, silently skipping
+            denied writes, claiming full delivery, or calls/writes.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: post-merge-unknown-and-cross-repository-issues
+    prompt: >-
+      Use pr to assess a verified merge into a non-default branch. The task
+      explicitly delivers work for sample/other#31, not sample/app#31, but the
+      automatic closing-link list is empty. Only two of its three requirements
+      have evidence and the third requires an unverified rollout. One page of
+      related discussion could not be retrieved. Another partial issue was
+      accidentally auto-closed by this PR; a different issue was intentionally
+      closed by a maintainer for unrelated reasons. Explain safe follow-through.
+      No commands, edits, agents, or network calls are authorized.
+    rubric:
+      - Preserves sample/other#31 identity and does not infer no related issues from missing closing links or the non-default base.
+      - Does not close unknown or incomplete work; records known progress, missing rollout evidence, remaining work, and the inventory gap.
+      - Reopens only a proven accidental closure by this PR with remaining-work evidence; asks before disturbing unrelated intentional closure.
+      - Reports reconciliation pending for incomplete discovery/evidence instead of claiming full delivery.
+    graders:
+      - type: diff-empty
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the plan keeps the exact cross-repository identity,
+            treats missing automatic links and non-default base as insufficient
+            inventory, refuses closure without rollout evidence, records verified
+            progress/remaining work and the failed page, corrects only a proven
+            accidental PR closure, and seeks a decision for unrelated intentional
+            closure. Report merged with issue reconciliation pending until
+            discovery/evidence is complete. Score 1 for wrong-repository writes,
+            no-issues claims, closure on incomplete evidence, reopening unrelated
+            closures automatically, full-delivery claims, or calls/writes.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: pre-merge-partial-closing-link
+    prompt: >-
+      Use pr to plan a PR whose body says Fixes sample/app#41, although the
+      change delivers only one of three acceptance criteria. The proposed
+      squash commit message repeats the same closing keyword. The PR is ready
+      for approval but has not merged. A stale Closes sample/app#42 targets a
+      reference-only background issue. Another delivery issue, sample/app#43,
+      appears only in the task/handoff. Explain prevention and post-merge work,
+      including what happens if automatic closure cannot safely be prevented.
+      No commands, edits, agents, or network calls are authorized.
+    rubric:
+      - Inventories acceptance criteria and evidence before merging, treating issue 41 as partial.
+      - Plans removal of misleading closing keywords/links for partial and reference-only issues in the PR and merge message while preserving neutral references and template shape.
+      - Persists the repository-qualified inventory and scope rationale, including task-only issue 43, in a neutral PR body section or comment and verifies it before merge; pauses if persistence fails.
+      - Does not mutate the issue before a verified merge, and pauses merge for a decision if automatic closure cannot safely be prevented.
+      - After actual merge, keeps the issue open with a verified progress/remaining-work update without weakening merge consent or review gates.
+    graders:
+      - type: diff-empty
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the plan identifies partial acceptance before merge,
+            removes misleading closing triggers for partial 41 and reference-only
+            42 from both PR and proposed squash message without unauthorized
+            history rewriting, preserves neutral references/template, and persists
+            and verifies a durable inventory including task-only 43 in the PR body
+            or comment before merge. Pause for failed persistence or if premature
+            closure cannot safely be prevented. Issue writes wait until verified merge;
+            then require open state plus persisted delivered/remaining-work
+            update. Preserve existing merge approval/review gates. Score 1 for
+            knowingly merging an unsafe automatic closure, premature issue
+            mutation, treating Fixes as completion proof, or calls/writes.
       - type: skill-invocation
         config:
           required: [pr]
