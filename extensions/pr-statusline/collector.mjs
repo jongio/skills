@@ -28,7 +28,9 @@ export async function collect(session, { home, interval = 15000, report = consol
 			rmSync(file, { force: true });
 		}
 	}
-	const tracker = new SessionTracker(session.sessionId, previous);
+	const tracker = new SessionTracker(session.sessionId, previous?.activeTrackingVersion === 1 ? previous : previous && {
+		...previous, prs: previous.prs.filter((pr) => pr.active || pr.simulated), calls: {}, transcriptOffset: 0,
+	});
 	initializeMergedPrs(tracker, Date.now());
 	const queued = [];
 	let loading = true;

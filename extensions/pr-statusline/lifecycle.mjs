@@ -57,6 +57,9 @@ export function dismissMergedPrs(tracker) {
 }
 
 export function reconcilePrStates(tracker, disk) {
+	if (disk.activeTrackingVersion !== 1) {
+		disk = { ...disk, activeTrackingVersion: 1, prs: disk.prs.filter((pr) => pr.active || pr.simulated), calls: {} };
+	}
 	if ((disk.clearedAt ?? 0) > (tracker.state.clearedAt ?? 0)) {
 		Object.assign(tracker.state, disk);
 		tracker.repository = disk.repository ?? null;

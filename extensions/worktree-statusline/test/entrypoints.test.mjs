@@ -88,6 +88,9 @@ function extensionScript(entry, full) {
 			assert.match(logs.pop(), /0 starting/);
 			await command("session-subagents")({ args: "clear" });
 			assert.match(logs.pop(), /Cleared/);
+			assert.deepEqual(JSON.parse(tool("session_subagents")({ action: "list" })), []);
+			assert.throws(() => tool("session_subagents")({ action: "remove" }), /agent ID/);
+			assert.throws(() => tool("session_statusline")({ action: "invalid" }), /clear or refresh/);
 			assert.throws(() => tool("session_issues")({ action: "add", reference: "invalid" }));
 			assert.equal(JSON.parse(tool("session_issues")({ action: "add", reference: "example/widget#2" })).length, 1);
 			await command("session-issues")({ args: "list" });
@@ -95,6 +98,8 @@ function extensionScript(entry, full) {
 			assert.equal(JSON.parse(tool("session_issues")({ action: "clear" })).length, 0);
 			await command("session-statusline")({ args: "clear" });
 			assert.match(logs.pop(), /Cleared this session/);
+			assert.match(tool("session_statusline")({ action: "clear" }), /Cleared this session/);
+			assert.match(tool("session_statusline")({ action: "refresh" }), /^Refreshed this session/);
 			await command("session-statusline")({ args: "refresh" });
 			assert.match(logs.pop(), /^Refreshed this session/);
 			await command("session-statusline")({ args: "setup none" });

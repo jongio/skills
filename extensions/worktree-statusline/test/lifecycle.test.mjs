@@ -136,7 +136,8 @@ test("collector dismisses late merge confirmations against an already received p
 	const collector = await collect({
 		sessionId: id,
 		on(fn) { handler = fn; return () => {}; },
-		async getEvents() { return [event("user.message", 1000, { content: `Work on ${url(1)}` })]; },
+		async getEvents() { return [event("user.message", 1000, { content: `Work on ${url(1)}` }),
+			event("tool.execution_start", 1100, { toolCallId: "track", toolName: "session_prs", arguments: { action: "add", reference: url(1) } })]; },
 		rpc: { metadata: { async activity() { return { hasActiveWork: true }; } } },
 	}, { home, interval: 100000 });
 	try {
@@ -189,7 +190,8 @@ test("collector reconciles merge metadata before dismissal and never revives it 
 	const session = {
 		sessionId: id,
 		on(fn) { handler = fn; return () => {}; },
-		async getEvents() { return [event("user.message", 1000, { content: `Work on ${url(1)}` })]; },
+		async getEvents() { return [event("user.message", 1000, { content: `Work on ${url(1)}` }),
+			event("tool.execution_start", 1100, { toolCallId: "track", toolName: "session_prs", arguments: { action: "add", reference: url(1) } })]; },
 		rpc: { metadata: { async activity() { return { hasActiveWork: false }; } } },
 	};
 	const collector = await collect(session, { home, interval: 100000 });

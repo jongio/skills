@@ -139,6 +139,12 @@
       "source": "./skills/ci-hound",
       "description": "Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows.",
       "version": "1.0.0"
+    },
+    {
+      "name": "session-statusline",
+      "source": "./skills/session-statusline",
+      "description": "Manage only the current session's active statusline pills and clear entries without deleting work or changing enabled components.",
+      "version": "1.0.0"
     }
   ]
 }

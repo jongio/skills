@@ -144,6 +144,7 @@ export function readState(sessionId, home = configHome()) {
 		...(Number.isFinite(item.checkedAt) ? { checkedAt: item.checkedAt } : {}),
 		...(Number.isFinite(item.closedAt) ? { closedAt: item.closedAt } : {}),
 		...(item.simulated ? { simulated: true } : {}),
+		...(item.active ? { active: true } : {}),
 	}));
 	state.ignored = state.ignored.map((url) => issueReference(url).url);
 	return state;
@@ -169,10 +170,12 @@ export class IssueTracker {
 		statePath(sessionId);
 		this.state = {
 			version: 1,
+			activeTrackingVersion: 1,
 			sessionId,
 			clearedAt: previous?.clearedAt ?? 0,
 			clearedWorkspace: previous?.clearedWorkspace ?? null,
-			issues: [...(previous?.issues ?? [])],
+			issues: (previous?.issues ?? []).filter((issue) => previous?.version !== 1 ||
+				previous.activeTrackingVersion === 1 || issue.active || issue.simulated),
 			ignored: [...(previous?.ignored ?? [])],
 			updatedAt: previous?.updatedAt ?? Date.now(),
 			transcriptOffset: Number.isInteger(previous?.transcriptOffset) && previous.transcriptOffset >= 0
@@ -182,7 +185,7 @@ export class IssueTracker {
 		this.repository = previous?.repository ?? null;
 		this.host = previous?.host ?? "github.com";
 		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
-		this.calls = new Map(Object.entries(previous?.calls ?? {}));
+		this.calls = new Map(Object.entries(previous?.version === 1 && previous.activeTrackingVersion !== 1 ? {} : previous?.calls ?? {}));
 	}
 
 	add(reference, explicit = false) {
@@ -190,8 +193,10 @@ export class IssueTracker {
 		if (PLACEHOLDER_REPOS.has(item.label.split("#")[0].toLowerCase())) return;
 		if (explicit) this.state.ignored = this.state.ignored.filter((url) => url !== item.url);
 		if (!this.state.ignored.includes(item.url) && !this.state.issues.some((i) => i.url === item.url)) {
-			this.state.issues.push(item);
+			this.state.issues.push({ ...item, active: true });
 		}
+		const existing = this.state.issues.find((issue) => issue.url === item.url);
+		if (existing) existing.active = true;
 	}
 
 	manage(action, reference) {
@@ -235,22 +240,15 @@ export class IssueTracker {
 					}
 				}
 			}
-			if (!isSkillInjection && !/\btriage\b/i.test(content)) {
-				for (const item of extractIssues(content, this.repository, this.host)) {
-					this.add(item.url);
-				}
-			}
-			for (const attachment of data.attachments ?? []) {
-				if (attachment.type === "github_reference" && attachment.referenceType === "issue") {
-					this.add(attachment.url);
-				}
-			}
 		}
 
 		if (event.type === "tool.execution_start") {
 			const args = data.arguments ?? {};
 			const name = data.mcpToolName ?? data.toolName ?? "";
 			const command = String(args.command ?? "");
+			if (/(?:^|[._-])session_issues$/.test(name) && args.action === "add") {
+				this.add(args.reference);
+			}
 			const safeSessionId = this.state.sessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 			const otherSessionState = new RegExp(`\\.copilot[\\\\/]session-state(?:[\\\\/](?!${safeSessionId}\\b)|$)`, "i");
 			const isDiagnostic = /\.copilot[\\/](?:pr-statusline|issue-statusline|subagent-statusline)\b|events\.jsonl\b|smoke\.test\.mjs\b/i.test(command) ||
@@ -263,17 +261,10 @@ export class IssueTracker {
 				}
 			}
 
-			// Detect swarm / issue worktree paths only when they belong to this session
-			if (this.repository) {
-				const swarmMatch = new RegExp(`\\bswarm-\\d+-${this.state.sessionId.slice(0, 8)}-([1-9]\\d*)\\b`, "i").exec(command);
-				if (swarmMatch) {
-					this.add(`https://${this.host}/${this.repository}/issues/${swarmMatch[1]}`);
-				}
-			}
-
 			const isBatchLoop = /\bforeach\b|\bForEach-Object\b|\bgh\s+issue\s+list\b|\bgh\s+search\b/i.test(command);
 			const ghSubcommand = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+issue\s+(view|edit|comment|close|reopen|develop|create)\b/.exec(command)?.[1];
 			const mcpTargeted = /(?:^|[_-])(?:issue_read|issue_write|create_issue|update_issue)$/.test(name);
+			const mcpWrite = mcpTargeted && !/(?:^|[_-])issue_read$/.test(name);
 			const closing = ghSubcommand === "close" || (/(?:^|[_-])(?:issue_write|update_issue)$/.test(name) && String(args.state ?? "").toLowerCase() === "closed");
 			const reopening = ghSubcommand === "reopen";
 			const isPrPollCommand = /\brepos\/[\w.-]+\/[\w.-]+\/pulls\/[1-9]\d*\b/.test(command) || /\bpullRequest\s*\(/.test(command);
@@ -285,7 +276,8 @@ export class IssueTracker {
 			const explicitRepo = /(?:--repo|-R)(?:[=\s]+)["']?([\w.-]+\/[\w.-]+)(?![\w./-])/.exec(command)?.[1] ??
 				(args.owner && args.repo ? `${args.owner}/${args.repo}` : null);
 			const repository = explicitRepo ?? (changedDirectory ? null : this.repository);
-			const targeted = !isBatchLoop && (Boolean(ghSubcommand) || mcpTargeted || Boolean(api));
+			const apiWrite = api && /(?:--method|-X)(?:=|\s+)["']?(?:POST|PATCH|PUT|DELETE)\b/i.test(command);
+			const targeted = !isBatchLoop && (Boolean(ghSubcommand && ghSubcommand !== "view") || mcpWrite || apiWrite);
 
 			if (targeted) {
 				const commandTargetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
@@ -379,23 +371,10 @@ function inspectWorkspaceMetadata(tracker, sessionDir) {
 	try {
 		const raw = readFileSync(wsPath, "utf8");
 		const repo = /^repository:\s*(\S+)\s*$/m.exec(raw)?.[1];
-		const branch = /^branch:\s*(\S+)\s*$/m.exec(raw)?.[1];
-		const name = /^name:\s*(.+?)\s*$/m.exec(raw)?.[1];
-		if (tracker.state.clearedAt && JSON.stringify([repo ?? null, branch ?? null, name ?? null]) ===
-			JSON.stringify(tracker.state.clearedWorkspace)) return false;
 		if (repo && !tracker.repository) {
 			tracker.repository = repo;
 			changed = true;
 		}
-		const before = tracker.state.issues.length;
-		if (name && !/\btriage\b/i.test(name)) {
-			for (const item of extractIssues(name, tracker.repository, tracker.host)) tracker.add(item.url);
-		}
-		if (tracker.repository && branch) {
-			const issueBranch = /^(?:issue|bug|feat|fix)[/-]([1-9]\d*)(?:[/-]|$)/i.exec(branch);
-			if (issueBranch) tracker.add(`https://${tracker.host}/${tracker.repository}/issues/${issueBranch[1]}`);
-		}
-		if (tracker.state.issues.length !== before) changed = true;
 	} catch {
 		// Ignore workspace.yaml read errors.
 	}
@@ -445,15 +424,16 @@ export function syncSession(payload, {
 	}
 	if (!hasTranscript && !hasWorkspace && !previous) return { state: null };
 
-	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
+	const migrate = previous && previous.activeTrackingVersion !== 1;
+	const reset = hasTranscript && (!previous || migrate || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new IssueTracker(
 		sessionId,
-		reset && previous ? { issues: previous.issues, ignored: previous.ignored,
+		reset && previous ? { issues: migrate ? previous.issues.filter((issue) => issue.active || issue.simulated) : previous.issues, ignored: previous.ignored,
 			clearedAt: previous.clearedAt, clearedWorkspace: previous.clearedWorkspace,
 			...(previous.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.state.transcriptOffset;
-	let changed = (hasTranscript || hasWorkspace) && (!previous || reset);
+	let changed = Boolean(migrate) || (hasTranscript || hasWorkspace) && (!previous || reset);
 
 	if ((hasTranscript || hasWorkspace) && inspectWorkspaceMetadata(tracker, sessionDir)) {
 		changed = true;
@@ -494,6 +474,7 @@ export function syncSession(payload, {
 				const byUrl = new Map(tracker.state.issues.map((i) => [i.url, i]));
 				tracker.state.ignored = [...latest.ignored];
 				tracker.state.issues = latest.issues
+					.filter((i) => latest.activeTrackingVersion === 1 || i.active || i.simulated)
 					.filter((i) => !tracker.state.ignored.includes(i.url))
 					.map((i) => byUrl.get(i.url) ?? i);
 			}

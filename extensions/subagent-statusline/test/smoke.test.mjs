@@ -78,7 +78,7 @@ try {
 			JSON.stringify(event("subagent.started", { agentId: "a1", toolCallId: "t1", agentName: "devx-developer" }, "a1", new Date(1000).toISOString())),
 			JSON.stringify(event("subagent.started", { agentId: "a2", toolCallId: "t2", agentName: "devx-developer" }, "a2", new Date(1100).toISOString())),
 			JSON.stringify(event("subagent.started", { agentId: "e1", toolCallId: "te1", agentType: "explore", agentName: "explore" }, "e1", new Date(1150).toISOString())),
-			JSON.stringify(event("tool.execution_start", { toolCallId: "c2", toolName: "powershell", arguments: { command: "gh pr view https://github.com/Azure/azure-dev/pull/4812" } }, "a2", new Date(1200).toISOString())),
+			JSON.stringify(event("tool.execution_start", { toolCallId: "c2", toolName: "powershell", arguments: { command: "gh pr edit https://github.com/Azure/azure-dev/pull/4812 --add-label active" } }, "a2", new Date(1200).toISOString())),
 		].join("\n") + "\n",
 	);
 	const plainOut = render({ session_id: "live-subagents", transcript_path: transcriptDir }, { home, links: false, color: false });

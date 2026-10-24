@@ -1,0 +1,95 @@
+name: session-statusline
+description: Session-local pill controls, active-work enrollment, and durable dismissal boundaries.
+type: capability
+
+defaults:
+  runs: 1
+  timeout: 10m
+  executor: copilot-sdk
+
+scoring:
+  weights:
+    prompt: 0.8
+    skill-invocation: 0.2
+  threshold: 0.8
+
+stimuli:
+  - name: clear-pills-not-work-or-settings
+    prompt: >-
+      Use session-statusline. Clear all pills from this session's footer. In this
+      evaluation do not execute tools or write files: state the exact tool and
+      arguments you would use, and what must remain unchanged.
+    tags:
+      scenario: workflow
+      cost: low
+    rubric:
+      - Selects session_statusline with action clear.
+      - Does not disable components, delete work, stop agents, or touch other sessions.
+      - Does not claim that the requested clear has actually run.
+    graders:
+      - type: prompt
+        name: session-local-clear
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response names session_statusline with action clear,
+            preserves enabled components and underlying work in all sessions, and
+            does not claim an unexecuted operation succeeded. Score 1 for changing
+            settings, stopping agents, deleting work, or pretending it ran.
+      - type: skill-invocation
+        config:
+          required: [session-statusline]
+  - name: references-are-not-active-work
+    prompt: >-
+      Use session-statusline. We are reviewing acme/widget PR 12, but PR 90 and
+      issue 91 are historical references only. I manually cleared PR 90 earlier.
+      Do not execute tools: describe which entries to add and the exact tool
+      arguments. Do not infer that a lookup is active work.
+    tags:
+      scenario: active-work
+      cost: low
+    rubric:
+      - Explicitly enrolls only acme/widget#12 as active review work using session_prs.
+      - Excludes historical PR 90 and issue 91 and honors the prior manual dismissal.
+      - Does not claim the proposed tool call ran.
+    graders:
+      - type: prompt
+        name: reference-exclusion
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response explicitly adds acme/widget#12 through
+            session_prs for review and does not add PR 90 or issue 91. It must
+            respect the prior manual dismissal of PR 90 and not claim execution.
+            Score 1 if historical references create pills.
+      - type: skill-invocation
+        config:
+          required: [session-statusline]
+  - name: missing-tools-are-not-success
+    prompt: >-
+      Use session-statusline to clear only agent pills. Assume the extension tools
+      are unavailable. Do not run shell commands or change any files. Explain the
+      available fallback without claiming the agents were stopped or pills cleared.
+    tags:
+      scenario: unavailable-tools
+      cost: low
+    rubric:
+      - Provides /session-subagents clear as an unexecuted fallback.
+      - Distinguishes dismissing agent pills from stopping agents.
+      - Does not change files, settings, or tracking while tools are unavailable.
+    graders:
+      - type: prompt
+        name: unavailable-tools
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response provides /session-subagents clear as an
+            unexecuted fallback and distinguishes dismissing pills from stopping
+            agents. Score 1 if it edits settings/state, scans other sessions,
+            stops agents, or claims the clear succeeded.
+      - type: skill-invocation
+        config:
+          required: [session-statusline]

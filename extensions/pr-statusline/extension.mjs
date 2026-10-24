@@ -28,6 +28,21 @@ function manage(action, reference) {
 	return collector.manage(action, reference);
 }
 
+function manageAgents(action, id) {
+	const tracker = new SubagentTracker(session.sessionId, readSubagentState(session.sessionId));
+	const agents = tracker.manage(action, id);
+	writeSubagentState(tracker.snapshot());
+	return agents;
+}
+
+function updateSession(action) {
+	if (!collector) throw new Error("Session statusline is still loading; retry shortly.");
+	const payload = { session_id: session.sessionId };
+	const result = action === "clear" ? clearSessionStatusline(payload) : refreshSessionStatusline(payload);
+	collector.reload();
+	return result;
+}
+
 const session = await joinSession({
 	commands: [
 		{
@@ -39,10 +54,7 @@ const session = await joinSession({
 					if (action === "setup") {
 						await runInteractiveStatuslinePicker(session, { args: selection.join(" ") });
 					} else if ((action === "clear" || action === "refresh") && !selection.length) {
-						if (!collector) throw new Error("Session statusline is still loading; retry shortly.");
-						const payload = { session_id: session.sessionId };
-						await session.log(action === "clear" ? clearSessionStatusline(payload) : refreshSessionStatusline(payload));
-						collector.reload();
+						await session.log(updateSession(action));
 					} else {
 						await session.log("Usage: /session-statusline [refresh | clear | setup [all | none | prs issues subagents worktrees]]");
 					}
@@ -96,22 +108,50 @@ const session = await joinSession({
 		},
 		{
 			name: "session-subagents",
-			description: "Session subagent statusline: list or clear",
+			description: "Session subagent statusline: list, remove <agent-id>, or clear",
 			handler: async ({ args }) => {
-				const action = args.trim().split(/\s+/)[0] || "list";
-				const tracker = new SubagentTracker(session.sessionId, readSubagentState(session.sessionId));
-				if (action === "clear") {
-					tracker.clear();
-					writeSubagentState(tracker.snapshot());
-					await session.log("Cleared subagent statusline.");
-					return;
+				try {
+					const [action = "list", id] = args.trim().split(/\s+/).filter(Boolean);
+					const agents = manageAgents(action, id);
+					const tracker = new SubagentTracker(session.sessionId, readSubagentState(session.sessionId));
+					const c = tracker.counts();
+					await session.log(action === "clear" ? "Cleared subagent statusline." :
+						`Subagents: ${c.starting} starting, ${c.exploring} exploring, ${c.inPr} in PR, ${c.merged} merged, ${c.done} done, ${c.failed} failed\n${agents.map((a) => `${a.id}: ${a.name} (${a.status})`).join("\n")}`);
+				} catch (error) {
+					await session.log(`Usage: /session-subagents [list | remove <agent-id> | clear] (${error.message})`);
 				}
-				const c = tracker.counts();
-				await session.log(`Subagents: ${c.starting} starting, ${c.exploring} exploring, ${c.inPr} in PR, ${c.merged} merged, ${c.done} done, ${c.failed} failed`);
 			},
 		},
 	],
 	tools: [
+		{
+			name: "session_statusline",
+			description: "Clear or refresh only this session's statusline pills. Clear dismisses entries without changing enabled components, deleting work, or stopping agents.",
+			parameters: {
+				type: "object",
+				properties: { action: { type: "string", enum: ["clear", "refresh"] } },
+				required: ["action"],
+				additionalProperties: false,
+			},
+			handler: ({ action }) => {
+				if (!["clear", "refresh"].includes(action)) throw new Error("Use clear or refresh.");
+				return updateSession(action);
+			},
+		},
+		{
+			name: "session_subagents",
+			description: "List, remove an agent pill, or clear agent pills belonging to this session. Does not stop agents or affect other sessions.",
+			parameters: {
+				type: "object",
+				properties: {
+					action: { type: "string", enum: ["list", "remove", "clear"] },
+					id: { type: "string", description: "Tracked agent ID; required for remove" },
+				},
+				required: ["action"],
+				additionalProperties: false,
+			},
+			handler: ({ action, id }) => JSON.stringify(manageAgents(action, id)),
+		},
 		{
 			name: "statusline_setup",
 			description: "Configure which Copilot CLI statusline extensions are enabled (Pull Requests, GitHub Issues, Subagents, Branch/Worktree). Omit arguments to open the interactive picker.",

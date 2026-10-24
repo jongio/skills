@@ -61,7 +61,8 @@
     "nobs",
     "refactor",
     "skill-doctor",
-    "ci-hound"
+    "ci-hound",
+    "session-statusline"
   ],
   "repository": "https://github.com/jongio/skills"
 }

@@ -13,10 +13,8 @@ import {
 	prContextFields,
 	queryBranchPrWithGh,
 	queryPrStatusWithGh,
-	readPrCache,
 	refreshTrackedPrStatuses as refreshTrackedPrStatusesImpl,
 	summarizePrStatus,
-	writePrCache,
 } from "./github.mjs";
 
 export {
@@ -155,6 +153,7 @@ export function readState(sessionId, home = configHome()) {
 		...(Number.isFinite(pr.mergedObservedAt) ? { mergedObservedAt: pr.mergedObservedAt } : {}),
 		...(Number.isSafeInteger(pr.generation) && pr.generation >= 0 ? { generation: pr.generation } : {}),
 		...(pr.simulated ? { simulated: true } : {}),
+		...(pr.active ? { active: true } : {}),
 	}));
 	state.ignored = state.ignored.map((url) => pullRequest(url).url);
 	if (Array.isArray(state.simulate)) {
@@ -183,12 +182,14 @@ export class SessionTracker {
 		statePath(sessionId);
 		this.state = normalizePrMergeState({
 			version: 1,
+			activeTrackingVersion: 1,
 			mergeStateVersion: previous?.mergeStateVersion,
 			sessionId,
 			clearedAt: previous?.clearedAt ?? 0,
 			clearedWorkspace: previous?.clearedWorkspace ?? null,
 			clearedPrs: [...(previous?.clearedPrs ?? [])],
-			prs: [...(previous?.prs ?? [])],
+			prs: (previous?.prs ?? []).filter((pr) => previous?.version !== 1 ||
+				previous.activeTrackingVersion === 1 || pr.active || pr.simulated),
 			ignored: [...(previous?.ignored ?? [])],
 			ignoredRevisions: { ...previous?.ignoredRevisions },
 			status: previous?.status ?? "Starting tracker",
@@ -202,7 +203,7 @@ export class SessionTracker {
 		this.host = previous?.host ?? "github.com";
 		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
 		this.userRepos = new Set(Array.isArray(previous?.userRepos) ? previous.userRepos : []);
-		this.calls = new Map(Object.entries(previous?.calls ?? {}));
+		this.calls = new Map(Object.entries(previous?.version === 1 && previous.activeTrackingVersion !== 1 ? {} : previous?.calls ?? {}));
 		this.pending = new Map(Object.entries(previous?.pending ?? {}));
 		this.background = new Set(Array.isArray(previous?.background) ? previous.background : []);
 	}
@@ -223,10 +224,11 @@ export class SessionTracker {
 			}
 		}
 		if (!this.state.ignored.includes(pr.url) && !existing) {
-			this.state.prs.push({ ...pr, provenance: sourceProvenance(source) });
+			this.state.prs.push({ ...pr, active: true, provenance: sourceProvenance(source) });
 		} else if (existing && source) {
 			existing.provenance = mergePrProvenance(existing.provenance, sourceProvenance(source));
 		}
+		if (existing) existing.active = true;
 	}
 
 	manage(action, reference) {
@@ -274,19 +276,6 @@ export class SessionTracker {
 				initializeMergedPrs(this, messageTime);
 				dismissMergedPrs(this);
 			}
-			if (!isSkillInjection) {
-				for (const pr of urls(content, this.repository, this.host)) {
-					this.userRepos.add(pr.label.split("#")[0].toLowerCase());
-					this.add(pr.url, false, isAutomated ? null : prSource);
-				}
-			}
-			for (const attachment of data.attachments ?? []) {
-				if (attachment.type === "github_reference" && attachment.referenceType === "pull_request") {
-					const pr = pullRequest(attachment.url);
-					this.userRepos.add(pr.label.split("#")[0].toLowerCase());
-					this.add(pr.url, false, prSource);
-				}
-			}
 			if (!event.agentId) {
 				for (const key of this.pending.keys()) {
 					if (key.startsWith("tool:")) this.pending.delete(key);
@@ -298,11 +287,11 @@ export class SessionTracker {
 			const args = data.arguments ?? {};
 			const name = data.mcpToolName ?? data.toolName ?? "";
 			const command = args.command ?? "";
+			if (/(?:^|[._-])session_prs$/.test(name) && args.action === "add") {
+				this.add(args.reference, false, prSource);
+			}
 			if (!event.agentId && name === "ask_user") this.pending.set(`tool:${data.toolCallId}`, "answer");
 			if (!event.agentId && name === "exit_plan_mode") this.pending.set(`tool:${data.toolCallId}`, "plan approval");
-			if (name === "manage_schedule") {
-				for (const pr of urls(args.prompt, this.repository, this.host)) this.add(pr.url);
-			}
 			if (/\b(?:git\s+push|gh\s+run\s+rerun|gh\s+pr\s+(?:create|edit|ready|review|comment)|resolveReviewThread)\b/.test(command)) {
 				for (const pr of this.state.prs) {
 					if (!pr.simulated) pr.checkedAt = 0;
@@ -313,51 +302,32 @@ export class SessionTracker {
 			const otherSessionState = new RegExp(`\\.copilot[\\\\/]session-state(?:[\\\\/](?!${safeSessionId}\\b)|$)`, "i");
 			const isDiagnostic = /\.copilot[\\/]pr-statusline\b|events\.jsonl\b|smoke\.test\.mjs\b/i.test(command) ||
 				otherSessionState.test(command);
-			const isMetadataProbeOnly = /\bgh\s+pr\s+diff\b[^\r\n]*--name-only\b/.test(command) ||
-				(/\bgh\s+pr\s+view\b/.test(command) &&
-					/--json\s+([\w,]+)/.test(command) &&
-					!/\b(?:url|statusCheckRollup|reviewDecision|reviews|comments|mergeStateStatus|body|title)\b/.test(/--json\s+([\w,]+)/.exec(command)?.[1] ?? ""));
 			const ghSubcommand = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+(view|diff|checks|checkout|edit|review|comment|merge|close|reopen|ready|create)\b/.exec(command)?.[1];
 			const mcpTargeted = /(?:^|[_-])(?:pull_request_read|create_pull_request|update_pull_request|merge_pull_request|pull_request_review_write|add_comment_to_pending_review)$/.test(name);
+			const mcpWrite = mcpTargeted && !/(?:^|[_-])pull_request_read$/.test(name);
 			const merging = ghSubcommand === "merge" || /(?:^|[_-])merge_pull_request$/.test(name);
 			const closing = ghSubcommand === "close";
 			const reopening = ghSubcommand === "reopen";
 			const isProcessFilter = /\bGet-CimInstance\b|\bWhere-Object\b|\b-like\s+['"]\*/i.test(command);
 			const api = isProcessFilter ? null : /repos\/([\w.-]+\/[\w.-]+)\/pulls\/([1-9]\d*)(?!\d)/.exec(command);
-			const isTask = /(?:^|[._-])task$/.test(name) &&
-				args.agent_type !== "explore" &&
-				args.agent_type !== "research" &&
-				(urls(args.prompt, this.repository, this.host).length > 0 || /\b(?:pr|pull request)\b/i.test(`${args.description ?? ""} ${args.prompt ?? ""}`));
 			const changedDirectory = /\b(?:cd|Set-Location|Push-Location)\b|\bgh\s+-C\b/i.test(command);
 			const explicitRepo = /(?:--repo|-R)(?:[=\s]+)["']?([\w.-]+\/[\w.-]+)(?![\w./-])/.exec(command)?.[1] ??
 				(args.owner && args.repo ? `${args.owner}/${args.repo}` : null);
 			const repository = explicitRepo ?? (changedDirectory ? null : this.repository);
-			const crossRepoReadOnly = Boolean(
-				this.repository &&
-				explicitRepo &&
-				explicitRepo.toLowerCase() !== this.repository.toLowerCase() &&
-				!this.userRepos.has(explicitRepo.toLowerCase()) &&
-				!changedDirectory &&
-				(ghSubcommand === "view" || ghSubcommand === "diff"),
-			);
-			const targeted = !isDiagnostic && !isMetadataProbeOnly && !crossRepoReadOnly &&
-				(Boolean(ghSubcommand && ghSubcommand !== "diff") || mcpTargeted);
+			const apiWrite = api && /(?:--method|-X)(?:=|\s+)["']?(?:POST|PATCH|PUT|DELETE)\b/i.test(command);
+			const targeted = !isDiagnostic &&
+				(Boolean(ghSubcommand && !["view", "diff", "checks"].includes(ghSubcommand)) || mcpWrite || apiWrite);
 			const hasListCommand = /\bgh\s+(?:(?:-R|--repo)(?:=|\s+)\S+\s+)*pr\s+(?:list|status)\b|\bgh\s+search\b|\brepos\/[\w.-]+\/[\w.-]+\/pulls(?=[?'"\s]|$)/i.test(command);
-			// Delegating a PR task is not evidence that the parent directly worked on it.
-			const call = { targeted: targeted || (!isDiagnostic && !!api) || isTask, closing, merging,
-				source: isTask ? {} : prSource, scrapeResultUrls: false, targets: [] };
-			const existingOnly = !call.targeted && !isDiagnostic && Boolean(ghSubcommand || mcpTargeted);
+			const call = { targeted, closing, merging, source: prSource, scrapeResultUrls: false, targets: [] };
 			const addTarget = (reference) => {
-				if (!existingOnly || this.state.prs.some((pr) => pr.url === pullRequest(reference).url)) {
-					const replayedBeforeInput = history &&
-						(!event.timestamp || Date.parse(event.timestamp) <= this.lastUserInputAt);
-					this.add(reference, reopening && !replayedBeforeInput, call.source);
-				}
+				const replayedBeforeInput = history &&
+					(!event.timestamp || Date.parse(event.timestamp) <= this.lastUserInputAt);
+				this.add(reference, reopening && !replayedBeforeInput, call.source);
 			};
-			if (call.targeted || existingOnly) {
+			if (call.targeted) {
 				const commandTargetText = command
 					? command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "")
-					: args.prompt;
+					: "";
 				for (const pr of urls(commandTargetText, this.repository, this.host)) {
 					call.targets.push(pr.url);
 					if (!closing) addTarget(pr.url);
@@ -375,8 +345,7 @@ export class SessionTracker {
 				call.scrapeResultUrls = !closing && !hasListCommand && (
 					ghSubcommand === "create" ||
 					/(?:^|[_-])create_pull_request$/.test(name) ||
-					isTask ||
-					call.targets.length === 0
+					(ghSubcommand === "checkout" && call.targets.length === 0)
 				);
 				this.calls.set(data.toolCallId, call);
 			}
@@ -504,74 +473,17 @@ function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = f
 	return startOffset + lastNewline + 1;
 }
 
-function inspectWorkspaceMetadata(tracker, sessionDir, { home, now, useGh }) {
+function inspectWorkspaceMetadata(tracker, sessionDir) {
 	const wsPath = join(sessionDir, "workspace.yaml");
 	if (!existsSync(wsPath)) return false;
 	let changed = false;
 	try {
 		const raw = readFileSync(wsPath, "utf8");
 		const repo = /^repository:\s*(\S+)\s*$/m.exec(raw)?.[1];
-		const branch = /^branch:\s*(\S+)\s*$/m.exec(raw)?.[1];
-		const cwd = /^cwd:\s*(.+?)\s*$/m.exec(raw)?.[1];
-		const name = /^name:\s*(.+?)\s*$/m.exec(raw)?.[1];
-		if (tracker.state.clearedAt && JSON.stringify([repo ?? null, branch ?? null, cwd ?? null, name ?? null]) ===
-			JSON.stringify(tracker.state.clearedWorkspace)) return false;
 		if (repo && !tracker.repository) {
 			tracker.repository = repo;
 			changed = true;
 		}
-		const before = tracker.state.prs.length;
-		if (name) {
-			for (const pr of urls(name, tracker.repository, tracker.host)) tracker.add(pr.url);
-		}
-		if (tracker.repository && branch) {
-			const prBranch = /^pr-([1-9]\d*)$/i.exec(branch);
-			if (prBranch) tracker.add(`https://${tracker.host}/${tracker.repository}/pull/${prBranch[1]}`);
-		}
-		if (tracker.repository && cwd) {
-			const worktreePr = /\bpr-review-[\w.-]+-([1-9]\d*)-[0-9a-f]{7,}\b/i.exec(cwd);
-			if (worktreePr) tracker.add(`https://${tracker.host}/${tracker.repository}/pull/${worktreePr[1]}`);
-		}
-		if (useGh && tracker.repository && branch &&
-				!["main", "master", "HEAD"].includes(branch) &&
-				!branch.startsWith("detached@") &&
-				!/^pr-[1-9]\d*$/i.test(branch)) {
-			const cache = readPrCache(home);
-			const key = `branch:${tracker.repository}:${branch}`;
-			const cached = cache[key];
-			let branchPr = cached && now - cached.checkedAt < (cached.ttlMs ?? PR_SETTLED_TTL_MS) ? cached.data : undefined;
-			if (branchPr === undefined && (!cached?.refreshingUntil || cached.refreshingUntil <= now)) {
-				cache[key] = { ...(cached ?? {}), refreshingUntil: now + 8000 };
-				writePrCache(cache, home);
-				branchPr = queryBranchPrWithGh(tracker.repository, branch);
-				cache[key] = {
-					data: branchPr,
-					checkedAt: now,
-					ttlMs: PR_SETTLED_TTL_MS,
-					refreshingUntil: 0,
-				};
-				writePrCache(cache, home);
-			}
-			if (branchPr?.url) {
-				tracker.add(branchPr.url);
-				const added = tracker.state.prs.find((p) => p.url === branchPr.url);
-				if (added) {
-					const fields = prContextFields(branchPr);
-					for (const [key, value] of Object.entries(fields)) {
-						if (JSON.stringify(added[key]) !== JSON.stringify(value)) {
-							added[key] = value;
-							changed = true;
-						}
-					}
-					if (branchPr.title && !added.title) added.title = branchPr.title;
-					if (!added.status) {
-						added.status = summarizePrStatus(branchPr);
-						added.checkedAt = now;
-					}
-				}
-			}
-		}
-		if (tracker.state.prs.length !== before) changed = true;
 	} catch {
 		// Ignore workspace.yaml read failures.
 	}
@@ -621,22 +533,22 @@ export function syncSession(payload, {
 	}
 	if (!hasTranscript && !hasWorkspace && !previous) return { state: null, liveTranscript: false };
 
-	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
+	const migrate = previous && previous.activeTrackingVersion !== 1;
+	const reset = hasTranscript && (!previous || migrate || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new SessionTracker(
 		sessionId,
-		reset && previous ? { prs: previous.prs, ignored: previous.ignored,
+		reset && previous ? { prs: migrate ? previous.prs.filter((pr) => pr.active || pr.simulated) : previous.prs, ignored: previous.ignored,
 			ignoredRevisions: previous.ignoredRevisions, simulate: previous.simulate, clearedAt: previous.clearedAt,
 			clearedWorkspace: previous.clearedWorkspace, clearedPrs: previous.clearedPrs,
 			...(previous.clearedAt ? { repository: previous.repository, host: previous.host,
 				lastUserInputAt: previous.lastUserInputAt, userRepos: previous.userRepos } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.state.transcriptOffset;
-	let changed = Boolean(previous && previous.mergeStateVersion !== tracker.state.mergeStateVersion) ||
+	let changed = Boolean(migrate || (previous && previous.mergeStateVersion !== tracker.state.mergeStateVersion)) ||
 		((hasTranscript || hasWorkspace) && (!previous || reset));
 	if (initializeMergedPrs(tracker, now)) changed = true;
-	const useDefaultGh = fetchPrStatus === undefined && (hasTranscript || hasWorkspace);
 
-	if ((hasTranscript || hasWorkspace) && inspectWorkspaceMetadata(tracker, sessionDir, { home, now, useGh: useDefaultGh })) {
+	if ((hasTranscript || hasWorkspace) && inspectWorkspaceMetadata(tracker, sessionDir)) {
 		changed = true;
 	}
 
@@ -666,15 +578,6 @@ export function syncSession(payload, {
 	if ((hasTranscript || hasWorkspace) && (tracker.state.status === "Stopped" || tracker.state.status === "Starting tracker")) {
 		tracker.state.status = "Waiting on you";
 		changed = true;
-	}
-
-	const remoteRepo = payload?.remote?.repository;
-	const remotePr = payload?.remote?.pull_request_number;
-	if (remoteRepo && /^[1-9]\d*$/.test(String(remotePr)) &&
-		!tracker.state.clearedPrs.includes(pullRequest(`${remoteRepo}#${remotePr}`).url)) {
-		const before = tracker.state.prs.length;
-		tracker.add(`${remoteRepo}#${remotePr}`);
-		if (tracker.state.prs.length !== before) changed = true;
 	}
 
 	const statusFetcher = typeof fetchPrStatus === "function"

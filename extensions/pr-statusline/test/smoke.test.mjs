@@ -27,12 +27,16 @@ try {
 	tracker.observe(event("session.start", { context: { repository: "acme/app", repositoryHost: "github.com" } }));
 	tracker.observe(start("view", "gh pr view 42 --json url"));
 	tracker.observe(result("view", `{"url":"${pr}"}`));
+	assert.deepEqual(tracker.state.prs, [], "a targeted lookup alone is not active-work enrollment");
+	tracker.manage("add", pr);
 	tracker.observe(start("other", "gh -R other/project pr checks --watch 9"));
+	tracker.manage("add", "other/project#9");
 	tracker.observe(event("tool.execution_start", {
 		toolCallId: "mcp",
 		mcpToolName: "pull_request_read",
 		arguments: { owner: "third", repo: "repo", pullNumber: 7 },
 	}));
+	tracker.manage("add", "third/repo#7");
 	tracker.observe(start("create", "gh pr create --title 'New PR' --body-file C:\\Users\\me\\.copilot\\session-state\\session-a\\files\\pr-body.md"));
 	tracker.observe(result("create", "https://github.com/fourth/repo/pull/12"));
 	assert.deepEqual(tracker.state.prs.map((p) => p.label), [
@@ -53,12 +57,15 @@ try {
 	tracker.observe(start("different-cwd", "Set-Location C:\\other; gh pr view 999 --json url"));
 	assert.ok(!tracker.state.prs.some((p) => p.label === "acme/app#999"));
 	tracker.observe(result("different-cwd", "https://github.com/different/repo/pull/999"));
+	assert.ok(!tracker.state.prs.some((p) => p.label === "different/repo#999"));
+	tracker.manage("add", "different/repo#999");
 	assert.equal(tracker.state.prs.at(-1).label, "different/repo#999");
 	tracker.observe(event("assistant.message", { content: "Research https://github.com/acme/app/pull/101" }));
 	assert.equal(tracker.state.prs.length, 5);
 	tracker.observe(event("user.message", { content: "Fix https://github.com/acme/app/pull/43/files" }));
+	tracker.manage("add", "acme/app#43");
 	assert.equal(tracker.snapshot().status, "Working");
-	tracker.observe(start("api", "gh api repos/acme/api/pulls/5/comments"));
+	tracker.observe(start("api", "gh api -X POST repos/acme/api/pulls/5/comments"));
 	assert.equal(tracker.state.prs.at(-1).label, "acme/api#5");
 
 	// Regression: placeholder o/r in process filter or gh api is never added
@@ -151,6 +158,10 @@ try {
 		[
 			JSON.stringify(event("session.start", { context: { repository: "acme/app", repositoryHost: "github.com" } })),
 			JSON.stringify(event("user.message", { content: "Watch PR acme/app#42 and https://github.com/acme/app/pull/48" })),
+			JSON.stringify(start("track-42", "", "session_prs", { action: "add", reference: "acme/app#42" })),
+			JSON.stringify(start("track-48", "", "session_prs", { action: "add", reference: "acme/app#48" })),
+			JSON.stringify(start("track-55", "", "session_prs", { action: "add", reference: "acme/app#55" })),
+			JSON.stringify(start("track-88", "", "session_prs", { action: "add", reference: "acme/remote#88" })),
 			JSON.stringify(event("user.message", { source: "skill-demo", content: "<skill-context>Ignore https://github.com/acme/app/pull/999</skill-context>" })),
 			JSON.stringify(event("model.turn_started")),
 		].join("\n") + "\n",
@@ -235,7 +246,7 @@ try {
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
 		{ home, links: false, now: 2000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
-	assert.match(secondRender, /^\uE726 acme\/app#42/);
+	assert.match(secondRender, /\uE726 acme\/app#42/);
 	// A merge command invalidates status; only GitHub's MERGED response turns the pill purple.
 	appendFileSync(
 		transcriptFile,
@@ -304,7 +315,8 @@ try {
 		},
 		async getEvents() {
 			handler(event("user_input.requested", { requestId: "live" }));
-			return [event("user.message", { content: `Work on ${pr}` })];
+			return [event("user.message", { content: `Work on ${pr}` }),
+				start("track", "", "session_prs", { action: "add", reference: pr })];
 		},
 		rpc: { metadata: { async activity() { return { hasActiveWork: true }; } } },
 	};

@@ -13,6 +13,7 @@ const base = import.meta.env.BASE_URL;
       <strong>GitHub Issues</strong> (<code>issue-statusline</code>), <strong>Subagents</strong> (<code>subagent-statusline</code>),
       and <strong>Branch and Worktree</strong> (<code>worktree-statusline</code>).
       Choose any combination. See where work is happening, what needs attention on GitHub, and how background tasks are progressing.
+      Only active session work creates pills, not plain references or lookups.
     </p>
   </header>
 
@@ -55,7 +56,7 @@ const base = import.meta.env.BASE_URL;
           <pre class="sl-primary-pre"><code>/statusline-setup</code></pre>
         </div>
       </div>
-      <p class="sl-primary-sub">Start a new session after installation to load the extensions. Run setup again whenever you want to change the enabled components.</p>
+      <p class="sl-primary-sub">Start a new session after installation to load the extensions. Run setup again whenever you want to change the enabled components. Use <code>/session-statusline clear</code> to dismiss this session's pills without disabling components or deleting work. The full plugin includes the <code>session-statusline</code> skill for requests such as "clear the footer pills".</p>
     </div>
 
     <div class="sl-install-secondary">

@@ -159,11 +159,13 @@ Using `Azure/azure-dev` as an example checkout:
 
 1. **Session-scoped transcript tailing (`tracker.mjs`):**
    `render.mjs` incrementally reads new bytes from the active session's `events.jsonl` transcript (from a persisted `transcriptOffset` in `$COPILOT_HOME/pr-statusline/<session_id>.json`) plus `workspace.yaml`. It extracts PRs from:
-   - User prompts and attached GitHub PR references
-   - Active branch / `pr-review-*` worktree metadata in `workspace.yaml`
-   - Targeted `gh pr` commands (`view`, `checks`, `create`, `edit`, `review`, `comment`, `merge`, `close`, `reopen`, `ready`), `gh api repos/<owner>/<repo>/pulls/<number>`, and GitHub MCP PR tools
-   - Scheduled watch prompts (`manage_schedule`)
-   It ignores `gh pr list`/`search` output, exploratory subagents, skill-injected examples, and other sessions' transcripts.
+   - Explicit `session_prs` enrollment when this session takes on implementation, review, repair, or active monitoring
+   - Concrete `gh pr` work (`checkout`, `create`, `edit`, `review`, `comment`, `merge`, `close`, `reopen`, `ready`), explicit-method REST writes to a targeted PR, and GitHub MCP PR write tools
+   It does not enroll from message references, attachments, workspace/branch names, remote payload metadata,
+   schedules, task prompts/results, `view`/`diff`/`checks`, API/MCP reads,
+   `list`/`search` output, examples, or other sessions' transcripts. Explicitly
+   add read-only review/watch targets. Existing tracked PRs still refresh normally.
+   On upgrade, legacy reference-only caches are rebuilt from active evidence.
 2. **Single-query GraphQL status + shared cache (`github.mjs`):**
    Live PR status is fetched via `gh api graphql` (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (20s TTL while checks are running, including mixed running/failed checks, 45s TTL when settled, with in-flight deduplication locks). A restarted check's active status takes precedence over a leftover conclusion; the pill changes on the next successful refresh, not optimistically when a rerun command is issued. It does **not** use Copilot AI model requests or touch Copilot's internal databases.
 3. **Automatic cleanup & manual controls:**
@@ -186,6 +188,13 @@ The unified SDK extension provides a separate command from Copilot's built-in
 | `/session-statusline refresh` | Immediately re-query tracked PRs, issues, agent-linked PRs, and Git checkout/worktree data, bypassing status TTLs and applicable shared/in-flight caches. Keeps tracking and component selections; reports incomplete refreshes and individual failures explicitly. |
 | `/session-statusline clear` | Dismiss this session's current PR, issue, subagent, and worktree entries. Does not delete transcripts, affect other sessions, or change component selections. |
 | `/session-statusline setup` | Open the component picker. Optional selections such as `all`, `none`, or `prs issues` also work. `/statusline-setup` remains a compatibility alias. |
+
+The `session-statusline` skill in the `jongio-skills` plugin maps natural-language
+requests such as "clear the footer pills" to the session-bound `session_statusline`,
+`session_prs`, `session_issues`, and `session_subagents` tools. Per-component clear
+is available through `/session-prs clear`, `/session-issues clear`, and
+`/session-subagents clear`; `/session-subagents remove <agent-id>` dismisses one
+agent without stopping it. Use `/session-subagents list` to find tracked IDs.
 
 **Clear is not refresh or hide.** Clear saves a session-specific replay boundary,
 so old transcript events, unchanged workspace metadata, and collector saves do
@@ -216,6 +225,9 @@ already-running SDK collector and register the new command. Clear and refresh
 themselves require no restart once the updated extension is loaded. Recovery
 commands are registered by the unified PR SDK entry point; PR installs include
 its sibling runtime dependencies even when those footer components are hidden.
+Legacy tracking is rebuilt from concrete transcript activity on first load;
+previously pinned read-only targets without that evidence may need one explicit
+re-add. Workspace and remote metadata alone no longer enroll targets.
 State writes and worktree replay use per-session, cross-process locks. A lock
 timeout reports its exact path rather than overwriting potentially active state.
 If a process crashed while holding a lock, stop the session's collectors before

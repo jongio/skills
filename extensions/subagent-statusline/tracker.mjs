@@ -116,7 +116,16 @@ export function readState(sessionId, home = configHome()) {
 export function writeState(state, home = configHome()) {
 	return updateState(state.sessionId, (current) => {
 		if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return current;
-		return state;
+		const ignored = new Set([...(current?.ignored ?? []), ...(state.ignored ?? [])]);
+		for (const [call, id] of Object.entries(state.taskCalls ?? {})) {
+			if (ignored.has(call)) ignored.add(id);
+		}
+		return {
+			...state, ignored: [...ignored],
+			agents: Object.fromEntries(Object.entries(state.agents).filter(([id]) => !ignored.has(id))),
+			taskCalls: Object.fromEntries(Object.entries(state.taskCalls ?? {}).filter(([call, id]) => !ignored.has(call) && !ignored.has(id))),
+			agentToolCalls: Object.fromEntries(Object.entries(state.agentToolCalls ?? {}).filter(([, call]) => !ignored.has(call.agentId))),
+		};
 	}, home);
 }
 
@@ -150,6 +159,15 @@ export class SubagentTracker {
 		this.dismissed = Boolean(previous?.dismissed);
 		this.simulated = Boolean(previous?.simulated);
 		this.agents = new Map(Object.entries(previous?.agents ?? {}));
+		this.ignored = new Set(previous?.ignored ?? []);
+		if (!this.simulated && previous?.version === 1 && previous.activeTrackingVersion !== 1) {
+			for (const [id, agent] of this.agents) {
+				const active = { ...agent, prs: [], mergedPrs: [] };
+				delete active.settlementObservedAt;
+				delete active.settlementDismissed;
+				this.agents.set(id, active);
+			}
+		}
 		if (!this.simulated && previous?.mergeStateVersion !== 1) {
 			for (const [id, agent] of this.agents) {
 				if (!agent.mergedPrs?.length) continue;
@@ -165,7 +183,7 @@ export class SubagentTracker {
 	}
 
 	ensureAgent(id, meta = {}) {
-		if (!id) return null;
+		if (!id || this.ignored.has(id)) return null;
 		let entry = this.agents.get(id);
 		if (!entry) {
 			entry = {
@@ -209,10 +227,28 @@ export class SubagentTracker {
 	}
 
 	clear() {
+		for (const id of this.agents.keys()) this.ignored.add(id);
+		for (const id of this.taskCalls.keys()) this.ignored.add(id);
 		this.agents.clear();
 		this.taskCalls.clear();
 		this.agentToolCalls.clear();
 		this.dismissed = true;
+	}
+
+	manage(action, id) {
+		if (action === "clear") this.clear();
+		else if (action === "remove") {
+			if (!id) throw new Error("Provide a tracked agent ID.");
+			this.ignored.add(id);
+			this.agents.delete(id);
+			for (const [call, agentId] of this.taskCalls) {
+				if (agentId === id) {
+					this.ignored.add(call);
+					this.taskCalls.delete(call);
+				}
+			}
+		} else if (action !== "list") throw new Error("Use list, remove, or clear.");
+		return [...this.agents.values()];
 	}
 
 	observe(event) {
@@ -243,6 +279,7 @@ export class SubagentTracker {
 
 		if (event.type === "subagent.started") {
 			const id = event.agentId || data.agentId || data.toolCallId;
+			if (this.ignored.has(id) || this.ignored.has(data.toolCallId)) return;
 			if (data.toolCallId && id && data.toolCallId !== id && this.agents.has(data.toolCallId)) {
 				const prior = this.agents.get(data.toolCallId);
 				this.agents.delete(data.toolCallId);
@@ -300,6 +337,7 @@ export class SubagentTracker {
 
 			if (/(?:^|[._-])task$/.test(name)) {
 				const id = data.toolCallId;
+				if (this.ignored.has(id)) return;
 				const rawDesc = String(args.description || String(args.prompt ?? "").split(/\r?\n/)[0] || "").trim().slice(0, 140);
 				this.ensureAgent(id, {
 					name: args.name || args.agent_type || "subagent",
@@ -309,27 +347,29 @@ export class SubagentTracker {
 					timestamp: eventTime,
 				});
 				this.taskCalls.set(data.toolCallId, id);
-				if (!isReadonlyAgentType(args.agent_type)) {
-					for (const prUrl of extractPrUrls(args.prompt)) this.linkPr(id, prUrl);
-				}
 				return;
 			}
 
-			if (event.agentId && this.agents.has(event.agentId)) {
-				const isPrCmd = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+(?:view|checks|create|edit|review|comment|merge|ready)\b/.test(command) ||
+			const agentId = event.agentId || data.agentId;
+			if (agentId && this.agents.has(agentId)) {
+				const ghSubcommand = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+(checkout|create|edit|review|comment|merge|ready|reopen)\b/.exec(command)?.[1];
+				const isPrCmd = Boolean(ghSubcommand) ||
 					/(?:^|[_-])(?:create_pull_request|update_pull_request|merge_pull_request)$/.test(name);
 				if (isPrCmd) {
 					const explicitRepo = /(?:--repo|-R)(?:[=\s]+)["']?([\w.-]+\/[\w.-]+)(?![\w./-])/.exec(command)?.[1] ??
 						(args.owner && args.repo ? `${args.owner}/${args.repo}` : this.repository);
-					const numMatch = /\bgh(?:\s+\S+)*\s+pr\s+(?:view|checks|edit|review|comment|merge|ready)\s+([1-9]\d*)\b/.exec(command)?.[1] ??
+					const numMatch = /\bgh(?:\s+\S+)*\s+pr\s+(?:checkout|edit|review|comment|merge|ready|reopen)\s+([1-9]\d*)\b/.exec(command)?.[1] ??
 						args.pullNumber ?? args.pull_number;
 					const targetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
 					const targets = extractPrUrls(targetText);
 					if (explicitRepo && /^[1-9]\d*$/.test(String(numMatch))) {
 						targets.push(`https://${this.host}/${explicitRepo}/pull/${numMatch}`);
 					}
-					for (const prUrl of targets) this.linkPr(event.agentId, prUrl);
-					this.agentToolCalls.set(data.toolCallId, { agentId: event.agentId, targets });
+					for (const prUrl of targets) this.linkPr(agentId, prUrl);
+					this.agentToolCalls.set(data.toolCallId, {
+						agentId, targets,
+						created: ghSubcommand === "create" || /(?:^|[_-])create_pull_request$/.test(name),
+					});
 				}
 			}
 		}
@@ -341,9 +381,6 @@ export class SubagentTracker {
 			if (taskAgentId && this.agents.has(taskAgentId)) {
 				const agent = this.agents.get(taskAgentId);
 				if (data.success) {
-					if (!isReadonlyAgentType(agent.agentType || agent.name)) {
-						for (const prUrl of extractPrUrls(text)) this.linkPr(taskAgentId, prUrl);
-					}
 					if (agent.status === "starting" && agent.executionMode !== "background") {
 						agent.status = "completed";
 						agent.completedAt = eventTime;
@@ -357,7 +394,7 @@ export class SubagentTracker {
 			}
 			const subCall = this.agentToolCalls.get(data.toolCallId);
 			this.agentToolCalls.delete(data.toolCallId);
-			if (subCall && data.success) {
+			if (subCall?.created && data.success) {
 				for (const prUrl of extractPrUrls(text)) {
 					this.linkPr(subCall.agentId, prUrl, false, eventTime);
 				}
@@ -429,6 +466,7 @@ export class SubagentTracker {
 	snapshot() {
 		return {
 			version: 1,
+			activeTrackingVersion: 1,
 			mergeStateVersion: 1,
 			sessionId: this.sessionId,
 			clearedAt: this.clearedAt,
@@ -440,6 +478,7 @@ export class SubagentTracker {
 			...(this.simulated ? { simulated: true } : {}),
 			updatedAt: Date.now(),
 			agents: Object.fromEntries(this.agents),
+			ignored: [...this.ignored],
 			taskCalls: Object.fromEntries(this.taskCalls),
 			agentToolCalls: Object.fromEntries(this.agentToolCalls),
 		};
@@ -496,14 +535,16 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	}
 	if (!hasTranscript && !previous) return { tracker: null };
 
-	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
+	const reset = hasTranscript && (!previous || previous.activeTrackingVersion !== 1 ||
+		!Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new SubagentTracker(
 		sessionId,
-		reset ? { ...(previous?.simulated ? { agents: previous.agents, simulated: true } : {}), clearedAt: previous?.clearedAt,
+		reset ? { ...(previous?.simulated ? { agents: previous.agents, simulated: true } : {}), ignored: previous?.ignored, clearedAt: previous?.clearedAt,
 			...(previous?.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.transcriptOffset;
-	let changed = Boolean(previous && previous.mergeStateVersion !== 1) || (hasTranscript && (!previous || reset));
+	let changed = Boolean(previous && (previous.mergeStateVersion !== 1 || previous.activeTrackingVersion !== 1)) ||
+		(hasTranscript && (!previous || reset));
 
 	const prCache = readSharedPrCache(home);
 	if (tracker.syncWithPrCache(prCache, now)) changed = true;

@@ -74,7 +74,8 @@ set up the copilot statusline from jongio/skills and ask me which of PRs, issues
 - `   4 merged ` (Purple: all subagent PRs merged; dismisses on your next prompt)
 
 - **Auto-hides when idle:** Outputs nothing (0 lines) when the session has no active or merged subagents.
-- **Inspection:** Run `/tasks` in the Copilot CLI console for individual subagent timelines. With the SDK extension loaded, `/session-subagents list` shows counts and `/session-subagents clear` dismisses the tracked summary.
+- **Inspection:** Run `/tasks` in the Copilot CLI console for individual subagent timelines. With the SDK extension loaded, `/session-subagents list` shows counts and tracked IDs, `/session-subagents remove <agent-id>` dismisses one agent, and `/session-subagents clear` dismisses the tracked summary. These controls do not stop agents; the `session-statusline` skill exposes them through `session_subagents`.
+- **Session ownership:** Only actual task launches and subagent start events in this session enroll agents. Reading or listing agents and mentioning their IDs do not. Task prompts/results and PR lookups cannot create PR associations; concrete PR work can. Manual removal survives transcript re-indexing.
 - **State lifecycle:**
   - ` N starting` (`U+F252`): Implementation subagents currently running that have not opened a PR yet.
   - ` N exploring` (`U+F422` / Unicode `◎`): Read-only `explore` and `research` subagents currently investigating.

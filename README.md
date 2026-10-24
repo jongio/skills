@@ -32,6 +32,7 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`refactor`](skills/refactor/) | Plan behavior-preserving refactoring with explicit scope, depth and risk choices. |
 | [`skill-doctor`](skills/skill-doctor/) | Learn from recent session feedback and trim skill bloat, with cached audits, a dedicated worktree, and one improvement PR. |
 | [`ci-hound`](skills/ci-hound/) | Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows. |
+| [`session-statusline`](skills/session-statusline/) | Manage only the current session's active statusline pills and clear entries without deleting work or changing enabled components. |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:
@@ -77,7 +78,7 @@ summary appears below the checkout rows. See the
 [worktree guide](extensions/worktree-statusline/README.md) for association and
 visibility rules. Disabling worktree grouping restores horizontal composition.
 
-Installing `statuslines@jongio-skills` (statuslines only) or `jongio-skills@jongio-skills` (all skills and statuslines) from the `jongio/skills` marketplace auto-registers the statuslines and opens an interactive checkbox picker on first session start. Use `/session-statusline setup` (or the compatibility alias `/statusline-setup`) to toggle **Pull Requests**, **GitHub Issues**, **Subagents**, and **Branch and Worktree** anytime. `/session-statusline refresh` forces fresh tracked data; `/session-statusline clear` dismisses this session's entries without changing enabled components or deleting transcripts. See [session recovery and setup](extensions/pr-statusline/README.md#session-recovery-and-setup), including the collector restart requirement after upgrading. Or run the standalone setup script:
+Installing `statuslines@jongio-skills` (statuslines only) or `jongio-skills@jongio-skills` (all skills and statuslines) from the `jongio/skills` marketplace auto-registers the statuslines and opens an interactive checkbox picker on first session start. Use `/session-statusline setup` (or the compatibility alias `/statusline-setup`) to toggle **Pull Requests**, **GitHub Issues**, **Subagents**, and **Branch and Worktree** anytime. `/session-statusline refresh` forces fresh tracked data; `/session-statusline clear` dismisses this session's entries without changing enabled components or deleting transcripts. The full plugin also includes the [`session-statusline`](skills/session-statusline/) skill: ask "clear the footer pills" or remove one PR, issue, or agent. References and lookups alone do not create pills; explicitly enroll read-only review/watch work. See [session recovery and setup](extensions/pr-statusline/README.md#session-recovery-and-setup), including the collector restart requirement after upgrading. Or run the standalone setup script:
 
 ```text
 # Install just the statuslines (no skills) in Copilot CLI:

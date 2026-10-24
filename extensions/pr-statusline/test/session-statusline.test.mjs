@@ -19,6 +19,10 @@ import { resolveLinkedCheckouts } from "../../worktree-statusline/worktrees.mjs"
 const prUrl = (n) => `https://github.com/example/widget/pull/${n}`;
 const issueUrl = (n) => `https://github.com/example/widget/issues/${n}`;
 const event = (type, time, data = {}) => ({ type, timestamp: new Date(time).toISOString(), data });
+const track = (kind, time, reference) => event("tool.execution_start", time, {
+	toolCallId: `${kind}-${time}-${reference}`, toolName: `session_${kind}`,
+	arguments: { action: "add", reference },
+});
 async function fixture(run) {
 	const home = realpathSync.native(mkdtempSync(join(tmpdir(), "session-statusline-")));
 	try { await run(home); } finally { rmSync(home, { recursive: true, force: true }); }
@@ -127,6 +131,8 @@ test("clear is session-local and persists through transcript replay, stale write
 		assert.deepEqual(sessionDirectory(payload, { home }).directories, []);
 		const fresh = [
 			event("user.message", 3000, { content: "Work on PR #1 and issue #2" }),
+			track("prs", 3001, prUrl(1)),
+			track("issues", 3002, issueUrl(2)),
 			event("subagent.started", 3100, { agentId: "new-agent" }),
 			event("tool.execution_start", 3200, { toolCallId: "new-call", toolName: "bash", arguments: { command: "echo new" } }),
 			event("tool.execution_complete", 3300, { toolCallId: "new-call", success: true }),
@@ -155,7 +161,7 @@ test("collector restart skips cleared SDK history, including old reopen commands
 	}, { home, interval: 100000 });
 	try {
 		assert.deepEqual(readState("restart", home).prs, []);
-		handler(event("user.message", 3000, { content: `PR ${prUrl(1)}` }));
+		handler(track("prs", 3000, prUrl(1)));
 		assert.equal(readState("restart", home).prs.length, 1);
 	} finally { collector.stop(); }
 }));
@@ -180,7 +186,7 @@ test("a running collector retains context discovered by clear before saving or t
 		const retained = readState(id, home);
 		assert.equal(retained.repository, "example/widget");
 		assert.equal(retained.lastUserInputAt, 1100);
-		assert.deepEqual(retained.userRepos, ["example/widget"]);
+		assert.deepEqual(retained.userRepos, []);
 		writeState({ ...retained, host: "github.enterprise.test" }, home);
 		handler(event("session.idle", 2100));
 		const saved = readState(id, home);
@@ -188,7 +194,9 @@ test("a running collector retains context discovered by clear before saving or t
 		assert.equal(saved.host, "github.enterprise.test");
 		assert.equal(saved.lastUserInputAt, retained.lastUserInputAt);
 		assert.deepEqual(saved.userRepos, retained.userRepos);
-		const fresh = event("user.message", 3000, { content: "Work on PR #42" });
+		const fresh = event("tool.execution_start", 3000, {
+			toolCallId: "new-work", toolName: "bash", arguments: { command: "gh pr checkout 42" },
+		});
 		appendFileSync(file, JSON.stringify(fresh) + "\n");
 		handler(fresh);
 		assert.deepEqual(readState(id, home).prs.map((pr) => pr.url), ["https://github.enterprise.test/example/widget/pull/42"]);
@@ -411,7 +419,7 @@ for (const kind of ["PR message", "repository context", "issue message", "subage
 			? event("session.context_changed", 3000, { repository: "example/second" })
 			: kind === "subagent start"
 				? event("subagent.started", 3000, { agentId: "new-agent" })
-				: event("user.message", 3000, { content: kind === "PR message" ? prUrl(9) : issueUrl(9) });
+				: track(kind === "PR message" ? "prs" : "issues", 3000, kind === "PR message" ? prUrl(9) : issueUrl(9));
 		const consumed = new Map();
 		const rename = fs.renameSync;
 		let appended = false;
@@ -438,7 +446,9 @@ for (const kind of ["PR message", "repository context", "issue message", "subage
 			assert.equal(read(id, home).transcriptOffset, consumed.get(components[index]));
 		}
 		if (kind === "repository context") {
-			appendFileSync(file, JSON.stringify(event("user.message", 4000, { content: "Work on PR #42 and issue #43" })) + "\n");
+			appendFileSync(file, [
+				track("prs", 4000, "example/second#42"), track("issues", 4001, "example/second#43"),
+			].map(JSON.stringify).join("\n") + "\n");
 			assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url),
 				["https://github.com/example/second/pull/42"]);
 			assert.deepEqual(syncIssues(payload, { home, fetchIssueStatus: false }).state.issues.map((issue) => issue.url),
@@ -474,7 +484,7 @@ for (const agentId of [null, "child"]) {
 						event("tool.execution_start", 3000, { toolCallId: "concurrent", toolName: "bash", arguments: { command: "cd nested" } }),
 						event("tool.execution_complete", 3100, { toolCallId: "concurrent", success: true }),
 					].map((item) => ({ ...item, ...(agentId ? { agentId } : {}) })),
-					event("user.message", 3200, { content: prUrl(9) }),
+					track("prs", 3200, prUrl(9)),
 				].map(JSON.stringify).join("\n") + "\n");
 				appended = true;
 			}
@@ -496,7 +506,7 @@ for (const agentId of [null, "child"]) {
 		assert.equal(readState(id, home).clearedAt, 2000);
 		assert.equal(readIssues(id, home).clearedAt, 2000);
 		assert.equal(readAgents(id, home).clearedAt, 2000);
-		assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedAt, 3100);
+		assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedAt, 3200);
 		assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url), [prUrl(9)]);
 		appendFileSync(file, [
 			event("tool.execution_start", 4000, { toolCallId: "later", toolName: "bash", arguments: { command: "cd later" } }),
