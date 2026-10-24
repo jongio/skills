@@ -315,6 +315,68 @@ try {
 				JSON.parse(readFileSync(fakeWtSettings, "utf8")).profiles.defaults.font.face,
 				"Cascadia Code PL",
 			);
+
+			// When multiple Windows Terminal candidates exist (e.g. Stable + Preview), only heal the unambiguous profile match
+			const fakeWtStable = join(pluginHome, "wt-stable.json");
+			const fakeWtPreview = join(pluginHome, "wt-preview.json");
+			writeFileSync(fakeWtStable, JSON.stringify({
+				profiles: {
+					defaults: {},
+					list: [{ guid: "{11111111-1111-1111-1111-111111111111}", name: "StablePS" }],
+				},
+			}, null, 4));
+			writeFileSync(fakeWtPreview, JSON.stringify({
+				profiles: {
+					defaults: {},
+					list: [{ guid: "{22222222-2222-2222-2222-222222222222}", name: "PreviewPS" }],
+				},
+			}, null, 4));
+			assert.equal(
+				ensureWindowsTerminalNerdFont({
+					wtSettingsPaths: [fakeWtStable, fakeWtPreview],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "{22222222-2222-2222-2222-222222222222}",
+					isWsl: false,
+				}),
+				"CaskaydiaCove Nerd Font Mono",
+			);
+			assert.equal(JSON.parse(readFileSync(fakeWtStable, "utf8")).profiles.defaults.font, undefined);
+			assert.equal(
+				JSON.parse(readFileSync(fakeWtPreview, "utf8")).profiles.defaults.font.face,
+				"CaskaydiaCove Nerd Font Mono",
+			);
+
+			// Ambiguous multiple candidates (both match WT_PROFILE_ID) skip auto-heal without writing
+			writeFileSync(fakeWtPreview, JSON.stringify({
+				profiles: {
+					defaults: {},
+					list: [{ guid: "{11111111-1111-1111-1111-111111111111}", name: "PreviewPS" }],
+				},
+			}, null, 4));
+			assert.equal(
+				ensureWindowsTerminalNerdFont({
+					wtSettingsPaths: [fakeWtStable, fakeWtPreview],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "{11111111-1111-1111-1111-111111111111}",
+					isWsl: false,
+				}),
+				null,
+			);
+			assert.equal(JSON.parse(readFileSync(fakeWtStable, "utf8")).profiles.defaults.font, undefined);
+			assert.equal(JSON.parse(readFileSync(fakeWtPreview, "utf8")).profiles.defaults.font, undefined);
+
+			// VS Code with unset font keys preserves Unicode fallback instead of falling through to Windows Terminal
+			const fakeVsCodeSettings = join(pluginHome, "vscode-settings.json");
+			writeFileSync(fakeVsCodeSettings, JSON.stringify({ "workbench.colorTheme": "Default Dark+" }));
+			assert.equal(
+				detectNerdFontSupport({
+					termProgram: "vscode",
+					vscodeSettingsPaths: [fakeVsCodeSettings],
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [fakeFontsDir],
+				}),
+				false,
+			);
 		} finally {
 			rmSync(pluginHome, { recursive: true, force: true });
 		}

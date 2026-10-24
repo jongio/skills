@@ -245,37 +245,54 @@ export function ensureWindowsTerminalNerdFont({
 	wslDistroName = process.env.WSL_DISTRO_NAME,
 	isWsl = isWslEnvironment(),
 } = {}) {
+	if (isWsl && !wtSettingsPaths) return null;
 	const installedFace = detectInstalledWindowsNerdFontFace({ fontDirs });
 	if (!installedFace) return null;
 	const paths = wtSettingsPaths ?? candidateWindowsTerminalSettingsPaths();
+	const candidates = [];
 	for (const p of paths) {
 		if (!existsSync(p)) continue;
 		try {
 			const parsed = JSON.parse(stripJsonComments(readFileSync(p, "utf8")));
-			if (!parsed || typeof parsed !== "object") continue;
-			const matchedProfile = resolveWindowsTerminalProfile(parsed, { wtProfileId, wslDistroName, isWsl });
-			const defaultFace = String(parsed?.profiles?.defaults?.font?.face ?? "").trim();
-			const profileFace = String(matchedProfile?.font?.face ?? "").trim();
-			if (profileFace || defaultFace) {
-				return isNerdFontName(profileFace || defaultFace) ? (profileFace || defaultFace) : null;
-			}
-			if (!parsed.profiles || typeof parsed.profiles !== "object" || Array.isArray(parsed.profiles)) {
-				parsed.profiles = {};
-			}
-			if (!parsed.profiles.defaults || typeof parsed.profiles.defaults !== "object" || Array.isArray(parsed.profiles.defaults)) {
-				parsed.profiles.defaults = {};
-			}
-			if (!parsed.profiles.defaults.font || typeof parsed.profiles.defaults.font !== "object" || Array.isArray(parsed.profiles.defaults.font)) {
-				parsed.profiles.defaults.font = {};
-			}
-			parsed.profiles.defaults.font.face = installedFace;
-			atomicWriteText(p, `${JSON.stringify(parsed, null, 4)}\n`);
-			return installedFace;
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+			const list = Array.isArray(parsed?.profiles?.list) ? parsed.profiles.list : [];
+			const hasExplicitProfile = Boolean(
+				wtProfileId &&
+				list.some((prof) => String(prof?.guid ?? "").toLowerCase() === String(wtProfileId).toLowerCase()),
+			);
+			candidates.push({ path: p, parsed, hasExplicitProfile });
 		} catch {
-			// Best-effort heal; ignore read-only or malformed settings files.
+			// Ignore unreadable or malformed candidate.
 		}
 	}
-	return null;
+	if (!candidates.length) return null;
+	const scoped = wtProfileId
+		? candidates.filter((c) => c.hasExplicitProfile)
+		: candidates;
+	if (scoped.length !== 1) return null;
+	const { path: targetPath, parsed } = scoped[0];
+	try {
+		const matchedProfile = resolveWindowsTerminalProfile(parsed, { wtProfileId, wslDistroName, isWsl });
+		const defaultFace = String(parsed?.profiles?.defaults?.font?.face ?? "").trim();
+		const profileFace = String(matchedProfile?.font?.face ?? "").trim();
+		if (profileFace || defaultFace) {
+			return isNerdFontName(profileFace || defaultFace) ? (profileFace || defaultFace) : null;
+		}
+		if (!parsed.profiles || typeof parsed.profiles !== "object" || Array.isArray(parsed.profiles)) {
+			parsed.profiles = {};
+		}
+		if (!parsed.profiles.defaults || typeof parsed.profiles.defaults !== "object" || Array.isArray(parsed.profiles.defaults)) {
+			parsed.profiles.defaults = {};
+		}
+		if (!parsed.profiles.defaults.font || typeof parsed.profiles.defaults.font !== "object" || Array.isArray(parsed.profiles.defaults.font)) {
+			parsed.profiles.defaults.font = {};
+		}
+		parsed.profiles.defaults.font.face = installedFace;
+		atomicWriteText(targetPath, `${JSON.stringify(parsed, null, 4)}\n`);
+		return installedFace;
+	} catch {
+		return null;
+	}
 }
 
 export function detectNerdFontFromWindowsTerminalSettings(settingsObj, {
@@ -309,33 +326,47 @@ export function detectNerdFontSupport({
 			try {
 				const parsed = JSON.parse(stripJsonComments(readFileSync(p, "utf8")));
 				const face = parsed?.["terminal.integrated.fontFamily"] || parsed?.["editor.fontFamily"] || "";
-				if (String(face).trim()) return isNerdFontName(face);
+				return isNerdFontName(face);
 			} catch {
 				// Ignore malformed VS Code settings.json.
 			}
 		}
+		return false;
 	}
 
 	const wsl = isWslEnvironment();
 	const paths = wtSettingsPaths ?? candidateWindowsTerminalSettingsPaths();
+	const parsedCandidates = [];
 	for (const p of paths) {
 		if (!existsSync(p)) continue;
 		try {
 			const parsed = JSON.parse(stripJsonComments(readFileSync(p, "utf8")));
-			const matchedProfile = resolveWindowsTerminalProfile(parsed, { wtProfileId, wslDistroName, isWsl: wsl });
-			const effectiveFace = String(matchedProfile?.font?.face || parsed?.profiles?.defaults?.font?.face || "").trim();
-			if (!effectiveFace) {
-				return Boolean(detectInstalledWindowsNerdFontFace({ fontDirs }));
-			}
-			const res = detectNerdFontFromWindowsTerminalSettings(parsed, {
-				wtProfileId,
-				wslDistroName,
-				isWsl: wsl,
-			});
-			if (typeof res === "boolean") return res;
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+			const list = Array.isArray(parsed?.profiles?.list) ? parsed.profiles.list : [];
+			const hasExplicitProfile = Boolean(
+				wtProfileId &&
+				list.some((prof) => String(prof?.guid ?? "").toLowerCase() === String(wtProfileId).toLowerCase()),
+			);
+			parsedCandidates.push({ parsed, hasExplicitProfile });
 		} catch {
 			// Ignore malformed settings file and try next candidate.
 		}
+	}
+	const ordered = wtProfileId && parsedCandidates.some((c) => c.hasExplicitProfile)
+		? [...parsedCandidates.filter((c) => c.hasExplicitProfile), ...parsedCandidates.filter((c) => !c.hasExplicitProfile)]
+		: parsedCandidates;
+	for (const { parsed } of ordered) {
+		const matchedProfile = resolveWindowsTerminalProfile(parsed, { wtProfileId, wslDistroName, isWsl: wsl });
+		const effectiveFace = String(matchedProfile?.font?.face || parsed?.profiles?.defaults?.font?.face || "").trim();
+		if (!effectiveFace) {
+			return Boolean(detectInstalledWindowsNerdFontFace({ fontDirs }));
+		}
+		const res = detectNerdFontFromWindowsTerminalSettings(parsed, {
+			wtProfileId,
+			wslDistroName,
+			isWsl: wsl,
+		});
+		if (typeof res === "boolean") return res;
 	}
 	if (wsl) return false;
 	return true;
