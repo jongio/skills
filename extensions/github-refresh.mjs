@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { withStateLock } from "./state-lock.mjs";
+import { isDeepStrictEqual } from "node:util";
 
 const pending = new Map();
 export async function prefetchStatuses(kind, items, {
@@ -27,8 +28,9 @@ export async function prefetchStatuses(kind, items, {
       continue;
     }
     const ttl = entry?.ttlMs ?? 45000;
-    if (!force && entry?.scope === scope && entry.info && now - entry.checkedAt < ttl) {
-      results.set(item.url, entry.info);
+    if (!force && item.checkedAt !== 0 && entry?.scope === scope && !entry.lastError &&
+        entry.info && Number.isFinite(entry.checkedAt) && now - entry.checkedAt < ttl) {
+      results.set(item.url, { info: entry.info, checkedAt: entry.checkedAt, fromCache: true });
       continue;
     }
     const key = `${home}\0${scope}\0${item.url}${force ? `\0${randomUUID()}` : ""}`;
@@ -60,7 +62,7 @@ export async function prefetchStatuses(kind, items, {
             };
             write(cache, home);
           });
-          return info;
+          return { info, checkedAt: now, fromCache: false };
         } catch (error) {
           withStateLock(cacheFile, () => {
             const cache = read(home);
@@ -83,20 +85,54 @@ export async function prefetchStatuses(kind, items, {
   return (url) => {
     const value = results.get(url);
     if (value instanceof Error) throw value;
-    return value;
+    if (!value) return undefined;
+    return Object.defineProperties({ ...value.info }, {
+      observedAt: { value: value.checkedAt },
+      observedFromCache: { value: value.fromCache },
+    });
   };
 }
 
-export function mergeObservations(current, previous, refreshed) {
+export function mergeObservations(current, previous, refreshed, { allowRemovals = false } = {}) {
   const key = (item) => item.url ?? item.id;
   const before = new Map(previous.map((item) => [key(item), item]));
   const after = new Map(refreshed.map((item) => [key(item), item]));
+  const lifecycle = ["generation", "checkedAt", "status", "closedAt", "mergedAt", "mergedObservedAt", "prs",
+    "mergedPrs", "settlementObservedAt", "settlementDismissed"];
   return current.flatMap((item) => {
     const old = before.get(key(item)), fresh = after.get(key(item));
-    if (old && !fresh && JSON.stringify(item) === JSON.stringify(old)) return [];
-    if (!old || !fresh || JSON.stringify(item) !== JSON.stringify(old)) return item;
-    return fresh;
+    if (allowRemovals && old && !fresh && isDeepStrictEqual(item, old)) return [];
+    if (!old || !fresh || lifecycle.some((field) => !isDeepStrictEqual(item[field], old[field]))) return item;
+    const fields = [...new Set([...Object.keys(old), ...Object.keys(fresh)])]
+      .filter((field) => !isDeepStrictEqual(old[field], fresh[field]));
+    if (fields.some((field) => !isDeepStrictEqual(item[field], old[field]))) return item;
+    const updated = { ...item };
+    for (const field of fields) {
+      if (Object.hasOwn(fresh, field)) updated[field] = fresh[field];
+      else delete updated[field];
+    }
+    return updated;
   });
+}
+
+export function mergeRefreshState(current, initial, refreshed, list, now = Date.now()) {
+  const previous = (initial?.[list] || []).filter((item) => list !== "issues" ||
+    (current.explicitRevisions?.[item.url] || 0) === (initial?.explicitRevisions?.[item.url] || 0));
+  const entries = mergeObservations(current[list], previous, refreshed[list], { allowRemovals: true });
+  const ignored = new Set(current.ignored || []);
+  const ignoredRevisions = { ...current.ignoredRevisions };
+  for (const old of previous) {
+    if (entries.some((item) => item.url === old.url) || refreshed[list].some((item) => item.url === old.url) ||
+        !refreshed.ignored.includes(old.url)) continue;
+    ignored.add(old.url);
+    if (list === "prs") ignoredRevisions[old.url] = Math.max(ignoredRevisions[old.url] ?? 0,
+      refreshed.ignoredRevisions?.[old.url] ?? old.generation ?? 0);
+  }
+  return {
+    ...current, [list]: entries, ignored: [...ignored],
+    ...(list === "prs" ? { ignoredRevisions } : {}),
+    updatedAt: Math.max(Number.isFinite(current.updatedAt) ? current.updatedAt : 0, now),
+  };
 }
 
 export async function refreshTracker(kind, sessionId, {
@@ -107,6 +143,7 @@ export async function refreshTracker(kind, sessionId, {
   let initial = module.readState(sessionId, home);
   let tracker = new Tracker(sessionId, initial);
   const list = kind === "pr" ? "prs" : "issues";
+  const failures = [];
   if (kind === "pr") {
     try {
       const workspace = readFileSync(join(home, "session-state", sessionId, "workspace.yaml"), "utf8");
@@ -131,25 +168,20 @@ export async function refreshTracker(kind, sessionId, {
         }
       }
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      signal?.throwIfAborted();
+      if (error.code !== "ENOENT") failures.push(`Branch discovery: ${error.message}`);
     }
   }
-  const previous = structuredClone(initial?.[list] || []);
+  const previous = initial ? structuredClone(initial) : tracker.snapshot();
   const fetch = await prefetchStatuses(kind, tracker.state[list], { home, now, force, signal });
   signal?.throwIfAborted();
-  const failures = [];
   const refresh = kind === "pr" ? module.refreshTrackedPrStatuses : module.refreshTrackedIssueStatuses;
   refresh(tracker, { home, now, force, prefetched: true, [kind === "pr" ? "fetchPrStatus" : "fetchIssueStatus"]: fetch,
     onError: (error) => failures.push(error.message) });
   module.updateState(sessionId, (current) => {
     current ??= tracker.snapshot();
     if ((current.clearedAt || 0) !== (initial?.clearedAt || 0)) return current;
-    const entries = mergeObservations(current[list], previous, tracker.state[list]);
-    for (const item of tracker.state[list]) {
-      if (!previous.some((old) => old.url === item.url) && !entries.some((old) => old.url === item.url) &&
-          !current.ignored?.includes(item.url)) entries.push(item);
-    }
-    return { ...current, [list]: entries, updatedAt: now };
+    return mergeRefreshState(current, previous, tracker.state, list, now);
   }, home);
   return failures;
 }

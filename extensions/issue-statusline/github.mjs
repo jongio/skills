@@ -188,8 +188,11 @@ export function refreshTrackedIssueStatuses(tracker, {
 				info = null;
 			}
 		}
+		const observedAt = prefetched && Number.isFinite(info?.observedAt) ? info.observedAt
+			: useSharedCache && Number.isFinite(cached?.checkedAt) ? cached.checkedAt : now;
+		if (info && (useSharedCache || info.observedFromCache) && Number.isFinite(issue.checkedAt) && observedAt < issue.checkedAt) continue;
 		if (failure && !issue.stale) { issue.stale = true; changed = true; }
-		if (info && issue.stale) { delete issue.stale; changed = true; }
+		if (info && issue.stale !== false) { issue.stale = false; changed = true; }
 		if ((force || failure) && !info) {
 			onError(new Error(`Could not refresh ${issue.label}: ${failure?.message ?? "GitHub returned no status."}`));
 			continue;
@@ -219,8 +222,8 @@ export function refreshTrackedIssueStatuses(tracker, {
 					issue.status = closedStatus;
 					changed = true;
 				}
-				if (issue.checkedAt !== now) {
-					issue.checkedAt = now;
+				if (issue.checkedAt !== observedAt) {
+					issue.checkedAt = observedAt;
 					changed = true;
 				}
 				continue;
@@ -239,8 +242,8 @@ export function refreshTrackedIssueStatuses(tracker, {
 				changed = true;
 			}
 		}
-		if (info && issue.checkedAt !== now) {
-			issue.checkedAt = now;
+		if (info && issue.checkedAt !== observedAt) {
+			issue.checkedAt = observedAt;
 			changed = true;
 		}
 	}

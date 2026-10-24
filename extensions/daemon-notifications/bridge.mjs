@@ -45,6 +45,7 @@ export function createNotificationBridge(session, { home, interval = 5000, now =
           if (stopped || !subscriptions[name]) break;
           let event;
           try { event = JSON.parse(line); } catch { continue; }
+          if (!event || typeof event !== "object" || Array.isArray(event)) continue;
           if (typeof event.stream !== "string" || event.stream.length > 64 ||
               !Number.isSafeInteger(event.sequence) || event.sequence <= 0 ||
               !/^[A-Z_]{2,64}$/.test(event.type || "")) continue;

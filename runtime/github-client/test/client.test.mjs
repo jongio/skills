@@ -63,6 +63,8 @@ test("native REST/GraphQL results retain headers, conditional reads, and credent
   assert.equal(httpDetails(first).rateLimitRemaining, 12);
   const second = await client.request({ endpoint: "repos/fixture/repo", headers: { "if-none-match": first.headers.etag } });
   assert.equal(second.status, 304);
+  assert.equal(second.ok, true);
+  assert.equal(second.error, null);
   assert.equal(first.cacheScope, second.cacheScope);
   const gql = await client.request({ kind: "graphql", query: "query($name:String!) { viewer { login } }", variables: { name: "fixture" } });
   assert.equal(gql.budget, "graphql");

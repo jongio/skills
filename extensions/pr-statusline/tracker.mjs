@@ -151,6 +151,7 @@ export function readState(sessionId, home = configHome()) {
 		...(typeof pr.title === "string" && pr.title ? { title: pr.title } : {}),
 		...(typeof pr.status === "string" && pr.status ? { status: pr.status } : {}),
 		...(Number.isFinite(pr.checkedAt) ? { checkedAt: pr.checkedAt } : {}),
+		...(typeof pr.stale === "boolean" ? { stale: pr.stale } : {}),
 		...(Number.isFinite(pr.mergedAt) ? { mergedAt: pr.mergedAt } : {}),
 		...(Number.isFinite(pr.mergedObservedAt) ? { mergedObservedAt: pr.mergedObservedAt } : {}),
 		...(Number.isSafeInteger(pr.generation) && pr.generation >= 0 ? { generation: pr.generation } : {}),

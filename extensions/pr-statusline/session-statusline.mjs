@@ -1,6 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import {
 	configHome, readState, refreshTrackedPrStatuses, SessionTracker, syncSession as syncPrs, transcriptPathFor, updateState, writeState,
 } from "./tracker.mjs";
@@ -15,7 +14,7 @@ import {
 	checkoutDivergence, readJson, sessionContexts, transcriptIdentity, withSessionDirectory, writeJson,
 } from "../worktree-statusline/tracker.mjs";
 import { resolveLinkedCheckouts } from "../worktree-statusline/worktrees.mjs";
-import { prefetchStatuses } from "../github-refresh.mjs";
+import { mergeObservations, mergeRefreshState, prefetchStatuses } from "../github-refresh.mjs";
 
 export function clearSessionStatusline(payload, { home = configHome(), now = Date.now() } = {}) {
 	const id = payload?.session_id;
@@ -94,6 +93,8 @@ export async function refreshSessionStatusline(payload, {
 	const agents = new SubagentTracker(id, readAgents(id, home));
 	const previousPrs = structuredClone(prs.state.prs);
 	const previousIssues = structuredClone(issues.state.issues);
+	const initialPrState = { ...prs.state, prs: previousPrs };
+	const initialIssueState = { ...issues.state, issues: previousIssues, explicitRevisions: { ...issues.state.explicitRevisions } };
 	const previousAgents = structuredClone(agents.snapshot());
 	const failures = [];
 	const onError = (error) => failures.push(error.message);
@@ -111,7 +112,7 @@ export async function refreshSessionStatusline(payload, {
 			const saved = updateState(id, (current) => {
 				current ??= prs.snapshot();
 				if ((current.clearedAt ?? 0) !== prs.state.clearedAt) return current;
-				return { ...current, prs: mergeObservations(current.prs, previousPrs, remotePrs.state.prs), updatedAt: Date.now() };
+				return mergeRefreshState(current, initialPrState, remotePrs.state, "prs");
 			}, home);
 			prs.state.prs = saved.prs;
 		}],
@@ -122,7 +123,7 @@ export async function refreshSessionStatusline(payload, {
 			updateIssues(id, (current) => {
 				current ??= issues.snapshot();
 				if ((current.clearedAt ?? 0) !== issues.state.clearedAt) return current;
-				return { ...current, issues: mergeObservations(current.issues, previousIssues, issues.state.issues), updatedAt: Date.now() };
+				return mergeRefreshState(current, initialIssueState, issues.state, "issues");
 			}, home);
 		}],
 		["Subagents", () => {
@@ -156,25 +157,4 @@ export async function refreshSessionStatusline(payload, {
 	return failures.length
 		? `Session statusline refresh incomplete:\n${failures.join("\n")}`
 		: "Refreshed this session's tracked statusline entries. Tracking and enabled components are unchanged.";
-}
-
-function mergeObservations(current, previous, refreshed) {
-	const key = (item) => item.url ?? item.id;
-	const before = new Map(previous.map((item) => [key(item), item]));
-	const after = new Map(refreshed.map((item) => [key(item), item]));
-	const lifecycle = ["generation", "checkedAt", "status", "closedAt", "mergedAt", "mergedObservedAt", "prs",
-		"mergedPrs", "settlementObservedAt", "settlementDismissed"];
-	return current.map((item) => {
-		const old = before.get(key(item)), fresh = after.get(key(item));
-		if (!old || !fresh || lifecycle.some((field) => !isDeepStrictEqual(item[field], old[field]))) return item;
-		const fields = [...new Set([...Object.keys(old), ...Object.keys(fresh)])]
-			.filter((field) => !isDeepStrictEqual(old[field], fresh[field]));
-		if (fields.some((field) => !isDeepStrictEqual(item[field], old[field]))) return item;
-		const updated = { ...item };
-		for (const field of fields) {
-			if (Object.hasOwn(fresh, field)) updated[field] = fresh[field];
-			else delete updated[field];
-		}
-		return updated;
-	});
 }

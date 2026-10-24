@@ -143,6 +143,7 @@ export function readState(sessionId, home = configHome()) {
 		...(typeof item.status === "string" && item.status ? { status: item.status } : {}),
 		...(Number.isFinite(item.checkedAt) ? { checkedAt: item.checkedAt } : {}),
 		...(Number.isFinite(item.closedAt) ? { closedAt: item.closedAt } : {}),
+		...(typeof item.stale === "boolean" ? { stale: item.stale } : {}),
 		...(item.simulated ? { simulated: true } : {}),
 	}));
 	state.ignored = state.ignored.map((url) => issueReference(url).url);
@@ -158,7 +159,15 @@ export function writeState(state, home = configHome()) {
 
 export function updateState(sessionId, update, home = configHome()) {
 	return withStateLock(statePath(sessionId, home), () => {
-		const state = update(readState(sessionId, home));
+		const previous = readState(sessionId, home);
+		const state = update(previous);
+		if (previous?.explicitRevisions || state.explicitRevisions) {
+			const revisions = { ...previous?.explicitRevisions };
+			for (const [url, revision] of Object.entries(state.explicitRevisions || {})) {
+				if (Number.isSafeInteger(revision) && revision >= 0) revisions[url] = Math.max(revisions[url] || 0, revision);
+			}
+			state.explicitRevisions = revisions;
+		}
 		atomicWriteJson(statePath(sessionId, home), state);
 		return state;
 	});
@@ -174,6 +183,7 @@ export class IssueTracker {
 			clearedWorkspace: previous?.clearedWorkspace ?? null,
 			issues: [...(previous?.issues ?? [])],
 			ignored: [...(previous?.ignored ?? [])],
+			...(previous?.explicitRevisions ? { explicitRevisions: { ...previous.explicitRevisions } } : {}),
 			updatedAt: previous?.updatedAt ?? Date.now(),
 			transcriptOffset: Number.isInteger(previous?.transcriptOffset) && previous.transcriptOffset >= 0
 				? previous.transcriptOffset
@@ -188,7 +198,12 @@ export class IssueTracker {
 	add(reference, explicit = false) {
 		const item = issueReference(reference);
 		if (PLACEHOLDER_REPOS.has(item.label.split("#")[0].toLowerCase())) return;
-		if (explicit) this.state.ignored = this.state.ignored.filter((url) => url !== item.url);
+		if (explicit) {
+			this.state.ignored = this.state.ignored.filter((url) => url !== item.url);
+			this.state.explicitRevisions ??= {};
+			const revision = this.state.explicitRevisions[item.url];
+			this.state.explicitRevisions[item.url] = Number.isSafeInteger(revision) && revision >= 0 ? revision + 1 : 1;
+		}
 		if (!this.state.ignored.includes(item.url) && !this.state.issues.some((i) => i.url === item.url)) {
 			this.state.issues.push(item);
 		}
@@ -449,7 +464,7 @@ export function syncSession(payload, {
 	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new IssueTracker(
 		sessionId,
-		reset && previous ? { issues: previous.issues, ignored: previous.ignored,
+		reset && previous ? { issues: previous.issues, ignored: previous.ignored, explicitRevisions: previous.explicitRevisions,
 			clearedAt: previous.clearedAt, clearedWorkspace: previous.clearedWorkspace,
 			...(previous.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);

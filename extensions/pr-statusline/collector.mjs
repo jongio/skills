@@ -113,7 +113,8 @@ export async function collect(session, { home, interval = 15000, report = consol
 		try {
 			const activity = await session.rpc.metadata.activity();
 			if (refreshRemote && !stopped) {
-				await refreshTracker("pr", session.sessionId, { home, signal: controller.signal });
+				const failures = await refreshTracker("pr", session.sessionId, { home, signal: controller.signal });
+				for (const failure of failures) report(`[pr-statusline] ${failure}`);
 				const result = await refreshSessionStatusline({ session_id: session.sessionId }, { home, force: false, remoteOnly: true, signal: controller.signal });
 				if (result.startsWith("Session statusline refresh incomplete")) report(`[pr-statusline] ${result}`);
 			}

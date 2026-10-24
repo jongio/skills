@@ -397,8 +397,11 @@ export function refreshTrackedPrStatuses(tracker, {
 				info = null;
 			}
 		}
+		const observedAt = prefetched && Number.isFinite(info?.observedAt) ? info.observedAt
+			: useSharedCache && Number.isFinite(cached?.checkedAt) ? cached.checkedAt : now;
+		if (info && (useSharedCache || info.observedFromCache) && Number.isFinite(pr.checkedAt) && observedAt < pr.checkedAt) continue;
 		if (failure && !pr.stale) { pr.stale = true; changed = true; }
-		if (info && pr.stale) { delete pr.stale; changed = true; }
+		if (info && pr.stale !== false) { pr.stale = false; changed = true; }
 		if ((force || failure) && !info) {
 			onError(new Error(`Could not refresh ${pr.label}: ${failure?.message ?? "GitHub returned no status."}`));
 			continue;
@@ -420,8 +423,8 @@ export function refreshTrackedPrStatuses(tracker, {
 					pr.status = mergedStatus;
 					changed = true;
 				}
-				if (pr.checkedAt !== now) {
-					pr.checkedAt = now;
+				if (pr.checkedAt !== observedAt) {
+					pr.checkedAt = observedAt;
 					changed = true;
 				}
 				continue;
@@ -441,8 +444,8 @@ export function refreshTrackedPrStatuses(tracker, {
 				changed = true;
 			}
 		}
-		if (info && pr.checkedAt !== now) {
-			pr.checkedAt = now;
+		if (info && pr.checkedAt !== observedAt) {
+			pr.checkedAt = observedAt;
 			changed = true;
 		}
 	}

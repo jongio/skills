@@ -179,8 +179,9 @@ export function createGitHubClient({
           const user = fallbackAccounts.shift();
           if (user) { auth = await resolveCredential(signal, user, true); continue; }
         }
-        const ok = (meta.status >= 200 && meta.status < 300 || meta.status === 304) &&
-          errors.length === 0 && !response.error && !signal.aborted;
+        // Octokit throws for a conditional 304 as well as actual HTTP failures.
+        const ok = (meta.status === 304 || meta.status >= 200 && meta.status < 300 && !response.error) &&
+          errors.length === 0 && !signal.aborted;
         return {
           ok, status: meta.status, headers: response.headers, data: response.data,
           cacheScope: identity(auth.token), rateLimited, budget: graphql ? "graphql" : "rest",

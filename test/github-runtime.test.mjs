@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+import { createServer } from "node:http";
+import { createGitHubClient } from "../extensions/github-client.mjs";
+import { ghApiWithEtag, loadState } from "../skills/ci-hound/scripts/ci-hound-daemon.mjs";
+import { createPrWatchState, evaluatePrPollTick, parsePrWatchArgs } from "../skills/pr/scripts/pr-watch-daemon.mjs";
 import { configureStatuslines, SHARED_RUNTIME_FILES } from "../scripts/setup-statusline.mjs";
 import { statuslineGitHub, requestedGitHubEnvironment, gitHubEnvironmentForHost } from "../extensions/github-transport.mjs";
 import { render as renderPr } from "../extensions/pr-statusline/render.mjs";
@@ -17,6 +21,47 @@ import { readState, writeState, SessionTracker } from "../extensions/pr-statusli
 import { clearSessionStatusline } from "../extensions/pr-statusline/session-statusline.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+test("both watchers consume a real bundled SDK 304 as validated cached data", async (t) => {
+  const head = "b".repeat(40);
+  const pr = { state: "OPEN", headRefOid: head, mergeable: "MERGEABLE", mergeStateStatus: "CLEAN",
+    reviewRequests: { nodes: [] }, reviews: { nodes: [] }, reviewThreads: { nodes: [] }, comments: { nodes: [] },
+    commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
+      { __typename: "CheckRun", name: "CI", status: "IN_PROGRESS", conclusion: null },
+    ] } } } }] } };
+  const server = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/graphql") {
+      response.end(JSON.stringify({ data: { repository: { pullRequest: pr } } }));
+    } else if (request.headers["if-none-match"]) {
+      response.writeHead(304, { etag: '"fixture"' });
+      response.end();
+    } else {
+      response.setHeader("etag", '"fixture"');
+      response.end(JSON.stringify(request.url.includes("/commits/") ? { sha: head } : { workflow_runs: [], total_count: 0 }));
+    }
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const client = createGitHubClient({ baseUrl: `http://127.0.0.1:${server.address().port}`, env: { GH_TOKEN: "fixture-token", NO_PROXY: "*" } });
+  t.after(async () => {
+    server.closeAllConnections();
+    await client.close();
+    await new Promise((resolve) => server.close(resolve));
+  });
+  const request = (input) => client.request(input);
+  request.cacheScope = () => client.cacheScope();
+  const ciState = loadState("");
+  await ghApiWithEtag("repos/fixture/repo/commits/main", ciState, request);
+  const cached = await ghApiWithEtag("repos/fixture/repo/commits/main", ciState, request);
+  assert.equal(cached.fromCache, true);
+  assert.equal(cached.data.sha, head);
+  const args = parsePrWatchArgs(["watch", "--repo", "fixture/repo", "--pr", "1", "--head", head, "--no-copilot"]);
+  const state = createPrWatchState();
+  await evaluatePrPollTick(args, request, state);
+  const tick = await evaluatePrPollTick(args, request, state);
+  assert.equal(tick.error, undefined);
+  assert.equal(tick.status.cacheHits304, 1);
+  assert.equal(tick.status.pendingChecksCount, 1);
+});
 test("expired standalone observations are visibly stale without a network refresh", (t) => {
   const home = fixture(t);
   const tracker = new SessionTracker("expired");
