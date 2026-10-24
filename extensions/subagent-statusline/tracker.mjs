@@ -212,7 +212,8 @@ export class SubagentTracker {
 		this.dismissed = false;
 	}
 
-	clear() {
+	clear(now = Date.now()) {
+		this.dismissedThroughAt = Math.max(this.dismissedThroughAt, now);
 		for (const id of this.agents.keys()) this.ignored.add(id);
 		for (const id of this.taskCalls.keys()) this.ignored.add(id);
 		this.agents.clear();

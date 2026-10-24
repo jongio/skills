@@ -24,6 +24,7 @@ for (const [component, standalone] of [["issues", "issue-statusline"], ["subagen
 							import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 							import { join } from "node:path";
 							import { registerHooks } from "node:module";
+							import { createSdkHost } from ${JSON.stringify(pathToFileURL(join(root, "extensions", "worktree-statusline", "test", "mock-sdk.mjs")).href)};
 							import { IssueTracker, readState as readIssues, writeState as writeIssues, syncSession as syncIssues } from ${moduleUrl("issue-statusline")};
 							import { SubagentTracker, readState as readAgents, writeState as writeAgents, syncSession as syncAgents } from ${moduleUrl("subagent-statusline")};
 							const component = ${JSON.stringify(component)}, action = ${JSON.stringify(action)}, adapter = ${JSON.stringify(adapter)};
@@ -72,7 +73,7 @@ for (const [component, standalone] of [["issues", "issue-statusline"], ["subagen
 								on: () => () => {}, getEvents: async () => [],
 								rpc: { metadata: { activity: async () => ({ hasActiveWork: false }) } },
 							};
-							globalThis.joinTestSession = async value => { configuration = value; return session; };
+							globalThis.joinTestSession = createSdkHost(session, value => { configuration = value; }).joinSession;
 							const sdk = "data:text/javascript," + encodeURIComponent("export const joinSession = globalThis.joinTestSession;");
 							registerHooks({ resolve(specifier, context, next) {
 								return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);

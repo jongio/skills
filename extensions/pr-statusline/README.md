@@ -343,6 +343,8 @@ Plugin startup also handles existing standalone installations: it preserves
 their entrypoints as backups, retires only those statusline SDK controllers in
 the current session, and then claims the unified tool names. Work agents and
 saved component selections are unchanged.
+This handover uses live registrations even if another session has already moved
+the shared entrypoint files; an already-moved backup does not block startup.
 Legacy inferred tracking is dropped on first load; explicitly re-add any work
 this session still owns. Ownership is never reconstructed from shell history,
 workspace names, or remote metadata.

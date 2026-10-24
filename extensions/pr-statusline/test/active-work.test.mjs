@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -174,11 +174,35 @@ test("agent remove and clear survive transcript re-indexing without stopping oth
 	writeAgents(tracker.snapshot(), home);
 	tracker = syncAgents({ session_id: id }, { home }).tracker;
 	assert.equal(tracker.agents.size, 0);
-	tracker.observe(event("subagent.started", { agentId: "new-agent" }));
+	tracker.observe({ ...event("subagent.started", { agentId: "new-agent" }), timestamp: new Date(Date.now() + 1).toISOString() });
 	assert.deepEqual([...tracker.agents.keys()], ["new-agent"]);
 	assert.throws(() => tracker.manage("remove"), /agent ID/);
 	assert.throws(() => tracker.manage("stop", "new-agent"), /list, remove, or clear/);
 }));
+
+for (const partial of [false, true]) {
+	test(`component-only agent clear suppresses unread ${partial ? "partial" : "complete"} pre-clear launches but accepts new work`, async (t) => fixture((home) => {
+		const id = `component-clear-${partial}`;
+		const dir = join(home, "session-state", id);
+		mkdirSync(dir, { recursive: true });
+		const file = join(dir, "events.jsonl");
+		const first = event("subagent.started", { agentId: "observed", toolCallId: "observed-call" });
+		writeFileSync(file, JSON.stringify(first) + "\n");
+		const tracker = syncAgents({ session_id: id }, { home }).tracker;
+		const unread = { ...event("subagent.started", { agentId: "unread", toolCallId: "unread-call" }), timestamp: new Date(1500).toISOString() };
+		appendFileSync(file, JSON.stringify(unread) + (partial ? "" : "\n"));
+		t.mock.method(Date, "now", () => 2000);
+		tracker.manage("clear");
+		writeAgents(tracker.snapshot(), home);
+		const fresh = { ...event("subagent.started", { agentId: "fresh" }), timestamp: new Date(2500).toISOString() };
+		appendFileSync(file, (partial ? "\n" : "") + JSON.stringify(fresh) + "\n");
+		const current = syncAgents({ session_id: id }, { home }).tracker;
+		assert.deepEqual([...current.agents.keys()], ["fresh"]);
+		assert.ok(current.ignored.has("unread"));
+		assert.ok(current.ignored.has("unread-call"));
+		assert.equal(current.dismissedThroughAt, 2000);
+	}));
+}
 
 test("legacy reference-only caches do not survive manual listing or a missing transcript", async () => fixture((home) => {
 	for (const [Tracker, write, sync, field, reference, fetch] of [
