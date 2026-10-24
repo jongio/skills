@@ -413,7 +413,7 @@ function applyDefaultFontFaceJsonc(raw, installedFace) {
 		return insertPropertyInJsoncObject(raw, rootSpan, `"profiles": { "defaults": { "font": { "face": ${faceLiteral} } } }`);
 	}
 	if (!profilesVal.isObject) {
-		return replaceJsoncValueSpan(raw, profilesVal, `{ "defaults": { "font": { "face": ${faceLiteral} } } }`);
+		return null;
 	}
 	const profilesSpan = profilesVal.objectSpan;
 	const defaultsVal = findJsoncPropertyValue(raw, profilesSpan.open, profilesSpan.close, "defaults");
@@ -421,7 +421,7 @@ function applyDefaultFontFaceJsonc(raw, installedFace) {
 		return insertPropertyInJsoncObject(raw, profilesSpan, `"defaults": { "font": { "face": ${faceLiteral} } }`);
 	}
 	if (!defaultsVal.isObject) {
-		return replaceJsoncValueSpan(raw, defaultsVal, `{ "font": { "face": ${faceLiteral} } }`);
+		return null;
 	}
 	const defaultsSpan = defaultsVal.objectSpan;
 	const fontVal = findJsoncPropertyValue(raw, defaultsSpan.open, defaultsSpan.close, "font");
@@ -433,7 +433,7 @@ function applyDefaultFontFaceJsonc(raw, installedFace) {
 		return insertPropertyInJsoncObject(raw, defaultsSpan, `"font": { "face": ${faceLiteral} }`);
 	}
 	if (!fontVal.isObject) {
-		return replaceJsoncValueSpan(raw, fontVal, `{ "face": ${faceLiteral} }`);
+		return null;
 	}
 	const fontSpan = fontVal.objectSpan;
 	const faceVal = findJsoncPropertyValue(raw, fontSpan.open, fontSpan.close, "face");

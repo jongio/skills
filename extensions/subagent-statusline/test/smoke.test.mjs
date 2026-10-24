@@ -298,6 +298,7 @@ try {
 					wtSettingsPaths: [fakeWtSettings],
 					fontDirs: [fakeFontsDir],
 					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					termProgram: "",
 					isWsl: false,
 				}),
 				"CaskaydiaCove Nerd Font Mono",
@@ -329,6 +330,7 @@ try {
 					wtSettingsPaths: [fakeWtSettings],
 					fontDirs: [fakeFontsDir],
 					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					termProgram: "",
 					isWsl: false,
 				}),
 				null,
@@ -349,10 +351,28 @@ try {
 					wtSettingsPaths: [fakeWtSettings],
 					fontDirs: [fakeFontsDir],
 					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					termProgram: "",
 					isWsl: false,
 				}),
 				null,
 			);
+			// Legacy array-valued "profiles": [...] is never overwritten
+			const legacyArrayProfiles = JSON.stringify({
+				defaultProfile: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+				profiles: [{ guid: "{574e775e-4f2a-5b96-ac1e-a2962a402336}", name: "PowerShell" }],
+			}, null, 4);
+			writeFileSync(fakeWtSettings, legacyArrayProfiles);
+			assert.equal(
+				ensureWindowsTerminalNerdFont({
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "",
+					termProgram: "",
+					isWsl: false,
+				}),
+				null,
+			);
+			assert.equal(readFileSync(fakeWtSettings, "utf8"), legacyArrayProfiles);
 			const commentedWtSettings = `{\n  // user comment preserved\n  "profiles": {\n    "defaults": {\n      /* nested comment */\n      "startingDirectory": "C:\\\\code",\n    },\n    "list": [{ "guid": "{574e775e-4f2a-5b96-ac1e-a2962a402336}", "name": "PowerShell", }],\n  },\n}\n`;
 			writeFileSync(fakeWtSettings, commentedWtSettings);
 			assert.equal(
@@ -436,6 +456,7 @@ try {
 					wtSettingsPaths: [fakeWtStable, fakeWtPreview],
 					fontDirs: [fakeFontsDir],
 					wtProfileId: "{22222222-2222-2222-2222-222222222222}",
+					termProgram: "",
 					isWsl: false,
 				}),
 				"CaskaydiaCove Nerd Font Mono",
@@ -458,6 +479,7 @@ try {
 					wtSettingsPaths: [fakeWtStable, fakeWtPreview],
 					fontDirs: [fakeFontsDir],
 					wtProfileId: "{11111111-1111-1111-1111-111111111111}",
+					termProgram: "",
 					isWsl: false,
 				}),
 				null,
