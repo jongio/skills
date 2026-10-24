@@ -12,13 +12,13 @@
       "name": "jongio-skills",
       "source": "./",
       "description": "Install the complete Jon Gallant skills collection as one plugin.",
-      "version": "2.1.0"
+      "version": "2.1.1"
     },
     {
       "name": "statuslines",
       "source": "./extensions",
       "description": "Install only the composable PR, Issue, Subagent, and Branch/Worktree statusline extensions for GitHub Copilot CLI without installing skills.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "create-canvas-app",

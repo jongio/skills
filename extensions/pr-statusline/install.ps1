@@ -15,7 +15,7 @@ $target = Join-Path $homeDir 'extensions\pr-statusline'
 $composerPath = Join-Path $homeDir 'statusline-compose.mjs'
 New-Item -ItemType Directory -Path $target -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\state-lock.mjs') -Destination (Join-Path $homeDir 'extensions\state-lock.mjs') -Force
-foreach ($file in @('extension.mjs', 'collector.mjs', 'session-statusline.mjs', 'tracker.mjs', 'github.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')) {
+foreach ($file in @('extension.mjs', 'collector.mjs', 'session-statusline.mjs', 'tracker.mjs', 'github.mjs', 'render.mjs', 'compose.mjs', 'attention.mjs', 'attention-state.mjs', 'attention.windows.cs', 'copilot-extension.json')) {
 	Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination (Join-Path $target $file) -Force
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'compose.mjs') -Destination $composerPath -Force
