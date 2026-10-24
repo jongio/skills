@@ -1,7 +1,9 @@
-import { dirname } from "node:path";
+import { existsSync, realpathSync, renameSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { collect } from "./collector.mjs";
+import { configHome } from "./tracker.mjs";
 import { createSessionAttention, runAttentionCommand } from "./attention.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
 import {
@@ -46,7 +48,7 @@ function updateSession(action) {
 	return result;
 }
 
-const session = await joinSession({
+const configuration = {
 	commands: [
 		{
 			name: "session-attention",
@@ -150,7 +152,11 @@ const session = await joinSession({
 			},
 			handler: ({ action }) => {
 				if (!["clear", "refresh"].includes(action)) throw new Error("Use clear or refresh.");
-				return updateSession(action);
+				try {
+					return updateSession(action);
+				} catch (error) {
+					return { resultType: "failure", textResultForLlm: error instanceof Error ? error.message : String(error) };
+				}
 			},
 		},
 		{
@@ -219,7 +225,54 @@ const session = await joinSession({
 			},
 		},
 	],
-});
+};
+
+const ownEntry = realpathSync.native(fileURLToPath(import.meta.url));
+const standalone = ["pr", "issue", "subagent", "worktree"].map((name) => ({
+	id: `user:${name}-statusline`,
+	file: join(configHome(), "extensions", `${name}-statusline`, "extension.mjs"),
+})).filter(({ file }) => existsSync(file) && realpathSync.native(file) !== ownEntry);
+const session = await joinSession({ ...configuration, ...(standalone.length ? { tools: [] } : {}) });
+
+if (standalone.length) {
+	const { extensions } = await session.rpc.extensions.list();
+	const current = extensions.find((entry) => entry.pid === process.pid);
+	if (!current) throw new Error("Cannot verify the current statusline controller; restart Copilot before migrating.");
+	for (const entry of standalone.filter((entry) => entry.id !== current.id)) {
+		renameSync(entry.file, `${entry.file}.disabled-${Date.now()}-${process.pid}`);
+		if (extensions.some((extension) => extension.id === entry.id)) await session.rpc.extensions.disable({ id: entry.id });
+	}
+	// Declaration-only tools let the same connection claim names after old controllers stop.
+	const pending = new Map();
+	session.on((event) => {
+		const data = event.data ?? {};
+		if (event.type === "external_tool.completed") {
+			pending.get(data.requestId)?.abort();
+			pending.delete(data.requestId);
+			return;
+		}
+		if (event.type !== "external_tool.requested" || pending.has(data.requestId)) return;
+		const tool = configuration.tools.find((entry) => entry.name === data.toolName);
+		if (!tool) return;
+		const controller = new AbortController();
+		pending.set(data.requestId, controller);
+		void (async () => {
+			let response;
+			try {
+				response = { result: await tool.handler(data.arguments, {
+					sessionId: session.sessionId, toolCallId: data.toolCallId, toolName: data.toolName,
+					arguments: data.arguments, signal: controller.signal,
+				}) };
+			} catch (error) {
+				response = { error: error instanceof Error ? error.message : String(error) };
+			}
+			if (pending.get(data.requestId) !== controller || controller.signal.aborted) return;
+			pending.delete(data.requestId);
+			await session.rpc.tools.handlePendingToolCall({ requestId: data.requestId, ...response });
+		})().catch((error) => console.error(`[pr-statusline] ${error.message}`));
+	});
+	await session.rpc.tools.set({ tools: configuration.tools.map(({ handler, ...definition }) => definition) });
+}
 
 attention = createSessionAttention({ ownerProcessId: process.ppid });
 collector = await collect(session, { attention });

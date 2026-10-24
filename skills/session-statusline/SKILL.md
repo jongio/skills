@@ -39,6 +39,8 @@ not the underlying issues, PRs, agents, branches, or worktrees.
 4. For a component operation, list that component afterward and verify the
    requested entries are absent/present. For clear-all or refresh, use the
    tool's result; report incomplete refreshes and errors, not success.
+   If clear reports that history is still catching up, retry once after replay
+   advances. If it remains incomplete, report the blocked clear, not success.
 5. If the tools are unavailable, give the matching extension command below.
    Do not claim it ran, substitute a repository scan, or edit raw state files.
 

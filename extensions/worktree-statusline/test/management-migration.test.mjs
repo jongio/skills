@@ -29,6 +29,7 @@ for (const [component, standalone] of [["issues", "issue-statusline"], ["subagen
 							const component = ${JSON.stringify(component)}, action = ${JSON.stringify(action)}, adapter = ${JSON.stringify(adapter)};
 							const id = "management-first";
 							const home = process.env.COPILOT_HOME;
+							assert.equal(process.env.LOCALAPPDATA, join(home, "appdata"), "terminal settings must be fixture-local");
 							const issue = "https://github.com/acme/app/issues/7", pr = "https://github.com/acme/app/pull/42";
 							const event = (type, data, agentId) => ({ type, data, agentId, timestamp: new Date(1000).toISOString() });
 							const history = [
@@ -108,7 +109,7 @@ for (const [component, standalone] of [["issues", "issue-statusline"], ["subagen
 							assert.deepEqual(["settings.json", "statusline-config.json"].map(path => readFileSync(join(home, path), "utf8")), config);
 						`], {
 							encoding: "utf8", timeout: 60000, windowsHide: true,
-							env: { ...process.env, COPILOT_HOME: home, NO_COLOR: "1" },
+							env: { ...process.env, COPILOT_HOME: home, LOCALAPPDATA: join(home, "appdata"), NO_COLOR: "1" },
 						});
 						assert.ifError(result.error);
 						assert.equal(result.status, 0, result.stderr || result.stdout);

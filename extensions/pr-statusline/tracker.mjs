@@ -168,7 +168,7 @@ export class SessionTracker {
 		}
 		if (!this.state.ignored.includes(pr.url) && !existing) {
 			this.state.prs.push({ ...pr, owned: true, provenance: sourceProvenance(source) });
-		} else if (existing && source) {
+		} else if (existing && (explicit || source)) {
 			existing.provenance = mergePrProvenance(existing.provenance, sourceProvenance(source));
 		}
 		if (existing) existing.owned = true;

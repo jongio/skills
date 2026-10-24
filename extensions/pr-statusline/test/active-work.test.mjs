@@ -8,6 +8,8 @@ import { clearSessionStatusline } from "../session-statusline.mjs";
 import { SessionTracker, readState, syncSession, writeState } from "../tracker.mjs";
 import { IssueTracker, syncSession as syncIssues, writeState as writeIssues } from "../../issue-statusline/tracker.mjs";
 import { SubagentTracker, syncSession as syncAgents, writeState as writeAgents } from "../../subagent-statusline/tracker.mjs";
+import { configureStatuslines } from "../../../scripts/setup-statusline.mjs";
+import { composeStatusLine } from "../../worktree-statusline/compose.mjs";
 
 const pr = "https://github.com/acme/app/pull/42";
 const issue = "https://github.com/acme/app/issues/7";
@@ -259,6 +261,56 @@ test("root lookups do not promote agent-only PRs into extra detailed pills", () 
 	tracker.manage("add", pr);
 	assert.equal(tracker.state.prs[0].provenance.root, true);
 });
+
+test("an explicit re-add with unproven attribution restores detailed PR visibility", async () => fixture(async (home) => {
+	configureStatuslines({ home, enabled: ["pr-statusline", "subagent-statusline"] });
+	const tracker = new SessionTracker("unknown-readd");
+	tracker.manage("add", pr, { agentId: "worker" });
+	tracker.add(pr, false, null);
+	assert.equal(tracker.state.prs[0].provenance.unknown, false, "non-explicit adds do not alter proven attribution");
+	const agents = new SubagentTracker("unknown-readd");
+	agents.ensureAgent("worker", { agentType: "general-purpose" });
+	agents.linkPr("worker", pr);
+	writeAgents(agents.snapshot(), home);
+	writeState(tracker.snapshot(), home);
+	const options = { home, color: false, links: false, nerdFont: false };
+	assert.ok(!(await composeStatusLine({ session_id: "unknown-readd" }, options)).includes("acme/app#42"));
+	tracker.manage("add", pr, null);
+	writeState(tracker.snapshot(), home);
+	const output = await composeStatusLine({ session_id: "unknown-readd" }, options);
+	assert.ok(output.includes("acme/app#42"), output);
+	assert.deepEqual(tracker.state.prs[0].provenance, { root: false, unknown: true, agents: ["worker"] });
+}));
+
+test("legacy agents without transcripts are dropped rather than promoted to verified tracking", async () => fixture((home) => {
+	const tracker = new SubagentTracker("legacy-orphans");
+	tracker.ensureAgent("generic-project-task");
+	tracker.ensureAgent("plausible-worker", { agentType: "general-purpose" });
+	tracker.taskCalls.set("old-task", "generic-project-task");
+	const legacy = tracker.snapshot();
+	legacy.activeTrackingVersion = 1;
+	writeAgents(legacy, home);
+	assert.deepEqual(new SubagentTracker("legacy-orphans", legacy).manage("list"), []);
+	const current = syncAgents({ session_id: "legacy-orphans" }, { home }).tracker;
+	assert.equal(current.agents.size, 0);
+	assert.equal(current.taskCalls.size, 0);
+	assert.equal(current.snapshot().activeTrackingVersion, 2);
+}));
+
+test("verified and simulated agent caches remain usable without a transcript", async () => fixture((home) => {
+	for (const simulated of [false, true]) {
+		const id = `retained-${simulated}`;
+		const tracker = new SubagentTracker(id);
+		tracker.ensureAgent("worker");
+		const state = tracker.snapshot();
+		if (simulated) {
+			state.activeTrackingVersion = 1;
+			state.simulated = true;
+		}
+		writeAgents(state, home);
+		assert.deepEqual([...syncAgents({ session_id: id }, { home }).tracker.agents.keys()], ["worker"]);
+	}
+}));
 
 test("rejected enrollment history cannot prevent collector startup or later live tracking", async () => fixture(async (home) => {
 	let handler;

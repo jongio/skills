@@ -17,7 +17,7 @@ function fixture(run) {
 function node(home, args, input = "") {
 	const result = spawnSync(process.execPath, args, {
 		input, encoding: "utf8", timeout: 60000, windowsHide: true,
-		env: { ...process.env, COPILOT_HOME: home, NO_COLOR: "1" },
+		env: { ...process.env, COPILOT_HOME: home, LOCALAPPDATA: join(home, "appdata"), NO_COLOR: "1" },
 	});
 	assert.ifError(result.error);
 	return result;
@@ -48,6 +48,8 @@ test("standalone renderers and compositor emit zero rows for an empty session", 
 function extensionScript(entry, full) {
 	return `
 		import assert from "node:assert/strict";
+		import { mkdirSync, writeFileSync } from "node:fs";
+		import { join } from "node:path";
 		import { registerHooks } from "node:module";
 		let configuration, observer;
 		const logs = [];
@@ -100,6 +102,9 @@ function extensionScript(entry, full) {
 				{ sessionId: session.sessionId, toolCallId: "claim-child" }));
 			assert.equal(claimed[0].owned, true);
 			assert.deepEqual(claimed[0].provenance, { root: false, unknown: false, agents: ["actual-worker"] });
+			const readded = JSON.parse(tool("session_prs")({ action: "add", reference: "example/widget#10" },
+				{ sessionId: session.sessionId, toolCallId: "unobserved-readd" }));
+			assert.deepEqual(readded[0].provenance, { root: false, unknown: true, agents: ["actual-worker"] });
 			const unknown = JSON.parse(tool("session_prs")({ action: "add", reference: "example/widget#11" },
 				{ sessionId: session.sessionId, toolCallId: "unobserved-call" }));
 			assert.deepEqual(unknown[1].provenance, { root: false, unknown: true, agents: [] });
@@ -120,6 +125,17 @@ function extensionScript(entry, full) {
 			assert.match(logs.pop(), /example\\/widget#2/);
 			assert.equal(JSON.parse(tool("session_issues")({ action: "clear" })).length, 0);
 			const agentsModule = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "subagent-statusline", "tracker.mjs")).href)});
+			tool("session_prs")({ action: "add", reference: "example/widget#88" });
+			const directory = join(process.env.COPILOT_HOME, "session-state", session.sessionId);
+			mkdirSync(directory, { recursive: true });
+			const transcript = join(directory, "events.jsonl");
+			writeFileSync(transcript, '{"type":"tool.execution_start","data":');
+			const busy = tool("session_statusline")({ action: "clear" });
+			assert.equal(busy.resultType, "failure");
+			assert.match(busy.textResultForLlm, /history is still catching up/);
+			assert.equal(JSON.parse(tool("session_prs")({ action: "list" })).length, 1);
+			writeFileSync(transcript, JSON.stringify({ type: "session.start", data: {} }) + "\\n");
+			assert.match(tool("session_statusline")({ action: "clear" }), /^Cleared/);
 			for (const adapter of ["command", "tool"]) {
 				tool("session_prs")({ action: "add", reference: "example/widget#3" });
 				tool("session_issues")({ action: "add", reference: "example/widget#4" });
@@ -157,7 +173,7 @@ function extensionScript(entry, full) {
 test("unified extension handlers manage session state, validate references and configure selections", () => fixture((home) => {
 	configureStatuslines({ home, repoRoot: root, enabled: ids });
 	const result = node(home, ["--input-type=module", "-e",
-		extensionScript(join(root, "extensions", "pr-statusline", "extension.mjs"), true)]);
+		extensionScript(join(home, "extensions", "pr-statusline", "extension.mjs"), true)]);
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stdout, /handlers passed/);
 }));
@@ -180,6 +196,99 @@ test("installer exposes one SDK controller and preserves standalone entry points
 		extensionScript(join(home, "extensions", "pr-statusline", "extension.mjs"), true)]);
 	assert.equal(result.status, 0, result.stderr);
 }));
+
+for (const legacy of ["subagent-statusline", "pr-statusline"]) {
+	test(`plugin startup takes over ${legacy} without losing customizations or work agents`, () => fixture((home) => {
+		configureStatuslines({ home, repoRoot: root, enabled: [legacy] });
+		const oldEntry = join(home, "extensions", legacy, "extension.mjs");
+		const original = `${readFileSync(oldEntry, "utf8")}\n// Preserve standalone customization.\n`;
+		writeFileSync(oldEntry, original);
+		const entry = pathToFileURL(join(root, "extensions", "pr-statusline", "extension.mjs")).href;
+		const result = node(home, ["--input-type=module", "-e", `
+			import assert from "node:assert/strict";
+			import { existsSync, readFileSync, readdirSync } from "node:fs";
+			import { dirname, join } from "node:path";
+			import { registerHooks } from "node:module";
+			import { SubagentTracker, readState as readAgents, writeState as writeAgents } from ${JSON.stringify(pathToFileURL(join(root, "extensions", "subagent-statusline", "tracker.mjs")).href)};
+			import { readState } from ${JSON.stringify(pathToFileURL(join(root, "extensions", "pr-statusline", "tracker.mjs")).href)};
+			const home = process.env.COPILOT_HOME, id = "plugin-upgrade";
+			const worker = new SubagentTracker(id);
+			worker.ensureAgent("running-worker");
+			writeAgents(worker.snapshot());
+			const beforeAgents = readAgents(id);
+			const beforeConfig = readFileSync(join(home, "statusline-config.json"), "utf8");
+			const legacyId = ${JSON.stringify(`user:${legacy}`)};
+			const observers = [], replies = new Map(), disabled = [];
+			let configuration, definitions;
+			const session = {
+				sessionId: id, capabilities: {}, log: async () => {},
+				on(fn) { observers.push(fn); return () => {}; },
+				getEvents: async () => [],
+				rpc: {
+					metadata: { activity: async () => ({ hasActiveWork: false }) },
+					extensions: {
+						list: async () => ({ extensions: [
+							{ id: "plugin:jongio-skills:pr-statusline", pid: process.pid },
+							{ id: legacyId, pid: process.pid + 1 },
+							{ id: "user:unrelated", pid: process.pid + 2 },
+						] }),
+						disable: async ({ id }) => { assert.equal(id, legacyId); disabled.push(id); },
+					},
+					tools: {
+						set: async ({ tools }) => {
+							assert.deepEqual(disabled, [legacyId], "old provider must stop before names are claimed");
+							definitions = tools;
+						},
+						handlePendingToolCall: async ({ requestId, ...response }) => replies.get(requestId)(response),
+					},
+				},
+			};
+			globalThis.joinTestSession = async value => {
+				configuration = value;
+				assert.deepEqual(value.tools, [], "bootstrap must not claim conflicting tool names");
+				return session;
+			};
+			const sdk = "data:text/javascript," + encodeURIComponent("export const joinSession = globalThis.joinTestSession;");
+			registerHooks({ resolve(specifier, context, next) {
+				return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
+			} });
+			await import(${JSON.stringify(entry)});
+			assert.deepEqual(readAgents(id), beforeAgents, "SDK handover must not stop or dismiss work agents");
+			assert.equal(readFileSync(join(home, "statusline-config.json"), "utf8"), beforeConfig);
+			assert.equal(existsSync(${JSON.stringify(oldEntry)}), false);
+			const backup = readdirSync(${JSON.stringify(dirname(oldEntry))}).find(name => name.startsWith("extension.mjs.disabled-"));
+			assert.equal(readFileSync(join(${JSON.stringify(dirname(oldEntry))}, backup), "utf8"), ${JSON.stringify(original)});
+			assert.ok(definitions.every(tool => typeof tool.handler === "undefined"));
+			for (const name of ["session_prs", "session_issues", "session_subagents", "session_statusline"]) {
+				assert.ok(definitions.some(tool => tool.name === name), name);
+			}
+			let sequence = 0;
+			const emit = event => observers.forEach(handler => handler(event));
+			const invoke = (toolName, args, toolCallId = "tool-" + sequence) => new Promise(resolve => {
+				const requestId = "request-" + sequence++;
+				replies.set(requestId, resolve);
+				emit({ type: "external_tool.requested", data: { requestId, toolName, toolCallId, arguments: args } });
+			});
+			const args = { action: "add", reference: "acme/app#42" };
+			emit({ type: "tool.execution_start", agentId: "running-worker", data: {
+				toolName: "session_prs", toolCallId: "owned-call", arguments: args,
+			} });
+			const added = await invoke("session_prs", args, "owned-call");
+			assert.equal(JSON.parse(added.result)[0].owned, true);
+			assert.deepEqual(readState(id).prs[0].provenance, { root: false, unknown: false, agents: ["running-worker"] });
+			await invoke("session_prs", args);
+			assert.equal(readState(id).prs[0].provenance.unknown, true);
+			assert.ok((await invoke("session_prs", { action: "add", reference: "invalid" })).error);
+			assert.equal(JSON.parse((await invoke("session_subagents", { action: "list" })).result).length, 1);
+			assert.match((await invoke("session_statusline", { action: "clear" })).result, /^Cleared/);
+			assert.deepEqual(readState(id).prs, []);
+			assert.deepEqual(readAgents(id).agents, {});
+			console.log("plugin upgrade passed");
+		`]);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /plugin upgrade passed/);
+	}));
+}
 
 test("PR-only and worktree-only installs start their SDK entry points without enabling siblings", () => fixture((home) => {
 	for (const id of ["pr-statusline", "worktree-statusline"]) {

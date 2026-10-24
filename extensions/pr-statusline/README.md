@@ -339,6 +339,10 @@ The installer keeps one unified SDK controller to avoid duplicate tool names.
 Existing standalone sibling entry points are preserved as
 `extension.mjs.disabled-*` backups, not loaded alongside the unified controller.
 Toggling footer components does not remove the installed unified controls.
+Plugin startup also handles existing standalone installations: it preserves
+their entrypoints as backups, retires only those statusline SDK controllers in
+the current session, and then claims the unified tool names. Work agents and
+saved component selections are unchanged.
 Legacy inferred tracking is dropped on first load; explicitly re-add any work
 this session still owns. Ownership is never reconstructed from shell history,
 workspace names, or remote metadata.

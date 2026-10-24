@@ -151,16 +151,9 @@ export class SubagentTracker {
 			: 0;
 		this.dismissed = Boolean(previous?.dismissed);
 		this.simulated = Boolean(previous?.simulated);
-		this.agents = new Map(Object.entries(previous?.agents ?? {}));
+		const legacy = !this.simulated && previous?.version === 1 && previous.activeTrackingVersion !== 2;
+		this.agents = new Map(Object.entries(legacy ? {} : previous?.agents ?? {}));
 		this.ignored = new Set(previous?.ignored ?? []);
-		if (!this.simulated && previous?.version === 1 && previous.activeTrackingVersion !== 2) {
-			for (const [id, agent] of this.agents) {
-				const active = { ...agent, prs: [], mergedPrs: [] };
-				delete active.settlementObservedAt;
-				delete active.settlementDismissed;
-				this.agents.set(id, active);
-			}
-		}
 		if (!this.simulated && previous?.mergeStateVersion !== 1) {
 			for (const [id, agent] of this.agents) {
 				if (!agent.mergedPrs?.length) continue;
@@ -171,7 +164,7 @@ export class SubagentTracker {
 				this.dismissed = false;
 			}
 		}
-		this.taskCalls = new Map(Object.entries(previous?.taskCalls ?? {}));
+		this.taskCalls = new Map(Object.entries(legacy ? {} : previous?.taskCalls ?? {}));
 		this.agentToolCalls = new Map(Object.entries(previous?.activeTrackingVersion === 2 ? previous.agentToolCalls ?? {} : {}));
 	}
 
