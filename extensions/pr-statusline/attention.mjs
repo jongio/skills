@@ -118,6 +118,7 @@ export function createSessionAttention({
 	let acknowledgedGeneration = 0;
 	let previous = null;
 	let preview = null;
+	let activePreview = null;
 
 	const status = () => ({ enabled: config.enabled, supported, style: config.style,
 		binding, error: lastError, ...state.snapshot() });
@@ -128,6 +129,7 @@ export function createSessionAttention({
 	};
 	function stopChild() {
 		cancelStart?.();
+		activePreview = null;
 		const current = child;
 		child = null;
 		binding = null;
@@ -153,6 +155,7 @@ export function createSessionAttention({
 			send(message);
 		}
 		if (preview) {
+			activePreview = preview;
 			send({ type: "preview", ...preview, style: config.style, color: config.colors[preview.kind] });
 			preview = null;
 		}
@@ -213,8 +216,9 @@ export function createSessionAttention({
 								message.generation <= state.generation) {
 								acknowledgedGeneration = Math.max(acknowledgedGeneration, message.generation);
 							} else if (message.type === "previewComplete" &&
-								String(message.windowHandle) === binding && !config.enabled) {
-								stopChild();
+								String(message.windowHandle) === binding) {
+								activePreview = null;
+								if (!config.enabled) stopChild();
 							} else if (message.type === "unavailable") {
 								const error = new Error(String(message.message));
 								fail(error);
@@ -236,6 +240,7 @@ export function createSessionAttention({
 				current.once("close", (code) => {
 					if (child !== current) return;
 					child = null;
+					activePreview = null;
 					binding = null;
 					previous = null;
 					const error = new Error(stderr.trim() || `Window attention helper exited (${code}). Run /session-attention on to retry.`);
@@ -252,15 +257,19 @@ export function createSessionAttention({
 		return starting;
 	}
 	function synchronize() {
-		if (!config.enabled && !preview) { stopChild(); return; }
+		if (!config.enabled && !preview && !activePreview) { stopChild(); return; }
 		if (!supported) return;
 		if (!child && !preview && state.generation <= acknowledgedGeneration) return;
 		if (!child && (state.snapshot().kind || preview)) void start();
 		else publish();
 	}
-	function reload() {
+	function reload({ explicitDisable = false } = {}) {
 		try {
 			const next = readAttentionConfig(home);
+			if (!next.enabled && (explicitDisable || config.enabled)) {
+				preview = null;
+				activePreview = null;
+			}
 			if (!next.enabled) acknowledgedGeneration = Math.max(acknowledgedGeneration, state.generation);
 			config = next;
 			synchronize();
@@ -272,7 +281,7 @@ export function createSessionAttention({
 	}
 	reload();
 	const onConfigChange = () => {
-		if (!stopped) { failed = false; lastError = null; reload(); }
+		if (!stopped) { failed = false; lastError = null; reload({ explicitDisable: true }); }
 	};
 	if (watch) watchFile(attentionConfigPath(home), { persistent: false, interval: 1000 }, onConfigChange);
 
@@ -294,7 +303,7 @@ export function createSessionAttention({
 			setAttentionConfig(update, { home });
 			failed = false;
 			lastError = null;
-			reload();
+			reload({ explicitDisable: update.enabled === false });
 			return status();
 		},
 		async preview(kind = "approval") {
@@ -302,13 +311,15 @@ export function createSessionAttention({
 			if (!supported) throw new Error("Window attention requires Windows Terminal on Windows.");
 			failed = false;
 			lastError = null;
-			preview = { kind };
+			const request = { kind };
+			preview = request;
 			await start();
 			publish();
 			if (lastError) {
-				preview = null;
+				if (preview === request) preview = null;
 				throw new Error(lastError);
 			}
+			if (activePreview !== request) throw new Error("Window attention preview cancelled.");
 		},
 		stop() {
 			stopped = true;

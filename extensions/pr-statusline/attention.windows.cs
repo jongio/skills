@@ -47,7 +47,7 @@ internal sealed class AttentionLatch
     public bool Show(bool focused, long inputSequence, bool settled = true)
     {
         if (!focused) wasAway = true;
-        if (Active && !Acknowledged && focused && settled && (wasAway || inputSequence != inputAtStart))
+        if (Active && !Acknowledged && focused && settled && (wasAway || inputSequence > inputAtStart))
             Acknowledged = true;
         return Active && !Acknowledged;
     }
@@ -58,12 +58,12 @@ internal sealed class AttentionFocus
     private readonly IntPtr target;
     private long focusedSince = -1, interactionSince = -1;
     public bool Focused, Settled;
-    public long InputSequence;
+    public long InputSequence, SettledInputSequence;
 
     public AttentionFocus(IntPtr window, long inputSequence)
     {
         target = window;
-        InputSequence = inputSequence;
+        InputSequence = SettledInputSequence = inputSequence;
     }
 
     public void Observe(IntPtr foreground, long milliseconds)
@@ -79,7 +79,7 @@ internal sealed class AttentionFocus
         Settled = milliseconds - focusedSince >= 250;
         if (Settled && interactionSince >= 0 && milliseconds - interactionSince >= 250)
         {
-            InputSequence++;
+            SettledInputSequence = InputSequence;
             interactionSince = -1;
         }
     }
@@ -87,7 +87,11 @@ internal sealed class AttentionFocus
     public void Interact(IntPtr foreground, long milliseconds)
     {
         Observe(foreground, milliseconds);
-        if (Focused && interactionSince < 0) interactionSince = milliseconds;
+        if (Focused)
+        {
+            InputSequence++;
+            if (interactionSince < 0) interactionSince = milliseconds;
+        }
     }
 }
 
@@ -549,6 +553,24 @@ internal static class TerminalAttention
         CheckLatch(latch.Show(true, 11));
         latch.Update(new AttentionCommand { generation = 6, kind = null }, true, 11);
         CheckLatch(!latch.Show(true, 11));
+        var tracker = new AttentionFocus(new IntPtr(1), 0);
+        tracker.Observe(new IntPtr(1), 0);
+        tracker.Observe(new IntPtr(1), 250);
+        tracker.Interact(new IntPtr(1), 300);
+        var laterAlert = new AttentionLatch();
+        var laterPreview = new AttentionLatch();
+        var question = new AttentionCommand { generation = 1, kind = "question" };
+        laterAlert.Update(question, true, tracker.InputSequence);
+        laterPreview.Update(question, true, tracker.InputSequence);
+        tracker.Observe(new IntPtr(1), 400);
+        CheckLatch(laterAlert.Show(true, tracker.SettledInputSequence, tracker.Settled));
+        tracker.Observe(new IntPtr(1), 600);
+        CheckLatch(laterAlert.Show(true, tracker.SettledInputSequence, tracker.Settled));
+        CheckLatch(laterPreview.Show(true, tracker.SettledInputSequence, tracker.Settled));
+        tracker.Interact(new IntPtr(1), 700);
+        tracker.Observe(new IntPtr(1), 1000);
+        CheckLatch(!laterAlert.Show(true, tracker.SettledInputSequence, tracker.Settled));
+        CheckLatch(!laterPreview.Show(true, tracker.SettledInputSequence, tracker.Settled));
         Emit(new { type = "selfTest", passed = true });
     }
 
@@ -604,27 +626,28 @@ internal static class TerminalAttention
                 tracker.Interact(foreground, time + 10);
                 tracker.Observe(foreground, time + 500);
                 CheckLatch(!tracker.Focused && !tracker.Settled && tracker.InputSequence == 0);
-                CheckLatch(latch.Show(tracker.Focused, tracker.InputSequence, tracker.Settled));
+                CheckLatch(latch.Show(tracker.Focused, tracker.SettledInputSequence, tracker.Settled));
                 time += 1000;
             }
             tracker.Observe(first, time);
-            CheckLatch(latch.Show(tracker.Focused, tracker.InputSequence, tracker.Settled));
+            CheckLatch(latch.Show(tracker.Focused, tracker.SettledInputSequence, tracker.Settled));
             tracker.Interact(first, time + 10);
             tracker.Observe(opened, time + 50);
             tracker.Observe(opened, time + 500);
-            CheckLatch(tracker.InputSequence == 0 && latch.Show(tracker.Focused, tracker.InputSequence, tracker.Settled));
+            CheckLatch(tracker.SettledInputSequence == 0 &&
+                latch.Show(tracker.Focused, tracker.SettledInputSequence, tracker.Settled));
             tracker.Observe(first, time + 1000);
             tracker.Observe(first, time + 1300);
-            CheckLatch(!latch.Show(tracker.Focused, tracker.InputSequence, tracker.Settled));
+            CheckLatch(!latch.Show(tracker.Focused, tracker.SettledInputSequence, tracker.Settled));
             tracker.Observe(other, time + 1500);
-            CheckLatch(!latch.Show(tracker.Focused, tracker.InputSequence, tracker.Settled));
-            latch.Update(new AttentionCommand { generation = 2, kind = "question" }, true, 0);
+            CheckLatch(!latch.Show(tracker.Focused, tracker.SettledInputSequence, tracker.Settled));
+            latch.Update(new AttentionCommand { generation = 2, kind = "question" }, true, tracker.InputSequence);
             tracker.Observe(first, time + 2000);
             tracker.Observe(first, time + 2300);
-            CheckLatch(latch.Show(tracker.Focused, tracker.InputSequence, tracker.Settled));
+            CheckLatch(latch.Show(tracker.Focused, tracker.SettledInputSequence, tracker.Settled));
             tracker.Interact(first, time + 2400);
             tracker.Observe(first, time + 2700);
-            CheckLatch(!latch.Show(tracker.Focused, tracker.InputSequence, tracker.Settled));
+            CheckLatch(!latch.Show(tracker.Focused, tracker.SettledInputSequence, tracker.Settled));
             Emit(new { type = "focusIsolationTest", passed = true, sameProcessWindows = true,
                 ownedWindowExcluded = true, newWindowExcluded = true, transientActivationExcluded = true });
         }
@@ -706,11 +729,11 @@ internal static class TerminalAttention
                     }
                     bool focused = focus.Focused;
                     bool acknowledged = latch.Acknowledged;
-                    bool visible = latch.Show(focused, inputSequence, focus.Settled);
+                    bool visible = latch.Show(focused, focus.SettledInputSequence, focus.Settled);
                     if (!acknowledged && latch.Acknowledged)
                         Emit(new { type = "acknowledged", generation = latch.Generation,
                             windowHandle = target.ToInt64().ToString() });
-                    if (preview != null && !preview.Show(focused, inputSequence, focus.Settled))
+                    if (preview != null && !preview.Show(focused, focus.SettledInputSequence, focus.Settled))
                     {
                         preview = null;
                         Emit(new { type = "previewComplete", windowHandle = target.ToInt64().ToString() });

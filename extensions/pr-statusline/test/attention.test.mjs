@@ -37,7 +37,7 @@ function fakeHelper({ startup = { type: "ready", windowHandle: "1234" } } = {}) 
 		child.kill = () => { child.emit("close", 0); };
 		child.message = (value) => child.stdout.write(`${JSON.stringify({ windowHandle: "1234", ...value })}\n`);
 		children.push({ child, executable, args, options });
-		queueMicrotask(() => child.message(startup));
+		if (startup) queueMicrotask(() => child.message(startup));
 		return child;
 	}
 	return { children, messages, spawn };
@@ -389,6 +389,58 @@ test("preview has no timer, clears on interaction, works while disabled and does
 		assert.equal(helper.children[0].child.stdin.writableEnded, true);
 		await assert.rejects(runAttentionCommand(attention, "preview invalid"), /Preview kind/);
 		await assert.rejects(runAttentionCommand(attention, "on invalid"), /Usage:/);
+	} finally { attention.stop(); }
+}));
+
+test("a preview while attention is off survives unrelated live and background events until acknowledged", async () => fixture(async (home) => {
+	const { attention, helper } = controller(home);
+	try {
+		await attention.preview("question");
+		const child = helper.children[0].child;
+		for (const value of [
+			event("permission.requested", { requestId: "child-approval" }, { agentId: "child" }),
+			event("assistant.turn_start"), event("session.compaction_start"),
+			event("subagent.completed", { agentId: "child" }), event("session.idle"),
+		]) {
+			attention.observe(value);
+			assert.equal(child.stdin.writableEnded, false, value.type);
+		}
+		assert.equal(readAttentionConfig(home).enabled, false);
+		child.message({ type: "previewComplete" });
+		await flush();
+		assert.equal(child.stdin.writableEnded, true);
+	} finally { attention.stop(); }
+}));
+
+test("explicit off cancels a preview still compiling and prevents a later native launch", async () => fixture(async (home) => {
+	let finish;
+	const { attention, helper } = controller(home, { build: () => new Promise((resolve) => { finish = resolve; }) });
+	try {
+		const rejected = assert.rejects(attention.preview(), /cancelled/);
+		attention.configure({ enabled: false });
+		finish("attention.exe");
+		await rejected;
+		assert.equal(helper.children.length, 0);
+		attention.configure({ enabled: true });
+		await flush();
+		assert.equal(helper.children.length, 0, "Re-enabling must not resurrect the cancelled preview.");
+	} finally { attention.stop(); }
+}));
+
+test("explicit off cancels a preview still binding, and a late ready response cannot display it", async () => fixture(async (home) => {
+	const helper = fakeHelper({ startup: null });
+	const { attention } = controller(home, { spawn: helper.spawn });
+	try {
+		const rejected = assert.rejects(attention.preview(), /cancelled/);
+		await flush();
+		assert.equal(helper.children.length, 1);
+		attention.configure({ enabled: false });
+		await rejected;
+		const child = helper.children[0].child;
+		assert.equal(child.stdin.writableEnded, true);
+		child.message({ type: "ready", windowHandle: "1234" });
+		assert.equal(helper.messages.length, 0);
+		assert.equal(attention.status().binding, null);
 	} finally { attention.stop(); }
 }));
 
