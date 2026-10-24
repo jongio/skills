@@ -14,6 +14,11 @@ subagent-only PR details are compacted. These commit counts are separate from
 the overall agent counts and use locally fetched refs.
 See the [divergence legend](../worktree-statusline/README.md#upstream-and-base-divergence).
 
+New merge and reopen observations require a successful, unexpired shared PR
+cache entry with an observation timestamp. Failed or expired entries remain
+diagnostic history and cannot newly settle an agent. Previously confirmed
+settlement remains until the existing dismissal or fresh-reopen rules apply.
+
 ## Install (Windows, macOS, and Linux)
 
 ### Option 1: Install as a Copilot Plugin or Interactive Script (Recommended)

@@ -117,7 +117,7 @@ test("SDK token access is explicit, minimal, and restricted to named GitHub cred
     assert.equal(gitHubEnvironmentForHost(host, ghe).GITHUB_TOKEN, undefined);
   }
 });
-test("background branch discovery enriches explicit ownership without enrolling passive workspace hints", async (t) => {
+test("workspace branch hints never trigger unused lookup or enroll targets during owned refresh", async (t) => {
   const home = fixture(t);
   const directory = join(home, "session-state", "branch");
   mkdirSync(directory, { recursive: true });
@@ -140,20 +140,20 @@ test("background branch discovery enriches explicit ownership without enrolling 
   writeState(active.snapshot(), home);
   await refreshTracker("pr", "branch", { home, now: 2000 });
   assert.equal(readState("branch", home).prs[0].url, "https://github.com/example/widget/pull/1");
-  assert.equal(branches, 1);
+  assert.equal(branches, 0);
   clearSessionStatusline({ session_id: "branch" }, { home, now: 3000 });
   await refreshTracker("pr", "branch", { home, now: 4000 });
   assert.deepEqual(readState("branch", home).prs, []);
   writeFileSync(workspace, "repository: example/widget\nbranch: later\n");
   await refreshTracker("pr", "branch", { home, now: 5000 });
   assert.deepEqual(readState("branch", home).prs, []);
-  assert.equal(branches, 1, "new branch hints cannot undo a clear");
+  assert.equal(branches, 0, "new branch hints cannot undo a clear");
   const later = new SessionTracker("branch", readState("branch", home));
   later.manage("add", "https://github.com/example/widget/pull/2");
   writeState(later.snapshot(), home);
   await refreshTracker("pr", "branch", { home, now: 6000 });
   assert.deepEqual(readState("branch", home).prs.map((pr) => pr.url), ["https://github.com/example/widget/pull/2"]);
-  assert.equal(branches, 2);
+  assert.equal(branches, 0, "owned targets refresh directly without a duplicate branch query");
 });
 test("background refresh coalesces, preserves failed observation age, and isolates changed credentials", async (t) => {
   const home = fixture(t);
@@ -277,6 +277,9 @@ test("both plugin notification entry points register opt-in tools without model 
       const logs = [];
       const session = { sessionId: "notification-fixture",
         log: async (text) => logs.push(text), on: (handler) => { observe = handler; },
+        disconnect: async () => {},
+        rpc: { extensions: { list: async () => ({ extensions: [{ id: "plugin:fixture:daemon-notifications", pid: process.pid }] }),
+          disable: async () => assert.fail("No legacy provider in this fixture") } },
         send: () => assert.fail("No model calls"), sendAndWait: () => assert.fail("No model calls") };
       globalThis.joinSessionFixture = async (value) => { configuration = value; return session; };
       const sdk = "data:text/javascript," + encodeURIComponent("export const joinSession = globalThis.joinSessionFixture;");
@@ -294,6 +297,85 @@ test("both plugin notification entry points register opt-in tools without model 
       assert.equal(logs.length, 1);
       tool.handler({ action: "unsubscribe", watcher: "ci" });
       observe({ type: "session.shutdown" });
+    `;
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+      cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,
+      env: { ...process.env, COPILOT_HOME: home },
+    });
+    assert.equal(result.status, 0, result.stderr);
+  }
+});
+
+test("plugin notification handover retires the manual provider and preserves single delivery/unsubscribe", (t) => {
+  for (const entry of [
+    join(root, "com.github.copilot", "extensions", "daemon-notifications", "extension.mjs"),
+    join(root, "extensions", "com.github.copilot", "extensions", "daemon-notifications", "extension.mjs"),
+  ]) {
+    const home = fixture(t);
+    const code = `
+      import assert from "node:assert/strict";
+      import { mkdirSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+      import { join } from "node:path";
+      import { registerHooks } from "node:module";
+      import { createEventWriter } from ${JSON.stringify(pathToFileURL(join(root, "runtime", "github-client", "events.mjs")).href)};
+      const timers = new Map(), logs = [], disabled = [], configurations = {}, observers = { manual: [], plugin: [] };
+      let stage = "manual", nextTimer = 0;
+      globalThis.setInterval = (callback) => {
+        const handle = { id: ++nextTimer, unref() {} };
+        timers.set(handle, callback);
+        return handle;
+      };
+      globalThis.clearInterval = (handle) => timers.delete(handle);
+      const sessions = Object.fromEntries(["manual", "plugin"].map((kind) => [kind, {
+        sessionId: "handover", log: async (text) => logs.push({ kind, text }),
+        on: (callback) => observers[kind].push(callback), disconnect: async () => {},
+        send: () => assert.fail("No model calls"), sendAndWait: () => assert.fail("No model calls"),
+        rpc: { extensions: {
+          list: async () => ({ extensions: stage === "manual"
+            ? [{ id: "user:daemon-notifications", pid: process.pid }]
+            : [{ id: "user:daemon-notifications", pid: process.pid + 1 },
+               { id: "plugin:fixture:daemon-notifications", pid: process.pid }] }),
+          disable: async ({ id }) => {
+            assert.equal(id, "user:daemon-notifications");
+            disabled.push(id);
+            for (const observe of observers.manual) observe({ type: "session.shutdown" });
+          },
+        } },
+      }]));
+      globalThis.joinSessionFixture = async (value) => {
+        if (value.tools?.length) configurations[stage] = value;
+        return sessions[stage];
+      };
+      const sdk = "data:text/javascript," + encodeURIComponent("export const joinSession = globalThis.joinSessionFixture;");
+      registerHooks({ resolve(specifier, context, next) {
+        return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
+      } });
+      const legacy = join(process.env.COPILOT_HOME, "extensions", "daemon-notifications", "extension.mjs");
+      mkdirSync(join(process.env.COPILOT_HOME, "extensions", "daemon-notifications"), { recursive: true });
+      writeFileSync(legacy, "manual entrypoint fixture");
+      await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "daemon-notifications", "extension.mjs")).href + "?manual")});
+      const manualTool = configurations.manual.tools.find((tool) => tool.name === "daemon_notifications");
+      const { file } = JSON.parse(manualTool.handler({ action: "subscribe", watcher: "ci" }));
+      const emit = createEventWriter(file, "ci-hound");
+      stage = "plugin";
+      await import(${JSON.stringify(pathToFileURL(entry).href)});
+      emit({ events: [{ type: "JOB_FAILED", repo: "fixture/repo" }] });
+      for (const poll of [...timers.values()]) await poll();
+      assert.equal(logs.length, 1, "one event is delivered by exactly one active provider");
+      assert.equal(logs[0].kind, "plugin");
+      assert.deepEqual(disabled, ["user:daemon-notifications"]);
+      assert.equal(timers.size, 1);
+      assert.equal(existsSync(legacy), false);
+      assert.equal(readdirSync(join(process.env.COPILOT_HOME, "extensions", "daemon-notifications"))
+        .filter((name) => name.startsWith("extension.mjs.disabled-")).length, 1);
+      const pluginTool = configurations.plugin.tools.find((tool) => tool.name === "daemon_notifications");
+      assert.equal(JSON.parse(pluginTool.handler({ action: "status" })).length, 1);
+      pluginTool.handler({ action: "unsubscribe", watcher: "ci" });
+      emit({ events: [{ type: "JOB_FAILED", repo: "fixture/repo" }] });
+      for (const poll of [...timers.values()]) await poll();
+      assert.equal(logs.length, 1, "unsubscribe cannot leave a legacy provider polling");
+      assert.equal(timers.size, 0);
+      for (const observe of observers.plugin) observe({ type: "session.shutdown" });
     `;
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
       cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,

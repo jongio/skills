@@ -6,6 +6,10 @@ creates another Copilot runtime, calls a model, starts watchers or repairs, or
 authorizes a merge.
 
 The full plugin and standalone statuslines plugin expose this entry point.
+When a plugin starts, it retires the legacy manual notifications provider before
+registering its tools, preserving a disabled entrypoint backup and the session's
+subscriptions and replay watermarks. This prevents concurrent manual/plugin
+delivery and makes unsubscribe authoritative for the active provider.
 Subscription is disabled until explicitly requested. For a manual install, run
 from the repository root:
 

@@ -270,7 +270,7 @@ test("settled subagent counts dismiss independently, without losing active PRs o
 		lastUserInputAt: 500,
 		agents: { a: { id: "a", status: "completed", prs: [url(1)], mergedPrs: [url(1)], completedAt: 10 } },
 	});
-	legacy.syncWithPrCache(data, 1000);
+	legacy.syncWithPrCache({ [url(1)]: { ...data[url(1)], checkedAt: 1000 } }, 1000);
 	assert.equal(legacy.agents.get("a").settlementObservedAt, 1000);
 	legacy.observe(event("user.message", 750));
 	assert.equal(legacy.counts().merged, 1);

@@ -72,7 +72,7 @@ try {
 		result: { content: "Merged" },
 	}, "agent-2", new Date(2600).toISOString()));
 	assert.equal(tracker.counts().merged, 0, "merge command success is not remote merge confirmation");
-	tracker.syncWithPrCache({ "https://github.com/Azure/azure-dev/pull/102": { info: { state: "MERGED" } } }, 2600);
+	tracker.syncWithPrCache({ "https://github.com/Azure/azure-dev/pull/102": { info: { state: "MERGED" }, checkedAt: 2600 } }, 2600);
 	assert.deepEqual(tracker.counts(), { total: 4, starting: 1, exploring: 0, inPr: 1, merged: 1, done: 1, failed: 0 });
 
 	// Live transcript rendering test (including parallel general-purpose + explore subagents)

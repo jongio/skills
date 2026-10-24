@@ -1,6 +1,5 @@
 import { statuslineGitHub } from "./github-transport.mjs";
 import { join } from "node:path";
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { withStateLock } from "./state-lock.mjs";
@@ -30,7 +29,18 @@ export async function prefetchStatuses(kind, items, {
     const host = new URL(item.url).hostname;
     let scope;
     try { scope = fetchStatus ? "injected" : await statuslineGitHub.cacheScope(host, { signal, target: item.url }); }
-    catch (error) { results.set(item.url, error); continue; }
+    catch (error) {
+      signal?.throwIfAborted();
+      const cacheFile = join(home, `${kind === "pr" ? "pr" : "issue"}-statusline`, `${kind === "pr" ? "pr" : "issue"}-cache.json`);
+      withStateLock(cacheFile, () => {
+        const cache = read(home);
+        if (!cache[item.url]) return;
+        cache[item.url] = { ...cache[item.url], lastError: error.message };
+        write(cache, home);
+      });
+      results.set(item.url, error);
+      continue;
+    }
     const entry = read(home)[item.url];
     if (!force && entry?.scope === scope && entry.retryAt > now) {
       results.set(item.url, new Error(entry.lastError || "GitHub refresh is backing off"));
@@ -147,53 +157,10 @@ export async function refreshTracker(kind, sessionId, {
 } = {}) {
   const module = await import(kind === "pr" ? "./pr-statusline/tracker.mjs" : "./issue-statusline/tracker.mjs");
   const Tracker = kind === "pr" ? module.SessionTracker : module.IssueTracker;
-  let initial = module.readState(sessionId, home);
-  let tracker = new Tracker(sessionId, initial);
+  const initial = module.readState(sessionId, home);
+  const tracker = new Tracker(sessionId, initial);
   const list = kind === "pr" ? "prs" : "issues";
   const failures = [];
-  if (kind === "pr") {
-    try {
-      const workspace = readFileSync(join(home, "session-state", sessionId, "workspace.yaml"), "utf8");
-      const repository = /^repository:\s*(\S+)/m.exec(workspace)?.[1];
-      const branch = /^branch:\s*(\S+)/m.exec(workspace)?.[1];
-      if (repository && branch && tracker.state.prs.some((pr) => !pr.simulated) &&
-          !["main", "master", "HEAD"].includes(branch)) {
-        const github = await import("./pr-statusline/github.mjs");
-        const key = `branch:${tracker.host}/${repository}:${branch}`;
-        const scope = await statuslineGitHub.cacheScope(tracker.host, { signal, target: key });
-        const cache = github.readPrCache(home);
-        if (!force && cache[key]?.scope === scope && cache[key].retryAt > now) {
-          throw new Error(cache[key].lastError || "Branch discovery is backing off");
-        }
-        let data = cache[key]?.scope === scope && now - cache[key].checkedAt < 45000 ? cache[key].data : undefined;
-        if (data === undefined) {
-          try {
-            data = await github.queryBranchPrWithGh(repository, branch, { host: tracker.host, signal });
-          } catch (error) {
-            signal?.throwIfAborted();
-            withStateLock(join(home, "pr-statusline", "pr-cache.json"), () => {
-              const current = github.readPrCache(home);
-              current[key] = { ...(current[key]?.scope === scope ? current[key] : {}), scope,
-                lastError: error.message, retryAt: retryDeadline(error.response?.headers || {}, now) };
-              github.writePrCache(current, home);
-            });
-            throw error;
-          }
-          withStateLock(join(home, "pr-statusline", "pr-cache.json"), () => {
-            github.writePrCache({ ...github.readPrCache(home), [key]: { data, scope: data.cacheScope || scope, checkedAt: now, ttlMs: 45000 } }, home);
-          });
-        }
-        const synced = module.syncSession({ session_id: sessionId }, { home, now, fetchPrStatus: false }).state;
-        if (synced) {
-          initial = synced;
-          tracker = new Tracker(sessionId, initial);
-        }
-      }
-    } catch (error) {
-      signal?.throwIfAborted();
-      if (error.code !== "ENOENT") failures.push(`Branch discovery: ${error.message}`);
-    }
-  }
   const previous = initial ? structuredClone(initial) : tracker.snapshot();
   const fetch = await prefetchStatuses(kind, tracker.state[list], { home, now, force, signal });
   signal?.throwIfAborted();

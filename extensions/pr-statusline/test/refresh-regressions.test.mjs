@@ -108,22 +108,26 @@ for (const kind of ["pr", "issue"]) {
   });
 }
 
-test("optional branch discovery failure does not block known PRs and issues", async (t) => {
+test("unused workspace branch lookup cannot delay known PR and issue refresh", async (t) => {
   const home = fixture(t), id = "discovery";
   seed("pr", home, id);
   seed("issue", home, id);
   const directory = join(home, "session-state", id);
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "workspace.yaml"), "repository: inaccessible/workspace\nbranch: feature\n");
-  mockGitHub(t, (kind) => kind === "branch" ? new Error("Branch discovery unavailable")
-    : { state: "OPEN", title: kind === "pr" ? "Updated PR" : "Updated issue" });
+  let branches = 0;
+  mockGitHub(t, (kind) => {
+    if (kind === "branch") { branches++; return new Error("Branch discovery unavailable"); }
+    return { state: "OPEN", title: kind === "pr" ? "Updated PR" : "Updated issue" };
+  });
   const reports = [];
   const collector = await collect(session(id), { home, report: (message) => reports.push(message) });
   t.after(() => collector.stop());
   await collector.initialPoll;
   assert.equal(readState(id, home).prs[0].title, "Updated PR");
   assert.equal(readIssues(id, home).issues[0].title, "Updated issue");
-  assert.ok(reports.some((message) => /discovery/i.test(message)));
+  assert.equal(branches, 0);
+  assert.deepEqual(reports, []);
 });
 
 test("successful remote recovery clears a running collector's stale flag", async (t) => {
@@ -158,14 +162,17 @@ test("cached recovery clears stale state without requiring a newer observation t
   });
   await refreshTracker("pr", id, { home, now: 1000 });
   unavailable = true;
-  await refreshTracker("pr", id, { home, now: 2000 });
+  await refreshTracker("pr", id, { home, now: 1000 });
   assert.equal(readState(id, home).prs[0].stale, true);
   unavailable = false;
+  const recovered = await prefetchStatuses("pr", [{ url: refs.pr }], { home, now: 1000, force: true });
+  assert.equal(recovered(refs.pr).title, "Snapshot");
+  assert.equal(readState(id, home).prs[0].stale, true, "shared recovery does not mutate local tracking");
   t.mock.method(Date, "now", () => 3000);
   const collector = await collect(session(id), { home });
   t.after(() => collector.stop());
   await collector.initialPoll;
-  assert.equal(calls, 1, "the valid cached observation is reused");
+  assert.equal(calls, 2, "the recovered valid cache is reused without another request");
   assert.equal(readState(id, home).prs[0].checkedAt, 1000);
   assert.equal(readState(id, home).prs[0].stale, false);
   assert.equal(collector.tracker.state.prs[0].stale, false);
@@ -244,37 +251,6 @@ test("refresh backoff honors numeric and HTTP-date Retry-After with bounded malf
     const second = await prefetchStatuses("pr", [{ url: refs.pr }], { home, now: now + delay - 1 });
     assert.throws(() => second(refs.pr), /Server backoff/);
     assert.equal(calls, 1, "no retry before the server's deadline");
-  }
-});
-
-test("branch discovery honors credential-scoped cooldown while known PRs keep refreshing", async (t) => {
-  for (const header of ["180", new Date(181000).toUTCString()]) {
-    const home = fixture(t), id = "branch-cooldown";
-    seed("pr", home, id);
-    const directory = join(home, "session-state", id);
-    mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, "workspace.yaml"), "repository: fixture/workspace\nbranch: feature\n");
-    let scope = "one", branches = 0, known = 0;
-    t.mock.method(statuslineGitHub, "cacheScope", async () => scope);
-    t.mock.method(statuslineGitHub, "request", async ({ query }) => {
-      if (query.includes("pullRequests(")) {
-        branches++;
-        return { ok: false, status: 429, cacheScope: scope, error: "Discovery cooldown", headers: { "retry-after": header } };
-      }
-      known++;
-      return { ok: true, cacheScope: scope, data: { data: { repository: { pullRequest: { state: "OPEN", title: "Known PR" } } } } };
-    });
-    await refreshTracker("pr", id, { home, now: 1000 });
-    const key = "branch:github.com/fixture/workspace:feature";
-    assert.equal(readPrCache(home)[key]?.retryAt, 181000);
-    await refreshTracker("pr", id, { home, now: 61000 });
-    assert.equal(branches, 1, "feature discovery does not retry during server cooldown");
-    assert.equal(known, 2, "unrelated known PR refresh is not blocked");
-    assert.equal(readState(id, home).prs[0].title, "Known PR");
-    scope = "two";
-    await refreshTracker("pr", id, { home, now: 62000 });
-    assert.equal(branches, 2, "another credential does not inherit the old cooldown");
-    assert.equal(readPrCache(home)[key].scope, "two");
   }
 });
 
