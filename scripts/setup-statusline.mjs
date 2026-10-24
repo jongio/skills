@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { ensureWindowsTerminalNerdFont } from "../extensions/pr-statusline/compose.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
@@ -181,6 +182,9 @@ export function configureStatuslines({
 	}
 
 	// Write statusline-config.json so compose.mjs only renders the selected extensions
+	if (existingIconMode !== "unicode" && resolve(home) === resolve(process.env.COPILOT_HOME || join(homedir(), ".copilot"))) {
+		ensureWindowsTerminalNerdFont();
+	}
 	atomicWriteText(
 		configPath,
 		`${JSON.stringify({ version: 1, enabled: validEnabled, iconMode: existingIconMode, updatedAt: new Date().toISOString() }, null, 2)}\n`,

@@ -31,7 +31,9 @@ const NERD_FONT_TO_UNICODE = new Map([
 const NERD_FONT_REGEX = /[\uE726\uE727\uF419\uF4DD\uF058\uF252\uF057\uF071\uF440\uF164\uF075\uF41B\uF41D\uF188\uF415\uF4B8\uF422\uF002]/g;
 
 export function toUnicodeIcons(text) {
-	return String(text ?? "").replace(NERD_FONT_REGEX, (ch) => NERD_FONT_TO_UNICODE.get(ch) ?? ch);
+	return String(text ?? "")
+		.replace(/\uF415 ?/g, "@")
+		.replace(NERD_FONT_REGEX, (ch) => NERD_FONT_TO_UNICODE.get(ch) ?? ch);
 }
 
 export function isNerdFontName(fontName) {
@@ -41,11 +43,79 @@ export function isNerdFontName(fontName) {
 	return /\b(?:nerd\s*font|caskaydia|meslolg[sml]?\s*nf|fira\s*code\s*nf|jetbrains\s*mono\s*nf|hack\s*nf|0xproto\s*nf|[a-z0-9_-]+\s+nf(?:\s+mono|\s+propo)?)\b/i.test(raw);
 }
 
-function stripJsonComments(raw) {
-	return String(raw ?? "")
-		.replace(/\/\*[\s\S]*?\*\//g, "")
-		.replace(/^\s*\/\/.*$/gm, "")
-		.replace(/,(\s*[}\]])/g, "$1");
+export function stripJsonComments(raw) {
+	const src = String(raw ?? "");
+	let noComments = "";
+	let inString = false;
+	let i = 0;
+	while (i < src.length) {
+		const ch = src[i];
+		const next = src[i + 1];
+		if (inString) {
+			noComments += ch;
+			if (ch === "\\" && i + 1 < src.length) {
+				noComments += next;
+				i += 2;
+				continue;
+			}
+			if (ch === "\"") inString = false;
+			i++;
+			continue;
+		}
+		if (ch === "\"") {
+			inString = true;
+			noComments += ch;
+			i++;
+			continue;
+		}
+		if (ch === "/" && next === "/") {
+			i += 2;
+			while (i < src.length && src[i] !== "\n" && src[i] !== "\r") i++;
+			continue;
+		}
+		if (ch === "/" && next === "*") {
+			i += 2;
+			while (i + 1 < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+			i += 2;
+			continue;
+		}
+		noComments += ch;
+		i++;
+	}
+	let out = "";
+	inString = false;
+	i = 0;
+	while (i < noComments.length) {
+		const ch = noComments[i];
+		if (inString) {
+			out += ch;
+			if (ch === "\\" && i + 1 < noComments.length) {
+				out += noComments[i + 1];
+				i += 2;
+				continue;
+			}
+			if (ch === "\"") inString = false;
+			i++;
+			continue;
+		}
+		if (ch === "\"") {
+			inString = true;
+			out += ch;
+			i++;
+			continue;
+		}
+		if (ch === ",") {
+			let j = i + 1;
+			while (j < noComments.length && /\s/.test(noComments[j])) j++;
+			if (noComments[j] === "}" || noComments[j] === "]") {
+				i++;
+				continue;
+			}
+		}
+		out += ch;
+		i++;
+	}
+	return out;
 }
 
 function isWslEnvironment(procVersionPath = "/proc/version") {
@@ -86,14 +156,62 @@ function candidateWindowsTerminalSettingsPaths() {
 	return paths;
 }
 
-export function detectNerdFontFromWindowsTerminalSettings(settingsObj, {
+const INSTALLED_NERD_FONT_CANDIDATES = [
+	["CaskaydiaCoveNerdFontMono-Regular.ttf", "CaskaydiaCove Nerd Font Mono"],
+	["CaskaydiaCoveNerdFont-Regular.ttf", "CaskaydiaCove Nerd Font"],
+	["JetBrainsMonoNerdFontMono-Regular.ttf", "JetBrainsMono Nerd Font Mono"],
+	["JetBrainsMonoNerdFont-Regular.ttf", "JetBrainsMono Nerd Font"],
+	["FiraCodeNerdFontMono-Regular.ttf", "FiraCode Nerd Font Mono"],
+	["FiraCodeNerdFont-Regular.ttf", "FiraCode Nerd Font"],
+	["MesloLGSNerdFontMono-Regular.ttf", "MesloLGS Nerd Font Mono"],
+	["MesloLGS NF Regular.ttf", "MesloLGS NF"],
+	["HackNerdFontMono-Regular.ttf", "Hack Nerd Font Mono"],
+	["0xProtoNerdFontMono-Regular.ttf", "0xProto Nerd Font Mono"],
+];
+
+function candidateWindowsFontDirs() {
+	const dirs = [];
+	if (process.platform === "win32") {
+		if (process.env.LOCALAPPDATA) {
+			dirs.push(join(process.env.LOCALAPPDATA, "Microsoft", "Windows", "Fonts"));
+		}
+		if (process.env.WINDIR) {
+			dirs.push(join(process.env.WINDIR, "Fonts"));
+		}
+	} else if (process.platform === "linux" && existsSync("/mnt/c")) {
+		try {
+			const skip = new Set(["Public", "Default", "Default User", "All Users"]);
+			if (existsSync("/mnt/c/Users")) {
+				for (const entry of readdirSync("/mnt/c/Users", { withFileTypes: true })) {
+					if (!entry.isDirectory() || skip.has(entry.name)) continue;
+					dirs.push(join("/mnt/c/Users", entry.name, "AppData", "Local", "Microsoft", "Windows", "Fonts"));
+				}
+			}
+			dirs.push("/mnt/c/Windows/Fonts");
+		} catch {
+			// Ignore unreadable /mnt/c paths.
+		}
+	}
+	return dirs;
+}
+
+export function detectInstalledWindowsNerdFontFace({ fontDirs = null } = {}) {
+	const dirs = fontDirs ?? candidateWindowsFontDirs();
+	for (const dir of dirs) {
+		if (!dir || !existsSync(dir)) continue;
+		for (const [fileName, face] of INSTALLED_NERD_FONT_CANDIDATES) {
+			if (existsSync(join(dir, fileName))) return face;
+		}
+	}
+	return null;
+}
+
+function resolveWindowsTerminalProfile(settingsObj, {
 	wtProfileId = process.env.WT_PROFILE_ID,
 	wslDistroName = process.env.WSL_DISTRO_NAME,
 	isWsl = process.platform === "linux",
 } = {}) {
-	if (!settingsObj || typeof settingsObj !== "object") return null;
 	const list = Array.isArray(settingsObj?.profiles?.list) ? settingsObj.profiles.list : [];
-	const defaultFace = settingsObj?.profiles?.defaults?.font?.face ?? "";
 	let matchedProfile = null;
 	if (wtProfileId) {
 		matchedProfile = list.find((p) => String(p?.guid ?? "").toLowerCase() === String(wtProfileId).toLowerCase()) ?? null;
@@ -110,7 +228,286 @@ export function detectNerdFontFromWindowsTerminalSettings(settingsObj, {
 			matchedProfile = list.find((p) => String(p?.source ?? "").toLowerCase().includes("wsl")) ?? null;
 		}
 	}
-	const effectiveFace = matchedProfile?.font?.face || defaultFace || "";
+	if (!matchedProfile && !wtProfileId && !isWsl && settingsObj?.defaultProfile) {
+		const defTarget = String(settingsObj.defaultProfile).toLowerCase();
+		matchedProfile = list.find((p) =>
+			String(p?.guid ?? "").toLowerCase() === defTarget ||
+			String(p?.name ?? "").toLowerCase() === defTarget,
+		) ?? null;
+	}
+	return matchedProfile;
+}
+
+function scanJsoncObject(src, openIndex) {
+	let depth = 0;
+	let inString = false;
+	let firstTokenAfterOpen = -1;
+	let i = openIndex;
+	while (i < src.length) {
+		const ch = src[i];
+		const next = src[i + 1];
+		if (inString) {
+			if (ch === "\\" && i + 1 < src.length) {
+				i += 2;
+				continue;
+			}
+			if (ch === "\"") inString = false;
+			i++;
+			continue;
+		}
+		if (ch === "/" && next === "/") {
+			i += 2;
+			while (i < src.length && src[i] !== "\n" && src[i] !== "\r") i++;
+			continue;
+		}
+		if (ch === "/" && next === "*") {
+			i += 2;
+			while (i + 1 < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+			i += 2;
+			continue;
+		}
+		if (/\s/.test(ch)) {
+			i++;
+			continue;
+		}
+		if (depth === 1 && firstTokenAfterOpen === -1) {
+			firstTokenAfterOpen = i;
+		}
+		if (ch === "\"") {
+			inString = true;
+			i++;
+			continue;
+		}
+		if (ch === "{" || ch === "[") {
+			depth++;
+		} else if (ch === "}" || ch === "]") {
+			depth--;
+			if (depth === 0) {
+				return {
+					open: openIndex,
+					close: i,
+					firstTokenAfterOpen: firstTokenAfterOpen === -1 ? i : firstTokenAfterOpen,
+				};
+			}
+		}
+		i++;
+	}
+	return null;
+}
+
+function skipJsoncTrivia(src, index, limit = src.length - 1) {
+	let i = index;
+	while (i <= limit) {
+		if (/\s/.test(src[i])) {
+			i++;
+			continue;
+		}
+		if (src[i] === "/" && src[i + 1] === "/") {
+			i += 2;
+			while (i <= limit && src[i] !== "\n" && src[i] !== "\r") i++;
+			continue;
+		}
+		if (src[i] === "/" && src[i + 1] === "*") {
+			i += 2;
+			while (i + 1 <= limit && !(src[i] === "*" && src[i + 1] === "/")) i++;
+			i += 2;
+			continue;
+		}
+		break;
+	}
+	return i;
+}
+
+function scanJsoncValueSpan(src, startIndex, limit = src.length - 1) {
+	const ch = src[startIndex];
+	if (ch === "{" || ch === "[") {
+		const span = scanJsoncObject(src, startIndex);
+		if (!span) return null;
+		return {
+			start: startIndex,
+			end: span.close + 1,
+			isObject: ch === "{",
+			objectSpan: ch === "{" ? span : null,
+		};
+	}
+	if (ch === "\"") {
+		let i = startIndex + 1;
+		while (i <= limit) {
+			if (src[i] === "\\" && i + 1 <= limit) {
+				i += 2;
+				continue;
+			}
+			if (src[i] === "\"") {
+				return { start: startIndex, end: i + 1, isObject: false, objectSpan: null };
+			}
+			i++;
+		}
+		return null;
+	}
+	let i = startIndex;
+	while (i <= limit) {
+		const c = src[i];
+		if (/\s/.test(c) || c === "," || c === "}" || c === "]") break;
+		if (c === "/" && (src[i + 1] === "/" || src[i + 1] === "*")) break;
+		i++;
+	}
+	return i > startIndex ? { start: startIndex, end: i, isObject: false, objectSpan: null } : null;
+}
+
+function findJsoncPropertyValue(src, openIndex, closeIndex, propName) {
+	let i = openIndex + 1;
+	let match = null;
+	while (i < closeIndex) {
+		i = skipJsoncTrivia(src, i, closeIndex - 1);
+		if (i >= closeIndex) break;
+		if (src[i] === ",") {
+			i++;
+			continue;
+		}
+		if (src[i] !== "\"") return match;
+		const keySpan = scanJsoncValueSpan(src, i, closeIndex - 1);
+		if (!keySpan) return match;
+		let keyName = null;
+		try {
+			keyName = JSON.parse(src.slice(keySpan.start, keySpan.end));
+		} catch {
+			return match;
+		}
+		const colonIdx = skipJsoncTrivia(src, keySpan.end, closeIndex - 1);
+		if (src[colonIdx] !== ":") return match;
+		const valStart = skipJsoncTrivia(src, colonIdx + 1, closeIndex - 1);
+		if (valStart >= closeIndex) return match;
+		const valSpan = scanJsoncValueSpan(src, valStart, closeIndex - 1);
+		if (!valSpan) return match;
+		if (keyName === propName) {
+			match = valSpan;
+		}
+		i = valSpan.end;
+	}
+	return match;
+}
+
+function insertPropertyInJsoncObject(src, span, propText) {
+	if (span.firstTokenAfterOpen < span.close) {
+		return `${src.slice(0, span.firstTokenAfterOpen)}${propText}, ${src.slice(span.firstTokenAfterOpen)}`;
+	}
+	const inner = src.slice(span.open + 1, span.close);
+	if (!inner.trim()) {
+		return `${src.slice(0, span.open + 1)} ${propText} ${src.slice(span.close)}`;
+	}
+	return `${src.slice(0, span.close)}${propText}\n${src.slice(span.close)}`;
+}
+
+function replaceJsoncValueSpan(src, valSpan, replacementText) {
+	return `${src.slice(0, valSpan.start)}${replacementText}${src.slice(valSpan.end)}`;
+}
+
+function applyDefaultFontFaceJsonc(raw, installedFace) {
+	const firstBrace = skipJsoncTrivia(raw, 0);
+	if (raw[firstBrace] !== "{") return null;
+	const rootSpan = scanJsoncObject(raw, firstBrace);
+	if (!rootSpan) return null;
+	const faceLiteral = JSON.stringify(installedFace);
+	const profilesVal = findJsoncPropertyValue(raw, rootSpan.open, rootSpan.close, "profiles");
+	if (!profilesVal) {
+		return insertPropertyInJsoncObject(raw, rootSpan, `"profiles": { "defaults": { "font": { "face": ${faceLiteral} } } }`);
+	}
+	if (!profilesVal.isObject) {
+		return null;
+	}
+	const profilesSpan = profilesVal.objectSpan;
+	const defaultsVal = findJsoncPropertyValue(raw, profilesSpan.open, profilesSpan.close, "defaults");
+	if (!defaultsVal) {
+		return insertPropertyInJsoncObject(raw, profilesSpan, `"defaults": { "font": { "face": ${faceLiteral} } }`);
+	}
+	if (!defaultsVal.isObject) {
+		return null;
+	}
+	const defaultsSpan = defaultsVal.objectSpan;
+	const fontVal = findJsoncPropertyValue(raw, defaultsSpan.open, defaultsSpan.close, "font");
+	if (!fontVal) {
+		const legacyFaceVal = findJsoncPropertyValue(raw, defaultsSpan.open, defaultsSpan.close, "fontFace");
+		if (legacyFaceVal) {
+			return replaceJsoncValueSpan(raw, legacyFaceVal, faceLiteral);
+		}
+		return insertPropertyInJsoncObject(raw, defaultsSpan, `"font": { "face": ${faceLiteral} }`);
+	}
+	if (!fontVal.isObject) {
+		return null;
+	}
+	const fontSpan = fontVal.objectSpan;
+	const faceVal = findJsoncPropertyValue(raw, fontSpan.open, fontSpan.close, "face");
+	if (faceVal) {
+		return replaceJsoncValueSpan(raw, faceVal, faceLiteral);
+	}
+	return insertPropertyInJsoncObject(raw, fontSpan, `"face": ${faceLiteral}`);
+}
+
+export function ensureWindowsTerminalNerdFont({
+	wtSettingsPaths = null,
+	fontDirs = null,
+	wtProfileId = process.env.WT_PROFILE_ID,
+	wslDistroName = process.env.WSL_DISTRO_NAME,
+	termProgram = process.env.TERM_PROGRAM,
+	isWsl = isWslEnvironment(),
+} = {}) {
+	const envChoice = String(process.env.COPILOT_STATUSLINE_ICONS ?? "").trim().toLowerCase();
+	if (["unicode", "ascii", "plain", "false", "0"].includes(envChoice)) return null;
+	if (String(termProgram ?? "").toLowerCase() === "vscode") return null;
+	if (isWsl && !wtSettingsPaths) return null;
+	const installedFace = detectInstalledWindowsNerdFontFace({ fontDirs });
+	if (!installedFace) return null;
+	const paths = wtSettingsPaths ?? candidateWindowsTerminalSettingsPaths();
+	const candidates = [];
+	for (const p of paths) {
+		if (!existsSync(p)) continue;
+		try {
+			const raw = readFileSync(p, "utf8");
+			const stripped = stripJsonComments(raw);
+			const parsed = JSON.parse(stripped);
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+			const list = Array.isArray(parsed?.profiles?.list) ? parsed.profiles.list : [];
+			const hasExplicitProfile = Boolean(
+				wtProfileId &&
+				list.some((prof) => String(prof?.guid ?? "").toLowerCase() === String(wtProfileId).toLowerCase()),
+			);
+			candidates.push({ path: p, raw, parsed, hasExplicitProfile });
+		} catch {
+			// Ignore unreadable or malformed candidate.
+		}
+	}
+	if (!candidates.length) return null;
+	const scoped = wtProfileId
+		? candidates.filter((c) => c.hasExplicitProfile)
+		: candidates;
+	if (scoped.length !== 1) return null;
+	const { path: targetPath, raw, parsed } = scoped[0];
+	try {
+		const matchedProfile = resolveWindowsTerminalProfile(parsed, { wtProfileId, wslDistroName, isWsl });
+		const defaultFace = String(parsed?.profiles?.defaults?.font?.face ?? parsed?.profiles?.defaults?.fontFace ?? "").trim();
+		const profileFace = String(matchedProfile?.font?.face ?? matchedProfile?.fontFace ?? "").trim();
+		if (profileFace || defaultFace) {
+			return isNerdFontName(profileFace || defaultFace) ? (profileFace || defaultFace) : null;
+		}
+		const updatedRaw = applyDefaultFontFaceJsonc(raw, installedFace);
+		if (!updatedRaw) return null;
+		JSON.parse(stripJsonComments(updatedRaw));
+		atomicWriteText(targetPath, updatedRaw);
+		return installedFace;
+	} catch {
+		return null;
+	}
+}
+
+export function detectNerdFontFromWindowsTerminalSettings(settingsObj, {
+	wtProfileId = process.env.WT_PROFILE_ID,
+	wslDistroName = process.env.WSL_DISTRO_NAME,
+	isWsl = process.platform === "linux",
+} = {}) {
+	if (!settingsObj || typeof settingsObj !== "object") return null;
+	const defaultFace = settingsObj?.profiles?.defaults?.font?.face ?? settingsObj?.profiles?.defaults?.fontFace ?? "";
+	const matchedProfile = resolveWindowsTerminalProfile(settingsObj, { wtProfileId, wslDistroName, isWsl });
+	const effectiveFace = matchedProfile?.font?.face || matchedProfile?.fontFace || defaultFace || "";
 	return isNerdFontName(effectiveFace);
 }
 
@@ -120,6 +517,7 @@ export function detectNerdFontSupport({
 	wslDistroName = process.env.WSL_DISTRO_NAME,
 	termProgram = process.env.TERM_PROGRAM,
 	vscodeSettingsPaths = null,
+	fontDirs = null,
 } = {}) {
 	const envChoice = String(process.env.COPILOT_STATUSLINE_ICONS ?? "").trim().toLowerCase();
 	if (["nerdfont", "nerd", "nf", "true", "1"].includes(envChoice)) return true;
@@ -137,23 +535,37 @@ export function detectNerdFontSupport({
 				// Ignore malformed VS Code settings.json.
 			}
 		}
+		return false;
 	}
 
 	const wsl = isWslEnvironment();
 	const paths = wtSettingsPaths ?? candidateWindowsTerminalSettingsPaths();
+	const parsedCandidates = [];
 	for (const p of paths) {
 		if (!existsSync(p)) continue;
 		try {
 			const parsed = JSON.parse(stripJsonComments(readFileSync(p, "utf8")));
-			const res = detectNerdFontFromWindowsTerminalSettings(parsed, {
-				wtProfileId,
-				wslDistroName,
-				isWsl: wsl,
-			});
-			if (typeof res === "boolean") return res;
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+			const list = Array.isArray(parsed?.profiles?.list) ? parsed.profiles.list : [];
+			const hasExplicitProfile = Boolean(
+				wtProfileId &&
+				list.some((prof) => String(prof?.guid ?? "").toLowerCase() === String(wtProfileId).toLowerCase()),
+			);
+			parsedCandidates.push({ parsed, hasExplicitProfile });
 		} catch {
 			// Ignore malformed settings file and try next candidate.
 		}
+	}
+	const ordered = wtProfileId && parsedCandidates.some((c) => c.hasExplicitProfile)
+		? [...parsedCandidates.filter((c) => c.hasExplicitProfile), ...parsedCandidates.filter((c) => !c.hasExplicitProfile)]
+		: parsedCandidates;
+	for (const { parsed } of ordered) {
+		const res = detectNerdFontFromWindowsTerminalSettings(parsed, {
+			wtProfileId,
+			wslDistroName,
+			isWsl: wsl,
+		});
+		if (typeof res === "boolean") return res;
 	}
 	if (wsl) return false;
 	return true;
@@ -291,6 +703,9 @@ export function setEnabledStatuslines(enabledIds, {
 		}
 	}
 	const resolvedIconMode = ["auto", "nerdfont", "unicode"].includes(iconMode) ? iconMode : existingIconMode;
+	if (resolvedIconMode !== "unicode" && resolve(home) === resolve(configHome())) {
+		ensureWindowsTerminalNerdFont();
+	}
 
 	atomicWriteText(
 		configPath,
@@ -495,6 +910,22 @@ export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 
 		const configPath = join(home, "statusline-config.json");
 		const firstRun = !existsSync(configPath);
+		if (resolve(home) === resolve(configHome())) {
+			let currentIconMode = "auto";
+			if (!firstRun) {
+				try {
+					const rawCfg = JSON.parse(readFileSync(configPath, "utf8"));
+					if (["auto", "nerdfont", "unicode"].includes(rawCfg?.iconMode)) {
+						currentIconMode = rawCfg.iconMode;
+					}
+				} catch {
+					currentIconMode = "auto";
+				}
+			}
+			if (currentIconMode !== "unicode") {
+				ensureWindowsTerminalNerdFont();
+			}
+		}
 		if (firstRun) {
 			setEnabledStatuslines(PREFERRED_ORDER, { home, nodePath });
 		} else {
