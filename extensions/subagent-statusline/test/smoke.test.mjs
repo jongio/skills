@@ -353,18 +353,44 @@ try {
 				}),
 				null,
 			);
-			const commentedWtSettings = `{\n  // user comment preserved\n  "profiles": {\n    "defaults": {},\n    "list": [{ "guid": "{574e775e-4f2a-5b96-ac1e-a2962a402336}", "name": "PowerShell" }]\n  }\n}\n`;
+			const commentedWtSettings = `{\n  // user comment preserved\n  "profiles": {\n    "defaults": {\n      /* nested comment */\n      "startingDirectory": "C:\\\\code",\n    },\n    "list": [{ "guid": "{574e775e-4f2a-5b96-ac1e-a2962a402336}", "name": "PowerShell", }],\n  },\n}\n`;
 			writeFileSync(fakeWtSettings, commentedWtSettings);
 			assert.equal(
 				ensureWindowsTerminalNerdFont({
 					wtSettingsPaths: [fakeWtSettings],
 					fontDirs: [fakeFontsDir],
 					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					termProgram: "",
+					isWsl: false,
+				}),
+				"CaskaydiaCove Nerd Font Mono",
+			);
+			const healedCommentedRaw = readFileSync(fakeWtSettings, "utf8");
+			assert.ok(healedCommentedRaw.includes("// user comment preserved"));
+			assert.ok(healedCommentedRaw.includes("/* nested comment */"));
+			assert.equal(
+				JSON.parse(stripJsonComments(healedCommentedRaw)).profiles.defaults.font.face,
+				"CaskaydiaCove Nerd Font Mono",
+			);
+
+			// Running inside VS Code never modifies Windows Terminal settings
+			writeFileSync(fakeWtSettings, JSON.stringify({
+				profiles: {
+					defaults: {},
+					list: [{ guid: "{574e775e-4f2a-5b96-ac1e-a2962a402336}", name: "PowerShell" }],
+				},
+			}, null, 4));
+			assert.equal(
+				ensureWindowsTerminalNerdFont({
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					termProgram: "vscode",
 					isWsl: false,
 				}),
 				null,
 			);
-			assert.equal(readFileSync(fakeWtSettings, "utf8"), commentedWtSettings);
+			assert.equal(JSON.parse(readFileSync(fakeWtSettings, "utf8")).profiles.defaults.font, undefined);
 
 			// When multiple Windows Terminal candidates exist (e.g. Stable + Preview), only heal the unambiguous profile match
 			const fakeWtStable = join(pluginHome, "wt-stable.json");

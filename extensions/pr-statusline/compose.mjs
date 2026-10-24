@@ -238,15 +238,222 @@ function resolveWindowsTerminalProfile(settingsObj, {
 	return matchedProfile;
 }
 
+function scanJsoncObject(src, openIndex) {
+	let depth = 0;
+	let inString = false;
+	let firstTokenAfterOpen = -1;
+	let i = openIndex;
+	while (i < src.length) {
+		const ch = src[i];
+		const next = src[i + 1];
+		if (inString) {
+			if (ch === "\\" && i + 1 < src.length) {
+				i += 2;
+				continue;
+			}
+			if (ch === "\"") inString = false;
+			i++;
+			continue;
+		}
+		if (ch === "/" && next === "/") {
+			i += 2;
+			while (i < src.length && src[i] !== "\n" && src[i] !== "\r") i++;
+			continue;
+		}
+		if (ch === "/" && next === "*") {
+			i += 2;
+			while (i + 1 < src.length && !(src[i] === "*" && src[i + 1] === "/")) i++;
+			i += 2;
+			continue;
+		}
+		if (/\s/.test(ch)) {
+			i++;
+			continue;
+		}
+		if (depth === 1 && firstTokenAfterOpen === -1) {
+			firstTokenAfterOpen = i;
+		}
+		if (ch === "\"") {
+			inString = true;
+			i++;
+			continue;
+		}
+		if (ch === "{" || ch === "[") {
+			depth++;
+		} else if (ch === "}" || ch === "]") {
+			depth--;
+			if (depth === 0) {
+				return {
+					open: openIndex,
+					close: i,
+					firstTokenAfterOpen: firstTokenAfterOpen === -1 ? i : firstTokenAfterOpen,
+				};
+			}
+		}
+		i++;
+	}
+	return null;
+}
+
+function findJsoncPropertyObject(src, openIndex, closeIndex, propName) {
+	let depth = 0;
+	let inString = false;
+	let i = openIndex;
+	while (i <= closeIndex) {
+		const ch = src[i];
+		const next = src[i + 1];
+		if (inString) {
+			if (ch === "\\" && i + 1 <= closeIndex) {
+				i += 2;
+				continue;
+			}
+			if (ch === "\"") inString = false;
+			i++;
+			continue;
+		}
+		if (ch === "/" && next === "/") {
+			i += 2;
+			while (i <= closeIndex && src[i] !== "\n" && src[i] !== "\r") i++;
+			continue;
+		}
+		if (ch === "/" && next === "*") {
+			i += 2;
+			while (i + 1 <= closeIndex && !(src[i] === "*" && src[i + 1] === "/")) i++;
+			i += 2;
+			continue;
+		}
+		if (ch === "\"") {
+			const strStart = i;
+			i++;
+			while (i <= closeIndex) {
+				if (src[i] === "\\" && i + 1 <= closeIndex) {
+					i += 2;
+					continue;
+				}
+				if (src[i] === "\"") break;
+				i++;
+			}
+			const strEnd = i;
+			i++;
+			if (depth === 1) {
+				let j = i;
+				while (j <= closeIndex) {
+					if (/\s/.test(src[j])) {
+						j++;
+						continue;
+					}
+					if (src[j] === "/" && src[j + 1] === "/") {
+						j += 2;
+						while (j <= closeIndex && src[j] !== "\n" && src[j] !== "\r") j++;
+						continue;
+					}
+					if (src[j] === "/" && src[j + 1] === "*") {
+						j += 2;
+						while (j + 1 <= closeIndex && !(src[j] === "*" && src[j + 1] === "/")) j++;
+						j += 2;
+						continue;
+					}
+					break;
+				}
+				if (src[j] === ":") {
+					let k = j + 1;
+					while (k <= closeIndex) {
+						if (/\s/.test(src[k])) {
+							k++;
+							continue;
+						}
+						if (src[k] === "/" && src[k + 1] === "/") {
+							k += 2;
+							while (k <= closeIndex && src[k] !== "\n" && src[k] !== "\r") k++;
+							continue;
+						}
+						if (src[k] === "/" && src[k + 1] === "*") {
+							k += 2;
+							while (k + 1 <= closeIndex && !(src[k] === "*" && src[k + 1] === "/")) k++;
+							k += 2;
+							continue;
+						}
+						break;
+					}
+					try {
+						if (JSON.parse(src.slice(strStart, strEnd + 1)) === propName && src[k] === "{") {
+							return scanJsoncObject(src, k);
+						}
+					} catch {
+						// Ignore unparseable key token.
+					}
+				}
+			}
+			continue;
+		}
+		if (ch === "{" || ch === "[") depth++;
+		else if (ch === "}" || ch === "]") depth--;
+		i++;
+	}
+	return null;
+}
+
+function insertPropertyInJsoncObject(src, span, propText) {
+	if (span.firstTokenAfterOpen < span.close) {
+		return `${src.slice(0, span.firstTokenAfterOpen)}${propText}, ${src.slice(span.firstTokenAfterOpen)}`;
+	}
+	const inner = src.slice(span.open + 1, span.close);
+	if (!inner.trim()) {
+		return `${src.slice(0, span.open + 1)} ${propText} ${src.slice(span.close)}`;
+	}
+	return `${src.slice(0, span.close)}${propText}\n${src.slice(span.close)}`;
+}
+
+function applyDefaultFontFaceJsonc(raw, installedFace) {
+	let firstBrace = 0;
+	while (firstBrace < raw.length && raw[firstBrace] !== "{") {
+		if (/\s/.test(raw[firstBrace])) {
+			firstBrace++;
+			continue;
+		}
+		if (raw[firstBrace] === "/" && raw[firstBrace + 1] === "/") {
+			firstBrace += 2;
+			while (firstBrace < raw.length && raw[firstBrace] !== "\n" && raw[firstBrace] !== "\r") firstBrace++;
+			continue;
+		}
+		if (raw[firstBrace] === "/" && raw[firstBrace + 1] === "*") {
+			firstBrace += 2;
+			while (firstBrace + 1 < raw.length && !(raw[firstBrace] === "*" && raw[firstBrace + 1] === "/")) firstBrace++;
+			firstBrace += 2;
+			continue;
+		}
+		break;
+	}
+	if (raw[firstBrace] !== "{") return null;
+	const rootSpan = scanJsoncObject(raw, firstBrace);
+	if (!rootSpan) return null;
+	const faceLiteral = JSON.stringify(installedFace);
+	const profilesSpan = findJsoncPropertyObject(raw, rootSpan.open, rootSpan.close, "profiles");
+	if (!profilesSpan) {
+		return insertPropertyInJsoncObject(raw, rootSpan, `"profiles": { "defaults": { "font": { "face": ${faceLiteral} } } }`);
+	}
+	const defaultsSpan = findJsoncPropertyObject(raw, profilesSpan.open, profilesSpan.close, "defaults");
+	if (!defaultsSpan) {
+		return insertPropertyInJsoncObject(raw, profilesSpan, `"defaults": { "font": { "face": ${faceLiteral} } }`);
+	}
+	const fontSpan = findJsoncPropertyObject(raw, defaultsSpan.open, defaultsSpan.close, "font");
+	if (!fontSpan) {
+		return insertPropertyInJsoncObject(raw, defaultsSpan, `"font": { "face": ${faceLiteral} }`);
+	}
+	return insertPropertyInJsoncObject(raw, fontSpan, `"face": ${faceLiteral}`);
+}
+
 export function ensureWindowsTerminalNerdFont({
 	wtSettingsPaths = null,
 	fontDirs = null,
 	wtProfileId = process.env.WT_PROFILE_ID,
 	wslDistroName = process.env.WSL_DISTRO_NAME,
+	termProgram = process.env.TERM_PROGRAM,
 	isWsl = isWslEnvironment(),
 } = {}) {
 	const envChoice = String(process.env.COPILOT_STATUSLINE_ICONS ?? "").trim().toLowerCase();
 	if (["unicode", "ascii", "plain", "false", "0"].includes(envChoice)) return null;
+	if (String(termProgram ?? "").toLowerCase() === "vscode") return null;
 	if (isWsl && !wtSettingsPaths) return null;
 	const installedFace = detectInstalledWindowsNerdFontFace({ fontDirs });
 	if (!installedFace) return null;
@@ -264,7 +471,7 @@ export function ensureWindowsTerminalNerdFont({
 				wtProfileId &&
 				list.some((prof) => String(prof?.guid ?? "").toLowerCase() === String(wtProfileId).toLowerCase()),
 			);
-			candidates.push({ path: p, raw, stripped, parsed, hasExplicitProfile });
+			candidates.push({ path: p, raw, parsed, hasExplicitProfile });
 		} catch {
 			// Ignore unreadable or malformed candidate.
 		}
@@ -274,8 +481,7 @@ export function ensureWindowsTerminalNerdFont({
 		? candidates.filter((c) => c.hasExplicitProfile)
 		: candidates;
 	if (scoped.length !== 1) return null;
-	const { path: targetPath, raw, stripped, parsed } = scoped[0];
-	if (raw !== stripped) return null;
+	const { path: targetPath, raw, parsed } = scoped[0];
 	try {
 		const matchedProfile = resolveWindowsTerminalProfile(parsed, { wtProfileId, wslDistroName, isWsl });
 		const defaultFace = String(parsed?.profiles?.defaults?.font?.face ?? parsed?.profiles?.defaults?.fontFace ?? "").trim();
@@ -283,17 +489,10 @@ export function ensureWindowsTerminalNerdFont({
 		if (profileFace || defaultFace) {
 			return isNerdFontName(profileFace || defaultFace) ? (profileFace || defaultFace) : null;
 		}
-		if (!parsed.profiles || typeof parsed.profiles !== "object" || Array.isArray(parsed.profiles)) {
-			parsed.profiles = {};
-		}
-		if (!parsed.profiles.defaults || typeof parsed.profiles.defaults !== "object" || Array.isArray(parsed.profiles.defaults)) {
-			parsed.profiles.defaults = {};
-		}
-		if (!parsed.profiles.defaults.font || typeof parsed.profiles.defaults.font !== "object" || Array.isArray(parsed.profiles.defaults.font)) {
-			parsed.profiles.defaults.font = {};
-		}
-		parsed.profiles.defaults.font.face = installedFace;
-		atomicWriteText(targetPath, `${JSON.stringify(parsed, null, 4)}\n`);
+		const updatedRaw = applyDefaultFontFaceJsonc(raw, installedFace);
+		if (!updatedRaw) return null;
+		JSON.parse(stripJsonComments(updatedRaw));
+		atomicWriteText(targetPath, updatedRaw);
 		return installedFace;
 	} catch {
 		return null;
