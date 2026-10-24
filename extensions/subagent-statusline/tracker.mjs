@@ -7,6 +7,7 @@ import { dismissSettledAgents, observeSettlement } from "./settlement.mjs";
 
 const INITIAL_HEAD_BYTES = 64 * 1024;
 const INITIAL_TAIL_BYTES = 16 * 1024 * 1024;
+const READ_CHUNK_BYTES = 1024 * 1024;
 const RELEVANT_EVENT_LINE = /"type"\s*:\s*"(?:session\.(?:start|resume|context_changed)|user\.message|tool\.execution_(?:start|complete)|subagent\.(?:started|completed|failed))"/;
 
 export const ICONS = {
@@ -88,16 +89,6 @@ export function normalizePrUrl(reference) {
 	return `https://${url.hostname}/${match[1]}/${match[2]}/pull/${match[3]}`;
 }
 
-function extractPrUrls(text) {
-	const source = String(text ?? "");
-	const found = [];
-	for (const [raw] of source.matchAll(/https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*/g)) {
-		const normalized = normalizePrUrl(raw);
-		if (normalized && !found.includes(normalized)) found.push(normalized);
-	}
-	return found;
-}
-
 export function readState(sessionId, home = configHome()) {
 	let raw;
 	try {
@@ -116,7 +107,18 @@ export function readState(sessionId, home = configHome()) {
 export function writeState(state, home = configHome()) {
 	return updateState(state.sessionId, (current) => {
 		if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return current;
-		return state;
+		if ((current?.dismissedThroughAt ?? 0) > (state.dismissedThroughAt ?? 0)) return current;
+		const ignored = new Set([...(current?.ignored ?? []), ...(state.ignored ?? [])]);
+		for (const [call, id] of Object.entries(state.taskCalls ?? {})) {
+			if (ignored.has(call)) ignored.add(id);
+		}
+		return {
+			...state, ignored: [...ignored],
+			dismissedThroughAt: Math.max(current?.dismissedThroughAt ?? 0, state.dismissedThroughAt ?? 0),
+			agents: Object.fromEntries(Object.entries(state.agents).filter(([id]) => !ignored.has(id))),
+			taskCalls: Object.fromEntries(Object.entries(state.taskCalls ?? {}).filter(([call, id]) => !ignored.has(call) && !ignored.has(id))),
+			agentToolCalls: Object.fromEntries(Object.entries(state.agentToolCalls ?? {}).filter(([, call]) => !ignored.has(call.agentId))),
+		};
 	}, home);
 }
 
@@ -141,6 +143,7 @@ export class SubagentTracker {
 		statePath(sessionId);
 		this.sessionId = sessionId;
 		this.clearedAt = previous?.clearedAt ?? 0;
+		this.dismissedThroughAt = Number.isFinite(previous?.dismissedThroughAt) ? previous.dismissedThroughAt : 0;
 		this.repository = previous?.repository ?? null;
 		this.host = previous?.host ?? "github.com";
 		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
@@ -149,7 +152,9 @@ export class SubagentTracker {
 			: 0;
 		this.dismissed = Boolean(previous?.dismissed);
 		this.simulated = Boolean(previous?.simulated);
-		this.agents = new Map(Object.entries(previous?.agents ?? {}));
+		const legacy = !this.simulated && previous?.version === 1 && previous.activeTrackingVersion !== 2;
+		this.agents = new Map(Object.entries(legacy ? {} : previous?.agents ?? {}));
+		this.ignored = new Set(previous?.ignored ?? []);
 		if (!this.simulated && previous?.mergeStateVersion !== 1) {
 			for (const [id, agent] of this.agents) {
 				if (!agent.mergedPrs?.length) continue;
@@ -160,12 +165,12 @@ export class SubagentTracker {
 				this.dismissed = false;
 			}
 		}
-		this.taskCalls = new Map(Object.entries(previous?.taskCalls ?? {}));
-		this.agentToolCalls = new Map(Object.entries(previous?.agentToolCalls ?? {}));
+		this.taskCalls = new Map(Object.entries(legacy ? {} : previous?.taskCalls ?? {}));
+		this.agentToolCalls = new Map(Object.entries(previous?.activeTrackingVersion === 2 ? previous.agentToolCalls ?? {} : {}));
 	}
 
 	ensureAgent(id, meta = {}) {
-		if (!id) return null;
+		if (!id || this.ignored.has(id)) return null;
 		let entry = this.agents.get(id);
 		if (!entry) {
 			entry = {
@@ -208,18 +213,38 @@ export class SubagentTracker {
 		this.dismissed = false;
 	}
 
-	clear() {
+	clear(now = Date.now()) {
+		this.dismissedThroughAt = Math.max(this.dismissedThroughAt, now);
+		for (const id of this.agents.keys()) this.ignored.add(id);
+		for (const id of this.taskCalls.keys()) this.ignored.add(id);
 		this.agents.clear();
 		this.taskCalls.clear();
 		this.agentToolCalls.clear();
 		this.dismissed = true;
 	}
 
-	observe(event) {
+	manage(action, id) {
+		if (action === "clear") this.clear();
+		else if (action === "remove") {
+			if (!id) throw new Error("Provide a tracked agent ID.");
+			this.ignored.add(id);
+			this.agents.delete(id);
+			for (const [call, agentId] of this.taskCalls) {
+				if (agentId === id) {
+					this.ignored.add(call);
+					this.taskCalls.delete(call);
+				}
+			}
+		} else if (action !== "list") throw new Error("Use list, remove, or clear.");
+		return [...this.agents.values()];
+	}
+
+	observe(event, dismissedHistory = false) {
 		if (this.clearedAt && event.timestamp && Date.parse(event.timestamp) <= this.clearedAt) return;
 		const data = event.data ?? {};
 		const ts = event.timestamp ? Date.parse(event.timestamp) : NaN;
 		const eventTime = Number.isFinite(ts) ? ts : Date.now();
+		if (this.dismissedThroughAt && (!Number.isFinite(ts) || eventTime <= this.dismissedThroughAt)) dismissedHistory = true;
 
 		if (event.type === "session.start" || event.type === "session.resume" || event.type === "session.context_changed") {
 			const context = data.context ?? data;
@@ -243,6 +268,11 @@ export class SubagentTracker {
 
 		if (event.type === "subagent.started") {
 			const id = event.agentId || data.agentId || data.toolCallId;
+			if (dismissedHistory) {
+				if (id) this.ignored.add(id);
+				if (data.toolCallId) this.ignored.add(data.toolCallId);
+			}
+			if (this.ignored.has(id) || this.ignored.has(data.toolCallId)) return;
 			if (data.toolCallId && id && data.toolCallId !== id && this.agents.has(data.toolCallId)) {
 				const prior = this.agents.get(data.toolCallId);
 				this.agents.delete(data.toolCallId);
@@ -296,10 +326,10 @@ export class SubagentTracker {
 		if (event.type === "tool.execution_start") {
 			const args = data.arguments ?? {};
 			const name = data.mcpToolName ?? data.toolName ?? "";
-			const command = String(args.command ?? "");
-
-			if (/(?:^|[._-])task$/.test(name)) {
+			if (/(?:^|[.])task$/.test(name) && typeof args.agent_type === "string" && args.agent_type.trim()) {
 				const id = data.toolCallId;
+				if (dismissedHistory && id) this.ignored.add(id);
+				if (this.ignored.has(id)) return;
 				const rawDesc = String(args.description || String(args.prompt ?? "").split(/\r?\n/)[0] || "").trim().slice(0, 140);
 				this.ensureAgent(id, {
 					name: args.name || args.agent_type || "subagent",
@@ -309,41 +339,21 @@ export class SubagentTracker {
 					timestamp: eventTime,
 				});
 				this.taskCalls.set(data.toolCallId, id);
-				if (!isReadonlyAgentType(args.agent_type)) {
-					for (const prUrl of extractPrUrls(args.prompt)) this.linkPr(id, prUrl);
-				}
 				return;
 			}
 
-			if (event.agentId && this.agents.has(event.agentId)) {
-				const isPrCmd = /\bgh(?:\s+(?:(?:-R|--repo)(?:=|\s+)\S+|-C\s+\S+))*\s+pr\s+(?:view|checks|create|edit|review|comment|merge|ready)\b/.test(command) ||
-					/(?:^|[_-])(?:create_pull_request|update_pull_request|merge_pull_request)$/.test(name);
-				if (isPrCmd) {
-					const explicitRepo = /(?:--repo|-R)(?:[=\s]+)["']?([\w.-]+\/[\w.-]+)(?![\w./-])/.exec(command)?.[1] ??
-						(args.owner && args.repo ? `${args.owner}/${args.repo}` : this.repository);
-					const numMatch = /\bgh(?:\s+\S+)*\s+pr\s+(?:view|checks|edit|review|comment|merge|ready)\s+([1-9]\d*)\b/.exec(command)?.[1] ??
-						args.pullNumber ?? args.pull_number;
-					const targetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
-					const targets = extractPrUrls(targetText);
-					if (explicitRepo && /^[1-9]\d*$/.test(String(numMatch))) {
-						targets.push(`https://${this.host}/${explicitRepo}/pull/${numMatch}`);
-					}
-					for (const prUrl of targets) this.linkPr(event.agentId, prUrl);
-					this.agentToolCalls.set(data.toolCallId, { agentId: event.agentId, targets });
-				}
+			const agentId = event.agentId || data.agentId;
+			if (agentId && this.agents.has(agentId) && /(?:^|[._-])session_prs$/.test(name) && args.action === "add") {
+				const reference = normalizePrUrl(args.reference);
+				if (reference) this.agentToolCalls.set(data.toolCallId, { agentId, reference });
 			}
 		}
 
 		if (event.type === "tool.execution_complete") {
-			const result = data.result ?? {};
-			const text = `${result.content ?? ""}\n${JSON.stringify(result.structuredContent ?? {})}`;
 			const taskAgentId = this.taskCalls.get(data.toolCallId);
 			if (taskAgentId && this.agents.has(taskAgentId)) {
 				const agent = this.agents.get(taskAgentId);
 				if (data.success) {
-					if (!isReadonlyAgentType(agent.agentType || agent.name)) {
-						for (const prUrl of extractPrUrls(text)) this.linkPr(taskAgentId, prUrl);
-					}
 					if (agent.status === "starting" && agent.executionMode !== "background") {
 						agent.status = "completed";
 						agent.completedAt = eventTime;
@@ -357,10 +367,8 @@ export class SubagentTracker {
 			}
 			const subCall = this.agentToolCalls.get(data.toolCallId);
 			this.agentToolCalls.delete(data.toolCallId);
-			if (subCall && data.success) {
-				for (const prUrl of extractPrUrls(text)) {
-					this.linkPr(subCall.agentId, prUrl, false, eventTime);
-				}
+			if (subCall && data.success && this.agents.has(subCall.agentId)) {
+				this.linkPr(subCall.agentId, subCall.reference, false, eventTime);
 			}
 		}
 	}
@@ -429,9 +437,11 @@ export class SubagentTracker {
 	snapshot() {
 		return {
 			version: 1,
+			activeTrackingVersion: 2,
 			mergeStateVersion: 1,
 			sessionId: this.sessionId,
 			clearedAt: this.clearedAt,
+			dismissedThroughAt: this.dismissedThroughAt,
 			repository: this.repository,
 			host: this.host,
 			lastUserInputAt: this.lastUserInputAt,
@@ -440,35 +450,47 @@ export class SubagentTracker {
 			...(this.simulated ? { simulated: true } : {}),
 			updatedAt: Date.now(),
 			agents: Object.fromEntries(this.agents),
+			ignored: [...this.ignored],
 			taskCalls: Object.fromEntries(this.taskCalls),
 			agentToolCalls: Object.fromEntries(this.agentToolCalls),
 		};
 	}
 }
 
-function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false) {
+function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false, replayed = null) {
 	if (length <= 0) return startOffset;
-	const chunk = Buffer.allocUnsafe(length);
-	const bytesRead = readSync(fd, chunk, 0, length, startOffset);
-	if (bytesRead <= 0) return startOffset;
-	let sliceStart = 0;
-	if (skipFirstPartialLine) {
-		const firstNewline = chunk.subarray(0, bytesRead).indexOf(0x0a);
-		if (firstNewline === -1) return startOffset;
-		sliceStart = firstNewline + 1;
-	}
-	const lastNewline = chunk.subarray(0, bytesRead).lastIndexOf(0x0a);
-	if (lastNewline < sliceStart) return startOffset;
-	const text = chunk.subarray(sliceStart, lastNewline + 1).toString("utf8");
-	for (const line of text.split("\n")) {
-		if (!line.trim() || !RELEVANT_EVENT_LINE.test(line)) continue;
-		try {
-			tracker.observe(JSON.parse(line));
-		} catch {
-			// Ignore malformed transcript lines.
+	const buffer = Buffer.allocUnsafe(Math.min(length, READ_CHUNK_BYTES));
+	let position = startOffset, completed = startOffset;
+	let fragments = [];
+	while (position < startOffset + length) {
+		const bytesRead = readSync(fd, buffer, 0, Math.min(buffer.length, startOffset + length - position), position);
+		if (bytesRead <= 0) break;
+		const chunk = buffer.subarray(0, bytesRead);
+		let from = 0;
+		for (let newline = chunk.indexOf(0x0a); newline !== -1; newline = chunk.indexOf(0x0a, from)) {
+			completed = position + newline + 1;
+			if (skipFirstPartialLine) skipFirstPartialLine = false;
+			else {
+				const part = chunk.subarray(from, newline);
+				const line = (fragments.length ? Buffer.concat([...fragments, part]) : part).toString("utf8");
+				if (line.trim() && RELEVANT_EVENT_LINE.test(line)) {
+					try {
+						const event = JSON.parse(line);
+						const time = Date.parse(event.timestamp);
+						const dismissedHistory = Boolean(replayed && (completed <= replayed.offset || !Number.isFinite(time) || time <= replayed.savedAt));
+						tracker.observe(event, dismissedHistory);
+					} catch {
+						// Ignore malformed transcript lines.
+					}
+				}
+			}
+			fragments = [];
+			from = newline + 1;
 		}
+		if (!skipFirstPartialLine && from < bytesRead) fragments.push(Buffer.from(chunk.subarray(from)));
+		position += bytesRead;
 	}
-	return startOffset + lastNewline + 1;
+	return completed;
 }
 
 export function syncSession(payload, { home = configHome(), now = Date.now() } = {}) {
@@ -496,14 +518,21 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	}
 	if (!hasTranscript && !previous) return { tracker: null };
 
-	const reset = hasTranscript && (!previous || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
+	const migrate = previous && previous.activeTrackingVersion !== 2;
+	const reset = hasTranscript && (!previous || migrate ||
+		!Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new SubagentTracker(
 		sessionId,
-		reset ? { ...(previous?.simulated ? { agents: previous.agents, simulated: true } : {}), clearedAt: previous?.clearedAt,
+		reset ? { ...(previous?.simulated ? { agents: previous.agents, simulated: true } : {}), ignored: previous?.ignored, dismissed: previous?.dismissed,
+			dismissedThroughAt: previous?.dismissedThroughAt, clearedAt: previous?.clearedAt,
 			...(previous?.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.transcriptOffset;
-	let changed = Boolean(previous && previous.mergeStateVersion !== 1) || (hasTranscript && (!previous || reset));
+	if (migrate && previous.dismissed && !previous.simulated && Number.isFinite(previous.updatedAt)) {
+		tracker.dismissedThroughAt = Math.max(tracker.dismissedThroughAt, previous.updatedAt);
+	}
+	let changed = Boolean(previous && (previous.mergeStateVersion !== 1 || previous.activeTrackingVersion !== 2)) ||
+		(hasTranscript && (!previous || reset));
 
 	const prCache = readSharedPrCache(home);
 	if (tracker.syncWithPrCache(prCache, now)) changed = true;
@@ -512,12 +541,16 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 		const fd = openSync(transcriptFile, "r");
 		try {
 			let nextOffset = offset;
-			if (offset === 0 && stat.size > INITIAL_HEAD_BYTES + INITIAL_TAIL_BYTES) {
-				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES, false);
+			const replayed = migrate && previous.dismissed && !previous.simulated ? {
+				offset: Number.isInteger(previous.transcriptOffset) && previous.transcriptOffset <= stat.size ? previous.transcriptOffset : 0,
+				savedAt: Number.isFinite(previous.updatedAt) ? previous.updatedAt : Infinity,
+			} : null;
+			if (!migrate && offset === 0 && stat.size > INITIAL_HEAD_BYTES + INITIAL_TAIL_BYTES) {
+				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES, false, replayed);
 				const tailStart = stat.size - INITIAL_TAIL_BYTES;
-				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true);
+				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true, replayed);
 			} else {
-				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset, false);
+				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset, false, replayed);
 			}
 			if (nextOffset !== offset) {
 				tracker.transcriptOffset = nextOffset;
@@ -531,7 +564,7 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	if (tracker.syncWithPrCache(prCache, now)) changed = true;
 	if (changed) {
 		const saved = writeState(tracker.snapshot(), home);
-		if ((saved.clearedAt ?? 0) > tracker.clearedAt) return { tracker: new SubagentTracker(sessionId, saved) };
+		return { tracker: new SubagentTracker(sessionId, saved) };
 	}
 	return { tracker };
 }

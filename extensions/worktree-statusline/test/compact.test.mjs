@@ -20,10 +20,7 @@ const url = (number) => `https://github.com/org/one/pull/${number}`;
 const event = (type, data, agentId) => ({ type, data, agentId });
 
 function workPr(tracker, number, agentId) {
-	tracker.observe(event("tool.execution_start", {
-		toolCallId: `work-${number}-${agentId ?? "root"}`, toolName: "powershell",
-		arguments: { command: `gh pr view ${url(number)}` },
-	}, agentId));
+	tracker.manage("add", url(number), agentId ? { agentId } : { root: true });
 }
 
 test("PR ownership records direct root work, excludes delegation, and never upgrades unknown history to agent-only", () => {
@@ -42,10 +39,11 @@ test("PR ownership records direct root work, excludes delegation, and never upgr
 		toolCallId: "delegated", toolName: "task",
 		arguments: { agent_type: "general-purpose", prompt: `Implement ${url(4)}` },
 	}));
-	assert.deepEqual(tracker.state.prs[3].provenance, { root: false, unknown: false, agents: [] });
+	assert.equal(tracker.state.prs.length, 3, "a delegated prompt reference alone does not enroll a PR");
 	workPr(tracker, 4, "child");
 	assert.deepEqual(tracker.state.prs[3].provenance, { root: false, unknown: false, agents: ["child"] });
 	tracker.observe(event("user.message", { content: `Please work on ${url(5)}` }));
+	tracker.manage("add", url(5));
 	assert.equal(tracker.state.prs[4].provenance.root, true);
 	tracker.manage("add", url(6));
 	assert.equal(tracker.state.prs[5].provenance.root, true);
@@ -56,11 +54,15 @@ test("PR ownership records direct root work, excludes delegation, and never upgr
 	tracker.observe(event("tool.execution_complete", {
 		toolCallId: "create", success: true, result: { content: url(7) },
 	}));
+	assert.equal(tracker.state.prs.length, 6, "creation output cannot infer ownership");
+	workPr(tracker, 7, "creator");
 	assert.deepEqual(tracker.state.prs[6].provenance, { root: false, unknown: false, agents: ["creator"] });
 	tracker.observe(event("tool.execution_start", {
 		toolCallId: "diff", toolName: "powershell", arguments: { command: `gh pr diff ${url(7)}` },
 	}));
-	assert.equal(tracker.state.prs[6].provenance.root, true, "root diff work retains details for an already-tracked PR");
+	assert.equal(tracker.state.prs[6].provenance.root, false, "a root lookup does not expand an agent-only PR into another pill");
+	tracker.manage("add", url(7));
+	assert.equal(tracker.state.prs[6].provenance.root, true, "explicit root review enrollment retains detailed PR status");
 	assert.deepEqual(normalizePrProvenance({ root: "false" }), { root: false, unknown: true, agents: [] });
 	assert.deepEqual(normalizePrProvenance({ root: false, unknown: false, agents: ["a", "a", null] }),
 		{ root: false, unknown: false, agents: ["a"] });
@@ -68,6 +70,7 @@ test("PR ownership records direct root work, excludes delegation, and never upgr
 		{ root: true, unknown: false, agents: ["a"] });
 	assert.equal(mergePrProvenance(undefined, sourceProvenance({ agentId: "a" })).unknown, true);
 	const multiPrAgent = new SubagentTracker("many-prs");
+	multiPrAgent.ensureAgent("one-agent");
 	for (let number = 1; number <= 20; number++) multiPrAgent.linkPr("one-agent", url(number));
 	assert.equal(multiPrAgent.counts().inPr, 1, "summary counts agents rather than PRs");
 });
@@ -97,15 +100,19 @@ test("20 subagent-only PRs collapse into one overall summary while root, unknown
 		const agents = new SubagentTracker("compact");
 		for (let number = 1; number <= 20; number++) {
 			workPr(prs, number, `agent-${number}`);
+			agents.ensureAgent(`agent-${number}`);
 			agents.linkPr(`agent-${number}`, url(number));
 		}
 		workPr(prs, 100);
 		workPr(prs, 100, "shared");
+		agents.ensureAgent("shared");
 		agents.linkPr("shared", url(100));
 		prs.add(url(101));
 		workPr(prs, 101, "legacy");
+		agents.ensureAgent("legacy");
 		agents.linkPr("legacy", url(101));
 		workPr(prs, 102, "merged");
+		agents.ensureAgent("merged");
 		agents.linkPr("merged", url(102), true);
 		agents.ensureAgent("starting");
 		agents.ensureAgent("exploring", { agentType: "explore" });

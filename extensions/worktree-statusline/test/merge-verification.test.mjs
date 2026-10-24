@@ -94,6 +94,7 @@ test("newer OPEN observations clear old merge metadata in either reconciliation 
 test("subagent merge attempts and legacy settlements require confirmation and recover from OPEN cache state", () => {
 	const tracker = new SubagentTracker("agent-attempt");
 	tracker.ensureAgent("a");
+	tracker.linkPr("a", url);
 	tracker.observe(event("tool.execution_start", 1000, {
 		toolCallId: "merge", toolName: "powershell",
 		arguments: { command: `gh pr merge ${url} --auto --squash` },

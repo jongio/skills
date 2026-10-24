@@ -17,6 +17,7 @@ import { queryPrStatusWithGh } from "../extensions/pr-statusline/github.mjs";
 import { queryIssueStatusWithGh } from "../extensions/issue-statusline/github.mjs";
 import { prefetchStatuses, refreshTracker } from "../extensions/github-refresh.mjs";
 import { readIssueCache } from "../extensions/issue-statusline/github.mjs";
+import { IssueTracker, writeState as writeIssueState } from "../extensions/issue-statusline/tracker.mjs";
 import { readState, writeState, SessionTracker } from "../extensions/pr-statusline/tracker.mjs";
 import { clearSessionStatusline } from "../extensions/pr-statusline/session-statusline.mjs";
 
@@ -116,27 +117,43 @@ test("SDK token access is explicit, minimal, and restricted to named GitHub cred
     assert.equal(gitHubEnvironmentForHost(host, ghe).GITHUB_TOKEN, undefined);
   }
 });
-test("background branch discovery preserves clear boundaries and discovers later work", async (t) => {
+test("background branch discovery enriches explicit ownership without enrolling passive workspace hints", async (t) => {
   const home = fixture(t);
   const directory = join(home, "session-state", "branch");
   mkdirSync(directory, { recursive: true });
   const workspace = join(directory, "workspace.yaml");
   writeFileSync(workspace, "repository: example/widget\nbranch: feature\n");
+  let branches = 0;
   t.mock.method(statuslineGitHub, "cacheScope", async () => "fixture");
   t.mock.method(statuslineGitHub, "request", async ({ query, variables }) => {
+    if (query.includes("pullRequests(")) branches++;
     const number = variables.head === "later" ? 2 : variables.number || 1;
     const info = { state: "OPEN", url: `https://github.com/example/widget/pull/${number}`, title: "Branch PR" };
     return { ok: true, cacheScope: "fixture",
       data: { data: { repository: query.includes("pullRequests(") ? { pullRequests: { nodes: [info] } } : { pullRequest: info } } } };
   });
   await refreshTracker("pr", "branch", { home, now: 1000 });
+  assert.deepEqual(readState("branch", home).prs, []);
+  assert.equal(branches, 0, "an inactive workspace does not cause discovery requests");
+  const active = new SessionTracker("branch", readState("branch", home));
+  active.manage("add", "https://github.com/example/widget/pull/1");
+  writeState(active.snapshot(), home);
+  await refreshTracker("pr", "branch", { home, now: 2000 });
   assert.equal(readState("branch", home).prs[0].url, "https://github.com/example/widget/pull/1");
-  clearSessionStatusline({ session_id: "branch" }, { home, now: 2000 });
-  await refreshTracker("pr", "branch", { home, now: 3000 });
+  assert.equal(branches, 1);
+  clearSessionStatusline({ session_id: "branch" }, { home, now: 3000 });
+  await refreshTracker("pr", "branch", { home, now: 4000 });
   assert.deepEqual(readState("branch", home).prs, []);
   writeFileSync(workspace, "repository: example/widget\nbranch: later\n");
-  await refreshTracker("pr", "branch", { home, now: 4000 });
+  await refreshTracker("pr", "branch", { home, now: 5000 });
+  assert.deepEqual(readState("branch", home).prs, []);
+  assert.equal(branches, 1, "new branch hints cannot undo a clear");
+  const later = new SessionTracker("branch", readState("branch", home));
+  later.manage("add", "https://github.com/example/widget/pull/2");
+  writeState(later.snapshot(), home);
+  await refreshTracker("pr", "branch", { home, now: 6000 });
   assert.deepEqual(readState("branch", home).prs.map((pr) => pr.url), ["https://github.com/example/widget/pull/2"]);
+  assert.equal(branches, 2);
 });
 test("background refresh coalesces, preserves failed observation age, and isolates changed credentials", async (t) => {
   const home = fixture(t);
@@ -217,6 +234,14 @@ test("cold footer rendering and workspace discovery never contact GitHub", (t) =
   writeFileSync(join(path, "workspace.yaml"), "repository: example/widget\nbranch: feature\n");
   t.mock.method(statuslineGitHub, "request", () => assert.fail("footer made a GitHub request"));
   t.mock.method(statuslineGitHub, "cacheScope", () => assert.fail("footer tried to resolve credentials"));
+  assert.equal(renderPr({ session_id: "offline" }, { home, links: false, color: false }), "");
+  assert.equal(renderIssue({ session_id: "offline" }, { home, links: false, color: false }), "");
+  const prs = new SessionTracker("offline");
+  prs.manage("add", "https://github.com/example/widget/pull/1");
+  writeState(prs.snapshot(), home);
+  const issues = new IssueTracker("offline");
+  issues.manage("add", "https://github.com/example/widget/issues/2");
+  writeIssueState(issues.snapshot(), home);
   assert.match(renderPr({ session_id: "offline" }, { home, links: false, color: false }), /widget#1/);
   assert.match(renderIssue({ session_id: "offline" }, { home, links: false, color: false }), /widget#2/);
 });

@@ -2,7 +2,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { ensurePluginStatuslineRegistered } from "./compose.mjs";
-import { IssueTracker, readState, writeState } from "./tracker.mjs";
+import { IssueTracker, syncSession, writeState } from "./tracker.mjs";
 import { startIssueRefresh } from "../github-refresh.mjs";
 import { requestedGitHubEnvironment } from "../github-transport.mjs";
 import { homedir } from "node:os";
@@ -18,7 +18,7 @@ const session = await joinSession({
 		handler: async ({ args }) => {
 			try {
 				const [action = "list", reference] = args.trim().split(/\s+/);
-				const tracker = new IssueTracker(session.sessionId, readState(session.sessionId));
+				const tracker = new IssueTracker(session.sessionId, syncSession({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
 				const issues = tracker.manage(action, reference);
 				writeState(tracker.snapshot());
 				await session.log(issues.length ? issues.map((i) => `${i.label}: ${i.url}`).join("\n") : "No tracked session issues.");
@@ -40,7 +40,7 @@ const session = await joinSession({
 			additionalProperties: false,
 		},
 		handler: ({ action, reference }) => {
-			const tracker = new IssueTracker(session.sessionId, readState(session.sessionId));
+			const tracker = new IssueTracker(session.sessionId, syncSession({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
 			const issues = tracker.manage(action, reference);
 			writeState(tracker.snapshot());
 			return JSON.stringify(issues);

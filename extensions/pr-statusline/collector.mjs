@@ -1,4 +1,4 @@
-import { readState, RELEVANT_EVENT_TYPE, SessionTracker, statePath, writeState } from "./tracker.mjs";
+import { pullRequest, readState, RELEVANT_EVENT_TYPE, SessionTracker, statePath, writeState } from "./tracker.mjs";
 import { renameSync, rmSync, statSync } from "node:fs";
 import { dismissMergedPrs, initializeMergedPrs, reconcilePrStates } from "./lifecycle.mjs";
 import { refreshSessionStatusline } from "./session-statusline.mjs";
@@ -30,7 +30,9 @@ export async function collect(session, { home, interval = 15000, report = consol
 			rmSync(file, { force: true });
 		}
 	}
-	const tracker = new SessionTracker(session.sessionId, previous);
+	const tracker = new SessionTracker(session.sessionId, previous?.activeTrackingVersion === 2 ? previous : previous && {
+		...previous, prs: previous.prs.filter((pr) => pr.owned === true || pr.simulated), calls: {}, transcriptOffset: 0,
+	});
 	initializeMergedPrs(tracker, Date.now());
 	const queued = [];
 	let loading = true;
@@ -140,9 +142,13 @@ export async function collect(session, { home, interval = 15000, report = consol
 	return {
 		tracker,
 		initialPoll,
-		manage(action, reference) {
+		manage(action, reference, toolCallId = null) {
 			reload();
-			const prs = tracker.manage(action, reference);
+			const call = toolCallId ? tracker.calls.get(toolCallId) : null;
+			const source = toolCallId && action === "add"
+				? (call?.reference === pullRequest(reference).url ? call.source : null)
+				: { root: true };
+			const prs = tracker.manage(action, reference, source);
 			save(null, { force: true });
 			return prs;
 		},

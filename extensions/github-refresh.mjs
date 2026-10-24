@@ -156,7 +156,8 @@ export async function refreshTracker(kind, sessionId, {
       const workspace = readFileSync(join(home, "session-state", sessionId, "workspace.yaml"), "utf8");
       const repository = /^repository:\s*(\S+)/m.exec(workspace)?.[1];
       const branch = /^branch:\s*(\S+)/m.exec(workspace)?.[1];
-      if (repository && branch && !["main", "master", "HEAD"].includes(branch)) {
+      if (repository && branch && tracker.state.prs.some((pr) => !pr.simulated) &&
+          !["main", "master", "HEAD"].includes(branch)) {
         const github = await import("./pr-statusline/github.mjs");
         const key = `branch:${tracker.host}/${repository}:${branch}`;
         const scope = await statuslineGitHub.cacheScope(tracker.host, { signal, target: key });

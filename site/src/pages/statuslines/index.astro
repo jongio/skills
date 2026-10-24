@@ -13,6 +13,8 @@ const base = import.meta.env.BASE_URL;
       <strong>GitHub Issues</strong> (<code>issue-statusline</code>), <strong>Subagents</strong> (<code>subagent-statusline</code>),
       and <strong>Branch and Worktree</strong> (<code>worktree-statusline</code>).
       Choose any combination. See where work is happening, what needs attention on GitHub, and how background tasks are progressing.
+      Explicitly enroll PRs and issues this session owns; references, shell commands, and GitHub responses never create them.
+      Actual session agent launches remain automatic.
     </p>
   </header>
 
@@ -55,7 +57,7 @@ const base = import.meta.env.BASE_URL;
           <pre class="sl-primary-pre"><code>/statusline-setup</code></pre>
         </div>
       </div>
-      <p class="sl-primary-sub">Start a new session after installation to load the extensions. Run setup again whenever you want to change the enabled components.</p>
+      <p class="sl-primary-sub">Start a new session after installation to load the extensions. Run setup again whenever you want to change the enabled components. Use <code>/session-statusline clear</code> to dismiss this session's pills without disabling components or deleting work. The full plugin includes the <code>session-statusline</code> skill for requests such as "clear the footer pills".</p>
     </div>
 
     <div class="sl-install-secondary">
@@ -102,7 +104,7 @@ const base = import.meta.env.BASE_URL;
         <div class="sl-shot-header">
           <div>
             <h2 id="pull-requests" class="sl-types-item c-pr">Pull Requests · Checks and reviews</h2>
-            <p class="sl-shot-sub">Follow the PRs worked on in this session, even across repositories. Open a PR from its pill using your terminal’s link gesture. PRs tracked only through background agents contribute to the subagent summary instead of adding individual pills.</p>
+            <p class="sl-shot-sub">Explicitly enroll PRs this session owns through <code>session_prs</code> or <code>/session-prs add</code>, even across repositories. Shell commands, GitHub responses, and references never enroll PRs or issues. Open a PR from its pill using your terminal’s link gesture. PRs tracked only through background agents contribute to the subagent summary instead of adding individual pills.</p>
           </div>
           <span><a href="https://github.com/jongio/skills/tree/main/extensions/pr-statusline" target="_blank" rel="noopener">View source →</a></span>
         </div>

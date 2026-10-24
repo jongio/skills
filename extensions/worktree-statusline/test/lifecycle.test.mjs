@@ -137,10 +137,12 @@ test("collector dismisses late merge confirmations against an already received p
 	const collector = await collect({
 		sessionId: id,
 		on(fn) { handler = fn; return () => {}; },
-		async getEvents() { return [event("user.message", 1000, { content: `Work on ${url(1)}` })]; },
+		async getEvents() { return [event("user.message", 1000, { content: `Work on ${url(1)}` }),
+			event("tool.execution_start", 1100, { toolCallId: "track", toolName: "session_prs", arguments: { action: "add", reference: url(1) } })]; },
 		rpc: { metadata: { async activity() { return { hasActiveWork: true }; } } },
 	}, { home, interval: 100000 });
 	try {
+		collector.manage("add", url(1));
 		handler(event("user.message", 3000, { content: "Status?" }));
 		const external = readState(id, home);
 		Object.assign(external.prs[0], {
@@ -155,7 +157,7 @@ test("collector dismisses late merge confirmations against an already received p
 	} finally { collector.stop(); }
 }));
 
-test("revision reconciliation rejects stale saves while explicit re-add and reopen survive older tombstones", () => {
+test("revision reconciliation rejects stale saves while explicit re-add survives older tombstones", () => {
 	const tracker = new SessionTracker("revisions");
 	tracker.add(url(1));
 	Object.assign(tracker.state.prs[0], { mergedAt: 100, mergedObservedAt: 200, checkedAt: 200, status: `${OCTICONS.merged} Merged` });
@@ -172,6 +174,8 @@ test("revision reconciliation rejects stale saves while explicit re-add and reop
 	tracker.observe(event("tool.execution_start", 200, {
 		toolCallId: "reopen", toolName: "powershell", arguments: { command: `gh pr reopen ${url(1)}` },
 	}));
+	assert.deepEqual(tracker.state.prs, [], "shell reopen cannot undo explicit removal");
+	tracker.manage("add", url(1));
 	assert.equal(tracker.state.prs[0].generation, 1);
 	reconcilePrStates(tracker, removed);
 	assert.equal(tracker.state.prs.length, 1);
@@ -190,11 +194,13 @@ test("collector reconciles merge metadata before dismissal and never revives it 
 	const session = {
 		sessionId: id,
 		on(fn) { handler = fn; return () => {}; },
-		async getEvents() { return [event("user.message", 1000, { content: `Work on ${url(1)}` })]; },
+		async getEvents() { return [event("user.message", 1000, { content: `Work on ${url(1)}` }),
+			event("tool.execution_start", 1100, { toolCallId: "track", toolName: "session_prs", arguments: { action: "add", reference: url(1) } })]; },
 		rpc: { metadata: { async activity() { return { hasActiveWork: false }; } } },
 	};
 	const collector = await collect(session, { home, interval: 100000 });
 	try {
+		collector.manage("add", url(1));
 		const external = readState(id, home);
 		Object.assign(external.prs[0], { mergedAt: 500, mergedObservedAt: 2000, checkedAt: 2000, status: `${OCTICONS.merged} Merged` });
 		external.updatedAt += 10000;
@@ -213,7 +219,7 @@ test("collector reconciles merge metadata before dismissal and never revives it 
 	} finally { collector.stop(); }
 }));
 
-test("collector startup replay cannot restore an old reopen, while a new live reopen can", async () => fixture(async (home) => {
+test("collector startup and live shell reopen cannot restore ownership without an explicit add", async () => fixture(async (home) => {
 	const id = "replay-reopen";
 	const tracker = new SessionTracker(id);
 	tracker.add(url(1));
@@ -233,6 +239,8 @@ test("collector startup replay cannot restore an old reopen, while a new live re
 	try {
 		assert.equal(readState(id, home).prs.length, 0);
 		handler(reopen(4000));
+		assert.deepEqual(readState(id, home).prs, []);
+		collector.manage("add", url(1));
 		assert.equal(readState(id, home).prs[0].generation, 1);
 	} finally { collector.stop(); }
 }));

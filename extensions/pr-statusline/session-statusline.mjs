@@ -67,8 +67,7 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 		issue.state.issues = [];
 		issue.state.clearedWorkspace = [repository, branch, name];
 		issue.state.clearedAt = clearedAt;
-		issue.calls.clear();
-		agents.clear();
+		agents.clear(clearedAt);
 		agents.clearedAt = clearedAt;
 		agents.simulated = false;
 		writeState(pr.snapshot(), home);
