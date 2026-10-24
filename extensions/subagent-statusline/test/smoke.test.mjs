@@ -373,6 +373,30 @@ try {
 				"CaskaydiaCove Nerd Font Mono",
 			);
 
+			// Existing unset font.face ("" or null) is replaced in place without duplicating keys on repeated healing
+			for (const unsetValue of ["\"\"", "null"]) {
+				const unsetFaceSettings = `{\n  // keep comment\n  "profiles": {\n    "defaults": {\n      "font": { "face": ${unsetValue}, "size": 11 }\n    },\n    "list": [{ "guid": "{574e775e-4f2a-5b96-ac1e-a2962a402336}", "name": "PowerShell" }]\n  }\n}\n`;
+				writeFileSync(fakeWtSettings, unsetFaceSettings);
+				for (let attempt = 0; attempt < 2; attempt++) {
+					assert.equal(
+						ensureWindowsTerminalNerdFont({
+							wtSettingsPaths: [fakeWtSettings],
+							fontDirs: [fakeFontsDir],
+							wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+							termProgram: "",
+							isWsl: false,
+						}),
+						"CaskaydiaCove Nerd Font Mono",
+					);
+				}
+				const healedUnsetRaw = readFileSync(fakeWtSettings, "utf8");
+				assert.equal((healedUnsetRaw.match(/"face"\s*:/g) ?? []).length, 1);
+				assert.equal(
+					JSON.parse(stripJsonComments(healedUnsetRaw)).profiles.defaults.font.face,
+					"CaskaydiaCove Nerd Font Mono",
+				);
+			}
+
 			// Running inside VS Code never modifies Windows Terminal settings
 			writeFileSync(fakeWtSettings, JSON.stringify({
 				profiles: {

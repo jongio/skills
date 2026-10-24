@@ -295,102 +295,96 @@ function scanJsoncObject(src, openIndex) {
 	return null;
 }
 
-function findJsoncPropertyObject(src, openIndex, closeIndex, propName) {
-	let depth = 0;
-	let inString = false;
-	let i = openIndex;
-	while (i <= closeIndex) {
-		const ch = src[i];
-		const next = src[i + 1];
-		if (inString) {
-			if (ch === "\\" && i + 1 <= closeIndex) {
+function skipJsoncTrivia(src, index, limit = src.length - 1) {
+	let i = index;
+	while (i <= limit) {
+		if (/\s/.test(src[i])) {
+			i++;
+			continue;
+		}
+		if (src[i] === "/" && src[i + 1] === "/") {
+			i += 2;
+			while (i <= limit && src[i] !== "\n" && src[i] !== "\r") i++;
+			continue;
+		}
+		if (src[i] === "/" && src[i + 1] === "*") {
+			i += 2;
+			while (i + 1 <= limit && !(src[i] === "*" && src[i + 1] === "/")) i++;
+			i += 2;
+			continue;
+		}
+		break;
+	}
+	return i;
+}
+
+function scanJsoncValueSpan(src, startIndex, limit = src.length - 1) {
+	const ch = src[startIndex];
+	if (ch === "{" || ch === "[") {
+		const span = scanJsoncObject(src, startIndex);
+		if (!span) return null;
+		return {
+			start: startIndex,
+			end: span.close + 1,
+			isObject: ch === "{",
+			objectSpan: ch === "{" ? span : null,
+		};
+	}
+	if (ch === "\"") {
+		let i = startIndex + 1;
+		while (i <= limit) {
+			if (src[i] === "\\" && i + 1 <= limit) {
 				i += 2;
 				continue;
 			}
-			if (ch === "\"") inString = false;
-			i++;
-			continue;
-		}
-		if (ch === "/" && next === "/") {
-			i += 2;
-			while (i <= closeIndex && src[i] !== "\n" && src[i] !== "\r") i++;
-			continue;
-		}
-		if (ch === "/" && next === "*") {
-			i += 2;
-			while (i + 1 <= closeIndex && !(src[i] === "*" && src[i + 1] === "/")) i++;
-			i += 2;
-			continue;
-		}
-		if (ch === "\"") {
-			const strStart = i;
-			i++;
-			while (i <= closeIndex) {
-				if (src[i] === "\\" && i + 1 <= closeIndex) {
-					i += 2;
-					continue;
-				}
-				if (src[i] === "\"") break;
-				i++;
+			if (src[i] === "\"") {
+				return { start: startIndex, end: i + 1, isObject: false, objectSpan: null };
 			}
-			const strEnd = i;
 			i++;
-			if (depth === 1) {
-				let j = i;
-				while (j <= closeIndex) {
-					if (/\s/.test(src[j])) {
-						j++;
-						continue;
-					}
-					if (src[j] === "/" && src[j + 1] === "/") {
-						j += 2;
-						while (j <= closeIndex && src[j] !== "\n" && src[j] !== "\r") j++;
-						continue;
-					}
-					if (src[j] === "/" && src[j + 1] === "*") {
-						j += 2;
-						while (j + 1 <= closeIndex && !(src[j] === "*" && src[j + 1] === "/")) j++;
-						j += 2;
-						continue;
-					}
-					break;
-				}
-				if (src[j] === ":") {
-					let k = j + 1;
-					while (k <= closeIndex) {
-						if (/\s/.test(src[k])) {
-							k++;
-							continue;
-						}
-						if (src[k] === "/" && src[k + 1] === "/") {
-							k += 2;
-							while (k <= closeIndex && src[k] !== "\n" && src[k] !== "\r") k++;
-							continue;
-						}
-						if (src[k] === "/" && src[k + 1] === "*") {
-							k += 2;
-							while (k + 1 <= closeIndex && !(src[k] === "*" && src[k + 1] === "/")) k++;
-							k += 2;
-							continue;
-						}
-						break;
-					}
-					try {
-						if (JSON.parse(src.slice(strStart, strEnd + 1)) === propName && src[k] === "{") {
-							return scanJsoncObject(src, k);
-						}
-					} catch {
-						// Ignore unparseable key token.
-					}
-				}
-			}
-			continue;
 		}
-		if (ch === "{" || ch === "[") depth++;
-		else if (ch === "}" || ch === "]") depth--;
+		return null;
+	}
+	let i = startIndex;
+	while (i <= limit) {
+		const c = src[i];
+		if (/\s/.test(c) || c === "," || c === "}" || c === "]") break;
+		if (c === "/" && (src[i + 1] === "/" || src[i + 1] === "*")) break;
 		i++;
 	}
-	return null;
+	return i > startIndex ? { start: startIndex, end: i, isObject: false, objectSpan: null } : null;
+}
+
+function findJsoncPropertyValue(src, openIndex, closeIndex, propName) {
+	let i = openIndex + 1;
+	let match = null;
+	while (i < closeIndex) {
+		i = skipJsoncTrivia(src, i, closeIndex - 1);
+		if (i >= closeIndex) break;
+		if (src[i] === ",") {
+			i++;
+			continue;
+		}
+		if (src[i] !== "\"") return match;
+		const keySpan = scanJsoncValueSpan(src, i, closeIndex - 1);
+		if (!keySpan) return match;
+		let keyName = null;
+		try {
+			keyName = JSON.parse(src.slice(keySpan.start, keySpan.end));
+		} catch {
+			return match;
+		}
+		const colonIdx = skipJsoncTrivia(src, keySpan.end, closeIndex - 1);
+		if (src[colonIdx] !== ":") return match;
+		const valStart = skipJsoncTrivia(src, colonIdx + 1, closeIndex - 1);
+		if (valStart >= closeIndex) return match;
+		const valSpan = scanJsoncValueSpan(src, valStart, closeIndex - 1);
+		if (!valSpan) return match;
+		if (keyName === propName) {
+			match = valSpan;
+		}
+		i = valSpan.end;
+	}
+	return match;
 }
 
 function insertPropertyInJsoncObject(src, span, propText) {
@@ -404,41 +398,47 @@ function insertPropertyInJsoncObject(src, span, propText) {
 	return `${src.slice(0, span.close)}${propText}\n${src.slice(span.close)}`;
 }
 
+function replaceJsoncValueSpan(src, valSpan, replacementText) {
+	return `${src.slice(0, valSpan.start)}${replacementText}${src.slice(valSpan.end)}`;
+}
+
 function applyDefaultFontFaceJsonc(raw, installedFace) {
-	let firstBrace = 0;
-	while (firstBrace < raw.length && raw[firstBrace] !== "{") {
-		if (/\s/.test(raw[firstBrace])) {
-			firstBrace++;
-			continue;
-		}
-		if (raw[firstBrace] === "/" && raw[firstBrace + 1] === "/") {
-			firstBrace += 2;
-			while (firstBrace < raw.length && raw[firstBrace] !== "\n" && raw[firstBrace] !== "\r") firstBrace++;
-			continue;
-		}
-		if (raw[firstBrace] === "/" && raw[firstBrace + 1] === "*") {
-			firstBrace += 2;
-			while (firstBrace + 1 < raw.length && !(raw[firstBrace] === "*" && raw[firstBrace + 1] === "/")) firstBrace++;
-			firstBrace += 2;
-			continue;
-		}
-		break;
-	}
+	const firstBrace = skipJsoncTrivia(raw, 0);
 	if (raw[firstBrace] !== "{") return null;
 	const rootSpan = scanJsoncObject(raw, firstBrace);
 	if (!rootSpan) return null;
 	const faceLiteral = JSON.stringify(installedFace);
-	const profilesSpan = findJsoncPropertyObject(raw, rootSpan.open, rootSpan.close, "profiles");
-	if (!profilesSpan) {
+	const profilesVal = findJsoncPropertyValue(raw, rootSpan.open, rootSpan.close, "profiles");
+	if (!profilesVal) {
 		return insertPropertyInJsoncObject(raw, rootSpan, `"profiles": { "defaults": { "font": { "face": ${faceLiteral} } } }`);
 	}
-	const defaultsSpan = findJsoncPropertyObject(raw, profilesSpan.open, profilesSpan.close, "defaults");
-	if (!defaultsSpan) {
+	if (!profilesVal.isObject) {
+		return replaceJsoncValueSpan(raw, profilesVal, `{ "defaults": { "font": { "face": ${faceLiteral} } } }`);
+	}
+	const profilesSpan = profilesVal.objectSpan;
+	const defaultsVal = findJsoncPropertyValue(raw, profilesSpan.open, profilesSpan.close, "defaults");
+	if (!defaultsVal) {
 		return insertPropertyInJsoncObject(raw, profilesSpan, `"defaults": { "font": { "face": ${faceLiteral} } }`);
 	}
-	const fontSpan = findJsoncPropertyObject(raw, defaultsSpan.open, defaultsSpan.close, "font");
-	if (!fontSpan) {
+	if (!defaultsVal.isObject) {
+		return replaceJsoncValueSpan(raw, defaultsVal, `{ "font": { "face": ${faceLiteral} } }`);
+	}
+	const defaultsSpan = defaultsVal.objectSpan;
+	const fontVal = findJsoncPropertyValue(raw, defaultsSpan.open, defaultsSpan.close, "font");
+	if (!fontVal) {
+		const legacyFaceVal = findJsoncPropertyValue(raw, defaultsSpan.open, defaultsSpan.close, "fontFace");
+		if (legacyFaceVal) {
+			return replaceJsoncValueSpan(raw, legacyFaceVal, faceLiteral);
+		}
 		return insertPropertyInJsoncObject(raw, defaultsSpan, `"font": { "face": ${faceLiteral} }`);
+	}
+	if (!fontVal.isObject) {
+		return replaceJsoncValueSpan(raw, fontVal, `{ "face": ${faceLiteral} }`);
+	}
+	const fontSpan = fontVal.objectSpan;
+	const faceVal = findJsoncPropertyValue(raw, fontSpan.open, fontSpan.close, "face");
+	if (faceVal) {
+		return replaceJsoncValueSpan(raw, faceVal, faceLiteral);
 	}
 	return insertPropertyInJsoncObject(raw, fontSpan, `"face": ${faceLiteral}`);
 }
