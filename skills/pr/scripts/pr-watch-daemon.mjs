@@ -1065,6 +1065,14 @@ export async function evaluatePrPollTick(args, execFn = defaultRequest, state = 
     state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   }
   const runsRes = await execFn(runsRequest);
+  if (runsRes?.ok && gqlRes?.cacheScope && runsRes.cacheScope && runsRes.cacheScope !== gqlRes.cacheScope) {
+    if (state) {
+      state.etags = {};
+      state.cacheScope = runsRes.cacheScope;
+    }
+    const error = "GitHub credentials changed during the poll; retry the pinned head";
+    return { events: [{ type: "POLL_ERROR", error }], error };
+  }
   const parsedRunsHttp = httpDetails(runsRes);
   if (state?.metrics) {
     if (parsedRunsHttp.rateLimitRemaining !== null) {

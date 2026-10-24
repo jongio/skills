@@ -195,3 +195,76 @@ test("both plugin notification entry points register opt-in tools without model 
     assert.equal(result.status, 0, result.stderr);
   }
 });
+
+    test("SDK denial prevents PR and issue collectors from accessing credentials or GitHub", (t) => {
+      const home = fixture(t);
+      for (const id of ["pr-statusline", "issue-statusline"]) {
+        const code = `
+          import assert from "node:assert/strict";
+          import { registerHooks } from "node:module";
+          const { statuslineGitHub } = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "github-transport.mjs")).href)});
+          let calls = 0;
+          statuslineGitHub.request = statuslineGitHub.cacheScope = async () => { calls++; throw new Error("Access before approval"); };
+          globalThis.deniedSession = async (options) => {
+            assert.deepEqual(options.requestedEnvironmentVariables, ["GH_TOKEN"]);
+            throw new Error("Permission denied");
+          };
+          const sdk = "data:text/javascript," + encodeURIComponent("export const joinSession = globalThis.deniedSession;");
+          registerHooks({ resolve(specifier, context, next) {
+            return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
+          } });
+          await assert.rejects(import(${JSON.stringify(pathToFileURL(join(root, "extensions", id, "extension.mjs")).href)}), /Permission denied/);
+          assert.equal(calls, 0);
+        `;
+        const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+          cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,
+          env: { ...process.env, COPILOT_HOME: home, COPILOT_STATUSLINE_TOKEN_ENV: "GH_TOKEN",
+            GH_TOKEN: "", GITHUB_TOKEN: "", GH_ENTERPRISE_TOKEN: "", GITHUB_ENTERPRISE_TOKEN: "" },
+        });
+        assert.equal(result.status, 0, result.stderr);
+      }
+    });
+
+    test("the real statusline adapter never forwards an enterprise environment token to an unrelated link", () => {
+      const code = `
+        import assert from "node:assert/strict";
+        import { createServer } from "node:http";
+        import { registerHooks } from "node:module";
+        const requests = [];
+        const server = createServer((request, response) => {
+          requests.push(request.headers.authorization);
+          response.setHeader("content-type", "application/json");
+          response.end(JSON.stringify({ data: { repository: { pullRequest: { state: "OPEN" } } } }));
+        });
+        await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+        globalThis.fixtureOrigin = "http://127.0.0.1:" + server.address().port;
+        const wrapper = "data:text/javascript," + encodeURIComponent(
+          "import { createGitHubClient as actual } from " + ${JSON.stringify(JSON.stringify(pathToFileURL(join(root, "extensions", "github-client.mjs")).href))} + ";" +
+          "export const createGitHubClient = options => actual({ ...options, baseUrl: globalThis.fixtureOrigin + '/api/v3'," +
+          "env: { ...(options.env || process.env), NO_PROXY: '*', no_proxy: '*' }," +
+          "run: async () => ({ ok: false, stdout: '', stderr: 'No configured credential' }) });"
+        );
+        registerHooks({ resolve(specifier, context, next) {
+          return specifier === "./github-client.mjs" && context.parentURL?.endsWith("/github-transport.mjs")
+            ? { url: wrapper, shortCircuit: true } : next(specifier, context);
+        } });
+        const { queryPrStatusWithGh } = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "pr-statusline", "github.mjs")).href)});
+        const { statuslineGitHub } = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "github-transport.mjs")).href)});
+        try {
+          await assert.rejects(queryPrStatusWithGh("https://unrelated.example/fixture/repo/pull/1"), /authentication required/);
+          assert.equal(requests.length, 0);
+          assert.equal((await queryPrStatusWithGh("https://enterprise.example/fixture/repo/pull/1")).state, "OPEN");
+          assert.deepEqual(requests, ["token fixture-enterprise"]);
+        } finally {
+          server.closeAllConnections();
+          await statuslineGitHub.close();
+          await new Promise((resolve) => server.close(resolve));
+        }
+      `;
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
+        cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,
+        env: { ...process.env, GH_HOST: "enterprise.example", GH_ENTERPRISE_TOKEN: "fixture-enterprise",
+          GITHUB_ENTERPRISE_TOKEN: "", GH_TOKEN: "", GITHUB_TOKEN: "" },
+      });
+      assert.equal(result.status, 0, result.stderr);
+    });

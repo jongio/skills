@@ -5,7 +5,7 @@ Continuously monitor GitHub Actions workflows with a zero-token ETag-cached back
 ## Features
 
 - **Zero-Token Background Daemon (`scripts/ci-hound-daemon.mjs`)**: Runs in an async background shell, streams live job-progress `PHASE_CHANGED` updates (`N/M jobs passed; active: ...`), and wakes the agent session when an actionable event occurs (`JOB_FAILED`, `WORKFLOW_FAILED`, `NEW_MAIN_COMMIT`, `WATCHED_RUNS_GREEN`, `ALL_GREEN`).
-- **ETag (`If-None-Match`) + `updated_at` Delta Caching**: Reuses `304 Not Modified` responses at zero GitHub API rate-limit cost, never re-fetches completed jobs, and persists state atomically with orphaned job ETag eviction.
+- **ETag (`If-None-Match`) + `updated_at` Delta Caching**: Reuses authenticated `304 Not Modified` responses at zero GitHub API rate-limit cost, skips unchanged retained completed runs, and persists state atomically with orphaned job ETag eviction. Credential changes invalidate cached observations.
 - **Adaptive Polling**: Polls every `15s` while `main` runs are active and backs off to `60s` when idle.
 - **Two-Tier Monitoring**:
   1. **Tier 1 (`main` branch — `push`, `workflow_dispatch`, `schedule`)**: Instant job-level failure detection, cross-platform desktop + audio alert, and isolated worktree auto-repair.

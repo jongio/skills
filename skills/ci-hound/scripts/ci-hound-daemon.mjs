@@ -615,6 +615,7 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
     state.cacheScope = scope;
   }
   const cached = state.etags[endpoint];
+  const requestedScope = state.cacheScope;
   const request = { endpoint, conditional: true, headers: cached?.etag ? { "If-None-Match": cached.etag } : {} };
   state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   const result = await execFn(request);
@@ -635,9 +636,13 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
     state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, parsed.retryAfterSec);
   }
 
-  if (result.ok && parsed.status === 304 && cached?.data !== undefined) {
-    state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
-    return { fromCache: true, data: cached.data };
+  if (parsed.status === 304) {
+    if (result.ok && cached?.etag && cached.data !== undefined &&
+        (!result.cacheScope || result.cacheScope === requestedScope)) {
+      state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
+      return { fromCache: true, data: cached.data };
+    }
+    return { fromCache: false, data: null, error: "HTTP 304 without a matching credential-scoped cache" };
   }
   const isRateLimited =
     result.rateLimited || parsed.status === 429 ||
@@ -918,6 +923,8 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   if (commitRes.rateLimited) {
     tickRateLimited = true;
   }
+  const pollScope = state.cacheScope;
+  const scopeChangedError = "GitHub credentials changed during the poll; retry the watched repositories";
   const currentSha = commitRes.data?.sha || state.lastMainSha;
   if (!tickRateLimited && currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
     const prevSha = state.lastMainSha;
@@ -994,6 +1001,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
       }
     }
   }
+  if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
   const workflowRuns = [...runMap.values()];
 
   let activeMainRuns = 0;
@@ -1024,6 +1032,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
         continue;
       }
       const jobsRes = await ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
+      if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
       if (jobsRes.rateLimited) {
         tickRateLimited = true;
         continue;
@@ -1041,6 +1050,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
             state,
             execFn
           );
+          if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
           if (pageRes.rateLimited) {
             tickRateLimited = true;
             jobsComplete = false;

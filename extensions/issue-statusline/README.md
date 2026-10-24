@@ -32,6 +32,8 @@ For environment-token-only authentication, explicitly select the required
 variable names with `COPILOT_STATUSLINE_TOKEN_ENV` before starting Copilot;
 the host asks permission before granting the collector those filtered values.
 Without that opt-in, the collector uses bounded `gh` credential discovery.
+For enterprise environment tokens, also set `GH_HOST` to the intended server;
+unrelated hosts found in links cannot inherit that token.
 
 ### Option 1: Install as a Copilot Plugin or Interactive Script (Recommended)
 

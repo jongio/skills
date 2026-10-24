@@ -6,7 +6,8 @@ creates another Copilot runtime, calls a model, starts watchers or repairs, or
 authorizes a merge.
 
 The full plugin and standalone statuslines plugin expose this entry point.
-Subscription is disabled until explicitly requested. For a manual install:
+Subscription is disabled until explicitly requested. For a manual install, run
+from the repository root:
 
 ```powershell
 node scripts\setup-statusline.mjs --notifications
