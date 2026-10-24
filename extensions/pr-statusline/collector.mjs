@@ -7,7 +7,7 @@ function serializeComparable(snap) {
 	return JSON.stringify(rest);
 }
 
-export async function collect(session, { home, interval = 15000, report = console.error } = {}) {
+export async function collect(session, { home, interval = 15000, report = console.error, attention = null } = {}) {
 	const file = statePath(session.sessionId, home);
 	let previous = null;
 	let lastDiskMtimeMs = 0;
@@ -85,6 +85,7 @@ export async function collect(session, { home, interval = 15000, report = consol
 			try {
 				reload();
 				tracker.observe(event);
+				attention?.observe(event);
 				save();
 			} catch (error) {
 				report(`[pr-statusline] ${error.message}`);
@@ -100,10 +101,14 @@ export async function collect(session, { home, interval = 15000, report = consol
 			}
 		}
 		loading = false;
-		for (const event of queued) tracker.observe(event);
+		for (const event of queued) {
+			tracker.observe(event);
+			attention?.observe(event);
+		}
 		save(null, { force: true });
 	} catch (error) {
 		unsubscribe();
+		attention?.stop();
 		throw error;
 	}
 	async function poll() {
@@ -138,6 +143,7 @@ export async function collect(session, { home, interval = 15000, report = consol
 			stopped = true;
 			clearInterval(timer);
 			unsubscribe();
+			attention?.stop();
 		},
 	};
 }

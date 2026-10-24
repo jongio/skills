@@ -2,6 +2,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { collect } from "./collector.mjs";
+import { createSessionAttention, runAttentionCommand } from "./attention.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
 import {
 	ensurePluginStatuslineRegistered,
@@ -24,6 +25,7 @@ const { firstRun } = ensurePluginStatuslineRegistered("pr-statusline", dirname(f
 });
 
 let collector;
+let attention;
 function manage(action, reference, invocation) {
 	if (!collector) throw new Error("PR statusline is still loading.");
 	return collector.manage(action, reference, invocation?.toolCallId);
@@ -46,6 +48,18 @@ function updateSession(action) {
 
 const session = await joinSession({
 	commands: [
+		{
+			name: "session-attention",
+			description: "Configure Windows Terminal attention alerts, show a preview, or inspect this session's window binding",
+			handler: async ({ args = "" }) => {
+				try {
+					if (!attention) throw new Error("Session attention is still loading; retry shortly.");
+					await session.log(await runAttentionCommand(attention, args));
+				} catch (error) {
+					await session.log(`Session attention: ${error.message}`);
+				}
+			},
+		},
 		{
 			name: "session-statusline",
 			description: "Refresh tracked session data, clear session entries, or set up enabled statusline components",
@@ -207,7 +221,8 @@ const session = await joinSession({
 	],
 });
 
-collector = await collect(session);
+attention = createSessionAttention({ ownerProcessId: process.ppid });
+collector = await collect(session, { attention });
 
 if (firstRun && session.capabilities?.ui?.elicitation) {
 	runInteractiveStatuslinePicker(session).catch(() => {});
