@@ -80,6 +80,14 @@ function extensionScript(entry, full) {
 		assert.match(logs.pop(), /No Git checkout found/);
 		if (${full}) {
 			assert.equal(configuration.commands.some(item => ["statusline", "footer"].includes(item.name)), false);
+			await command("session-attention")({ args: "status" });
+			assert.match(logs.pop(), /Window attention: off/);
+			await command("session-attention")({ args: "both" });
+			assert.match(logs.pop(), /Window attention: on; style: both/);
+			await command("session-attention")({ args: "off" });
+			assert.match(logs.pop(), /Window attention: off/);
+			await command("session-attention")({ args: "invalid" });
+			assert.match(logs.pop(), /Usage:.*session-attention/);
 			await command("session-statusline")({ args: "invalid" });
 			assert.match(logs.pop(), /Usage:.*refresh.*clear.*setup/);
 			const tool = name => configuration.tools.find(item => item.name === name).handler;

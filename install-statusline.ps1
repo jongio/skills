@@ -52,7 +52,7 @@ try {
 	}
 
 	$manifest = @{
-		'pr-statusline'       = @('extension.mjs', 'collector.mjs', 'session-statusline.mjs', 'tracker.mjs', 'github.mjs', 'provenance.mjs', 'lifecycle.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
+		'pr-statusline'       = @('extension.mjs', 'collector.mjs', 'session-statusline.mjs', 'tracker.mjs', 'github.mjs', 'provenance.mjs', 'lifecycle.mjs', 'render.mjs', 'compose.mjs', 'attention.mjs', 'attention-state.mjs', 'attention.windows.cs', 'copilot-extension.json')
 		'issue-statusline'    = @('extension.mjs', 'tracker.mjs', 'github.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 		'subagent-statusline' = @('extension.mjs', 'tracker.mjs', 'settlement.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')
 		'worktree-statusline' = @('extension.mjs', 'tracker.mjs', 'render.mjs', 'grouping.mjs', 'worktrees.mjs', 'compose.mjs', 'copilot-extension.json')

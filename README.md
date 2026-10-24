@@ -95,6 +95,12 @@ irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 
 curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash
 ```
 
+**Windows Terminal attention alerts** are also available, independently of the
+footer rows. Run `/session-attention both` to enable a pulsing border and
+background wash until that session's window gets focus, or
+`/session-attention preview` to try the appearance without enabling it.
+Alerts are off by default. See [window attention settings and behavior](extensions/pr-statusline/README.md#windows-terminal-attention-alerts).
+
 ## Install
 
 ### Option 1: Copilot Plugin Marketplace (Recommended)

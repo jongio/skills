@@ -113,6 +113,112 @@ set up the copilot statusline from jongio/skills and ask me which of PRs, issues
 }
 ```
 
+## Windows Terminal attention alerts
+
+These are **extension slash commands, not skills**; they do not appear in
+`/skills`. SDK extensions require experimental features. Enable them once with
+`/settings experimental on`, then run `/restart` in each existing CLI window
+before using `/session-attention`. Installing the plugin alone does not enable
+the SDK extension loader.
+
+Window alerts are **off by default**. The live extension can pulse a colored
+border, a translucent background wash, or both around the Terminal window that
+owns this session. This is independent of which footer components are visible:
+hiding or clearing footer rows does not disable window alerts.
+
+```text
+/session-attention both
+/session-attention preview
+/session-attention preview question
+/session-attention status
+/session-attention off
+```
+
+| Command | Effect |
+| --- | --- |
+| `/session-attention on` | Enable alerts using the saved appearance. |
+| `/session-attention off` | Disable alerts and remove any active window effect. |
+| `/session-attention border` | Enable only the pulsing border. |
+| `/session-attention background` | Enable only the translucent wash. |
+| `/session-attention both` | Enable both effects. |
+| `/session-attention preview [approval \| question \| ready \| error]` | Pulse until you click/type in the terminal or switch away and return. No timeout; does not enable alerts. Defaults to approval. |
+| `/session-attention status` | Show the enabled state, appearance, verified window binding, or helper error. |
+
+Alerts and previews have **no timeout**. Focusing the window acknowledges its current
+alert and removes the effect; switching away does not restart it. Only a new
+attention event re-arms the pulse. If an alert starts while the window already
+has focus, it keeps pulsing until a subsequent key press, click or scroll in
+that terminal, or until you switch away and return. Mouse movement alone and
+interaction with another window do not acknowledge it. Acknowledgment does not
+answer a question or approve a permission request.
+Acknowledgment uses the exact bound Terminal window, not the shared
+`WindowsTerminal.exe` process or another window's ownership chain. Switching to
+or opening another terminal leaves the alert active. Focus must settle on the
+bound window; transient activation and window-switching keyboard shortcuts do
+not dismiss it.
+
+An unresolved input request keeps pulsing through background activity and
+working/status refreshes. If the request is resolved and Copilot can continue
+without you, its alert clears. A response-ready alert also clears if Copilot
+resumes working on its own. Disabling attention or closing the session removes
+the effect.
+
+| Session event | Default appearance |
+| --- | --- |
+| Permission or plan approval needed | Amber |
+| Question or elicitation dialog needs an answer | Purple |
+| Root session finishes its response and becomes idle | Green |
+| Root session reports an error | Red |
+
+Green means **response ready**, not proof that the requested task succeeded.
+Working and compacting do not flash. Historical replay, hook-resolved approval
+requests, scheduled response completions, and background-agent completions do
+not create alerts. Real input requests raised by background agents can still
+need your attention.
+
+Preferences are saved separately in
+`$COPILOT_HOME/statusline-attention.json` (default
+`~/.copilot/statusline-attention.json`) and reloaded by running sessions.
+Colors can be customized with `#RRGGBB` values:
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "style": "both",
+  "colors": {
+    "approval": "#FFBB24",
+    "question": "#B48CFF",
+    "ready": "#5BD463",
+    "error": "#EF5F5F"
+  }
+}
+```
+
+The Windows-only helper binds through this session's console ownership, never
+the currently foreground window or a shared Terminal process ID. Its surfaces
+are click-through and non-activating, follow the window's position, size and
+DPI, hide while minimized, and disappear when the extension exits. Focus
+acknowledgment is **window-wide, not tab-specific**: use a separate Terminal
+window for each Copilot session when you need independent alerts.
+The extension supplies its CLI host PID rather than its own forked-process
+console. An attachable classic console or an unowned pseudoconsole is rejected
+without falling back to an ancestor's Terminal, even if it inherited
+`WT_SESSION`.
+
+No shell profile changes, global hooks, system service, or AI requests are
+needed. On first use, the bundled C# source is compiled with Windows' .NET
+Framework compiler and cached under
+`$COPILOT_HOME/statusline-attention/bin/`; no .NET SDK or package installation
+is required. The helper starts only for an attention event or preview and
+receives presentation metadata, not prompts or tool output. An unsupported
+host, missing compiler, or unverified window binding is reported without
+selecting another window or preventing the statusline from working. macOS,
+Linux, WSL, and other terminal hosts do not run this Windows helper.
+
+After upgrading the plugin or standalone runtime, start a new Copilot session
+to load the new `/session-attention` command.
+
 ## What appears in each pill
 
 Using `Azure/azure-dev` as an example checkout:

@@ -42,7 +42,7 @@ for file in extension.mjs bridge.mjs; do
   curl -fsSL "$BASE_URL/extensions/daemon-notifications/$file" -o "$TEMP_ROOT/extensions/daemon-notifications/$file"
 done
 
-for file in extension.mjs collector.mjs session-statusline.mjs tracker.mjs github.mjs provenance.mjs lifecycle.mjs render.mjs compose.mjs copilot-extension.json; do
+for file in extension.mjs collector.mjs session-statusline.mjs tracker.mjs github.mjs provenance.mjs lifecycle.mjs render.mjs compose.mjs attention.mjs attention-state.mjs attention.windows.cs copilot-extension.json; do
   mkdir -p "$TEMP_ROOT/extensions/pr-statusline"
   curl -fsSL "$BASE_URL/extensions/pr-statusline/$file" -o "$TEMP_ROOT/extensions/pr-statusline/$file"
 done

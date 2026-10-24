@@ -896,7 +896,8 @@ export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 			for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
 				if (!entry.isFile()) continue;
 				if (entry.name === "extension.mjs") continue;
-				if (entry.name.endsWith(".mjs") || entry.name === "copilot-extension.json") {
+				if (entry.name.endsWith(".mjs") || entry.name === "copilot-extension.json" ||
+					entry.name === "attention.windows.cs") {
 					copyFileSync(join(srcDir, entry.name), join(dstDir, entry.name));
 				}
 			}
