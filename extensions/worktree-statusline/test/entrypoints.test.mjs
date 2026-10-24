@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -49,12 +49,12 @@ function extensionScript(entry, full) {
 	return `
 		import assert from "node:assert/strict";
 		import { registerHooks } from "node:module";
-		let configuration;
+		let configuration, observer;
 		const logs = [];
 		const session = {
 			sessionId: "handler-fixture", capabilities: {},
 			log: async value => logs.push(value),
-			on: () => () => {}, getEvents: async () => [],
+			on: fn => { observer = fn; return () => {}; }, getEvents: async () => [],
 			rpc: { metadata: { activity: async () => ({ hasActiveWork: false }) } },
 		};
 		globalThis.joinTestSession = async value => { configuration = value; return session; };
@@ -82,6 +82,21 @@ function extensionScript(entry, full) {
 			await command("session-prs")({ args: "list" });
 			assert.match(logs.pop(), /example\\/widget#1/);
 			assert.equal(JSON.parse(tool("session_prs")({ action: "remove", reference: "example/widget#1" })).length, 0);
+			observer({ type: "subagent.started", data: { agentId: "actual-worker" } });
+			observer({ type: "tool.execution_start", agentId: "actual-worker", data: {
+				toolCallId: "claim-child", toolName: "session_prs",
+				arguments: { action: "add", reference: "example/widget#10" },
+			} });
+			assert.deepEqual(JSON.parse(tool("session_prs")({ action: "list" })), []);
+			const claimed = JSON.parse(tool("session_prs")({ action: "add", reference: "example/widget#10" },
+				{ sessionId: session.sessionId, toolCallId: "claim-child" }));
+			assert.equal(claimed[0].owned, true);
+			assert.deepEqual(claimed[0].provenance, { root: false, unknown: false, agents: ["actual-worker"] });
+			const unknown = JSON.parse(tool("session_prs")({ action: "add", reference: "example/widget#11" },
+				{ sessionId: session.sessionId, toolCallId: "unobserved-call" }));
+			assert.deepEqual(unknown[1].provenance, { root: false, unknown: true, agents: [] });
+			await command("session-prs")({ args: "clear" });
+			logs.pop();
 			await command("session-prs")({ args: "invalid" });
 			assert.match(logs.pop(), /Usage:/);
 			await command("session-subagents")({ args: "list" });
@@ -137,6 +152,25 @@ test("unified extension handlers manage session state, validate references and c
 		extensionScript(join(root, "extensions", "pr-statusline", "extension.mjs"), true)]);
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stdout, /handlers passed/);
+}));
+
+test("installer exposes one SDK controller and preserves standalone entry points when upgrading to unified controls", () => fixture((home) => {
+	configureStatuslines({ home, repoRoot: root, enabled: ids.filter((id) => id !== "pr-statusline") });
+	const customized = join(home, "extensions", "issue-statusline", "extension.mjs");
+	const previous = `${readFileSync(customized, "utf8")}\n// Local standalone customization.\n`;
+	writeFileSync(customized, previous);
+	configureStatuslines({ home, repoRoot: root, enabled: ["pr-statusline"], merge: true });
+	assert.deepEqual(new Set(getEnabledStatuslines(home)), new Set(ids));
+	assert.deepEqual(ids.filter((id) => existsSync(join(home, "extensions", id, "extension.mjs"))), ["pr-statusline"]);
+	const backups = readdirSync(dirname(customized)).filter((name) => name.startsWith("extension.mjs.disabled-"));
+	assert.equal(backups.length, 1);
+	assert.equal(readFileSync(join(dirname(customized), backups[0]), "utf8"), previous);
+	configureStatuslines({ home, repoRoot: root, enabled: ["issue-statusline"] });
+	assert.deepEqual(getEnabledStatuslines(home), ["issue-statusline"]);
+	assert.deepEqual(ids.filter((id) => existsSync(join(home, "extensions", id, "extension.mjs"))), ["pr-statusline"]);
+	const result = node(home, ["--input-type=module", "-e",
+		extensionScript(join(home, "extensions", "pr-statusline", "extension.mjs"), true)]);
+	assert.equal(result.status, 0, result.stderr);
 }));
 
 test("PR-only and worktree-only installs start their SDK entry points without enabling siblings", () => fixture((home) => {

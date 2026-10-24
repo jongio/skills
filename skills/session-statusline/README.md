@@ -22,8 +22,9 @@ Ask "clear the footer pills" or "remove the PR pill for owner/repo#123".
 
 Clearing dismisses tracking only: no PRs or issues are closed, agents stopped,
 worktrees deleted, transcripts removed, or component selections changed.
-References, lookups, and other sessions' work do not automatically create pills.
-Explicitly add read-only review/watch targets when the session takes them on.
+All PR and issue enrollment is explicit. Shell commands, GitHub writes/results,
+references, lookups, and other sessions' work never create pills. Add only work
+this session actually takes on, including read-only review/watch targets.
 
 ## Development
 

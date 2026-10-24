@@ -36,6 +36,8 @@ for (const [component, standalone] of [["issues", "issue-statusline"], ["subagen
 								event("tool.execution_start", { toolCallId: "issue-work", toolName: "powershell", arguments: { command: "gh issue develop 7" } }),
 								event("subagent.started", { agentId: "worker", agentType: "general-purpose" }),
 								event("tool.execution_start", { toolCallId: "agent-work", toolName: "powershell", arguments: { command: "gh pr checkout 42" } }, "worker"),
+								event("tool.execution_start", { toolCallId: "explicit-work", toolName: "session_prs", arguments: { action: "add", reference: pr } }, "worker"),
+								event("tool.execution_complete", { toolCallId: "explicit-work", success: true, result: { content: "Tracked" } }),
 							].map(JSON.stringify).join("\\n") + "\\n";
 							const directory = join(home, "session-state", id);
 							mkdirSync(directory, { recursive: true });
@@ -46,7 +48,7 @@ for (const [component, standalone] of [["issues", "issue-statusline"], ["subagen
 							issues.add("https://github.com/acme/app/issues/99");
 							const oldIssues = issues.snapshot();
 							delete oldIssues.activeTrackingVersion;
-							for (const item of oldIssues.issues) delete item.active;
+							for (const item of oldIssues.issues) if (item.label.endsWith("#99")) delete item.owned;
 							oldIssues.transcriptOffset = Buffer.byteLength(history);
 							writeIssues(oldIssues);
 							const agents = new SubagentTracker(id);
@@ -84,7 +86,7 @@ for (const [component, standalone] of [["issues", "issue-statusline"], ["subagen
 							const read = component === "issues" ? readIssues : readAgents;
 							const write = component === "issues" ? writeIssues : writeAgents;
 							const saved = read(id);
-							assert.equal(saved.activeTrackingVersion, 1);
+							assert.equal(saved.activeTrackingVersion, 2);
 							if (action === "list") {
 								if (component === "issues") assert.deepEqual(saved.issues.map(item => item.url), [issue]);
 								else assert.deepEqual(saved.agents.worker.prs, [pr]);

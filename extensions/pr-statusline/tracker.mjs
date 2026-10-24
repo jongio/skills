@@ -30,22 +30,6 @@ export {
 const INITIAL_HEAD_BYTES = 64 * 1024;
 const INITIAL_TAIL_BYTES = 16 * 1024 * 1024;
 const READ_CHUNK_BYTES = 1024 * 1024;
-const SUCCESSFUL_PR_URL = /^\s*(https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*)\/?(?:#(?:issuecomment-|discussion_r)[1-9]\d*)?\s*$/;
-const PLACEHOLDER_REPOS = new Set([
-	"owner/repo",
-	"org/repo",
-	"o/r",
-	"your-org/your-repo",
-	"example/repo",
-	"octo/api",
-	"octocat/hello-world",
-	"project/repo",
-	"org/project",
-	"test-owner/test-repo",
-	"foo/bar",
-	"backup/check",
-	"myorg/repo",
-]);
 export const RELEVANT_EVENT_TYPE = /^(?:session\.(?:start|resume|context_changed|idle|compaction_start|compaction_complete|error|shutdown)|user\.message|assistant\.turn_(?:start|end)|model\.turn_(?:started|ended)|tool\.execution_(?:start|complete)|subagent\.(?:started|completed|failed)|(?:permission|user_input|elicitation|exit_plan_mode)\.(?:requested|completed)|abort)$/;
 const RELEVANT_EVENT_LINE = /"type"\s*:\s*"(?:session\.(?:start|resume|context_changed|idle|compaction_start|compaction_complete|error|shutdown)|user\.message|assistant\.turn_(?:start|end)|model\.turn_(?:started|ended)|tool\.execution_(?:start|complete)|subagent\.(?:started|completed|failed)|(?:permission|user_input|elicitation|exit_plan_mode)\.(?:requested|completed)|abort)"/;
 
@@ -88,53 +72,6 @@ export function pullRequest(reference) {
 	};
 }
 
-function urls(text, repository = null, host = "github.com") {
-	const source = String(text ?? "");
-	const found = [];
-	const push = (ref) => {
-		try {
-			const pr = pullRequest(ref);
-			if (!PLACEHOLDER_REPOS.has(pr.label.split("#")[0].toLowerCase())) found.push(pr);
-		} catch {
-			// Ignore invalid references.
-		}
-	};
-	for (const [url] of source.matchAll(/https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*/g)) {
-		push(url);
-	}
-	for (const match of source.matchAll(/\b(?:pr|pull\s+request|pr-review|pr-watch|prw|review|watch)\b[^\r\n]{0,40}?\b([\w.-]+\/[\w.-]+#[1-9]\d*)\b/gi)) {
-		push(match[1]);
-	}
-	if (repository && !PLACEHOLDER_REPOS.has(repository.toLowerCase())) {
-		for (const match of source.matchAll(/\b(?:pr|pull\s+request)[ \t]+#([1-9]\d*)\b/gi)) {
-			push(`https://${host}/${repository}/pull/${match[1]}`);
-		}
-	}
-	return found;
-}
-
-function extractGhPrNumber(command) {
-	const match = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(view|diff|checks|checkout|co|create|edit|review|comment|merge|close|reopen|ready)\b([^;&|\r\n]*)/.exec(command);
-	if (!match || match[1] === "create") return null;
-	const tokens = match[2].match(/"(?:\\.|`.|[^"\\`])*"|'(?:''|[^'])*'|\S+/g) ?? [];
-	let flags = true;
-	for (let i = 0; i < tokens.length; i++) {
-		const token = tokens[i].replace(/^["']|["']$/g, "");
-		if (flags && token === "--") {
-			flags = false;
-			continue;
-		}
-		const reviewBoolean = match[1] === "review" && ["-c", "--comment", "-r"].includes(token);
-		if (flags && !reviewBoolean && /^(?:-R|--repo|-B|--base|-H|--head|-t|--title|-b|--body|--branch|--worktree|-F|--body-file|-c|--comment|-r|--reviewer|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template)$/.test(token)) {
-			i++;
-			continue;
-		}
-		if (flags && token.startsWith("-")) continue;
-		return /^[1-9]\d*$/.test(token) ? token : null;
-	}
-	return null;
-}
-
 export function readState(sessionId, home = configHome()) {
 	let raw;
 	try {
@@ -149,7 +86,7 @@ export function readState(sessionId, home = configHome()) {
 			!Number.isFinite(state.updatedAt) || typeof state.status !== "string") {
 		throw new Error("Invalid PR statusline state.");
 	}
-	state.prs = state.prs.map((pr) => ({
+	state.prs = state.prs.filter((pr) => pr.owned === true || pr.simulated).map((pr) => ({
 		...pullRequest(pr.url),
 		...prContextFields(pr),
 		provenance: normalizePrProvenance(pr.provenance),
@@ -160,7 +97,7 @@ export function readState(sessionId, home = configHome()) {
 		...(Number.isFinite(pr.mergedObservedAt) ? { mergedObservedAt: pr.mergedObservedAt } : {}),
 		...(Number.isSafeInteger(pr.generation) && pr.generation >= 0 ? { generation: pr.generation } : {}),
 		...(pr.simulated ? { simulated: true } : {}),
-		...(pr.active ? { active: true } : {}),
+		...(pr.owned === true ? { owned: true } : {}),
 	}));
 	state.ignored = state.ignored.map((url) => pullRequest(url).url);
 	if (Array.isArray(state.simulate)) {
@@ -189,14 +126,14 @@ export class SessionTracker {
 		statePath(sessionId);
 		this.state = normalizePrMergeState({
 			version: 1,
-			activeTrackingVersion: 1,
+			activeTrackingVersion: 2,
 			mergeStateVersion: previous?.mergeStateVersion,
 			sessionId,
 			clearedAt: previous?.clearedAt ?? 0,
 			clearedWorkspace: previous?.clearedWorkspace ?? null,
 			clearedPrs: [...(previous?.clearedPrs ?? [])],
-			prs: (previous?.prs ?? []).filter((pr) => previous?.version !== 1 ||
-				previous.activeTrackingVersion === 1 || pr.active || pr.simulated),
+			prs: (previous?.prs ?? []).filter((pr) => previous?.version !== 1 || pr.owned === true || pr.simulated)
+				.map((pr) => ({ ...pr, ...(previous?.version !== 1 ? { owned: true } : {}) })),
 			ignored: [...(previous?.ignored ?? [])],
 			ignoredRevisions: { ...previous?.ignoredRevisions },
 			status: previous?.status ?? "Starting tracker",
@@ -210,14 +147,13 @@ export class SessionTracker {
 		this.host = previous?.host ?? "github.com";
 		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
 		this.userRepos = new Set(Array.isArray(previous?.userRepos) ? previous.userRepos : []);
-		this.calls = new Map(Object.entries(previous?.version === 1 && previous.activeTrackingVersion !== 1 ? {} : previous?.calls ?? {}));
+		this.calls = new Map(Object.entries(previous?.activeTrackingVersion === 2 ? previous.calls ?? {} : {}));
 		this.pending = new Map(Object.entries(previous?.pending ?? {}));
 		this.background = new Set(Array.isArray(previous?.background) ? previous.background : []);
 	}
 
 	add(reference, explicit = false, source = null) {
 		const pr = pullRequest(reference);
-		if (PLACEHOLDER_REPOS.has(pr.label.split("#")[0].toLowerCase())) return;
 		const existing = this.state.prs.find((p) => p.url === pr.url);
 		if (explicit) {
 			const ignored = this.state.ignored.includes(pr.url) ? 0 : -1;
@@ -231,15 +167,15 @@ export class SessionTracker {
 			}
 		}
 		if (!this.state.ignored.includes(pr.url) && !existing) {
-			this.state.prs.push({ ...pr, active: true, provenance: sourceProvenance(source) });
+			this.state.prs.push({ ...pr, owned: true, provenance: sourceProvenance(source) });
 		} else if (existing && source) {
 			existing.provenance = mergePrProvenance(existing.provenance, sourceProvenance(source));
 		}
-		if (existing) existing.active = true;
+		if (existing) existing.owned = true;
 	}
 
-	manage(action, reference) {
-		if (action === "add") this.add(reference, true, { root: true });
+	manage(action, reference, source = { root: true }) {
+		if (action === "add") this.add(reference, true, source);
 		else if (action === "remove") {
 			const { url } = pullRequest(reference);
 			const pr = this.state.prs.find((entry) => entry.url === url);
@@ -252,7 +188,7 @@ export class SessionTracker {
 		return this.state.prs;
 	}
 
-	observe(event, history = false, consumed = false) {
+	observe(event, history = false) {
 		if (this.state.clearedAt && ((Date.parse(event.timestamp) || 0) <= this.state.clearedAt) &&
 			(history || event.timestamp)) return;
 		const data = event.data ?? {};
@@ -294,113 +230,25 @@ export class SessionTracker {
 			const args = data.arguments ?? {};
 			const name = data.mcpToolName ?? data.toolName ?? "";
 			const command = String(args.command ?? "");
-			const reviewCommand = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+review\b/.exec(command);
-			const contentFlags = reviewCommand?.index === command.search(/\bgh\b/)
-				? /\s+(?:-b|--body|-t|--title|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g
-				: /\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g;
-			const commandTargetText = command.replace(contentFlags, "");
 			if (/(?:^|[._-])session_prs$/.test(name) && args.action === "add") {
 				try {
-					this.add(args.reference, false, prSource);
+					this.calls.set(data.toolCallId, { reference: pullRequest(args.reference).url, source: prSource });
 				} catch {
-					// Rejected enrollment attempts remain in SDK history.
+					// Invalid control requests must not interrupt transcript replay.
 				}
 			}
 			if (!event.agentId && name === "ask_user") this.pending.set(`tool:${data.toolCallId}`, "answer");
 			if (!event.agentId && name === "exit_plan_mode") this.pending.set(`tool:${data.toolCallId}`, "plan approval");
-			if (/\b(?:git\s+push|gh\s+run\s+rerun|gh\s+pr\s+(?:create|edit|ready|review|comment)|resolveReviewThread)\b/.test(command)) {
+			if (/\b(?:git\s+push|gh\s+run\s+rerun|gh\s+pr\s+(?:create|edit|ready|review|comment|merge|close|reopen)|resolveReviewThread)\b/.test(command) ||
+				/(?:^|[_-])(?:create_pull_request|update_pull_request|merge_pull_request|pull_request_review_write)$/.test(name)) {
 				for (const pr of this.state.prs) {
 					if (!pr.simulated) pr.checkedAt = 0;
 				}
 			}
-			// Ignore diagnostic commands inspecting other sessions' transcripts or statusline state.
-			const safeSessionId = this.state.sessionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-			const otherSessionState = new RegExp(`\\.copilot[\\\\/]session-state(?:[\\\\/](?!${safeSessionId}\\b)|$)`, "i");
-			const isDiagnostic = /\.copilot[\\/]pr-statusline\b|events\.jsonl\b|smoke\.test\.mjs\b/i.test(command) ||
-				otherSessionState.test(command);
-			const ghSubcommand = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(view|diff|checks|checkout|co|edit|review|comment|merge|close|reopen|ready|create)\b/.exec(commandTargetText)?.[1];
-			const mcpTargeted = /(?:^|[_-])(?:pull_request_read|create_pull_request|update_pull_request|merge_pull_request|pull_request_review_write|add_comment_to_pending_review)$/.test(name);
-			const mcpWrite = mcpTargeted && !/(?:^|[_-])pull_request_read$/.test(name);
-			const merging = ghSubcommand === "merge" || /(?:^|[_-])merge_pull_request$/.test(name);
-			const closing = ghSubcommand === "close";
-			const reopening = ghSubcommand === "reopen";
-			const isProcessFilter = /\bGet-CimInstance\b|\bWhere-Object\b|\b-like\s+['"]\*/i.test(command);
-			const api = isProcessFilter ? null : /repos\/([\w.-]+\/[\w.-]+)\/pulls\/([1-9]\d*)(?!\d)/.exec(commandTargetText);
-			const changedDirectory = /\b(?:cd|Set-Location|Push-Location)\b|\bgh\s+-C\b/i.test(commandTargetText);
-			const repoArgument = /(?:--repo(?:=|\s+)|-R(?:=?|\s+))["']?(?:https:\/\/)?((?:[\w.-]+\/)?[\w.-]+\/[\w.-]+)(?![\w./-])/.exec(commandTargetText)?.[1]?.split("/");
-			const explicitRepo = repoArgument?.slice(-2).join("/") ??
-				(args.owner && args.repo ? `${args.owner}/${args.repo}` : null);
-			const hasRepoArgument = /(?:^|\s)(?:--repo(?:=|\s|$)|-R)/.test(commandTargetText);
-			const repository = explicitRepo ?? (changedDirectory || hasRepoArgument ? null : this.repository);
-			const host = repoArgument?.length === 3 ? repoArgument[0] : this.host;
-			const apiWrite = api && /(?:--method|-X)(?:=|\s+)["']?(?:POST|PATCH|PUT|DELETE)\b/i.test(commandTargetText);
-			const targeted = !isDiagnostic &&
-				(Boolean(ghSubcommand && !["view", "diff", "checks"].includes(ghSubcommand)) || mcpWrite || apiWrite);
-			const hasListCommand = /\bgh\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+\s+)*pr\s+(?:list|status)\b|\bgh\s+search\b|\brepos\/[\w.-]+\/[\w.-]+\/pulls(?=[?'"\s]|$)/i.test(commandTargetText);
-			const replayedBeforeInput = history &&
-				(!event.timestamp || Date.parse(event.timestamp) <= this.lastUserInputAt);
-			const call = { targeted, closing, merging, reopening: reopening && !replayedBeforeInput && !consumed,
-				source: prSource, scrapeResultUrls: false, targets: [] };
-			const addTarget = (reference) => {
-				this.add(reference, call.reopening, call.source);
-			};
-			if (call.targeted) {
-				for (const pr of urls(commandTargetText, this.repository, this.host)) {
-					call.targets.push(pr.url);
-					if (!closing) addTarget(pr.url);
-				}
-				const number = args.pullNumber ?? args.pull_number ?? extractGhPrNumber(command);
-				if (api) {
-					const targetUrl = `https://${this.host}/${api[1]}/pull/${api[2]}`;
-					call.targets.push(targetUrl);
-					if (!closing) addTarget(targetUrl);
-				} else if (repository && /^[1-9]\d*$/.test(String(number))) {
-					const targetUrl = `https://${host}/${repository}/pull/${number}`;
-					call.targets.push(targetUrl);
-					if (!closing) addTarget(targetUrl);
-				}
-				call.scrapeResultUrls = !closing && !hasListCommand && (
-					ghSubcommand === "create" ||
-					/(?:^|[_-])create_pull_request$/.test(name)
-				);
-				call.recoverTarget = !closing && !hasListCommand && !call.scrapeResultUrls &&
-					Boolean(ghSubcommand) && call.targets.length === 0 && !/[;&|\r\n]/.test(commandTargetText);
-				this.calls.set(data.toolCallId, call);
-			}
 		}
 		if (event.type === "tool.execution_complete") {
 			this.pending.delete(`tool:${data.toolCallId}`);
-			const call = this.calls.get(data.toolCallId);
 			this.calls.delete(data.toolCallId);
-			if (call?.targeted && data.success) {
-				const result = data.result ?? {};
-				const resultPrs = call.scrapeResultUrls
-					? urls(`${result.content ?? ""}\n${JSON.stringify(result.structuredContent ?? {})}`)
-					: (call.recoverTarget ? urls(SUCCESSFUL_PR_URL.exec(String(result.content ?? ""))?.[1]) : []);
-				if (call.closing) {
-					const closedTargets = [...call.targets];
-					if (closedTargets.length === 0) {
-						const closedLines = String(result.content ?? "")
-							.match(/(?:Closed pull request|already closed|Closed and commented:)[^\r\n]*/gi) ?? [];
-						for (const pr of urls(closedLines.join("\n"), this.repository, this.host)) {
-							closedTargets.push(pr.url);
-						}
-					}
-					for (const targetUrl of closedTargets) {
-						this.manage("remove", targetUrl);
-					}
-				} else if (call.merging) {
-					for (const targetUrl of [...call.targets, ...resultPrs.map((pr) => pr.url)]) {
-						this.add(targetUrl, false, call.source);
-						const existing = this.state.prs.find((p) => p.url === pullRequest(targetUrl).url);
-						if (existing) existing.checkedAt = 0;
-					}
-				} else {
-					for (const pr of resultPrs) {
-						this.add(pr.url, call.reopening, call.source);
-					}
-				}
-			}
 		}
 		const requestKinds = {
 			"permission.requested": "permission",
@@ -463,7 +311,7 @@ export class SessionTracker {
 	}
 }
 
-function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false, lineFilter = RELEVANT_EVENT_LINE, replayed = null) {
+function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false, lineFilter = RELEVANT_EVENT_LINE) {
 	if (length <= 0) return startOffset;
 	const buffer = Buffer.allocUnsafe(Math.min(length, READ_CHUNK_BYTES));
 	let position = startOffset, completed = startOffset;
@@ -482,9 +330,7 @@ function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = f
 				if (line.trim() && lineFilter.test(line)) {
 					try {
 						const event = JSON.parse(line);
-						const time = Date.parse(event.timestamp);
-						const consumed = Boolean(replayed && (completed <= replayed.offset || !Number.isFinite(time) || time <= replayed.savedAt));
-						tracker.observe(event, false, consumed);
+						tracker.observe(event);
 					} catch {
 						// Ignore malformed transcript lines.
 					}
@@ -562,11 +408,11 @@ export function syncSession(payload, {
 	}
 	if (!hasTranscript && !hasWorkspace && !previous) return { state: null, liveTranscript: false };
 
-	const migrate = previous && previous.activeTrackingVersion !== 1;
+	const migrate = previous && previous.activeTrackingVersion !== 2;
 	const reset = hasTranscript && (!previous || migrate || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new SessionTracker(
 		sessionId,
-		reset && previous ? { prs: migrate ? previous.prs.filter((pr) => pr.active || pr.simulated) : previous.prs, ignored: previous.ignored,
+		reset && previous ? { prs: previous.prs, ignored: previous.ignored,
 			ignoredRevisions: previous.ignoredRevisions, simulate: previous.simulate, clearedAt: previous.clearedAt,
 			clearedWorkspace: previous.clearedWorkspace, clearedPrs: previous.clearedPrs,
 			...(previous.clearedAt ? { repository: previous.repository, host: previous.host,
@@ -585,19 +431,15 @@ export function syncSession(payload, {
 		const fd = openSync(transcriptFile, "r");
 		try {
 			let nextOffset = offset;
-			const replayed = offset === 0 && previous ? {
-				offset: Number.isInteger(previous.transcriptOffset) && previous.transcriptOffset <= stat.size ? previous.transcriptOffset : 0,
-				savedAt: Number.isFinite(previous.updatedAt) ? previous.updatedAt : Infinity,
-			} : null;
 			if (!migrate && offset === 0 && stat.size > INITIAL_HEAD_BYTES + INITIAL_TAIL_BYTES) {
-				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES, false, RELEVANT_EVENT_LINE, replayed);
+				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES);
 				tracker.pending.clear();
 				tracker.calls.clear();
 				tracker.background.clear();
 				const tailStart = stat.size - INITIAL_TAIL_BYTES;
-				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true, RELEVANT_EVENT_LINE, replayed);
+				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true);
 			} else {
-				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset, false, RELEVANT_EVENT_LINE, replayed);
+				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset);
 			}
 			if (nextOffset !== offset) {
 				tracker.state.transcriptOffset = nextOffset;

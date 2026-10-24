@@ -24,9 +24,9 @@ const { firstRun } = ensurePluginStatuslineRegistered("pr-statusline", dirname(f
 });
 
 let collector;
-function manage(action, reference) {
+function manage(action, reference, invocation) {
 	if (!collector) throw new Error("PR statusline is still loading.");
-	return collector.manage(action, reference);
+	return collector.manage(action, reference, invocation?.toolCallId);
 }
 
 function manageAgents(action, id) {
@@ -183,7 +183,7 @@ const session = await joinSession({
 				required: ["action"],
 				additionalProperties: false,
 			},
-			handler: ({ action, reference }) => JSON.stringify(manage(action, reference)),
+			handler: ({ action, reference }, invocation) => JSON.stringify(manage(action, reference, invocation)),
 		},
 		{
 			name: "session_issues",

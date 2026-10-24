@@ -8,7 +8,6 @@ import { dismissSettledAgents, observeSettlement } from "./settlement.mjs";
 const INITIAL_HEAD_BYTES = 64 * 1024;
 const INITIAL_TAIL_BYTES = 16 * 1024 * 1024;
 const READ_CHUNK_BYTES = 1024 * 1024;
-const SUCCESSFUL_PR_URL = /^\s*(https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*)\/?(?:#(?:issuecomment-|discussion_r)[1-9]\d*)?\s*$/;
 const RELEVANT_EVENT_LINE = /"type"\s*:\s*"(?:session\.(?:start|resume|context_changed)|user\.message|tool\.execution_(?:start|complete)|subagent\.(?:started|completed|failed))"/;
 
 export const ICONS = {
@@ -90,38 +89,6 @@ export function normalizePrUrl(reference) {
 	return `https://${url.hostname}/${match[1]}/${match[2]}/pull/${match[3]}`;
 }
 
-function extractPrUrls(text) {
-	const source = String(text ?? "");
-	const found = [];
-	for (const [raw] of source.matchAll(/https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/[1-9]\d*/g)) {
-		const normalized = normalizePrUrl(raw);
-		if (normalized && !found.includes(normalized)) found.push(normalized);
-	}
-	return found;
-}
-
-function extractGhPrNumber(command) {
-	const match = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(view|diff|checks|checkout|co|create|edit|review|comment|merge|close|reopen|ready)\b([^;&|\r\n]*)/.exec(command);
-	if (!match || match[1] === "create") return null;
-	const tokens = match[2].match(/"(?:\\.|`.|[^"\\`])*"|'(?:''|[^'])*'|\S+/g) ?? [];
-	let flags = true;
-	for (let i = 0; i < tokens.length; i++) {
-		const token = tokens[i].replace(/^["']|["']$/g, "");
-		if (flags && token === "--") {
-			flags = false;
-			continue;
-		}
-		const reviewBoolean = match[1] === "review" && ["-c", "--comment", "-r"].includes(token);
-		if (flags && !reviewBoolean && /^(?:-R|--repo|-B|--base|-H|--head|-t|--title|-b|--body|--branch|--worktree|-F|--body-file|-c|--comment|-r|--reviewer|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template)$/.test(token)) {
-			i++;
-			continue;
-		}
-		if (flags && token.startsWith("-")) continue;
-		return /^[1-9]\d*$/.test(token) ? token : null;
-	}
-	return null;
-}
-
 export function readState(sessionId, home = configHome()) {
 	let raw;
 	try {
@@ -186,7 +153,7 @@ export class SubagentTracker {
 		this.simulated = Boolean(previous?.simulated);
 		this.agents = new Map(Object.entries(previous?.agents ?? {}));
 		this.ignored = new Set(previous?.ignored ?? []);
-		if (!this.simulated && previous?.version === 1 && previous.activeTrackingVersion !== 1) {
+		if (!this.simulated && previous?.version === 1 && previous.activeTrackingVersion !== 2) {
 			for (const [id, agent] of this.agents) {
 				const active = { ...agent, prs: [], mergedPrs: [] };
 				delete active.settlementObservedAt;
@@ -205,7 +172,7 @@ export class SubagentTracker {
 			}
 		}
 		this.taskCalls = new Map(Object.entries(previous?.taskCalls ?? {}));
-		this.agentToolCalls = new Map(Object.entries(previous?.agentToolCalls ?? {}));
+		this.agentToolCalls = new Map(Object.entries(previous?.activeTrackingVersion === 2 ? previous.agentToolCalls ?? {} : {}));
 	}
 
 	ensureAgent(id, meta = {}) {
@@ -364,9 +331,7 @@ export class SubagentTracker {
 		if (event.type === "tool.execution_start") {
 			const args = data.arguments ?? {};
 			const name = data.mcpToolName ?? data.toolName ?? "";
-			const command = String(args.command ?? "");
-
-			if (/(?:^|[._-])task$/.test(name)) {
+			if (/(?:^|[.])task$/.test(name) && typeof args.agent_type === "string" && args.agent_type.trim()) {
 				const id = data.toolCallId;
 				if (dismissedHistory && id) this.ignored.add(id);
 				if (this.ignored.has(id)) return;
@@ -383,42 +348,13 @@ export class SubagentTracker {
 			}
 
 			const agentId = event.agentId || data.agentId;
-			if (agentId && this.agents.has(agentId)) {
-				const reviewCommand = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+review\b/.exec(command);
-				const contentFlags = reviewCommand?.index === command.search(/\bgh\b/)
-					? /\s+(?:-b|--body|-t|--title|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g
-					: /\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g;
-				const targetText = command.replace(contentFlags, "");
-				const ghSubcommand = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(checkout|co|create|edit|review|comment|merge|ready|reopen)\b/.exec(targetText)?.[1];
-				const isPrCmd = Boolean(ghSubcommand) ||
-					/(?:^|[_-])(?:create_pull_request|update_pull_request|merge_pull_request)$/.test(name);
-				if (isPrCmd) {
-					const repoArgument = /(?:--repo(?:=|\s+)|-R(?:=?|\s+))["']?(?:https:\/\/)?((?:[\w.-]+\/)?[\w.-]+\/[\w.-]+)(?![\w./-])/.exec(targetText)?.[1]?.split("/");
-					const explicitRepo = repoArgument?.slice(-2).join("/") ??
-						(args.owner && args.repo ? `${args.owner}/${args.repo}` : null);
-					const changedDirectory = /\b(?:cd|Set-Location|Push-Location)\b|\bgh\s+-C\b/i.test(targetText);
-					const hasRepoArgument = /(?:^|\s)(?:--repo(?:=|\s|$)|-R)/.test(targetText);
-					const repository = explicitRepo ?? (changedDirectory || hasRepoArgument ? null : this.repository);
-					const host = repoArgument?.length === 3 ? repoArgument[0] : this.host;
-					const numMatch = args.pullNumber ?? args.pull_number ?? extractGhPrNumber(command);
-					const targets = extractPrUrls(targetText);
-					if (repository && /^[1-9]\d*$/.test(String(numMatch))) {
-						targets.push(`https://${host}/${repository}/pull/${numMatch}`);
-					}
-					for (const prUrl of targets) this.linkPr(agentId, prUrl);
-					this.agentToolCalls.set(data.toolCallId, {
-						agentId, targets,
-						created: ghSubcommand === "create" || /(?:^|[_-])create_pull_request$/.test(name),
-						recoverTarget: Boolean(ghSubcommand) && ghSubcommand !== "create" &&
-							targets.length === 0 && !/[;&|\r\n]/.test(targetText),
-					});
-				}
+			if (agentId && this.agents.has(agentId) && /(?:^|[._-])session_prs$/.test(name) && args.action === "add") {
+				const reference = normalizePrUrl(args.reference);
+				if (reference) this.agentToolCalls.set(data.toolCallId, { agentId, reference });
 			}
 		}
 
 		if (event.type === "tool.execution_complete") {
-			const result = data.result ?? {};
-			const text = `${result.content ?? ""}\n${JSON.stringify(result.structuredContent ?? {})}`;
 			const taskAgentId = this.taskCalls.get(data.toolCallId);
 			if (taskAgentId && this.agents.has(taskAgentId)) {
 				const agent = this.agents.get(taskAgentId);
@@ -436,12 +372,8 @@ export class SubagentTracker {
 			}
 			const subCall = this.agentToolCalls.get(data.toolCallId);
 			this.agentToolCalls.delete(data.toolCallId);
-			if (subCall && data.success) {
-				const targets = subCall.created ? extractPrUrls(text) :
-					(subCall.recoverTarget ? extractPrUrls(SUCCESSFUL_PR_URL.exec(String(result.content ?? ""))?.[1]) : []);
-				for (const prUrl of targets) {
-					this.linkPr(subCall.agentId, prUrl, false, eventTime);
-				}
+			if (subCall && data.success && this.agents.has(subCall.agentId)) {
+				this.linkPr(subCall.agentId, subCall.reference, false, eventTime);
 			}
 		}
 	}
@@ -510,7 +442,7 @@ export class SubagentTracker {
 	snapshot() {
 		return {
 			version: 1,
-			activeTrackingVersion: 1,
+			activeTrackingVersion: 2,
 			mergeStateVersion: 1,
 			sessionId: this.sessionId,
 			clearedAt: this.clearedAt,
@@ -591,7 +523,7 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	}
 	if (!hasTranscript && !previous) return { tracker: null };
 
-	const migrate = previous && previous.activeTrackingVersion !== 1;
+	const migrate = previous && previous.activeTrackingVersion !== 2;
 	const reset = hasTranscript && (!previous || migrate ||
 		!Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new SubagentTracker(
@@ -604,7 +536,7 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	if (migrate && previous.dismissed && !previous.simulated && Number.isFinite(previous.updatedAt)) {
 		tracker.dismissedThroughAt = Math.max(tracker.dismissedThroughAt, previous.updatedAt);
 	}
-	let changed = Boolean(previous && (previous.mergeStateVersion !== 1 || previous.activeTrackingVersion !== 1)) ||
+	let changed = Boolean(previous && (previous.mergeStateVersion !== 1 || previous.activeTrackingVersion !== 2)) ||
 		(hasTranscript && (!previous || reset));
 
 	const prCache = readSharedPrCache(home);

@@ -20,10 +20,7 @@ const url = (number) => `https://github.com/org/one/pull/${number}`;
 const event = (type, data, agentId) => ({ type, data, agentId });
 
 function workPr(tracker, number, agentId) {
-	tracker.observe(event("tool.execution_start", {
-		toolCallId: `work-${number}-${agentId ?? "root"}`, toolName: "powershell",
-		arguments: { command: `gh pr checkout ${url(number)}` },
-	}, agentId));
+	tracker.manage("add", url(number), agentId ? { agentId } : { root: true });
 }
 
 test("PR ownership records direct root work, excludes delegation, and never upgrades unknown history to agent-only", () => {
@@ -57,6 +54,8 @@ test("PR ownership records direct root work, excludes delegation, and never upgr
 	tracker.observe(event("tool.execution_complete", {
 		toolCallId: "create", success: true, result: { content: url(7) },
 	}));
+	assert.equal(tracker.state.prs.length, 6, "creation output cannot infer ownership");
+	workPr(tracker, 7, "creator");
 	assert.deepEqual(tracker.state.prs[6].provenance, { root: false, unknown: false, agents: ["creator"] });
 	tracker.observe(event("tool.execution_start", {
 		toolCallId: "diff", toolName: "powershell", arguments: { command: `gh pr diff ${url(7)}` },

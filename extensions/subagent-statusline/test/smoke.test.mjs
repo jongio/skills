@@ -55,9 +55,12 @@ try {
 		success: true,
 		result: { content: "https://github.com/Azure/azure-dev/pull/101" },
 	}, "agent-1", new Date(2100).toISOString()));
+	assert.equal(tracker.counts().inPr, 0, "creation output cannot associate a PR");
+	tracker.linkPr("agent-1", "https://github.com/Azure/azure-dev/pull/101");
 	assert.deepEqual(tracker.counts(), { total: 4, starting: 2, exploring: 0, inPr: 1, merged: 0, done: 1, failed: 0 });
 
-	// agent-2 opens PR #102 and merges it -> moves to merged
+	// Explicitly tracked agent-2 PR moves to merged only after remote confirmation.
+	tracker.linkPr("agent-2", "https://github.com/Azure/azure-dev/pull/102");
 	tracker.observe(event("tool.execution_start", {
 		toolCallId: "pr-merge-2",
 		toolName: "powershell",
@@ -82,7 +85,8 @@ try {
 			JSON.stringify(event("subagent.started", { agentId: "a1", toolCallId: "t1", agentName: "devx-developer" }, "a1", new Date(1000).toISOString())),
 			JSON.stringify(event("subagent.started", { agentId: "a2", toolCallId: "t2", agentName: "devx-developer" }, "a2", new Date(1100).toISOString())),
 			JSON.stringify(event("subagent.started", { agentId: "e1", toolCallId: "te1", agentType: "explore", agentName: "explore" }, "e1", new Date(1150).toISOString())),
-			JSON.stringify(event("tool.execution_start", { toolCallId: "c2", toolName: "powershell", arguments: { command: "gh pr edit https://github.com/Azure/azure-dev/pull/4812 --add-label active" } }, "a2", new Date(1200).toISOString())),
+			JSON.stringify(event("tool.execution_start", { toolCallId: "c2", toolName: "session_prs", arguments: { action: "add", reference: "Azure/azure-dev#4812" } }, "a2", new Date(1200).toISOString())),
+			JSON.stringify(event("tool.execution_complete", { toolCallId: "c2", success: true, result: { content: "Tracked" } }, "a2", new Date(1250).toISOString())),
 		].join("\n") + "\n",
 	);
 	const plainOut = render({ session_id: "live-subagents", transcript_path: transcriptDir }, { home, links: false, color: false });
@@ -99,6 +103,8 @@ try {
 		transcriptFile,
 		[
 			JSON.stringify(event("subagent.completed", { agentId: "e1", toolCallId: "te1", agentType: "explore", agentName: "explore" }, "e1", new Date(1900).toISOString())),
+			JSON.stringify(event("tool.execution_start", { toolCallId: "claim-a1", toolName: "session_prs", arguments: { action: "add", reference: "Azure/azure-dev#4811" } }, "a1", new Date(1950).toISOString())),
+			JSON.stringify(event("tool.execution_complete", { toolCallId: "claim-a1", success: true, result: { content: "Tracked" } }, "a1", new Date(1960).toISOString())),
 			JSON.stringify(event("tool.execution_start", { toolCallId: "m1", toolName: "powershell", arguments: { command: "gh pr merge https://github.com/Azure/azure-dev/pull/4811 --squash" } }, "a1", new Date(2000).toISOString())),
 			JSON.stringify(event("tool.execution_complete", { toolCallId: "m1", success: true, result: { content: "Merged" } }, "a1", new Date(2100).toISOString())),
 			JSON.stringify(event("tool.execution_start", { toolCallId: "m2", toolName: "powershell", arguments: { command: "gh pr merge https://github.com/Azure/azure-dev/pull/4812 --squash" } }, "a2", new Date(2200).toISOString())),

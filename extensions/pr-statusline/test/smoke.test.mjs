@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { SessionTracker, readState, statePath, writeState } from "../tracker.mjs";
+import { SessionTracker, readState, refreshTrackedPrStatuses, statePath, writeState } from "../tracker.mjs";
 import { render } from "../render.mjs";
 import { collect } from "../collector.mjs";
 
@@ -39,6 +39,8 @@ try {
 	tracker.manage("add", "third/repo#7");
 	tracker.observe(start("create", "gh pr create --title 'New PR' --body-file C:\\Users\\me\\.copilot\\session-state\\session-a\\files\\pr-body.md"));
 	tracker.observe(result("create", "https://github.com/fourth/repo/pull/12"));
+	assert.equal(tracker.state.prs.length, 3, "creation results do not enroll PRs");
+	tracker.manage("add", "fourth/repo#12");
 	assert.deepEqual(tracker.state.prs.map((p) => p.label), [
 		"acme/app#42",
 		"other/project#9",
@@ -66,6 +68,7 @@ try {
 	tracker.manage("add", "acme/app#43");
 	assert.equal(tracker.snapshot().status, "Working");
 	tracker.observe(start("api", "gh api -X POST repos/acme/api/pulls/5/comments"));
+	tracker.manage("add", "acme/api#5");
 	assert.equal(tracker.state.prs.at(-1).label, "acme/api#5");
 
 	// Regression: placeholder o/r in process filter or gh api is never added
@@ -82,6 +85,10 @@ try {
 	tracker.add("https://github.com/acme/app/pull/105");
 	tracker.observe(start("close-loop", "foreach ($n in @(94)) { gh pr close $n --repo acme/app --comment 'Superseded by https://github.com/acme/app/pull/105' }"));
 	tracker.observe(result("close-loop", "Closed pull request acme/app#94\nClosed and commented: https://github.com/acme/app/pull/94\n[{\"number\":105,\"url\":\"https://github.com/acme/app/pull/105\"}]"));
+	assert.ok(tracker.state.prs.some((p) => p.label === "acme/app#94"), "shell output is not confirmed closure");
+	refreshTrackedPrStatuses(tracker, { now: 2000, fetchPrStatus: (url) => ({
+		state: url.endsWith("/94") ? "CLOSED" : "OPEN",
+	}) });
 	assert.ok(!tracker.state.prs.some((p) => p.label === "acme/app#94"), "#94 closed");
 	assert.ok(tracker.state.prs.some((p) => p.label === "acme/app#105"), "#105 remains active");
 	tracker.manage("remove", "acme/app#105");
@@ -206,6 +213,9 @@ try {
 			statusCheckRollup: [{ status: "COMPLETED", conclusion: "FAILURE" }],
 		},
 	};
+	const owned = new SessionTracker("transcript-session");
+	for (const reference of ["acme/app#42", "acme/app#48", "acme/app#55", "acme/remote#88"]) owned.manage("add", reference);
+	writeState(owned.snapshot(), home);
 	// Pass transcript_path as the session directory, matching Copilot CLI's statusObject payload
 	const firstRender = render(
 		{
@@ -298,7 +308,10 @@ try {
 		{ session_id: "transcript-session", transcript_path: transcriptDir },
 		{ home, links: false, now: 7000, fetchPrStatus: (url) => mockPrStatuses[url] ?? null },
 	);
-	assert.ok(!recoveredRender.includes("acme/app#42"), "cache recovery rechecks GitHub and dismisses merges before the latest prompt");
+	assert.equal(recoveredRender, "", "cache recovery must not reconstruct ownership from history");
+	const rejoined = new SessionTracker("transcript-session", readState("transcript-session", home));
+	rejoined.manage("add", "acme/app#55");
+	writeState(rejoined.snapshot(), home);
 	appendFileSync(transcriptFile, `${JSON.stringify({ ...event("user.message", { content: "Continue" }), timestamp: new Date(8000).toISOString() })}\n`);
 	assert.match(render({ session_id: "transcript-session", transcript_path: transcriptDir },
 		{ home, links: false, now: 8100, fetchPrStatus: (url) => mockPrStatuses[url] ?? null }), /^\uE726 acme\/app#55/);
@@ -323,6 +336,8 @@ try {
 	const collector = await collect(session, { home, interval: 100000 });
 	try {
 		assert.equal(readState(session.sessionId, home).status, "Waiting on you (answer)");
+		assert.deepEqual(readState(session.sessionId, home).prs, [], "control attempts in history cannot claim ownership");
+		collector.manage("add", pr);
 		assert.equal(readState(session.sessionId, home).prs[0].url, pr);
 		const mtimeBeforeDelta = readState(session.sessionId, home).updatedAt;
 		handler(event("assistant.message.delta", { deltaContent: "token" }));

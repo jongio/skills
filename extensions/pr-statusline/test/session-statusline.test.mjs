@@ -139,6 +139,10 @@ test("clear is session-local and persists through transcript replay, stale write
 		];
 		appendFileSync(file, fresh.map(JSON.stringify).join("\n") + "\n");
 		for (const item of fresh) handler(item);
+		collector.manage("add", prUrl(1));
+		const ownedIssues = new IssueTracker(id, readIssues(id, home));
+		ownedIssues.manage("add", issueUrl(2));
+		writeIssues(ownedIssues.snapshot(), home);
 		assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url), [prUrl(1)]);
 		assert.deepEqual(syncIssues(payload, { home, fetchIssueStatus: false }).state.issues.map((issue) => issue.url), [issueUrl(2)]);
 		assert.deepEqual([...syncAgents(payload, { home }).tracker.agents.keys()], ["new-agent"]);
@@ -162,6 +166,8 @@ test("collector restart skips cleared SDK history, including old reopen commands
 	try {
 		assert.deepEqual(readState("restart", home).prs, []);
 		handler(track("prs", 3000, prUrl(1)));
+		assert.deepEqual(readState("restart", home).prs, []);
+		collector.manage("add", prUrl(1));
 		assert.equal(readState("restart", home).prs.length, 1);
 	} finally { collector.stop(); }
 }));
@@ -199,6 +205,8 @@ test("a running collector retains context discovered by clear before saving or t
 		});
 		appendFileSync(file, JSON.stringify(fresh) + "\n");
 		handler(fresh);
+		assert.deepEqual(readState(id, home).prs, []);
+		collector.manage("add", "https://github.enterprise.test/example/widget/pull/42");
 		assert.deepEqual(readState(id, home).prs.map((pr) => pr.url), ["https://github.enterprise.test/example/widget/pull/42"]);
 	} finally { collector.stop(); }
 }));
@@ -449,14 +457,16 @@ for (const kind of ["PR message", "repository context", "issue message", "subage
 			appendFileSync(file, [
 				track("prs", 4000, "example/second#42"), track("issues", 4001, "example/second#43"),
 			].map(JSON.stringify).join("\n") + "\n");
-			assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url),
-				["https://github.com/example/second/pull/42"]);
-			assert.deepEqual(syncIssues(payload, { home, fetchIssueStatus: false }).state.issues.map((issue) => issue.url),
-				["https://github.com/example/second/issues/43"]);
+			const prs = syncSession(payload, { home, fetchPrStatus: false }).state;
+			const issues = syncIssues(payload, { home, fetchIssueStatus: false }).state;
+			assert.equal(prs.repository, "example/second");
+			assert.equal(issues.repository, "example/second");
+			assert.deepEqual(prs.prs, [], "historical control attempts cannot enroll work");
+			assert.deepEqual(issues.issues, []);
 		} else if (kind === "PR message") {
-			assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url), [prUrl(9)]);
+			assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs, []);
 		} else if (kind === "issue message") {
-			assert.deepEqual(syncIssues(payload, { home, fetchIssueStatus: false }).state.issues.map((issue) => issue.url), [issueUrl(9)]);
+			assert.deepEqual(syncIssues(payload, { home, fetchIssueStatus: false }).state.issues, []);
 		} else {
 			assert.deepEqual([...syncAgents(payload, { home }).tracker.agents.keys()], ["new-agent"]);
 		}
@@ -507,7 +517,7 @@ for (const agentId of [null, "child"]) {
 		assert.equal(readIssues(id, home).clearedAt, 2000);
 		assert.equal(readAgents(id, home).clearedAt, 2000);
 		assert.equal(readJson(join(home, "worktree-statusline", `${id}.json`)).clearedAt, 3200);
-		assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs.map((pr) => pr.url), [prUrl(9)]);
+		assert.deepEqual(syncSession(payload, { home, fetchPrStatus: false }).state.prs, [], "an unexecuted control attempt cannot claim work");
 		appendFileSync(file, [
 			event("tool.execution_start", 4000, { toolCallId: "later", toolName: "bash", arguments: { command: "cd later" } }),
 			event("tool.execution_complete", 4100, { toolCallId: "later", success: true }),
@@ -647,7 +657,7 @@ test("refresh merges observations into current PR, issue and agent state without
 				status: "newer merged status", checkedAt: 5000, mergedAt: 5000, mergedObservedAt: 5000,
 			});
 			prs.state.transcriptOffset = 999;
-			prs.calls.set("new-pr-call", { command: "new work" });
+			prs.calls.set("new-pr-call", { reference: prUrl(9), source: { root: true } });
 			writeState(prs.snapshot(), home);
 			const issues = new IssueTracker(id, readIssues(id, home));
 			issues.manage("remove", issueUrl(2));
@@ -656,7 +666,7 @@ test("refresh merges observations into current PR, issue and agent state without
 				status: "newer closed status", checkedAt: 5000, closedAt: 5000,
 			});
 			issues.state.transcriptOffset = 999;
-			issues.calls.set("new-issue-call", { command: "new work" });
+			issues.lastUserInputAt = 4500;
 			writeIssues(issues.snapshot(), home);
 			const agents = new SubagentTracker(id, readAgents(id, home));
 			agents.agents.delete("old-agent");
@@ -683,7 +693,7 @@ test("refresh merges observations into current PR, issue and agent state without
 	assert.equal(issues.issues[0].closedAt, 5000);
 	assert.equal(issues.issues[0].status, "newer closed status");
 	assert.equal(issues.transcriptOffset, 999);
-	assert.ok(issues.calls["new-issue-call"]);
+	assert.equal(issues.lastUserInputAt, 4500);
 	const agents = readAgents(id, home);
 	assert.deepEqual(Object.keys(agents.agents), ["settled-agent", "new-agent"]);
 	assert.equal(agents.agents["settled-agent"].status, "failed");

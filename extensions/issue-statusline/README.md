@@ -85,10 +85,12 @@ set up the copilot statusline from jongio/skills and ask me which of PRs, issues
 
 With the SDK extension loaded, use `/session-issues list`, `/session-issues add owner/repo#123`, `/session-issues remove owner/repo#123`, or `/session-issues clear` to manage this session's tracked issues.
 
-Only explicit enrollment and concrete issue work (create/edit/comment/close/reopen/
-develop or targeted API/MCP writes) create pills.
-Message references, attachments, workspace/branch names, read-only lookups, and list/search
-results do not. Explicitly add an issue when taking on read-only review or monitoring.
+Only explicit `session_issues` or `/session-issues add` enrollment creates issue
+pills, including implementation, review, repair, or active monitoring.
+Shell commands, GitHub writes/results, references, attachments, workspace/branch
+names, lookups, and list/search results never enroll targets. Ownership persists
+across restarts; upgrades drop unowned legacy entries rather than rediscover them.
+Explicitly re-add any work this session still owns.
 The `session-statusline` skill exposes these controls in the `jongio-skills` plugin.
 Clearing changes tracking only; it does not close issues or disable components.
 

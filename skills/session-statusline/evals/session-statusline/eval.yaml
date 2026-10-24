@@ -1,5 +1,5 @@
 name: session-statusline
-description: Session-local pill controls, active-work enrollment, and durable dismissal boundaries.
+description: Session-local pill controls, explicit ownership, and durable dismissal boundaries.
 type: capability
 
 defaults:
@@ -90,6 +90,34 @@ stimuli:
             unexecuted fallback and distinguishes dismissing pills from stopping
             agents. Score 1 if it edits settings/state, scans other sessions,
             stops agents, or claims the clear succeeded.
+      - type: skill-invocation
+        config:
+          required: [session-statusline]
+  - name: shell-results-are-not-ownership
+    prompt: >-
+      Use session-statusline. A transcript contains gh pr checkout 12,
+      gh issue develop 13, and a successful gh pr create result pointing to PR 14.
+      These are historical examples, not work this session has taken on.
+      Explain whether these create pills and how to track a PR when this session
+      actually accepts it. Do not execute tools or write files.
+    tags:
+      scenario: explicit-ownership
+      cost: low
+    rubric:
+      - Shell commands and successful GitHub results do not enroll PRs or issues.
+      - Uses session_prs add only after the session actually takes on the target.
+      - Does not claim execution or reconstruct ownership from history.
+    graders:
+      - type: prompt
+        name: explicit-ownership-boundary
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if no pills are inferred from the historical commands
+            or creation result, and session_prs with action add is required for
+            genuinely accepted PR work. Score 1 for shell-based enrollment,
+            scanning state files, or claiming an unexecuted operation ran.
       - type: skill-invocation
         config:
           required: [session-statusline]

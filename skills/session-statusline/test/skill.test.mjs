@@ -33,6 +33,8 @@ test("manual controls use session-bound tools and preserve work and configuratio
 
 test("active-work policy excludes reference-only enrollment and respects manual dismissal", () => {
   assert.match(skill, /References in conversation, attachments/);
-  assert.match(skill, /Read-only review or monitoring requires an\s+explicit add/);
+  assert.match(skill, /All PR and issue work requires an explicit\s+add/);
+  assert.match(skill, /shell commands and GitHub writes\/results never enroll targets/);
+  assert.match(skill, /unowned legacy references are dropped/);
   assert.match(skill, /Honor manual dismissal/);
 });

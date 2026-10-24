@@ -7,8 +7,9 @@ alwaysApply: true
 
 When the session statusline tools are available, explicitly add an issue or PR
 with `session_issues` or `session_prs` only when this session takes on its
-implementation, review, repair, or active monitoring. Add read-only review/watch
-targets explicitly; passive lookups do not enroll them automatically.
+implementation, review, repair, or active monitoring. All PR and issue enrollment
+is explicit: shell commands, GitHub writes/results, and read-only lookups never
+enroll targets automatically. Actual session agent launches are tracked automatically.
 
 Never add pills for references, examples, attachments, memories, plans, search/list
 results, delegated prompts/results, or other sessions' work alone. Remove a target

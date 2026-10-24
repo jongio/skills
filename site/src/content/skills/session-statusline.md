@@ -14,7 +14,10 @@ install:
 Manage only the current session's active statusline pills and clear entries without deleting work or changing enabled components.
 
 Included in the full `jongio-skills` plugin. Requires the statusline extensions
-to execute session-bound controls. Plain references and lookups do not add pills.
+to execute session-bound controls. All PR and issue enrollment is explicit;
+shell commands, GitHub writes/results, references, and lookups never add pills.
+Actual session agent launches remain automatic. Upgrades drop unowned legacy
+entries; explicitly re-add any work this session still owns.
 
 ## Use it
 

@@ -34,7 +34,7 @@ for (const [name, Tracker, read, write, sync, reference, command, field] of [
 	["issue", IssueTracker, readIssues, writeIssues, syncIssues, issue, "gh issue reopen 7", "issues"],
 ]) {
 	for (const legacy of [true, false]) {
-		test(`${name} ${legacy ? "legacy migration" : "re-indexing"} preserves dismissal of consumed reopen history but accepts new reopen work`, async () => fixture((home) => {
+		test(`${name} ${legacy ? "legacy migration" : "re-indexing"} preserves dismissal across old and fresh shell reopen activity`, async () => fixture((home) => {
 			const id = "dismissed";
 			const old = encode([event("session.start", 500, { repository: "acme/app" }), start("old", 1000, command), complete("old", 1100, reference)]);
 			const file = transcript(home, id, old);
@@ -51,13 +51,16 @@ for (const [name, Tracker, read, write, sync, reference, command, field] of [
 			assert.deepEqual(sync({ session_id: id }, options).state[field], []);
 			assert.ok(read(id, home).ignored.includes(reference));
 			appendFileSync(file, encode([start("new", 2500, command), complete("new", 2600, reference)]));
-			assert.deepEqual(sync({ session_id: id }, { ...options, now: 3000 }).state[field].map((item) => item.url), [reference]);
-			assert.ok(!read(id, home).ignored.includes(reference));
+			assert.deepEqual(sync({ session_id: id }, { ...options, now: 3000 }).state[field], []);
+			const explicit = new Tracker(id, read(id, home));
+			explicit.manage("add", reference);
+			write(explicit.snapshot(), home);
+			assert.deepEqual(sync({ session_id: id }, { ...options, now: 3500 }).state[field].map((item) => item.url), [reference]);
 		}));
 	}
 }
 
-test("collector migration preserves a dismissed selector-free reopen but still accepts a fresh live reopen", async () => fixture(async (home) => {
+test("collector migration and live shell reopen preserve dismissal until explicit management", async () => fixture(async (home) => {
 	const id = "collector-dismissal";
 	const tracker = new SessionTracker(id);
 	tracker.manage("add", pr);
@@ -80,6 +83,8 @@ test("collector migration preserves a dismissed selector-free reopen but still a
 		assert.deepEqual(readState(id, home).prs, []);
 		handler(start("new", 2500, "gh pr reopen"));
 		handler(complete("new", 2600, pr));
+		assert.deepEqual(readState(id, home).prs, []);
+		collector.manage("add", pr);
 		assert.deepEqual(readState(id, home).prs.map((item) => item.url), [pr]);
 		assert.equal(readState(id, home).prs[0].generation, 1);
 	} finally { collector.stop(); }
@@ -142,7 +147,7 @@ for (const [name, Tracker, read, write, sync] of [
 	["issue", IssueTracker, readIssues, writeIssues, syncIssues],
 	["agent", SubagentTracker, readAgents, writeAgents, syncAgents],
 ]) {
-	test(`${name} migration replays middle-of-history work with bounded reads and split UTF-8 records`, async (t) => fixture((home) => {
+	test(`${name} migration preserves explicit ownership and replays activity with bounded reads and split UTF-8 records`, async (t) => fixture((home) => {
 		const id = "long-history";
 		const padding = encode([event("assistant.message", 500, { content: "x".repeat(1024) })]);
 		const header = encode([event("session.start", 500, { repository: "acme/app" })]);
@@ -152,6 +157,10 @@ for (const [name, Tracker, read, write, sync] of [
 			start("issue-work", 1000, "gh issue develop 7"),
 			event("subagent.started", 1000, { agentId: "worker", agentType: "general-purpose" }),
 			start("agent-work", 1000, "gh pr checkout 44", "worker"),
+			event("tool.execution_start", 1000, { toolCallId: "explicit-work", toolName: "session_prs", arguments: {
+				action: "add", reference: "acme/app#44",
+			} }, "worker"),
+			complete("explicit-work", 1100, "Tracked"),
 		];
 		const contentPrefix = JSON.stringify(complete("agent-work", 1100, "")).indexOf('"content":"') + '"content":"'.length;
 		const contentOffset = Buffer.byteLength(header + prefix + encode(middleStart)) + contentPrefix;
@@ -181,7 +190,9 @@ for (const [name, Tracker, read, write, sync] of [
 		}
 		const previous = tracker.snapshot();
 		delete previous.activeTrackingVersion;
-		for (const entry of [...(previous.prs ?? []), ...(previous.issues ?? [])]) delete entry.active;
+		for (const entry of [...(previous.prs ?? []), ...(previous.issues ?? [])]) {
+			if (entry.label.endsWith("#99")) delete entry.owned;
+		}
 		previous.transcriptOffset = size;
 		previous.updatedAt = 1500;
 		write(previous, home);
@@ -207,10 +218,10 @@ for (const [name, Tracker, read, write, sync] of [
 		if (name === "PR") assert.deepEqual(current.prs.map((item) => item.url), [pr, "https://github.com/acme/app/pull/44"]);
 		else if (name === "issue") assert.deepEqual(current.issues.map((item) => item.url), [issue]);
 		else assert.deepEqual(current.agents.worker.prs, ["https://github.com/acme/app/pull/44"]);
-		assert.equal(current.activeTrackingVersion, 1);
+		assert.equal(current.activeTrackingVersion, 2);
 		assert.equal(current.transcriptOffset, size);
 		assert.ok(observedContent === wideContent, "a record spanning chunks must preserve its exact UTF-8 contents");
-		assert.deepEqual(current.calls ?? current.agentToolCalls, {});
+		assert.deepEqual(current.calls ?? current.agentToolCalls ?? {}, {});
 		assert.ok(reads.length > 3);
 		assert.ok(reads.every((entry) => entry.length <= 1024 * 1024), "migration must not allocate a transcript-sized read");
 		assert.equal(reads.reduce((sum, entry) => sum + entry.length, 0), size);

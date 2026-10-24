@@ -69,6 +69,9 @@ try {
 			closedByPullRequestsReferences: { nodes: [] },
 		},
 	};
+	const owned = new IssueTracker("live-issues");
+	for (const number of [3315, 3318]) owned.manage("add", `Azure/azure-dev#${number}`);
+	writeState(owned.snapshot(), home);
 
 	const plain = render(
 		{ session_id: "live-issues", transcript_path: transcriptDir },
@@ -85,6 +88,7 @@ try {
 			JSON.stringify(event("tool.execution_complete", { toolCallId: "close-3318", success: true, result: { content: "Closed issue #3318" } }, undefined, new Date(3100).toISOString())),
 		].join("\n") + "\n",
 	);
+	mockIssues["https://github.com/Azure/azure-dev/issues/3318"].state = "CLOSED";
 	const afterCloseColored = render(
 		{ session_id: "live-issues", transcript_path: transcriptDir },
 		{ home, links: true, color: true, now: 3200, fetchIssueStatus: (url) => mockIssues[url] ?? null },
