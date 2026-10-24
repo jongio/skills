@@ -9,12 +9,13 @@ import {
 } from "./compose.mjs";
 import {
 	IssueTracker,
-	readState as readIssueState,
+	syncSession as syncIssues,
 	writeState as writeIssueState,
 } from "../issue-statusline/tracker.mjs";
 import {
 	readState as readSubagentState,
 	SubagentTracker,
+	syncSession as syncAgents,
 	writeState as writeSubagentState,
 } from "../subagent-statusline/tracker.mjs";
 
@@ -29,7 +30,7 @@ function manage(action, reference) {
 }
 
 function manageAgents(action, id) {
-	const tracker = new SubagentTracker(session.sessionId, readSubagentState(session.sessionId));
+	const tracker = syncAgents({ session_id: session.sessionId }).tracker ?? new SubagentTracker(session.sessionId);
 	const agents = tracker.manage(action, id);
 	writeSubagentState(tracker.snapshot());
 	return agents;
@@ -97,7 +98,7 @@ const session = await joinSession({
 			handler: async ({ args }) => {
 				try {
 					const [action = "list", reference] = args.trim().split(/\s+/);
-					const tracker = new IssueTracker(session.sessionId, readIssueState(session.sessionId));
+					const tracker = new IssueTracker(session.sessionId, syncIssues({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
 					const issues = tracker.manage(action, reference);
 					writeIssueState(tracker.snapshot());
 					await session.log(issues.length ? issues.map((i) => `${i.label}: ${i.url}`).join("\n") : "No tracked session issues.");
@@ -197,7 +198,7 @@ const session = await joinSession({
 				additionalProperties: false,
 			},
 			handler: ({ action, reference }) => {
-				const tracker = new IssueTracker(session.sessionId, readIssueState(session.sessionId));
+				const tracker = new IssueTracker(session.sessionId, syncIssues({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
 				const issues = tracker.manage(action, reference);
 				writeIssueState(tracker.snapshot());
 				return JSON.stringify(issues);

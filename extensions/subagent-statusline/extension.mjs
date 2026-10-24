@@ -2,7 +2,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { ensurePluginStatuslineRegistered } from "./compose.mjs";
-import { readState, SubagentTracker, writeState } from "./tracker.mjs";
+import { SubagentTracker, syncSession, writeState } from "./tracker.mjs";
 
 ensurePluginStatuslineRegistered("subagent-statusline", dirname(fileURLToPath(import.meta.url)));
 
@@ -13,7 +13,7 @@ const session = await joinSession({
 		handler: async ({ args }) => {
 			try {
 				const [action = "list", id] = args.trim().split(/\s+/).filter(Boolean);
-				const tracker = new SubagentTracker(session.sessionId, readState(session.sessionId));
+				const tracker = syncSession({ session_id: session.sessionId }).tracker ?? new SubagentTracker(session.sessionId);
 				const agents = tracker.manage(action, id);
 				writeState(tracker.snapshot());
 				const c = tracker.counts();
@@ -37,7 +37,7 @@ const session = await joinSession({
 			additionalProperties: false,
 		},
 		handler: ({ action, id }) => {
-			const tracker = new SubagentTracker(session.sessionId, readState(session.sessionId));
+			const tracker = syncSession({ session_id: session.sessionId }).tracker ?? new SubagentTracker(session.sessionId);
 			const agents = tracker.manage(action, id);
 			writeState(tracker.snapshot());
 			return JSON.stringify(agents);

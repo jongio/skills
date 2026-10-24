@@ -226,3 +226,27 @@ test("root lookups do not promote agent-only PRs into extra detailed pills", () 
 	tracker.manage("add", pr);
 	assert.equal(tracker.state.prs[0].provenance.root, true);
 });
+
+test("rejected enrollment history cannot prevent collector startup or later live tracking", async () => fixture(async (home) => {
+	let handler;
+	let unsubscribed = false;
+	const history = [event("session.start", { repository: "acme/app" })];
+	for (const [index, reference] of [undefined, "#42", "not a URL", issue].entries()) {
+		history.push(start(`rejected-${index}`, "", "session_prs", { action: "add", reference }));
+		history.push(event("tool.execution_complete", { toolCallId: `rejected-${index}`, success: false }));
+	}
+	history.push(start("concrete-work", "gh pr checkout 43"));
+	const collector = await collect({
+		sessionId: "rejected-history",
+		on(fn) { handler = fn; return () => { unsubscribed = true; }; },
+		getEvents: async () => history,
+		rpc: { metadata: { activity: async () => ({ hasActiveWork: true }) } },
+	}, { home, interval: 100000 });
+	try {
+		assert.equal(unsubscribed, false);
+		assert.deepEqual(readState("rejected-history", home).prs.map((item) => item.label), ["acme/app#43"]);
+		handler(start("live-work", "", "session_prs", { action: "add", reference: "acme/app#44" }));
+		assert.deepEqual(readState("rejected-history", home).prs.map((item) => item.label), ["acme/app#43", "acme/app#44"]);
+	} finally { collector.stop(); }
+	assert.equal(unsubscribed, true);
+}));

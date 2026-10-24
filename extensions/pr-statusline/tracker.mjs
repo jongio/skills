@@ -288,7 +288,11 @@ export class SessionTracker {
 			const name = data.mcpToolName ?? data.toolName ?? "";
 			const command = args.command ?? "";
 			if (/(?:^|[._-])session_prs$/.test(name) && args.action === "add") {
-				this.add(args.reference, false, prSource);
+				try {
+					this.add(args.reference, false, prSource);
+				} catch {
+					// Rejected enrollment attempts remain in SDK history.
+				}
 			}
 			if (!event.agentId && name === "ask_user") this.pending.set(`tool:${data.toolCallId}`, "answer");
 			if (!event.agentId && name === "exit_plan_mode") this.pending.set(`tool:${data.toolCallId}`, "plan approval");
