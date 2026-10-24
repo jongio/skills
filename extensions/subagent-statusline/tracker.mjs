@@ -107,6 +107,7 @@ export function readState(sessionId, home = configHome()) {
 export function writeState(state, home = configHome()) {
 	return updateState(state.sessionId, (current) => {
 		if ((current?.clearedAt ?? 0) > (state.clearedAt ?? 0)) return current;
+		if ((current?.dismissedThroughAt ?? 0) > (state.dismissedThroughAt ?? 0)) return current;
 		const ignored = new Set([...(current?.ignored ?? []), ...(state.ignored ?? [])]);
 		for (const [call, id] of Object.entries(state.taskCalls ?? {})) {
 			if (ignored.has(call)) ignored.add(id);
@@ -563,7 +564,10 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	if (tracker.syncWithPrCache(prCache, now)) changed = true;
 	if (changed) {
 		const saved = writeState(tracker.snapshot(), home);
-		if ((saved.clearedAt ?? 0) > tracker.clearedAt) return { tracker: new SubagentTracker(sessionId, saved) };
+		if ((saved.clearedAt ?? 0) > tracker.clearedAt ||
+			(saved.dismissedThroughAt ?? 0) > tracker.dismissedThroughAt) {
+			return { tracker: new SubagentTracker(sessionId, saved) };
+		}
 	}
 	return { tracker };
 }

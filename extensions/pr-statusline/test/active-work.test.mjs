@@ -7,7 +7,7 @@ import { collect } from "../collector.mjs";
 import { clearSessionStatusline } from "../session-statusline.mjs";
 import { SessionTracker, readState, syncSession, writeState } from "../tracker.mjs";
 import { IssueTracker, syncSession as syncIssues, writeState as writeIssues } from "../../issue-statusline/tracker.mjs";
-import { SubagentTracker, syncSession as syncAgents, writeState as writeAgents } from "../../subagent-statusline/tracker.mjs";
+import { SubagentTracker, readState as readAgents, syncSession as syncAgents, writeState as writeAgents } from "../../subagent-statusline/tracker.mjs";
 import { configureStatuslines } from "../../../scripts/setup-statusline.mjs";
 import { composeStatusLine } from "../../worktree-statusline/compose.mjs";
 
@@ -201,6 +201,49 @@ for (const partial of [false, true]) {
 		assert.ok(current.ignored.has("unread"));
 		assert.ok(current.ignored.has("unread-call"));
 		assert.equal(current.dismissedThroughAt, 2000);
+	}));
+}
+
+for (const duringSync of [false, true]) {
+	test(`component-only clear rejects an unread-launch stale save${duringSync ? " and returns the saved tracker" : ""}`, async (t) => fixture((home) => {
+		const id = `stale-agent-clear-${duringSync}`;
+		const dir = join(home, "session-state", id);
+		mkdirSync(dir, { recursive: true });
+		const file = join(dir, "events.jsonl");
+		writeFileSync(file, JSON.stringify(event("subagent.started", { agentId: "observed" })) + "\n");
+		const clearing = syncAgents({ session_id: id }, { home }).tracker;
+		const offset = clearing.transcriptOffset;
+		const unread = { ...event("subagent.started", { agentId: "unread" }), timestamp: new Date(1500).toISOString() };
+		appendFileSync(file, JSON.stringify(unread) + "\n");
+		const snapshot = SubagentTracker.prototype.snapshot;
+		let returned;
+		if (duringSync) {
+			let interleaved = false;
+			t.mock.method(SubagentTracker.prototype, "snapshot", function () {
+				const stale = snapshot.call(this);
+				if (!interleaved) {
+					interleaved = true;
+					clearing.clear(2000);
+					writeAgents(snapshot.call(clearing), home);
+				}
+				return stale;
+			});
+			returned = syncAgents({ session_id: id }, { home }).tracker;
+			assert.equal(interleaved, true);
+		} else {
+			const stale = syncAgents({ session_id: id }, { home }).tracker.snapshot();
+			clearing.clear(2000);
+			writeAgents(clearing.snapshot(), home);
+			returned = new SubagentTracker(id, writeAgents(stale, home));
+		}
+		assert.equal(returned.agents.size, 0, "a stale returned tracker must not render a dismissed launch");
+		assert.equal(returned.dismissedThroughAt, 2000);
+		assert.equal(readAgents(id, home).transcriptOffset, offset, "the stale cursor must not consume the unread launch");
+		const fresh = { ...event("subagent.started", { agentId: "fresh" }), timestamp: new Date(2500).toISOString() };
+		appendFileSync(file, JSON.stringify(fresh) + "\n");
+		const current = syncAgents({ session_id: id }, { home }).tracker;
+		assert.deepEqual([...current.agents.keys()], ["fresh"]);
+		assert.ok(current.ignored.has("unread"));
 	}));
 }
 
