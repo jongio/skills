@@ -96,6 +96,23 @@ function extensionScript(entry, full) {
 			await command("session-issues")({ args: "list" });
 			assert.match(logs.pop(), /example\\/widget#2/);
 			assert.equal(JSON.parse(tool("session_issues")({ action: "clear" })).length, 0);
+			const agentsModule = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "subagent-statusline", "tracker.mjs")).href)});
+			for (const adapter of ["command", "tool"]) {
+				tool("session_prs")({ action: "add", reference: "example/widget#3" });
+				tool("session_issues")({ action: "add", reference: "example/widget#4" });
+				const agents = new agentsModule.SubagentTracker(session.sessionId, agentsModule.readState(session.sessionId));
+				agents.ensureAgent("active-" + adapter);
+				agentsModule.writeState(agents.snapshot());
+				if (adapter === "command") {
+					await command("session-statusline")({ args: "clear" });
+					assert.match(logs.pop(), /Cleared this session/);
+				} else {
+					assert.match(tool("session_statusline")({ action: "clear" }), /Cleared this session/);
+				}
+				assert.deepEqual(JSON.parse(tool("session_prs")({ action: "list" })), []);
+				assert.deepEqual(JSON.parse(tool("session_issues")({ action: "list" })), []);
+				assert.deepEqual(JSON.parse(tool("session_subagents")({ action: "list" })), []);
+			}
 			await command("session-statusline")({ args: "clear" });
 			assert.match(logs.pop(), /Cleared this session/);
 			assert.match(tool("session_statusline")({ action: "clear" }), /Cleared this session/);
@@ -144,5 +161,68 @@ test("plugin auto-registration installs the shared state helper for every standa
 		const tracker = pathToFileURL(join(isolated, "extensions", id, "tracker.mjs")).href;
 		const result = node(isolated, ["--input-type=module", "-e", `await import(${JSON.stringify(tracker)});`]);
 		assert.equal(result.status, 0, result.stderr);
+	}
+}));
+
+test("unified and standalone agent commands and tools share populated remove/clear behavior", () => fixture((home) => {
+	for (const id of ["pr-statusline", "subagent-statusline"]) {
+		const isolated = join(home, id);
+		configureStatuslines({ home: isolated, repoRoot: root, enabled: [id] });
+		const entry = pathToFileURL(join(isolated, "extensions", id, "extension.mjs")).href;
+		const tracker = pathToFileURL(join(root, "extensions", "subagent-statusline", "tracker.mjs")).href;
+		const result = node(isolated, ["--input-type=module", "-e", `
+			import assert from "node:assert/strict";
+			import { readFileSync } from "node:fs";
+			import { join } from "node:path";
+			import { registerHooks } from "node:module";
+			import { SubagentTracker, readState, writeState } from ${JSON.stringify(tracker)};
+			let configuration;
+			const logs = [];
+			const session = {
+				sessionId: "adapter-fixture", capabilities: {},
+				log: async value => logs.push(value),
+				on: () => () => {}, getEvents: async () => [],
+				rpc: { metadata: { activity: async () => ({ hasActiveWork: false }) } },
+			};
+			globalThis.joinTestSession = async value => { configuration = value; return session; };
+			const sdk = "data:text/javascript," + encodeURIComponent("export const joinSession = globalThis.joinTestSession;");
+			registerHooks({ resolve(specifier, context, next) {
+				return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
+			} });
+			await import(${JSON.stringify(entry)});
+			const configPath = join(process.env.COPILOT_HOME, "statusline-config.json");
+			const settingsPath = join(process.env.COPILOT_HOME, "settings.json");
+			const before = [configPath, settingsPath].map(path => readFileSync(path, "utf8"));
+			const other = new SubagentTracker("other-session");
+			other.ensureAgent("unrelated");
+			writeState(other.snapshot());
+			const otherBefore = readState("other-session");
+			const command = configuration.commands.find(item => item.name === "session-subagents").handler;
+			const tool = configuration.tools.find(item => item.name === "session_subagents").handler;
+			for (const adapter of ["command", "tool"]) {
+				const first = adapter + "-first", second = adapter + "-second";
+				const current = new SubagentTracker(session.sessionId, readState(session.sessionId));
+				current.ensureAgent(first);
+				current.ensureAgent(second);
+				writeState(current.snapshot());
+				if (adapter === "command") {
+					await command({ args: "list" });
+					assert.ok(logs.pop().includes(first));
+					await command({ args: "remove " + first });
+				} else {
+					assert.equal(JSON.parse(tool({ action: "list" })).length, 2);
+					assert.deepEqual(JSON.parse(tool({ action: "remove", id: first })).map(agent => agent.id), [second]);
+				}
+				assert.deepEqual(Object.keys(readState(session.sessionId).agents), [second]);
+				if (adapter === "command") await command({ args: "clear" });
+				else assert.deepEqual(JSON.parse(tool({ action: "clear" })), []);
+				assert.deepEqual(readState(session.sessionId).agents, {});
+				assert.deepEqual(readState("other-session"), otherBefore);
+				assert.deepEqual([configPath, settingsPath].map(path => readFileSync(path, "utf8")), before);
+			}
+			console.log("agent adapter parity passed");
+		`]);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /agent adapter parity passed/);
 	}
 }));
