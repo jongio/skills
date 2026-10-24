@@ -140,10 +140,12 @@ test("scope includes runtime, setup, manifests and gate self-changes but ignores
 		"scripts/setup-statusline.mjs", "scripts/benchmark-statuslines.mjs",
 		"scripts/statusline-performance-offline.mjs", "scripts/compare-statusline-performance.mjs",
 		"test/statusline-performance.test.mjs", ".github/workflows/statusline-performance.yml",
+		"test/github-runtime.test.mjs", "runtime/github-client/client.mjs", "runtime/github-client/package-lock.json",
 		"install-statusline.ps1", "install-statusline.sh",
 	]) assert.ok(isRelevantPath(path), path);
 	for (const path of [
 		"README.md", "extensions/worktree-statusline/README.md", "extensions/pr-statusline/screenshot.png",
+		"runtime/github-client/README.md",
 		"site/src/pages/index.astro", "skills/eli5/SKILL.md", "scripts/unrelated.mjs",
 	]) assert.equal(isRelevantPath(path), false, path);
 });
@@ -336,7 +338,7 @@ test("workflow keeps a stable gate, two OS targets, exact revisions and explicit
 	assert.match(workflow, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
 	assert.match(workflow, /CANDIDATE_SHA: \$\{\{ github\.sha \}\}/);
 	assert.ok(workflow.indexOf("Statusline correctness") < workflow.indexOf("Compare identical workloads"));
-	assert.match(workflow, /run: node --test --test-concurrency=1 "extensions\/\*-statusline\/test\/\*\.test\.mjs" test\/statusline-performance\.test\.mjs test\/distribution-manifests\.test\.mjs/);
+	assert.match(workflow, /run: node --test --test-concurrency=1 "extensions\/\*-statusline\/test\/\*\.test\.mjs" "extensions\/daemon-notifications\/test\/\*\.test\.mjs" test\/statusline-performance\.test\.mjs test\/distribution-manifests\.test\.mjs test\/github-runtime\.test\.mjs/);
 	assert.match(workflow, /retention-days: 3/);
 	assert.match(workflow, /if-no-files-found: warn/);
 	for (const file of ["base", "candidate", "confirmation-base", "confirmation-candidate", "comparison"]) {

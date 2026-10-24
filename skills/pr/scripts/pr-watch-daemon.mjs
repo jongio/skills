@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { execFileSync, spawnSync } from "node:child_process";
-import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_threads";
+import { execFileSync } from "node:child_process";
+import { createGitHubClient, createEventWriter, httpDetails, runGh } from "./lib/github-client.mjs";
+import { resolve } from "node:path";
 
 const ERRORED_COPILOT_REVIEW_RE = /Copilot encountered an error and was unable to review this pull request/i;
 const ACTIONABLE_BODY_RE =
@@ -19,6 +20,8 @@ export function detectRepoFromGit(cwd = process.cwd()) {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5000,
+      windowsHide: true,
     }).trim();
     const match = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/i);
     return match ? match[1] : "";
@@ -30,6 +33,7 @@ export function detectRepoFromGit(cwd = process.cwd()) {
 export function parsePrWatchArgs(argv) {
   const args = {
     mode: "watch",
+    eventsFile: "",
     repo: "",
     pr: 0,
     prs: [],
@@ -84,6 +88,8 @@ export function parsePrWatchArgs(argv) {
       args.mode = token;
     } else if (token === "--mode" && argv[i + 1]) {
       args.mode = argv[++i];
+    } else if (token === "--events-file" && argv[i + 1]) {
+      args.eventsFile = resolve(argv[++i]);
     } else if (token === "--repo" && argv[i + 1]) {
       args.repo = argv[++i].trim();
     } else if (token === "--pr" && argv[i + 1]) {
@@ -368,74 +374,9 @@ export function createPrWatchState() {
   };
 }
 
-function parseRetryAfterHeader(rawVal) {
-  if (!rawVal) return null;
-  const trimmed = String(rawVal).trim();
-  if (/^\d+$/.test(trimmed)) {
-    return Number.parseInt(trimmed, 10);
-  }
-  const dateMs = Date.parse(trimmed);
-  if (Number.isFinite(dateMs)) {
-    return Math.max(1, Math.ceil((dateMs - Date.now()) / 1000));
-  }
-  return null;
-}
-
 function computeResetDelaySec(rateLimitReset) {
   if (!Number.isFinite(rateLimitReset) || rateLimitReset <= 0) return null;
   return Math.max(1, Math.ceil(rateLimitReset - Date.now() / 1000));
-}
-
-export function parsePrHttpResponse(raw, httpMeta = null) {
-  let remaining = String(raw || "").replace(/\r\n/g, "\n");
-  let lastHeaderBlock = "";
-  while (/^HTTP\/[\d.]+\s+\d{3}\b/.test(remaining)) {
-    const splitIndex = remaining.indexOf("\n\n");
-    if (splitIndex === -1) {
-      lastHeaderBlock = remaining;
-      remaining = "";
-      break;
-    }
-    lastHeaderBlock = remaining.slice(0, splitIndex);
-    remaining = remaining.slice(splitIndex + 2).trimStart();
-  }
-  const metaStatus = Number.isInteger(httpMeta?.status) ? httpMeta.status : null;
-  const metaRem =
-    httpMeta?.rateLimitRemaining !== null &&
-    httpMeta?.rateLimitRemaining !== undefined &&
-    /^\d+$/.test(String(httpMeta.rateLimitRemaining).trim())
-      ? Number.parseInt(String(httpMeta.rateLimitRemaining).trim(), 10)
-      : null;
-  const metaReset =
-    httpMeta?.rateLimitReset !== null &&
-    httpMeta?.rateLimitReset !== undefined &&
-    /^\d+$/.test(String(httpMeta.rateLimitReset).trim())
-      ? Number.parseInt(String(httpMeta.rateLimitReset).trim(), 10)
-      : null;
-  const metaRetry = httpMeta?.retryAfter ? parseRetryAfterHeader(httpMeta.retryAfter) : null;
-
-  if (!lastHeaderBlock) {
-    return {
-      status: metaStatus ?? 200,
-      etag: httpMeta?.etag ? String(httpMeta.etag).trim() : "",
-      rateLimitRemaining: metaRem,
-      rateLimitReset: metaReset,
-      retryAfterSec: metaRetry,
-      bodyText: remaining,
-    };
-  }
-  const bodyText = remaining.trim();
-  const statusMatch = lastHeaderBlock.match(/^HTTP\/[\d.]+\s+(\d{3})/m);
-  const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : (metaStatus ?? 200);
-  const etagMatch = lastHeaderBlock.match(/^etag:\s*(.+)$/im);
-  const etag = etagMatch ? etagMatch[1].trim() : (httpMeta?.etag ? String(httpMeta.etag).trim() : "");
-  const remMatch = lastHeaderBlock.match(/^x-ratelimit-remaining:\s*(\d+)\s*$/im);
-  const rateLimitRemaining = remMatch ? Number.parseInt(remMatch[1], 10) : metaRem;
-  const resetMatch = lastHeaderBlock.match(/^x-ratelimit-reset:\s*(\d+)\s*$/im);
-  const rateLimitReset = resetMatch ? Number.parseInt(resetMatch[1], 10) : metaReset;
-  const retryMatch = lastHeaderBlock.match(/^retry-after:\s*(.+)$/im);
-  const retryAfterSec = retryMatch ? parseRetryAfterHeader(retryMatch[1]) : metaRetry;
-  return { status, etag, rateLimitRemaining, rateLimitReset, retryAfterSec, bodyText };
 }
 
 export function computeAdaptivePrIntervalSec({
@@ -466,246 +407,22 @@ export function computeAdaptivePrIntervalSec({
   return intervalSec;
 }
 
-export function parseGhApiArgs(ghArgs) {
-  if (!Array.isArray(ghArgs) || ghArgs[0] !== "api") {
-    return null;
-  }
-  let includeHeaders = false;
-  let method = "";
-  const headers = {};
-  let endpoint = "";
-  const rawFields = {};
-  const typedFields = {};
 
-  for (let i = 1; i < ghArgs.length; i += 1) {
-    const token = ghArgs[i];
-    if (token === "-i" || token === "--include") {
-      includeHeaders = true;
-    } else if ((token === "-X" || token === "--method") && ghArgs[i + 1]) {
-      method = String(ghArgs[++i]).toUpperCase();
-    } else if ((token === "-H" || token === "--header") && ghArgs[i + 1]) {
-      const rawHeader = String(ghArgs[++i]);
-      const colonIdx = rawHeader.indexOf(":");
-      if (colonIdx <= 0) return null;
-      headers[rawHeader.slice(0, colonIdx).trim()] = rawHeader.slice(colonIdx + 1).trim();
-    } else if ((token === "-f" || token === "--raw-field") && ghArgs[i + 1]) {
-      const pair = String(ghArgs[++i]);
-      const eqIdx = pair.indexOf("=");
-      if (eqIdx <= 0) return null;
-      rawFields[pair.slice(0, eqIdx)] = pair.slice(eqIdx + 1);
-    } else if ((token === "-F" || token === "--field") && ghArgs[i + 1]) {
-      const pair = String(ghArgs[++i]);
-      const eqIdx = pair.indexOf("=");
-      if (eqIdx <= 0) return null;
-      const key = pair.slice(0, eqIdx);
-      const val = pair.slice(eqIdx + 1);
-      if (val.startsWith("@")) return null;
-      if (/^-?\d+$/.test(val)) {
-        typedFields[key] = Number.parseInt(val, 10);
-      } else if (val === "true" || val === "false") {
-        typedFields[key] = val === "true";
-      } else if (val === "null") {
-        typedFields[key] = null;
-      } else {
-        typedFields[key] = val;
-      }
-    } else if (token.startsWith("-")) {
-      return null;
-    } else if (!endpoint) {
-      endpoint = token;
-    } else {
-      return null;
-    }
+let githubClient;
+async function defaultRequest(request) {
+  if (request.kind === "reviewer") {
+    const result = await runGh(["pr", "edit", String(request.pr), "-R", request.repo,
+      request.remove ? "--remove-reviewer" : "--add-reviewer", "@copilot"], { timeout: 30000 });
+    return { ok: result.ok, error: result.stderr };
   }
-
-  if (!endpoint) {
-    return null;
-  }
-
-  if (endpoint === "graphql") {
-    const query = rawFields.query ?? typedFields.query;
-    if (typeof query !== "string" || !query) {
-      return null;
-    }
-    const variables = { ...rawFields, ...typedFields };
-    delete variables.query;
-    return {
-      url: "https://api.github.com/graphql",
-      method: method || "POST",
-      includeHeaders,
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({ query, variables }),
-    };
-  }
-
-  if (Object.keys(rawFields).length > 0 || Object.keys(typedFields).length > 0) {
-    return null;
-  }
-
-  const normalizedEndpoint = endpoint.replace(/^\/+/, "");
-  const url = /^https?:\/\//i.test(endpoint)
-    ? endpoint
-    : `https://api.github.com/${normalizedEndpoint}`;
-  return {
-    url,
-    method: method || "GET",
-    includeHeaders,
-    headers,
-    body: undefined,
-  };
+  githubClient ??= createGitHubClient();
+  return githubClient.request(request);
 }
-
-let keepAliveWorkerState = null;
-let nextWorkerReqId = 0;
-
-function resolveGhTokenOnce() {
-  const envToken = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim();
-  if (envToken) {
-    return envToken;
-  }
-  try {
-    return execFileSync("gh", ["auth", "token"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5000,
-    }).trim();
-  } catch {
-    return "";
-  }
-}
-
-function getKeepAliveWorker() {
-  if (process.env.GH_HOST || process.env.PR_WATCH_DISABLE_KEEPALIVE === "1") {
-    return null;
-  }
-  if (keepAliveWorkerState !== null) {
-    return keepAliveWorkerState;
-  }
-  const token = resolveGhTokenOnce();
-  if (!token) {
-    keepAliveWorkerState = false;
-    return false;
-  }
-  try {
-    const { port1, port2 } = new MessageChannel();
-    const workerCode = `
-      const { parentPort } = require("node:worker_threads");
-      let replyPort = null;
-      parentPort.on("message", async (msg) => {
-        if (msg.initPort) {
-          replyPort = msg.initPort;
-          return;
-        }
-        const { reqId, token, req, signalBuf } = msg;
-        const signal = new Int32Array(signalBuf);
-        try {
-          const res = await fetch(req.url, {
-            method: req.method,
-            headers: {
-              Accept: "application/vnd.github+json",
-              Authorization: "Bearer " + token,
-              "X-GitHub-Api-Version": "2022-11-28",
-              "User-Agent": "jongio-skills-daemon",
-              ...req.headers,
-            },
-            body: req.body,
-            signal: AbortSignal.timeout(28000),
-          });
-          const bodyText = await res.text();
-          const httpMeta = {
-            status: res.status,
-            etag: res.headers.get("etag"),
-            rateLimitRemaining: res.headers.get("x-ratelimit-remaining"),
-            rateLimitReset: res.headers.get("x-ratelimit-reset"),
-            retryAfter: res.headers.get("retry-after"),
-          };
-          let stdout = bodyText;
-          if (req.includeHeaders) {
-            const hdrLines = ["HTTP/2.0 " + res.status];
-            for (const h of ["etag", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after"]) {
-              const v = res.headers.get(h);
-              if (v !== null && v !== undefined && v !== "") hdrLines.push(h + ": " + v);
-            }
-            stdout = hdrLines.join("\\r\\n") + "\\r\\n\\r\\n" + bodyText;
-          }
-          replyPort.postMessage({
-            reqId,
-            ok: res.ok || (req.includeHeaders && res.status === 304),
-            stdout,
-            stderr: res.ok || res.status === 304 ? "" : (bodyText || ("HTTP " + res.status)),
-            httpMeta,
-          });
-        } catch (err) {
-          replyPort.postMessage({
-            reqId,
-            ok: false,
-            transportError: true,
-            stdout: "",
-            stderr: err && err.message ? err.message : String(err),
-          });
-        } finally {
-          Atomics.store(signal, 0, 1);
-          Atomics.notify(signal, 0, 1);
-        }
-      });
-    `;
-    const worker = new Worker(workerCode, { eval: true });
-    worker.unref();
-    worker.postMessage({ initPort: port2 }, [port2]);
-    keepAliveWorkerState = { worker, port1, token };
-    return keepAliveWorkerState;
-  } catch {
-    keepAliveWorkerState = false;
-    return false;
-  }
-}
-
-function defaultExecGh(ghArgs) {
-  const parsedReq = parseGhApiArgs(ghArgs);
-  if (parsedReq) {
-    const ka = getKeepAliveWorker();
-    if (ka) {
-      const reqId = (nextWorkerReqId += 1);
-      const signalBuf = new SharedArrayBuffer(4);
-      const signal = new Int32Array(signalBuf);
-      ka.worker.postMessage({
-        reqId,
-        token: ka.token,
-        req: parsedReq,
-        signalBuf,
-      });
-      const waitRes = Atomics.wait(signal, 0, 0, 30000);
-      while (true) {
-        const msg = receiveMessageOnPort(ka.port1);
-        if (!msg) break;
-        if ((waitRes === "ok" || waitRes === "not-equal") && msg.message?.reqId === reqId) {
-          const isReadOnlyRequest =
-            parsedReq.method === "GET" || parsedReq.url.endsWith("/graphql");
-          if (msg.message.transportError && isReadOnlyRequest) {
-            break;
-          }
-          return {
-            ok: msg.message.ok,
-            stdout: msg.message.stdout,
-            stderr: msg.message.stderr,
-            httpMeta: msg.message.httpMeta,
-          };
-        }
-      }
-    }
-  }
-  const res = spawnSync("gh", ghArgs, {
-    encoding: "utf8",
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  return {
-    ok: res.status === 0,
-    stdout: res.stdout || "",
-    stderr: res.stderr || "",
-  };
-}
-
-export function requestCopilotReview(args, execFn = defaultExecGh) {
+defaultRequest.cacheScope = async () => {
+  githubClient ??= createGitHubClient();
+  return githubClient.cacheScope();
+};
+export async function requestCopilotReview(args, execFn = defaultRequest) {
   if (!args?.head || typeof args.head !== "string" || !args.head.trim()) {
     return {
       ok: false,
@@ -739,33 +456,22 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
     }
   }`;
 
-  const fetchValidatedPr = () => {
-    const gqlRes = execFn([
-      "api",
-      "graphql",
-      "-F",
-      `owner=${owner}`,
-      "-F",
-      `name=${name}`,
-      "-F",
-      `pr=${args.pr}`,
-      "-f",
-      `query=${query}`,
-    ]);
+  const fetchValidatedPr = async () => {
+    const gqlRes = await execFn({ kind: "graphql", query, variables: { owner, name, pr: args.pr } });
     if (!gqlRes || !gqlRes.ok) {
       return {
         ok: false,
         result: {
           ok: false,
           status: "poll_error",
-          error: gqlRes?.stderr || "GraphQL query failed",
+          error: gqlRes?.error || "GraphQL query failed",
         },
       };
     }
 
     let parsed;
     try {
-      parsed = JSON.parse(gqlRes.stdout);
+      parsed = gqlRes.data;
     } catch (error) {
       return {
         ok: false,
@@ -836,7 +542,7 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
     return { ok: true, pr: prNode };
   };
 
-  const initialPrCheck = fetchValidatedPr();
+  const initialPrCheck = await fetchValidatedPr();
   if (!initialPrCheck.ok) {
     return initialPrCheck.result;
   }
@@ -888,18 +594,18 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
           page === 1
             ? `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100`
             : `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100&page=${page}`;
-        const runsRes = execFn(["api", endpoint]);
-        if (!runsRes || !runsRes.ok || !runsRes.stdout) {
+        const runsRes = await execFn({ endpoint });
+        if (!runsRes || !runsRes.ok || !runsRes.data) {
           return {
             ok: false,
             status: "poll_error",
-            error: runsRes?.stderr || "Workflow runs inventory unavailable",
+            error: runsRes?.error || "Workflow runs inventory unavailable",
           };
         }
 
         let runsData;
         try {
-          runsData = JSON.parse(runsRes.stdout);
+          runsData = runsRes.data;
         } catch (error) {
           return {
             ok: false,
@@ -965,7 +671,7 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   }
 
   // Revalidate PR open state and pinned head after inventory before cancelling runs or editing reviewers
-  const refreshedPrCheck = fetchValidatedPr();
+  const refreshedPrCheck = await fetchValidatedPr();
   if (!refreshedPrCheck.ok) {
     return refreshedPrCheck.result;
   }
@@ -978,12 +684,7 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   const cancelledRunIds = [];
   for (const run of matchingActiveRuns) {
     if (run.head_sha !== pr.headRefOid && run.id) {
-      const cancelRes = execFn([
-        "api",
-        "-X",
-        "POST",
-        `repos/${args.repo}/actions/runs/${run.id}/cancel`,
-      ]);
+      const cancelRes = await execFn({ method: "POST", endpoint: `repos/${args.repo}/actions/runs/${run.id}/cancel` });
       if (!cancelRes || !cancelRes.ok) {
         return {
           ok: false,
@@ -991,7 +692,7 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
           headRefOid: pr.headRefOid,
           runId: run.id,
           cancelledRunIds,
-          error: cancelRes?.stderr || `Failed to cancel superseded Copilot review run ${run.id}`,
+          error: cancelRes?.error || `Failed to cancel superseded Copilot review run ${run.id}`,
         };
       }
       cancelledRunIds.push(run.id);
@@ -1013,42 +714,26 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   );
   const toggledExistingRequest = Boolean(copilotCurrentlyRequested || cancelledRunIds.length > 0);
   if (toggledExistingRequest) {
-    const removeRes = execFn([
-      "pr",
-      "edit",
-      String(args.pr),
-      "-R",
-      args.repo,
-      "--remove-reviewer",
-      "@copilot",
-    ]);
+    const removeRes = await execFn({ kind: "reviewer", repo: args.repo, pr: args.pr, remove: true });
     if (!removeRes || !removeRes.ok) {
       return {
         ok: false,
         status: "remove_reviewer_failed",
         headRefOid: pr.headRefOid,
         cancelledRunIds,
-        error: removeRes?.stderr || "Failed to remove existing @copilot reviewer request",
+        error: removeRes?.error || "Failed to remove existing @copilot reviewer request",
       };
     }
   }
 
-  const addRes = execFn([
-    "pr",
-    "edit",
-    String(args.pr),
-    "-R",
-    args.repo,
-    "--add-reviewer",
-    "@copilot",
-  ]);
+  const addRes = await execFn({ kind: "reviewer", repo: args.repo, pr: args.pr, remove: false });
   if (!addRes.ok) {
     return {
       ok: false,
       status: "request_failed",
       headRefOid: pr.headRefOid,
       cancelledRunIds,
-      error: addRes.stderr || "Failed to request @copilot review",
+      error: addRes.error || "Failed to request @copilot review",
     };
   }
 
@@ -1061,7 +746,7 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   };
 }
 
-export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
+export async function evaluatePrPollTick(args, execFn = defaultRequest, state = null) {
   const [owner, name] = args.repo.split("/");
   const query = `query($owner: String!, $name: String!, $pr: Int!) {
     repository(owner: $owner, name: $name) {
@@ -1154,22 +839,12 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   }
 
-  const gqlRes = execFn([
-    "api",
-    "graphql",
-    "-F",
-    `owner=${owner}`,
-    "-F",
-    `name=${name}`,
-    "-F",
-    `pr=${args.pr}`,
-    "-f",
-    `query=${query}`,
-  ]);
-  const parsedGqlHttp = parsePrHttpResponse(
-    gqlRes?.stdout || gqlRes?.stderr || "",
-    gqlRes?.httpMeta
-  );
+  const gqlRes = await execFn({ kind: "graphql", query, variables: { owner, name, pr: args.pr } });
+  const parsedGqlHttp = httpDetails(gqlRes);
+  if (state && gqlRes?.cacheScope && state.cacheScope !== gqlRes.cacheScope) {
+    state.etags = {};
+    state.cacheScope = gqlRes.cacheScope;
+  }
   if (state?.metrics) {
     if (parsedGqlHttp.rateLimitRemaining !== null) {
       state.metrics.rateLimitRemaining = parsedGqlHttp.rateLimitRemaining;
@@ -1192,14 +867,14 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     return Math.max(parsedGqlHttp.retryAfterSec || 0, resetDelaySec || 0, 60);
   };
   if (!gqlRes || !gqlRes.ok) {
-    const errMsg = gqlRes?.stderr || "GraphQL query failed";
+    const errMsg = gqlRes?.error || "GraphQL query failed";
     const isHttpRateLimited =
-      parsedGqlHttp.status === 429 ||
+      gqlRes?.rateLimited || parsedGqlHttp.status === 429 ||
       (parsedGqlHttp.status === 403 &&
         (parsedGqlHttp.rateLimitRemaining === 0 ||
           parsedGqlHttp.retryAfterSec !== null ||
-          /rate limit/i.test(`${errMsg} ${parsedGqlHttp.bodyText}`))) ||
-      /rate limit|secondary rate limit|HTTP 429/i.test(`${errMsg} ${gqlRes?.stdout || ""}`);
+          /rate limit/i.test(`${errMsg} ${""}`))) ||
+      /rate limit|secondary rate limit|HTTP 429/i.test(`${errMsg} ${gqlRes?.data || ""}`);
     if (isHttpRateLimited) {
       const retryAfterSec = computeGqlRetrySec();
       if (state?.metrics) {
@@ -1229,7 +904,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
 
   let parsed;
   try {
-    parsed = JSON.parse(parsedGqlHttp.bodyText || gqlRes.stdout);
+    parsed = gqlRes.data;
   } catch (error) {
     const errMsg = `Invalid GraphQL JSON: ${error.message}`;
     return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
@@ -1384,19 +1059,21 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
   const activeWorkflowRuns = [];
   const runsEndpoint = `repos/${args.repo}/actions/runs?head_sha=${headOid}&per_page=100`;
   const cachedRunsEntry = state?.etags?.[runsEndpoint];
-  const runsGhArgs = state
-    ? [
-        "api",
-        "-i",
-        runsEndpoint,
-        ...(cachedRunsEntry?.etag ? ["-H", `If-None-Match: ${cachedRunsEntry.etag}`] : []),
-      ]
-    : ["api", runsEndpoint];
+  const runsRequest = { endpoint: runsEndpoint, conditional: Boolean(state),
+    headers: cachedRunsEntry?.etag ? { "If-None-Match": cachedRunsEntry.etag } : {} };
   if (state?.metrics) {
     state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   }
-  const runsRes = execFn(runsGhArgs);
-  const parsedRunsHttp = parsePrHttpResponse(runsRes?.stdout || "", runsRes?.httpMeta);
+  const runsRes = await execFn(runsRequest);
+  if (runsRes?.ok && gqlRes?.cacheScope && runsRes.cacheScope && runsRes.cacheScope !== gqlRes.cacheScope) {
+    if (state) {
+      state.etags = {};
+      state.cacheScope = runsRes.cacheScope;
+    }
+    const error = "GitHub credentials changed during the poll; retry the pinned head";
+    return { events: [{ type: "POLL_ERROR", error }], error };
+  }
+  const parsedRunsHttp = httpDetails(runsRes);
   if (state?.metrics) {
     if (parsedRunsHttp.rateLimitRemaining !== null) {
       state.metrics.rateLimitRemaining = parsedRunsHttp.rateLimitRemaining;
@@ -1413,16 +1090,16 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
   }
 
   let runsData;
-  if (state && parsedRunsHttp.status === 304 && cachedRunsEntry?.data !== undefined) {
+  if (state && runsRes?.ok && parsedRunsHttp.status === 304 && cachedRunsEntry?.data !== undefined) {
     state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
     runsData = cachedRunsEntry.data;
   } else {
     const isRateLimited =
-      parsedRunsHttp.status === 429 ||
+      runsRes?.rateLimited || parsedRunsHttp.status === 429 ||
       (parsedRunsHttp.status === 403 &&
         (parsedRunsHttp.rateLimitRemaining === 0 ||
           parsedRunsHttp.retryAfterSec !== null ||
-          /rate limit/i.test(parsedRunsHttp.bodyText || runsRes?.stderr || "")));
+          /rate limit/i.test(runsRes?.data || runsRes?.error || "")));
     if (isRateLimited) {
       const resetDelaySec =
         parsedRunsHttp.rateLimitRemaining === 0
@@ -1451,12 +1128,12 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
         }),
       };
     }
-    if (!runsRes || !runsRes.ok || !parsedRunsHttp.bodyText) {
-      const errMsg = runsRes?.stderr || "Workflow runs inventory unavailable";
+    if (!runsRes || !runsRes.ok || !runsRes?.data) {
+      const errMsg = runsRes?.error || "Workflow runs inventory unavailable";
       return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
     }
     try {
-      runsData = JSON.parse(parsedRunsHttp.bodyText);
+      runsData = runsRes.data;
     } catch (error) {
       const errMsg = `Invalid workflow runs JSON: ${error.message}`;
       return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
@@ -1655,7 +1332,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     let retryFailureStatus;
     if (state && maxRetries > 0 && prevRetries < maxRetries && !alreadyRetriedThisReview) {
       retryAttempted = true;
-      const retryRes = requestCopilotReview({ ...args, pr: args.pr, head: headOid }, execFn);
+      const retryRes = await requestCopilotReview({ ...args, pr: args.pr, head: headOid }, execFn);
       if (retryRes.ok) {
         state.copilotErrorRetriesByHead[headOid] = prevRetries + 1;
         if (reviewId) {
@@ -1910,7 +1587,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
   };
 }
 
-export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState = {}) {
+export async function evaluateMultiPrPollTick(args, execFn = defaultRequest, multiState = {}) {
   const targetPrs = Array.isArray(args.prs) && args.prs.length > 0 ? args.prs : [args.pr];
   const allEvents = [];
   const statuses = [];
@@ -1944,7 +1621,7 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
       hasExplicitSinceCommentId: entry.hasExplicitSinceCommentId,
       sinceCommentId: entry.sinceCommentId,
     };
-    const tick = evaluatePrPollTick(prArgs, execFn, entry.watchState);
+    const tick = await evaluatePrPollTick(prArgs, execFn, entry.watchState);
     if (tick.error && !firstError) {
       firstError = tick.error;
     }
@@ -2003,113 +1680,126 @@ const NON_TERMINAL_PR_EVENTS = new Set([
 
 export async function runCli(argv = process.argv.slice(2)) {
   const args = parsePrWatchArgs(argv);
-  if (args.mode === "request-copilot") {
-    const res = requestCopilotReview(args);
-    console.log(JSON.stringify(res, null, 2));
-    if (!res.ok) {
-      process.exit(1);
-    }
-    return;
-  }
-  if (args.mode === "once") {
-    if (args.prs.length > 1) {
-      const multi = evaluateMultiPrPollTick(args);
-      console.log(JSON.stringify(multi, null, 2));
-      if (multi.error) {
+  const emit = createEventWriter(args.eventsFile, "pr-watch", { repo: args.repo, pr: args.pr });
+  const heartbeat = args.eventsFile ? setInterval(() => emit({
+    status: { repo: args.repo, phase: "polling", summary: "Watcher active; awaiting GitHub observations" },
+  }), 60000) : null;
+  heartbeat?.unref();
+  try {
+    if (args.mode === "request-copilot") {
+      const res = await requestCopilotReview(args);
+      console.log(JSON.stringify(res, null, 2));
+      if (!res.ok) {
         process.exit(1);
       }
       return;
     }
-    const tick = evaluatePrPollTick(args);
-    console.log(JSON.stringify(tick, null, 2));
-    if (tick.error) {
-      process.exit(1);
+    if (args.mode === "once") {
+      if (args.prs.length > 1) {
+        const multi = await evaluateMultiPrPollTick(args);
+        emit(multi);
+        console.log(JSON.stringify(multi, null, 2));
+        if (multi.error) {
+          process.exit(1);
+        }
+        return;
+      }
+      const tick = await evaluatePrPollTick(args);
+      emit(tick);
+      console.log(JSON.stringify(tick, null, 2));
+      if (tick.error) {
+        process.exit(1);
+      }
+      return;
     }
-    return;
-  }
 
-  if (args.prs.length > 1) {
-    const multiState = {};
+    if (args.prs.length > 1) {
+      const multiState = {};
+      let polls = 0;
+      while (true) {
+        polls += 1;
+        const multi = await evaluateMultiPrPollTick(args, defaultRequest, multiState);
+        emit(multi);
+        if (multi.error) {
+          console.error(JSON.stringify(multi, null, 2));
+          process.exit(1);
+        }
+        const terminalEvents = multi.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
+        if (terminalEvents.length > 0) {
+          console.log(JSON.stringify(multi, null, 2));
+          return;
+        }
+        if (multi.rateLimited) {
+          console.log(JSON.stringify(multi, null, 2));
+          if (args.maxPolls > 0 && polls >= args.maxPolls) {
+            console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+            return;
+          }
+          await sleepSeconds(multi.nextIntervalSec || 60);
+          continue;
+        }
+        console.log(JSON.stringify({ prs: multi.prs, events: multi.events, statuses: multi.statuses }, null, 2));
+        if (args.maxPolls > 0 && polls >= args.maxPolls) {
+          console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }], statuses: multi.statuses }, null, 2));
+          return;
+        }
+        await sleepSeconds(multi.nextIntervalSec || args.intervalSec);
+      }
+    }
+
+    const watchState = createPrWatchState();
+    let baselinePhase = args.lastPhase;
+    let hasCommentBaseline = args.hasExplicitSinceCommentId;
+    let baselineCommentId = args.sinceCommentId;
     let polls = 0;
     while (true) {
       polls += 1;
-      const multi = evaluateMultiPrPollTick(args, defaultExecGh, multiState);
-      if (multi.error) {
-        console.error(JSON.stringify(multi, null, 2));
-        process.exit(1);
-      }
-      const terminalEvents = multi.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
-      if (terminalEvents.length > 0) {
-        console.log(JSON.stringify(multi, null, 2));
-        return;
-      }
-      if (multi.rateLimited) {
-        console.log(JSON.stringify(multi, null, 2));
+      const tick = await evaluatePrPollTick(
+        {
+          ...args,
+          lastPhase: baselinePhase,
+          hasExplicitSinceCommentId: hasCommentBaseline,
+          sinceCommentId: baselineCommentId,
+        },
+        defaultRequest,
+        watchState
+      );
+      emit(tick);
+      if (tick.rateLimited) {
+        console.log(JSON.stringify(tick, null, 2));
         if (args.maxPolls > 0 && polls >= args.maxPolls) {
-          console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+          console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
           return;
         }
-        await sleepSeconds(multi.nextIntervalSec || 60);
+        await sleepSeconds(tick.nextIntervalSec || 60);
         continue;
       }
-      console.log(JSON.stringify({ prs: multi.prs, events: multi.events, statuses: multi.statuses }, null, 2));
-      if (args.maxPolls > 0 && polls >= args.maxPolls) {
-        console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }], statuses: multi.statuses }, null, 2));
+      if (tick.error) {
+        console.error(JSON.stringify(tick, null, 2));
+        process.exit(1);
+      }
+      const terminalEvents = tick.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
+      if (terminalEvents.length > 0) {
+        console.log(JSON.stringify(tick, null, 2));
         return;
       }
-      await sleepSeconds(multi.nextIntervalSec || args.intervalSec);
-    }
-  }
-
-  const watchState = createPrWatchState();
-  let baselinePhase = args.lastPhase;
-  let hasCommentBaseline = args.hasExplicitSinceCommentId;
-  let baselineCommentId = args.sinceCommentId;
-  let polls = 0;
-  while (true) {
-    polls += 1;
-    const tick = evaluatePrPollTick(
-      {
-        ...args,
-        lastPhase: baselinePhase,
-        hasExplicitSinceCommentId: hasCommentBaseline,
-        sinceCommentId: baselineCommentId,
-      },
-      defaultExecGh,
-      watchState
-    );
-    if (tick.rateLimited) {
-      console.log(JSON.stringify(tick, null, 2));
+      // Emit live status and nonterminal phase changes / auto-retries to stdout while continuing to watch
+      console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
+      if (tick.status?.phase) {
+        baselinePhase = tick.status.phase;
+      }
+      if (!hasCommentBaseline && Number.isSafeInteger(tick.status?.latestCommentId)) {
+        hasCommentBaseline = true;
+        baselineCommentId = tick.status.latestCommentId;
+      }
       if (args.maxPolls > 0 && polls >= args.maxPolls) {
-        console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+        console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], status: tick.status }, null, 2));
         return;
       }
-      await sleepSeconds(tick.nextIntervalSec || 60);
-      continue;
+      await sleepSeconds(tick.nextIntervalSec || args.intervalSec);
     }
-    if (tick.error) {
-      console.error(JSON.stringify(tick, null, 2));
-      process.exit(1);
-    }
-    const terminalEvents = tick.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
-    if (terminalEvents.length > 0) {
-      console.log(JSON.stringify(tick, null, 2));
-      return;
-    }
-    // Emit live status and nonterminal phase changes / auto-retries to stdout while continuing to watch
-    console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
-    if (tick.status?.phase) {
-      baselinePhase = tick.status.phase;
-    }
-    if (!hasCommentBaseline && Number.isSafeInteger(tick.status?.latestCommentId)) {
-      hasCommentBaseline = true;
-      baselineCommentId = tick.status.latestCommentId;
-    }
-    if (args.maxPolls > 0 && polls >= args.maxPolls) {
-      console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], status: tick.status }, null, 2));
-      return;
-    }
-    await sleepSeconds(tick.nextIntervalSec || args.intervalSec);
+  } finally {
+    clearInterval(heartbeat);
   }
 }
 
@@ -2117,5 +1807,6 @@ if (
   import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}` ||
   process.argv[1]?.endsWith("pr-watch-daemon.mjs")
 ) {
-  runCli();
+  runCli().catch((error) => { console.error(error.message); process.exitCode = 1; })
+    .finally(() => githubClient?.close());
 }

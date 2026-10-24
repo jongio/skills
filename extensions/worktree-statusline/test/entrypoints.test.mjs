@@ -65,6 +65,13 @@ function extensionScript(entry, full) {
 		registerHooks({ resolve(specifier, context, next) {
 			return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
 		} });
+		const { statuslineGitHub } = await import(${JSON.stringify(pathToFileURL(join(dirname(dirname(entry)), "github-transport.mjs")).href)});
+		statuslineGitHub.cacheScope = async () => "fixture";
+		statuslineGitHub.request = async ({ query }) => ({
+			ok: true, status: 200, headers: {}, cacheScope: "fixture",
+			data: { data: { repository: query.includes("pullRequest(")
+				? { pullRequest: { state: "OPEN" } } : { issue: { state: "OPEN" } } } },
+		});
 		await import(${JSON.stringify(pathToFileURL(entry).href)});
 		const command = name => {
 			const entry = configuration.commands.find(item => item.name === name);

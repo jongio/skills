@@ -83,11 +83,11 @@ set up the copilot statusline from jongio/skills and ask me which of PRs, issues
 ./extensions/pr-statusline/install.sh
 ```
 
-`setup-statusline.mjs` and the installers copy runtime files listed in `scripts/setup-statusline.mjs`'s `EXTENSION_CATALOG` into `$COPILOT_HOME/extensions/<id>/` (default `~/.copilot`). PR installs include sibling runtime dependencies because the unified SDK entry point exposes their commands; only your selected footer items are enabled. Setup installs the shared `statusline-compose.mjs`, saves selections to `statusline-config.json`, and configures `statusLine` (`padding: 0`, `refreshInterval: 5`) and `footer.showCustom` in `settings.json`.
+`setup-statusline.mjs` and the installers copy runtime files listed in `scripts/setup-statusline.mjs`'s `EXTENSION_CATALOG` into `$COPILOT_HOME/extensions/<id>/` (default `~/.copilot`), plus the common assets in `SHARED_RUNTIME_FILES`. These include the bundled Octokit runtime, license notices, and async refresh helpers. PR installs include sibling runtime dependencies because the unified SDK entry point exposes their commands; only your selected footer items are enabled. Setup installs the shared `statusline-compose.mjs`, saves selections to `statusline-config.json`, and configures `statusLine` (`padding: 0`, `refreshInterval: 5`) and `footer.showCustom` in `settings.json`.
 
 ### Option 4: Manual setup (macOS / Linux / Windows)
 
-1. Copy every runtime file in `EXTENSION_CATALOG` for all four packages to `~/.copilot/extensions/<id>/`, preserving package directories. This includes the unified PR entry point's sibling dependencies. Copy the shared `extensions/state-lock.mjs` to `~/.copilot/extensions/state-lock.mjs` and `extensions/pr-statusline/compose.mjs` to `~/.copilot/statusline-compose.mjs`.
+1. Copy every runtime file in `EXTENSION_CATALOG` for all four packages to `~/.copilot/extensions/<id>/`, preserving package directories. This includes the unified PR entry point's sibling dependencies. Copy every common asset in `SHARED_RUNTIME_FILES` into `~/.copilot/extensions/`, and `extensions/pr-statusline/compose.mjs` to `~/.copilot/statusline-compose.mjs`.
 2. Add the following to `~/.copilot/settings.json`:
 
 ```json
@@ -277,7 +277,7 @@ Using `Azure/azure-dev` as an example checkout:
    A lost or corrupt ownership cache likewise requires explicit re-enrollment.
    Existing tracked PRs continue refreshing normally.
 2. **Single-query GraphQL status + shared cache (`github.mjs`):**
-   Live PR status is fetched via `gh api graphql` (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (20s TTL while checks are running, including mixed running/failed checks, 45s TTL when settled, with in-flight deduplication locks). A restarted check's active status takes precedence over a leftover conclusion; the pill changes on the next successful refresh, not optimistically when a rerun command is issued. It does **not** use Copilot AI model requests or touch Copilot's internal databases.
+   Live PR status is fetched through Octokit GraphQL (falling back across secondary logged-in `gh auth` accounts when a PR lives in another organization) and cached across sessions in `$COPILOT_HOME/pr-statusline/pr-cache.json` (20s TTL while checks are running, including mixed running/failed checks, 45s TTL when settled, with in-flight deduplication locks). A restarted check's active status takes precedence over a leftover conclusion; the pill changes on the next successful refresh, not optimistically when a rerun command is issued. It does **not** use Copilot AI model requests or touch Copilot's internal databases.
 3. **Automatic cleanup & manual controls:**
    Closed PRs are removed automatically. Merged PRs remain until the next real user message after this session detects the merge. When the SDK extension (`extension.mjs`) is loaded, you can also manage the list manually:
 
@@ -325,7 +325,7 @@ Existing per-component list/add/remove/clear commands remain available.
 Use **setup** to hide a component without dismissing its tracked items. Hidden
 components can be enabled again later; hiding does not clear their history.
 Refresh keeps entries tracked even when GitHub reports them closed or missing;
-normal subsequent footer updates still apply the existing lifecycle rules.
+normal subsequent collector refreshes still apply the existing lifecycle rules.
 Remote observations are applied to the latest locked tracking state, preserving
 activity and dismissals recorded while those queries run.
 Git comparisons use local refs; refresh does not fetch remote Git branches.
@@ -355,6 +355,53 @@ State writes and worktree replay use per-session, cross-process locks. A lock
 timeout reports its exact path rather than overwriting potentially active state.
 If a process crashed while holding a lock, stop the session's collectors before
 removing only that reported `.lock` directory, then restart Copilot.
+
+## Async GitHub refresh and offline rendering
+
+Footer rendering and workspace/branch discovery read local state only. The
+SDK collector performs asynchronous Octokit refreshes with host/credential-scoped
+caches. A cold footer can show tracked links before remote metadata arrives;
+failed refreshes keep last-known observations marked stale rather than claiming
+new success or merge state. Git comparisons still use bounded local Git reads.
+Local controls initialize before the first background poll finishes, so a slow
+GitHub response does not block tracking or clearing this session.
+Live session events remain authoritative while activity/GitHub requests are
+pending. Invalidated PR and issue metadata is marked stale immediately.
+Workspace hints do not trigger a duplicate branch lookup; owned PRs refresh
+directly by their tracked references.
+
+`/session-statusline refresh` awaits a real refresh and reports partial failures.
+For standalone installs without a running SDK collector, refresh explicitly:
+
+```powershell
+node "<COPILOT_HOME>\extensions\refresh-github.mjs" --session <session-id> --prs --issues
+```
+
+Choose only `--issues` for an issue-only installation. All files in
+`SHARED_RUNTIME_FILES` must accompany manually copied runtime packages; no
+end-user npm install is required.
+
+The SDK host filters sensitive environment variables. `gh` credential discovery
+is the default for collectors. If you intentionally use environment-token-only
+authentication, set `COPILOT_STATUSLINE_TOKEN_ENV` to the required token variable
+name before starting Copilot, for example `GH_TOKEN`. Comma-separated selections
+from `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN`, and
+`GITHUB_ENTERPRISE_TOKEN` are supported. The extension then requests approval for
+those exact names through the host; tokens are never sent through notification
+files. Standalone headless refresh uses its ordinary process environment.
+For enterprise environment tokens, also set `GH_HOST` to the intended server.
+An unrelated hostname discovered in a link cannot inherit that server's token;
+host-specific `gh` keystore lookup is the fallback instead.
+This also applies to `GH_TOKEN`/`GITHUB_TOKEN` when `GH_HOST` selects a
+`*.ghe.com` tenant: another tenant or github.com requires its own credential.
+Secondary-account choices are retained per target within the running client,
+so healthy cached observations do not repeat account discovery on every tick.
+
+The optional daemon notification bridge is separate from footer selection.
+Install it with `node scripts\setup-statusline.mjs --notifications`, then use
+`/daemon-notifications subscribe <watcher>` and pass its returned file to a daemon
+with `--events-file`. It logs progress only and never prompts a model or starts
+repairs. See `extensions\daemon-notifications\README.md`.
 
 ## Validate
 

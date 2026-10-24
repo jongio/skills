@@ -16,6 +16,27 @@ See the [divergence legend](../worktree-statusline/README.md#upstream-and-base-d
 
 ## Install (Windows, macOS, and Linux)
 
+GitHub metadata is refreshed asynchronously by the SDK collector through the
+bundled Octokit client. The footer reads cached state only; slow requests do not
+block rendering. Failed refreshes retain last-known observations marked stale.
+For a standalone issue-only install without a collector, run:
+
+```powershell
+node "<COPILOT_HOME>\extensions\refresh-github.mjs" --session <session-id> --issues
+```
+
+Manual installs must copy the common assets in `SHARED_RUNTIME_FILES` as well as
+the issue package. End users do not need an npm dependency install.
+
+For environment-token-only authentication, explicitly select the required
+variable names with `COPILOT_STATUSLINE_TOKEN_ENV` before starting Copilot;
+the host asks permission before granting the collector those filtered values.
+Without that opt-in, the collector uses bounded `gh` credential discovery.
+For enterprise environment tokens, also set `GH_HOST` to the intended server;
+unrelated hosts found in links cannot inherit that token.
+For a `*.ghe.com` tenant, this includes `GH_TOKEN`/`GITHUB_TOKEN`; neither
+another tenant nor github.com inherits the selected tenant's token.
+
 ### Option 1: Install as a Copilot Plugin or Interactive Script (Recommended)
 
 Install via the `jongio/skills` Copilot plugin, or run a single command to choose **Pull Requests**, **GitHub Issues**, **Subagents**, and/or **Branch and Worktree**:

@@ -1,6 +1,5 @@
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import {
 	configHome, readState, refreshTrackedPrStatuses, SessionTracker, syncSession as syncPrs, transcriptPathFor, updateState, writeState,
 } from "./tracker.mjs";
@@ -15,6 +14,7 @@ import {
 	checkoutDivergence, readJson, sessionContexts, transcriptIdentity, withSessionDirectory, writeJson,
 } from "../worktree-statusline/tracker.mjs";
 import { resolveLinkedCheckouts } from "../worktree-statusline/worktrees.mjs";
+import { mergeObservations, mergeRefreshState, prefetchStatuses } from "../github-refresh.mjs";
 
 export function clearSessionStatusline(payload, { home = configHome(), now = Date.now() } = {}) {
 	const id = payload?.session_id;
@@ -82,8 +82,9 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 	}, { home });
 }
 
-export function refreshSessionStatusline(payload, {
+export async function refreshSessionStatusline(payload, {
 	home = configHome(), now = Date.now(), fetchPrStatus, fetchIssueStatus, run,
+	force = true, remoteOnly = false, signal,
 } = {}) {
 	const id = payload?.session_id;
 	const prs = new SessionTracker(id, readState(id, home));
@@ -91,6 +92,8 @@ export function refreshSessionStatusline(payload, {
 	const agents = new SubagentTracker(id, readAgents(id, home));
 	const previousPrs = structuredClone(prs.state.prs);
 	const previousIssues = structuredClone(issues.state.issues);
+	const initialPrState = { ...prs.state, prs: previousPrs };
+	const initialIssueState = { ...issues.state, issues: previousIssues, explicitRevisions: { ...issues.state.explicitRevisions } };
 	const previousAgents = structuredClone(agents.snapshot());
 	const failures = [];
 	const onError = (error) => failures.push(error.message);
@@ -101,21 +104,25 @@ export function refreshSessionStatusline(payload, {
 		for (const url of agent.prs) remotePrs.add(url);
 	}
 	for (const [label, refresh] of [
-		["PRs", () => {
-			refreshTrackedPrStatuses(remotePrs, { home, now, fetchPrStatus, force: true, onError });
+		["PRs", async () => {
+			const fetch = await prefetchStatuses("pr", remotePrs.state.prs, { home, now, force, fetchStatus: fetchPrStatus, signal });
+			signal?.throwIfAborted();
+			refreshTrackedPrStatuses(remotePrs, { home, now, fetchPrStatus: fetch, force, prefetched: true, onError });
 			const saved = updateState(id, (current) => {
 				current ??= prs.snapshot();
 				if ((current.clearedAt ?? 0) !== prs.state.clearedAt) return current;
-				return { ...current, prs: mergeObservations(current.prs, previousPrs, remotePrs.state.prs), updatedAt: Date.now() };
+				return mergeRefreshState(current, initialPrState, remotePrs.state, "prs");
 			}, home);
 			prs.state.prs = saved.prs;
 		}],
-		["Issues", () => {
-			refreshTrackedIssueStatuses(issues, { home, now, fetchIssueStatus, force: true, onError });
+		["Issues", async () => {
+			const fetch = await prefetchStatuses("issue", issues.state.issues, { home, now, force, fetchStatus: fetchIssueStatus, signal });
+			signal?.throwIfAborted();
+			refreshTrackedIssueStatuses(issues, { home, now, fetchIssueStatus: fetch, force, prefetched: true, onError });
 			updateIssues(id, (current) => {
 				current ??= issues.snapshot();
 				if ((current.clearedAt ?? 0) !== issues.state.clearedAt) return current;
-				return { ...current, issues: mergeObservations(current.issues, previousIssues, issues.state.issues), updatedAt: Date.now() };
+				return mergeRefreshState(current, initialIssueState, issues.state, "issues");
 			}, home);
 		}],
 		["Subagents", () => {
@@ -132,14 +139,16 @@ export function refreshSessionStatusline(payload, {
 			}, home);
 		}],
 		["Worktrees", () => {
+			if (remoteOnly) return;
 			const { contexts, catchingUp } = sessionContexts(payload, { home, run, force: true });
 			if (catchingUp) throw new Error("Transcript replay is still catching up; retry refresh after the next footer update.");
 			const linked = resolveLinkedCheckouts(payload, contexts, prs.state.prs, { home, now, run, force: true });
 			for (const context of [...contexts, ...linked]) checkoutDivergence(context, prs.state.prs, { run, force: true });
 		}],
 	]) {
+		if (signal?.aborted) break;
 		try {
-			refresh();
+			await refresh();
 		} catch (error) {
 			onError(new Error(`${label}: ${error.message}`));
 		}
@@ -147,25 +156,4 @@ export function refreshSessionStatusline(payload, {
 	return failures.length
 		? `Session statusline refresh incomplete:\n${failures.join("\n")}`
 		: "Refreshed this session's tracked statusline entries. Tracking and enabled components are unchanged.";
-}
-
-function mergeObservations(current, previous, refreshed) {
-	const key = (item) => item.url ?? item.id;
-	const before = new Map(previous.map((item) => [key(item), item]));
-	const after = new Map(refreshed.map((item) => [key(item), item]));
-	const lifecycle = ["generation", "checkedAt", "status", "closedAt", "mergedAt", "mergedObservedAt", "prs",
-		"mergedPrs", "settlementObservedAt", "settlementDismissed"];
-	return current.map((item) => {
-		const old = before.get(key(item)), fresh = after.get(key(item));
-		if (!old || !fresh || lifecycle.some((field) => !isDeepStrictEqual(item[field], old[field]))) return item;
-		const fields = [...new Set([...Object.keys(old), ...Object.keys(fresh)])]
-			.filter((field) => !isDeepStrictEqual(old[field], fresh[field]));
-		if (fields.some((field) => !isDeepStrictEqual(item[field], old[field]))) return item;
-		const updated = { ...item };
-		for (const field of fields) {
-			if (Object.hasOwn(fresh, field)) updated[field] = fresh[field];
-			else delete updated[field];
-		}
-		return updated;
-	});
 }

@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { collect } from "./collector.mjs";
+import { requestedGitHubEnvironment } from "../github-transport.mjs";
 import { configHome } from "./tracker.mjs";
 import { createSessionAttention, runAttentionCommand } from "./attention.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
@@ -40,15 +41,16 @@ function manageAgents(action, id) {
 	return agents;
 }
 
-function updateSession(action) {
+async function updateSession(action) {
 	if (!collector) throw new Error("Session statusline is still loading; retry shortly.");
 	const payload = { session_id: session.sessionId };
-	const result = action === "clear" ? clearSessionStatusline(payload) : refreshSessionStatusline(payload);
+	const result = action === "clear" ? clearSessionStatusline(payload) : await refreshSessionStatusline(payload);
 	collector.reload();
 	return result;
 }
 
 const configuration = {
+	requestedEnvironmentVariables: requestedGitHubEnvironment(),
 	commands: [
 		{
 			name: "session-attention",
@@ -71,7 +73,7 @@ const configuration = {
 					if (action === "setup") {
 						await runInteractiveStatuslinePicker(session, { args: selection.join(" ") });
 					} else if ((action === "clear" || action === "refresh") && !selection.length) {
-						await session.log(updateSession(action));
+						await session.log(await updateSession(action));
 					} else {
 						await session.log("Usage: /session-statusline [refresh | clear | setup [all | none | prs issues subagents worktrees]]");
 					}
@@ -150,10 +152,10 @@ const configuration = {
 				required: ["action"],
 				additionalProperties: false,
 			},
-			handler: ({ action }) => {
+			handler: async ({ action }) => {
 				if (!["clear", "refresh"].includes(action)) throw new Error("Use clear or refresh.");
 				try {
-					return updateSession(action);
+					return await updateSession(action);
 				} catch (error) {
 					return { resultType: "failure", textResultForLlm: error instanceof Error ? error.message : String(error) };
 				}
@@ -227,7 +229,7 @@ const configuration = {
 	],
 };
 
-const bootstrap = await joinSession({ tools: [] });
+const bootstrap = await joinSession({ tools: [], requestedEnvironmentVariables: configuration.requestedEnvironmentVariables });
 const { extensions } = await bootstrap.rpc.extensions.list();
 const current = extensions.find((entry) => entry.pid === process.pid);
 if (!current) throw new Error("Cannot verify the current statusline controller; restart Copilot before migrating.");

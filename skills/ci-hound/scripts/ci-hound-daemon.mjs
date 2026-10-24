@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_threads";
+import { createGitHubClient, createEventWriter, httpDetails } from "./lib/github-client.mjs";
 
 export const FLAKE_PATTERNS = [
   {
@@ -81,6 +81,7 @@ export function selectDeliverySkill({
 export function parseArgs(argv) {
   const args = {
     mode: "watch",
+    eventsFile: "",
     repo: "",
     explicitRepos: [],
     addRepos: [],
@@ -135,6 +136,8 @@ export function parseArgs(argv) {
       args.mode = token;
     } else if (token === "--mode" && argv[i + 1]) {
       args.mode = argv[++i];
+    } else if (token === "--events-file" && argv[i + 1]) {
+      args.eventsFile = resolve(argv[++i]);
     } else if (token === "--repo" && argv[i + 1]) {
       const val = argv[++i].trim();
       addValidatedRepos(args.explicitRepos, val);
@@ -352,10 +355,10 @@ export function applySetupConfig(args, existingConfig) {
   return next;
 }
 
-function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
+async function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultRequest) {
   const results = [];
   for (let page = 1; ; page += 1) {
-    const res = ghApiWithEtag(`${baseEndpoint}&page=${page}`, state, execFn);
+    const res = await ghApiWithEtag(`${baseEndpoint}&page=${page}`, state, execFn);
     if (res.rateLimited) {
       if (state) {
         state.rateLimited = true;
@@ -379,7 +382,7 @@ function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
   return results;
 }
 
-export function discoverOwnerRepos(owner, visibility = "all", state, execFn = defaultExecGh) {
+export async function discoverOwnerRepos(owner, visibility = "all", state, execFn = defaultRequest) {
   if (!owner) {
     return [];
   }
@@ -392,18 +395,18 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
   const effectiveVisibility = visibility || "all";
   let rawRepos = [];
   if (owner === "@me") {
-    rawRepos = fetchPaginatedRepos(
+    rawRepos = await fetchPaginatedRepos(
       `user/repos?affiliation=owner&visibility=${effectiveVisibility}&per_page=100`,
       state,
       execFn
     );
   } else {
     const lowerOwner = owner.toLowerCase();
-    const accessible = fetchPaginatedRepos(
+    const accessible = (await fetchPaginatedRepos(
       `user/repos?affiliation=owner,organization_member,collaborator&visibility=${effectiveVisibility}&per_page=100`,
       state,
       execFn
-    ).filter((r) => typeof r?.owner?.login === "string" && r.owner.login.toLowerCase() === lowerOwner);
+    )).filter((r) => typeof r?.owner?.login === "string" && r.owner.login.toLowerCase() === lowerOwner);
 
     const byName = new Map();
     for (const r of accessible) {
@@ -412,7 +415,7 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
       }
     }
     if (effectiveVisibility !== "private" && !state?.rateLimited) {
-      const publicOwnerRepos = fetchPaginatedRepos(
+      const publicOwnerRepos = await fetchPaginatedRepos(
         `users/${encodeURIComponent(owner)}/repos?type=all&per_page=100`,
         state,
         execFn
@@ -447,7 +450,7 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
     .map((r) => normalizeRepoSlug(r.full_name));
 }
 
-export function resolveTargetRepos(args, config, discoveryState, execFn = defaultExecGh) {
+export async function resolveTargetRepos(args, config, discoveryState, execFn = defaultRequest) {
   if (args.explicitRepos.length > 0) {
     return [...new Set(args.explicitRepos.map(normalizeRepoSlug))];
   }
@@ -457,7 +460,7 @@ export function resolveTargetRepos(args, config, discoveryState, execFn = defaul
   const hasConfiguredScope = Boolean(effectiveOwner || hasConfiguredRepos);
   const combined = new Set((config?.repos || []).map(normalizeRepoSlug).filter(Boolean));
   if (effectiveOwner) {
-    for (const r of discoverOwnerRepos(effectiveOwner, effectiveVisibility, discoveryState, execFn)) {
+    for (const r of await discoverOwnerRepos(effectiveOwner, effectiveVisibility, discoveryState, execFn)) {
       combined.add(normalizeRepoSlug(r));
     }
   }
@@ -473,6 +476,8 @@ export function detectRepoFromGit(cwd = process.cwd()) {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5000,
+      windowsHide: true,
     }).trim();
     const match = remote.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/i);
     return match ? normalizeRepoSlug(match[1]) : "";
@@ -489,6 +494,7 @@ export function loadState(stateFile) {
         repo: parsed.repo || "",
         branch: parsed.branch || "main",
         lastMainSha: parsed.lastMainSha || "",
+        cacheScope: parsed.cacheScope || "",
         etags: parsed.etags || {},
         runs: parsed.runs || {},
         stepTelemetry: parsed.stepTelemetry || {},
@@ -572,56 +578,6 @@ export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunI
   return state;
 }
 
-function parseRetryAfterHeader(rawVal) {
-  if (!rawVal) return null;
-  const trimmed = String(rawVal).trim();
-  if (/^\d+$/.test(trimmed)) {
-    return Number.parseInt(trimmed, 10);
-  }
-  const dateMs = Date.parse(trimmed);
-  if (Number.isFinite(dateMs)) {
-    return Math.max(1, Math.ceil((dateMs - Date.now()) / 1000));
-  }
-  return null;
-}
-
-export function parseHttpResponse(raw) {
-  let remaining = String(raw || "").replace(/\r\n/g, "\n");
-  let lastHeaderBlock = "";
-  while (/^HTTP\/[\d.]+\s+\d{3}\b/.test(remaining)) {
-    const splitIndex = remaining.indexOf("\n\n");
-    if (splitIndex === -1) {
-      lastHeaderBlock = remaining;
-      remaining = "";
-      break;
-    }
-    lastHeaderBlock = remaining.slice(0, splitIndex);
-    remaining = remaining.slice(splitIndex + 2).trimStart();
-  }
-  if (!lastHeaderBlock) {
-    return {
-      status: 200,
-      etag: "",
-      rateLimitRemaining: null,
-      rateLimitReset: null,
-      retryAfterSec: null,
-      bodyText: remaining,
-    };
-  }
-  const bodyText = remaining.trim();
-  const statusMatch = lastHeaderBlock.match(/^HTTP\/[\d.]+\s+(\d{3})/m);
-  const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : 200;
-  const etagMatch = lastHeaderBlock.match(/^etag:\s*(.+)$/im);
-  const etag = etagMatch ? etagMatch[1].trim() : "";
-  const remMatch = lastHeaderBlock.match(/^x-ratelimit-remaining:\s*(\d+)\s*$/im);
-  const rateLimitRemaining = remMatch ? Number.parseInt(remMatch[1], 10) : null;
-  const resetMatch = lastHeaderBlock.match(/^x-ratelimit-reset:\s*(\d+)\s*$/im);
-  const rateLimitReset = resetMatch ? Number.parseInt(resetMatch[1], 10) : null;
-  const retryMatch = lastHeaderBlock.match(/^retry-after:\s*(.+)$/im);
-  const retryAfterSec = retryMatch ? parseRetryAfterHeader(retryMatch[1]) : null;
-  return { status, etag, rateLimitRemaining, rateLimitReset, retryAfterSec, bodyText };
-}
-
 function computeResetDelaySec(rateLimitReset) {
   if (!Number.isFinite(rateLimitReset) || rateLimitReset <= 0) return null;
   return Math.max(1, Math.ceil(rateLimitReset - Date.now() / 1000));
@@ -645,15 +601,31 @@ export function computeNextPollIntervalSec(args, activeMainRuns, metrics = {}) {
   return intervalSec;
 }
 
-export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
-  const cached = state.etags[endpoint];
-  const ghArgs = ["api", "-i", endpoint];
-  if (cached?.etag) {
-    ghArgs.push("-H", `If-None-Match: ${cached.etag}`);
+export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
+  let scope;
+  try {
+    scope = await execFn.cacheScope?.();
+  } catch (error) {
+    return { data: null, error: error.message };
   }
+  if (scope && state.cacheScope !== scope) {
+    state.etags = {};
+    state.runs = {};
+    state.lastMainSha = "";
+    state.cacheScope = scope;
+  }
+  const cached = state.etags[endpoint];
+  const requestedScope = state.cacheScope;
+  const request = { endpoint, conditional: true, headers: cached?.etag ? { "If-None-Match": cached.etag } : {} };
   state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
-  const result = execFn(ghArgs);
-  const parsed = parseHttpResponse(result.stdout || "");
+  const result = await execFn(request);
+  if (result.cacheScope && state.cacheScope !== result.cacheScope) {
+    state.etags = {};
+    state.runs = {};
+    state.lastMainSha = "";
+    state.cacheScope = result.cacheScope;
+  }
+  const parsed = httpDetails(result);
   if (parsed.rateLimitRemaining !== null) {
     state.metrics.rateLimitRemaining = parsed.rateLimitRemaining;
   }
@@ -664,16 +636,20 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
     state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, parsed.retryAfterSec);
   }
 
-  if (parsed.status === 304 && cached?.data !== undefined) {
-    state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
-    return { fromCache: true, data: cached.data };
+  if (parsed.status === 304) {
+    if (result.ok && cached?.etag && cached.data !== undefined &&
+        (!result.cacheScope || result.cacheScope === requestedScope)) {
+      state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
+      return { fromCache: true, data: cached.data };
+    }
+    return { fromCache: false, data: null, error: "HTTP 304 without a matching credential-scoped cache" };
   }
   const isRateLimited =
-    parsed.status === 429 ||
+    result.rateLimited || parsed.status === 429 ||
     (parsed.status === 403 &&
       (parsed.rateLimitRemaining === 0 ||
         parsed.retryAfterSec !== null ||
-        /rate limit/i.test(parsed.bodyText || result.stderr || "")));
+        /rate limit/i.test(result.error || "")));
   if (isRateLimited) {
     const resetDelaySec =
       parsed.rateLimitRemaining === 0 ? computeResetDelaySec(parsed.rateLimitReset) : null;
@@ -687,14 +663,14 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
       fromCache: Boolean(cached?.data !== undefined),
       data: cached?.data ?? null,
       rateLimited: true,
-      error: result.stderr || `HTTP ${parsed.status} rate limited`,
+      error: result.error || `HTTP ${parsed.status} rate limited`,
     };
   }
   if (!result.ok && parsed.status !== 304) {
-    return { fromCache: false, data: cached?.data ?? null, error: result.stderr || `HTTP ${parsed.status}` };
+    return { fromCache: false, data: cached?.data ?? null, error: result.error || `HTTP ${parsed.status}` };
   }
   try {
-    const data = JSON.parse(parsed.bodyText);
+    const data = result.data;
     if (parsed.etag) {
       state.etags[endpoint] = { etag: parsed.etag, data, updatedAt: new Date().toISOString() };
     }
@@ -704,236 +680,16 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
   }
 }
 
-export function parseGhApiArgs(ghArgs) {
-  if (!Array.isArray(ghArgs) || ghArgs[0] !== "api") {
-    return null;
-  }
-  let includeHeaders = false;
-  let method = "";
-  const headers = {};
-  let endpoint = "";
-  const rawFields = {};
-  const typedFields = {};
 
-  for (let i = 1; i < ghArgs.length; i += 1) {
-    const token = ghArgs[i];
-    if (token === "-i" || token === "--include") {
-      includeHeaders = true;
-    } else if ((token === "-X" || token === "--method") && ghArgs[i + 1]) {
-      method = String(ghArgs[++i]).toUpperCase();
-    } else if ((token === "-H" || token === "--header") && ghArgs[i + 1]) {
-      const rawHeader = String(ghArgs[++i]);
-      const colonIdx = rawHeader.indexOf(":");
-      if (colonIdx <= 0) return null;
-      headers[rawHeader.slice(0, colonIdx).trim()] = rawHeader.slice(colonIdx + 1).trim();
-    } else if ((token === "-f" || token === "--raw-field") && ghArgs[i + 1]) {
-      const pair = String(ghArgs[++i]);
-      const eqIdx = pair.indexOf("=");
-      if (eqIdx <= 0) return null;
-      rawFields[pair.slice(0, eqIdx)] = pair.slice(eqIdx + 1);
-    } else if ((token === "-F" || token === "--field") && ghArgs[i + 1]) {
-      const pair = String(ghArgs[++i]);
-      const eqIdx = pair.indexOf("=");
-      if (eqIdx <= 0) return null;
-      const key = pair.slice(0, eqIdx);
-      const val = pair.slice(eqIdx + 1);
-      if (val.startsWith("@")) return null;
-      if (/^-?\d+$/.test(val)) {
-        typedFields[key] = Number.parseInt(val, 10);
-      } else if (val === "true" || val === "false") {
-        typedFields[key] = val === "true";
-      } else if (val === "null") {
-        typedFields[key] = null;
-      } else {
-        typedFields[key] = val;
-      }
-    } else if (token.startsWith("-")) {
-      return null;
-    } else if (!endpoint) {
-      endpoint = token;
-    } else {
-      return null;
-    }
-  }
-
-  if (!endpoint) {
-    return null;
-  }
-
-  if (endpoint === "graphql") {
-    const query = rawFields.query ?? typedFields.query;
-    if (typeof query !== "string" || !query) {
-      return null;
-    }
-    const variables = { ...rawFields, ...typedFields };
-    delete variables.query;
-    return {
-      url: "https://api.github.com/graphql",
-      method: method || "POST",
-      includeHeaders,
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify({ query, variables }),
-    };
-  }
-
-  if (Object.keys(rawFields).length > 0 || Object.keys(typedFields).length > 0) {
-    return null;
-  }
-
-  const normalizedEndpoint = endpoint.replace(/^\/+/, "");
-  const url = /^https?:\/\//i.test(endpoint)
-    ? endpoint
-    : `https://api.github.com/${normalizedEndpoint}`;
-  return {
-    url,
-    method: method || "GET",
-    includeHeaders,
-    headers,
-    body: undefined,
-  };
+let githubClient;
+async function defaultRequest(request) {
+  githubClient ??= createGitHubClient();
+  return githubClient.request(request);
 }
-
-let keepAliveWorkerState = null;
-let nextWorkerReqId = 0;
-
-function resolveGhTokenOnce() {
-  const envToken = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim();
-  if (envToken) {
-    return envToken;
-  }
-  try {
-    return execFileSync("gh", ["auth", "token"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5000,
-    }).trim();
-  } catch {
-    return "";
-  }
-}
-
-function getKeepAliveWorker() {
-  if (process.env.GH_HOST || process.env.CI_HOUND_DISABLE_KEEPALIVE === "1") {
-    return null;
-  }
-  if (keepAliveWorkerState !== null) {
-    return keepAliveWorkerState;
-  }
-  const token = resolveGhTokenOnce();
-  if (!token) {
-    keepAliveWorkerState = false;
-    return false;
-  }
-  try {
-    const { port1, port2 } = new MessageChannel();
-    const workerCode = `
-      const { parentPort } = require("node:worker_threads");
-      let replyPort = null;
-      parentPort.on("message", async (msg) => {
-        if (msg.initPort) {
-          replyPort = msg.initPort;
-          return;
-        }
-        const { reqId, token, req, signalBuf } = msg;
-        const signal = new Int32Array(signalBuf);
-        try {
-          const res = await fetch(req.url, {
-            method: req.method,
-            headers: {
-              Accept: "application/vnd.github+json",
-              Authorization: "Bearer " + token,
-              "X-GitHub-Api-Version": "2022-11-28",
-              "User-Agent": "jongio-skills-daemon",
-              ...req.headers,
-            },
-            body: req.body,
-            signal: AbortSignal.timeout(28000),
-          });
-          const bodyText = await res.text();
-          let stdout = bodyText;
-          if (req.includeHeaders) {
-            const hdrLines = ["HTTP/2.0 " + res.status];
-            for (const h of ["etag", "x-ratelimit-remaining", "x-ratelimit-reset", "retry-after"]) {
-              const v = res.headers.get(h);
-              if (v !== null && v !== undefined && v !== "") hdrLines.push(h + ": " + v);
-            }
-            stdout = hdrLines.join("\\r\\n") + "\\r\\n\\r\\n" + bodyText;
-          }
-          replyPort.postMessage({
-            reqId,
-            ok: res.ok || (req.includeHeaders && res.status === 304),
-            stdout,
-            stderr: res.ok || res.status === 304 ? "" : (bodyText || ("HTTP " + res.status)),
-          });
-        } catch (err) {
-          replyPort.postMessage({
-            reqId,
-            ok: false,
-            transportError: true,
-            stdout: "",
-            stderr: err && err.message ? err.message : String(err),
-          });
-        } finally {
-          Atomics.store(signal, 0, 1);
-          Atomics.notify(signal, 0, 1);
-        }
-      });
-    `;
-    const worker = new Worker(workerCode, { eval: true });
-    worker.unref();
-    worker.postMessage({ initPort: port2 }, [port2]);
-    keepAliveWorkerState = { worker, port1, token };
-    return keepAliveWorkerState;
-  } catch {
-    keepAliveWorkerState = false;
-    return false;
-  }
-}
-
-function defaultExecGh(ghArgs) {
-  const parsedReq = parseGhApiArgs(ghArgs);
-  if (parsedReq) {
-    const ka = getKeepAliveWorker();
-    if (ka) {
-      const reqId = (nextWorkerReqId += 1);
-      const signalBuf = new SharedArrayBuffer(4);
-      const signal = new Int32Array(signalBuf);
-      ka.worker.postMessage({
-        reqId,
-        token: ka.token,
-        req: parsedReq,
-        signalBuf,
-      });
-      const waitRes = Atomics.wait(signal, 0, 0, 30000);
-      while (true) {
-        const msg = receiveMessageOnPort(ka.port1);
-        if (!msg) break;
-        if ((waitRes === "ok" || waitRes === "not-equal") && msg.message?.reqId === reqId) {
-          const isReadOnlyRequest =
-            parsedReq.method === "GET" || parsedReq.url.endsWith("/graphql");
-          if (msg.message.transportError && isReadOnlyRequest) {
-            break;
-          }
-          return {
-            ok: msg.message.ok,
-            stdout: msg.message.stdout,
-            stderr: msg.message.stderr,
-          };
-        }
-      }
-    }
-  }
-  const res = spawnSync("gh", ghArgs, {
-    encoding: "utf8",
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  return {
-    ok: res.status === 0,
-    stdout: res.stdout || "",
-    stderr: res.stderr || "",
-  };
-}
-
+defaultRequest.cacheScope = async () => {
+  githubClient ??= createGitHubClient();
+  return githubClient.cacheScope();
+};
 export function sendFailureAlert(title, message) {
   if (process.env.CI_HOUND_NO_ALERT === "1") {
     return;
@@ -1141,7 +897,7 @@ export function computeCiHoundPhase({
   };
 }
 
-export function evaluatePollTick(args, state, execFn = defaultExecGh) {
+export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   state.repo = args.repo;
   state.branch = args.branch;
   state.metrics.lastPollAt = new Date().toISOString();
@@ -1152,11 +908,23 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
 
   const events = [];
   let tickRateLimited = false;
+  let tickError = "";
+  const failedPoll = (error) => ({
+    events: [{ type: "POLL_ERROR", repo: args.repo, error }],
+    error,
+    activeMainRuns: 0,
+    nextIntervalSec: args.idleIntervalSec,
+  });
 
-  const commitRes = ghApiWithEtag(`repos/${args.repo}/commits/${args.branch}`, state, execFn);
+  const commitRes = await ghApiWithEtag(`repos/${args.repo}/commits/${args.branch}`, state, execFn);
+  if (!commitRes.rateLimited && (commitRes.error || !commitRes.data?.sha)) {
+    return failedPoll(commitRes.error || "Commit response missing sha");
+  }
   if (commitRes.rateLimited) {
     tickRateLimited = true;
   }
+  const pollScope = state.cacheScope;
+  const scopeChangedError = "GitHub credentials changed during the poll; retry the watched repositories";
   const currentSha = commitRes.data?.sha || state.lastMainSha;
   if (!tickRateLimited && currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
     const prevSha = state.lastMainSha;
@@ -1175,21 +943,25 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
 
   let branchRunsRes = { data: null };
   if (!tickRateLimited) {
-    branchRunsRes = ghApiWithEtag(
+    branchRunsRes = await ghApiWithEtag(
       `repos/${args.repo}/actions/runs?branch=${encodeURIComponent(args.branch)}&per_page=20`,
       state,
       execFn
     );
     if (branchRunsRes.rateLimited) {
       tickRateLimited = true;
+    } else if (branchRunsRes.error || !Array.isArray(branchRunsRes.data?.workflow_runs)) {
+      return failedPoll(branchRunsRes.error || "Branch workflow inventory unavailable");
     }
   }
 
   let allRunsRes = { data: null };
   if (!tickRateLimited) {
-    allRunsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs?per_page=25`, state, execFn);
+    allRunsRes = await ghApiWithEtag(`repos/${args.repo}/actions/runs?per_page=25`, state, execFn);
     if (allRunsRes.rateLimited) {
       tickRateLimited = true;
+    } else if (allRunsRes.error || !Array.isArray(allRunsRes.data?.workflow_runs)) {
+      return failedPoll(allRunsRes.error || "Workflow inventory unavailable");
     }
   }
 
@@ -1217,16 +989,19 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       break;
     }
     if (!runMap.has(watchId)) {
-      const watchRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${watchId}`, state, execFn);
+      const watchRes = await ghApiWithEtag(`repos/${args.repo}/actions/runs/${watchId}`, state, execFn);
       if (watchRes.rateLimited) {
         tickRateLimited = true;
         break;
       }
       if (watchRes.data?.id) {
         runMap.set(watchRes.data.id, watchRes.data);
+      } else {
+        tickError = watchRes.error || `Watched run ${watchId} unavailable`;
       }
     }
   }
+  if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
   const workflowRuns = [...runMap.values()];
 
   let activeMainRuns = 0;
@@ -1256,12 +1031,13 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       if (tickRateLimited) {
         continue;
       }
-      const jobsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
+      const jobsRes = await ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
+      if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
       if (jobsRes.rateLimited) {
         tickRateLimited = true;
         continue;
       }
-      if (Array.isArray(jobsRes.data?.jobs)) {
+      if (!jobsRes.error && Array.isArray(jobsRes.data?.jobs)) {
         const collectedJobs = [...jobsRes.data.jobs];
         const totalJobsExpected =
           typeof jobsRes.data.total_count === "number"
@@ -1269,18 +1045,19 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
             : collectedJobs.length;
         let page = 2;
         while (collectedJobs.length < totalJobsExpected) {
-          const pageRes = ghApiWithEtag(
+          const pageRes = await ghApiWithEtag(
             `repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50&page=${page}`,
             state,
             execFn
           );
+          if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
           if (pageRes.rateLimited) {
             tickRateLimited = true;
             jobsComplete = false;
             break;
           }
           const pageJobs = pageRes.data?.jobs;
-          if (!Array.isArray(pageJobs) || pageJobs.length === 0) {
+          if (pageRes.error || !Array.isArray(pageJobs) || pageJobs.length === 0) {
             jobsComplete = false;
             break;
           }
@@ -1293,6 +1070,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         jobs = collectedJobs;
       } else {
         jobsComplete = false;
+      }
+      if (!jobsComplete && !tickRateLimited) {
+        tickError = jobsRes.error || `Incomplete jobs inventory for run ${run.id}`;
       }
       if (run.status === "completed" && jobsComplete && !prevRun?.telemetryRecorded && jobs.length > 0) {
         recordTelemetryForRun(run, jobs, state);
@@ -1438,6 +1218,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       retryAfterSec: nextIntervalSec,
       rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
     });
+  } else if (tickError) {
+    events.push({ type: "POLL_ERROR", repo: args.repo, error: tickError });
   } else if (events.length === 0 && args.wakeOnAllGreen) {
     if (args.watchRunIds.length > 0) {
       const watchedRecords = args.watchRunIds.map((id) => state.runs[String(id)]).filter(Boolean);
@@ -1513,7 +1295,7 @@ export function stateFileForRepo(repo, args) {
   return join(dirname(args.configFile), `${safeSlug}.json`);
 }
 
-export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) {
+export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRequest) {
   const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
   const discoveryState = loadState(discoveryStateFile);
   discoveryState.rateLimited = false;
@@ -1522,7 +1304,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     discoveryState.metrics.rateLimitReset = null;
     discoveryState.metrics.retryAfterSec = null;
   }
-  const targetRepos = resolveTargetRepos(args, config, discoveryState, execFn);
+  const targetRepos = await resolveTargetRepos(args, config, discoveryState, execFn);
   for (const qualifiedRepo of Object.keys(args.watchRunsByRepo || {})) {
     if (args.explicitRepos.length > 0 && !args.explicitRepos.includes(qualifiedRepo)) {
       throw new Error(
@@ -1621,7 +1403,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
           ? repoWatchRunIds.length > 0 && args.wakeOnAllGreen
           : args.wakeOnAllGreen,
       };
-      const tick = evaluatePollTick(repoArgs, repoState, execFn);
+      const tick = await evaluatePollTick(repoArgs, repoState, execFn);
       saveState(repoStateFile, repoState);
       allEvents.push(...tick.events);
       if (tick.status) {
@@ -1660,122 +1442,134 @@ async function sleepSeconds(sec) {
 
 export async function runCli(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
-  const existingConfig = loadConfig(args.configFile);
+  const emit = createEventWriter(args.eventsFile, "ci-hound");
+  const heartbeat = args.eventsFile ? setInterval(() => emit({
+    status: { repo: args.repo, phase: "polling", summary: "Watcher active; awaiting GitHub observations" },
+  }), 60000) : null;
+  heartbeat?.unref();
+  try {
+    const existingConfig = loadConfig(args.configFile);
 
-  if (args.mode === "setup") {
-    const updatedConfig = applySetupConfig(args, existingConfig);
-    saveConfig(args.configFile, updatedConfig);
-    const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
-    const discoveryState = loadState(discoveryStateFile);
-    const resolvedRepos = resolveTargetRepos(
-      { ...args, explicitRepos: [] },
-      updatedConfig,
-      discoveryState
-    );
-    if (updatedConfig.owner) {
-      saveState(discoveryStateFile, discoveryState);
-    }
-    console.log(
-      JSON.stringify(
-        {
-          mode: "setup",
-          configFile: args.configFile,
-          config: updatedConfig,
-          resolvedRepos,
-        },
-        null,
-        2
-      )
-    );
-    return;
-  }
-
-  const hasOwnerScope = Boolean(args.owner || existingConfig?.owner);
-
-  if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
-    const multi = evaluateMultiRepoPollTick(args, existingConfig);
-    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
-      console.error(
-        "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
+    if (args.mode === "setup") {
+      const updatedConfig = applySetupConfig(args, existingConfig);
+      saveConfig(args.configFile, updatedConfig);
+      const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
+      const discoveryState = loadState(discoveryStateFile);
+      const resolvedRepos = await resolveTargetRepos(
+        { ...args, explicitRepos: [] },
+        updatedConfig,
+        discoveryState
       );
-      process.exit(1);
-    }
-    console.log(
-      JSON.stringify(
-        {
-          mode: args.mode,
-          repos: multi.repos,
-          tick: {
-            events: multi.events,
-            activeMainRuns: multi.activeMainRuns,
-            rateLimited: multi.rateLimited,
-            nextIntervalSec: multi.nextIntervalSec,
-            statuses: multi.statuses,
-          },
-          report: multi.reports.length === 1 ? multi.reports[0] : multi.reports,
-        },
-        null,
-        2
-      )
-    );
-    return;
-  }
-
-  const lastPhaseByRepo = new Map();
-  let polls = 0;
-  while (true) {
-    polls += 1;
-    const multi = evaluateMultiRepoPollTick(args, existingConfig);
-    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
-      console.error(
-        "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
-      );
-      process.exit(1);
-    }
-    const terminalEvents = multi.events.filter((e) => e.type !== "RATE_LIMITED");
-    if (terminalEvents.length > 0) {
-      console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
-      return;
-    }
-    const phaseChanges = [];
-    for (const st of multi.statuses || []) {
-      const prevPhase = lastPhaseByRepo.get(st.repo);
-      if (prevPhase && prevPhase !== st.phase) {
-        phaseChanges.push({
-          type: "PHASE_CHANGED",
-          timestamp: st.timestamp,
-          repo: st.repo,
-          previousPhase: prevPhase,
-          phase: st.phase,
-          summary: st.summary,
-        });
+      if (updatedConfig.owner) {
+        saveState(discoveryStateFile, discoveryState);
       }
-      lastPhaseByRepo.set(st.repo, st.phase);
-    }
-    const hasActiveRuns =
-      multi.activeMainRuns > 0 ||
-      (multi.statuses || []).some((st) => (st.activeRuns?.length || 0) > 0);
-    if (phaseChanges.length > 0 || hasActiveRuns) {
       console.log(
         JSON.stringify(
           {
-            repos: multi.repos,
-            events: phaseChanges,
-            statuses: multi.statuses,
+            mode: "setup",
+            configFile: args.configFile,
+            config: updatedConfig,
+            resolvedRepos,
           },
           null,
           2
         )
       );
-    }
-    if (args.maxPolls > 0 && polls >= args.maxPolls) {
-      console.log(JSON.stringify({ repos: multi.repos, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
       return;
     }
-    await sleepSeconds(multi.nextIntervalSec);
+
+    const hasOwnerScope = Boolean(args.owner || existingConfig?.owner);
+
+    if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
+      const multi = await evaluateMultiRepoPollTick(args, existingConfig);
+      emit(multi);
+      if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
+        console.error(
+          "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
+        );
+        process.exit(1);
+      }
+      console.log(
+        JSON.stringify(
+          {
+            mode: args.mode,
+            repos: multi.repos,
+            tick: {
+              events: multi.events,
+              activeMainRuns: multi.activeMainRuns,
+              rateLimited: multi.rateLimited,
+              nextIntervalSec: multi.nextIntervalSec,
+              statuses: multi.statuses,
+            },
+            report: multi.reports.length === 1 ? multi.reports[0] : multi.reports,
+          },
+          null,
+          2
+        )
+      );
+      return;
+    }
+
+    const lastPhaseByRepo = new Map();
+    let polls = 0;
+    while (true) {
+      polls += 1;
+      const multi = await evaluateMultiRepoPollTick(args, existingConfig);
+      emit(multi);
+      if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
+        console.error(
+          "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
+        );
+        process.exit(1);
+      }
+      const terminalEvents = multi.events.filter((e) => e.type !== "RATE_LIMITED");
+      if (terminalEvents.length > 0) {
+        console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
+        return;
+      }
+      const phaseChanges = [];
+      for (const st of multi.statuses || []) {
+        const prevPhase = lastPhaseByRepo.get(st.repo);
+        if (prevPhase && prevPhase !== st.phase) {
+          phaseChanges.push({
+            type: "PHASE_CHANGED",
+            timestamp: st.timestamp,
+            repo: st.repo,
+            previousPhase: prevPhase,
+            phase: st.phase,
+            summary: st.summary,
+          });
+        }
+        lastPhaseByRepo.set(st.repo, st.phase);
+      }
+      const hasActiveRuns =
+        multi.activeMainRuns > 0 ||
+        (multi.statuses || []).some((st) => (st.activeRuns?.length || 0) > 0);
+      if (phaseChanges.length > 0 || hasActiveRuns) {
+        console.log(
+          JSON.stringify(
+            {
+              repos: multi.repos,
+              events: phaseChanges,
+              statuses: multi.statuses,
+            },
+            null,
+            2
+          )
+        );
+      }
+      if (args.maxPolls > 0 && polls >= args.maxPolls) {
+        console.log(JSON.stringify({ repos: multi.repos, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+        return;
+      }
+      await sleepSeconds(multi.nextIntervalSec);
+    }
+  } finally {
+    clearInterval(heartbeat);
   }
 }
 
 if (import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}` || process.argv[1]?.endsWith("ci-hound-daemon.mjs")) {
-  runCli();
+  runCli().catch((error) => { console.error(error.message); process.exitCode = 1; })
+    .finally(() => githubClient?.close());
 }

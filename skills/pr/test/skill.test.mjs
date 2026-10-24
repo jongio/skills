@@ -1,3 +1,4 @@
+import { fixtureRequest, parseGhApiArgs } from "./github-fixtures.mjs";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -5,19 +6,22 @@ import {
   computeAdaptivePrIntervalSec,
   computePrPhase,
   createPrWatchState,
-  evaluateMultiPrPollTick,
-  evaluatePrPollTick,
+  evaluateMultiPrPollTick as native_evaluateMultiPrPollTick,
+  evaluatePrPollTick as native_evaluatePrPollTick,
   extractBodyOnlyFindings,
   isErroredCopilotReview,
-  parseGhApiArgs,
-  parsePrWatchArgs,
-  requestCopilotReview,
+    parsePrWatchArgs,
+  requestCopilotReview as native_requestCopilotReview,
 } from "../scripts/pr-watch-daemon.mjs";
+
+const requestCopilotReview = (...args) => { args[1] = fixtureRequest(args[1]); return native_requestCopilotReview(...args); };
+const evaluatePrPollTick = (...args) => { args[1] = fixtureRequest(args[1]); return native_evaluatePrPollTick(...args); };
+const evaluateMultiPrPollTick = (...args) => { args[1] = fixtureRequest(args[1]); return native_evaluateMultiPrPollTick(...args); };
 
 const skill = (await readFile(new URL("../SKILL.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 const evalSpec = (await readFile(new URL("../evals/pr/eval.yaml", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
 
-test("portable skill frontmatter contains name, description, and version metadata", () => {
+test("portable skill frontmatter contains name, description, and version metadata", async () => {
   const frontmatter = skill.match(/^---\n([\s\S]*?)\n---/);
   assert.ok(frontmatter);
   const keys = [...frontmatter[1].matchAll(/^([a-z][a-z-]*):/gm)].map((match) => match[1]);
@@ -26,13 +30,13 @@ test("portable skill frontmatter contains name, description, and version metadat
   assert.match(frontmatter[1], /^name: pr$/m);
 });
 
-test("skill includes workflow, safety, and exit criteria", () => {
+test("skill includes workflow, safety, and exit criteria", async () => {
   assert.match(skill, /^## Workflow$/m);
   assert.match(skill, /^## Safety$/m);
   assert.match(skill, /^## Exit Criteria$/m);
 });
 
-test("workflow remains concise and covers preflight, review routing, monitoring, and merge", () => {
+test("workflow remains concise and covers preflight, review routing, monitoring, and merge", async () => {
   assert.ok(skill.split("\n").length <= 60, "keep SKILL.md short and sweet");
   assert.doesNotMatch(skill, /devx|devy/i);
   assert.match(skill, /create a dedicated PR branch first/i);
@@ -65,7 +69,7 @@ test("workflow remains concise and covers preflight, review routing, monitoring,
   assert.doesNotMatch(skill, /gh pr merge --auto|Copilot never auto-requested on private repos/);
 });
 
-test("defaults to squash and branch deletion without destructive worktree cleanup", () => {
+test("defaults to squash and branch deletion without destructive worktree cleanup", async () => {
   assert.match(skill, /Default to squash merging and deleting the PR branch after merge/);
   assert.match(skill, /replace `--squash` only.*explicitly requests/);
   assert.match(skill, /Verify branch deletion separately/);
@@ -73,7 +77,7 @@ test("defaults to squash and branch deletion without destructive worktree cleanu
   assert.match(skill, /cleanup is blocked.*merged with cleanup pending/);
 });
 
-test("base updates require a verified blocker rather than divergence alone", () => {
+test("base updates require a verified blocker rather than divergence alone", async () => {
   const inspect = skill.split("**Inspect Base**:")[1]?.split("\n")[0];
   const monitor = skill.split("**Base changes**:")[1]?.split("\n")[0];
   assert.ok(inspect);
@@ -108,14 +112,14 @@ test("base-update documentation preserves CI without waiving real blockers", asy
   }
 });
 
-test("queue admission waits for confirmed merge and preserves the authorized strategy", () => {
+test("queue admission waits for confirmed merge and preserves the authorized strategy", async () => {
   assert.match(skill, /merge queue.*configured strategy.*authorized strategy/);
   assert.match(skill, /Queue admission is not a merge/);
   assert.match(skill, /wait for GitHub to confirm.*intended head.*before cleanup/);
   assert.match(skill, /Never bundle.*`--delete-branch`/);
 });
 
-test("cleanup requires atomic expected-OID deletion rather than check-then-delete", () => {
+test("cleanup requires atomic expected-OID deletion rather than check-then-delete", async () => {
   assert.match(skill, /Verify the PR head repository, remote, and branch/);
   assert.match(skill, /git push --force-with-lease=refs\/heads\/<branch>:<merged-head-OID> <verified-head-remote> :refs\/heads\/<branch>/);
   assert.match(skill, /git update-ref --no-deref -d refs\/heads\/<branch> <merged-head-OID>/);
@@ -123,7 +127,7 @@ test("cleanup requires atomic expected-OID deletion rather than check-then-delet
   assert.match(skill, /do not refresh the expected OID or retry.*unconditional deletion/);
 });
 
-test("merge consent defaults to a fresh head-bound approval, with an invocation-only auto override", () => {
+test("merge consent defaults to a fresh head-bound approval, with an invocation-only auto override", async () => {
   assert.match(skill, /Default to `--merge=approval`/);
   assert.match(skill, /`--merge=auto`/);
   assert.match(skill, /plain-language.*auto.merge.*ask.*before merging/i);
@@ -151,7 +155,7 @@ test("merge-mode documentation exposes both options and preserves safety gates",
   }
 });
 
-test("review inventory includes full bodies rather than trusting clean summary counts", () => {
+test("review inventory includes full bodies rather than trusting clean summary counts", async () => {
   const text = skill.replace(/\s+/g, " ");
   assert.match(text, /all submitted review bodies, PR conversation comments, inline review comments, and review threads/i);
   assert.match(text, /Paginate every collection/i);
@@ -161,7 +165,7 @@ test("review inventory includes full bodies rather than trusting clean summary c
   assert.match(text, /"No open issues".*not proof that feedback is clear/i);
 });
 
-test("owns documentation preflight with identity-bound reuse and missing-skill blocking", () => {
+test("owns documentation preflight with identity-bound reuse and missing-skill blocking", async () => {
   assert.equal((skill.match(/Invoke `doc-doctor`/g) ?? []).length, 1);
   assert.match(skill, /on the diff and affected docs/);
   assert.match(skill, /this check belongs here, not in `go`/);
@@ -170,7 +174,7 @@ test("owns documentation preflight with identity-bound reuse and missing-skill b
   assert.match(skill, /If unavailable, stop and prompt to install.*--skill doc-doctor/);
 });
 
-test("long-running delivery distinguishes execution, external waits, and blocked decisions", () => {
+test("long-running delivery distinguishes execution, external waits, and blocked decisions", async () => {
   assert.match(skill, /stage, elapsed time, last meaningful result, and next event at least every 60 seconds/);
   assert.match(skill, /host notifications or scheduling rather than tight polling/);
   assert.match(skill, /Distinguish running commands, external review\/CI waits, and blocked approval\/input/);
@@ -186,7 +190,7 @@ test("catalog body has a copyable install command with every required skill", as
   assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill pr --skill test-doctor --skill doc-doctor -g --agent github-copilot\r?\n```/);
 });
 
-test("body-only findings get evidence-backed disposition without fake thread resolution", () => {
+test("body-only findings get evidence-backed disposition without fake thread resolution", async () => {
   const text = skill.replace(/\s+/g, " ");
   assert.match(text, /Deduplicate.*review ID.*heading.*file\/line/i);
   assert.match(text, /revalidate older findings against the current head/i);
@@ -195,7 +199,7 @@ test("body-only findings get evidence-backed disposition without fake thread res
   assert.match(text, /all actionable feedback \(including review-body-only findings\) is addressed/i);
 });
 
-test("review replies identify every fix tersely with actual commit links", () => {
+test("review replies identify every fix tersely with actual commit links", async () => {
   const comments = skill.split("**Comments**:")[1]?.split("\n")[0];
   assert.ok(comments);
   assert.match(comments, /all actionable findings.*reply to each.*including Copilot/i);
@@ -207,7 +211,7 @@ test("review replies identify every fix tersely with actual commit links", () =>
   assert.match(comments, /replying does not replace thread resolution or review\/merge gates/i);
 });
 
-test("eval spec covers private repo reviewer rules, comment resolution, and balanced grader weights", () => {
+test("eval spec covers private repo reviewer rules, comment resolution, and balanced grader weights", async () => {
   assert.doesNotMatch(evalSpec, /devx|devy/i);
   const cases = [...evalSpec.matchAll(/^  - name: (.+)$/gm)].map(([, name]) => name);
   assert.deepEqual(cases, [
@@ -255,7 +259,7 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
   }
 });
 
-test("base-update evals distinguish divergence, confirmed blockers, and unknown state", () => {
+test("base-update evals distinguish divergence, confirmed blockers, and unknown state", async () => {
   const scenario = (name) => {
     const section = evalSpec.split(`  - name: ${name}\n`)[1]?.split("\n  - name: ")[0];
     assert.ok(section, `missing scenario ${name}`);
@@ -276,7 +280,7 @@ test("base-update evals distinguish divergence, confirmed blockers, and unknown 
   assert.match(unknown, /queue admission is not a merge/i);
 });
 
-test("reply eval checks actual fix attribution, body-only grouping, and disputed findings", () => {
+test("reply eval checks actual fix attribution, body-only grouping, and disputed findings", async () => {
   const section = evalSpec.split("  - name: terse-fix-replies-with-commit-links\n")[1]
     ?.split("\n  - name: ")[0];
   assert.ok(section);
@@ -290,7 +294,7 @@ test("reply eval checks actual fix attribution, body-only grouping, and disputed
   assert.match(scenario, /No commands, edits, agents, or network calls/);
 });
 
-test("progress eval preserves gate integrity and distinguishes approval waiting", () => {
+test("progress eval preserves gate integrity and distinguishes approval waiting", async () => {
   const section = evalSpec.split("  - name: long-running-gate-and-approval-wait\n")[1]
     ?.split("\n  - name: ")[0];
   assert.ok(section);
@@ -303,7 +307,7 @@ test("progress eval preserves gate integrity and distinguishes approval waiting"
   assert.match(scenario, /No commands, edits, agents, or network calls/);
 });
 
-test("review and merge evals distinguish exemptions, completion, approval, and authorization", () => {
+test("review and merge evals distinguish exemptions, completion, approval, and authorization", async () => {
   const exception = evalSpec.split("  - name: verified-private-owner-exception\n")[1]
     ?.split("\n  - name: ")[0];
   const nonExempt = evalSpec.split("  - name: other-private-owner-requires-current-head-review\n")[1]
@@ -324,7 +328,7 @@ test("review and merge evals distinguish exemptions, completion, approval, and a
   assert.match(nonExempt, /merged-state verification/);
 });
 
-test("pr-watch-daemon detects unresolved threads, body-only findings, errored Copilot reviews, and merge readiness", () => {
+test("pr-watch-daemon detects unresolved threads, body-only findings, errored Copilot reviews, and merge readiness", async () => {
   const args = parsePrWatchArgs([
     "watch",
     "--repo",
@@ -354,7 +358,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   );
 
   // 1. Errored Copilot review without active run emits COPILOT_REVIEW_ERROR instead of PR_READY_TO_MERGE
-  const erroredTick = evaluatePrPollTick(args, (ghArgs) => {
+  const erroredTick = await evaluatePrPollTick(args, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return {
         ok: true,
@@ -410,7 +414,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(erroredTick.events[0].type, "COPILOT_REVIEW_ERROR");
 
   // 2. Body-only finding ("1 previously missed issue") and unresolved thread emit FEEDBACK_ACTION_NEEDED
-  const feedbackTick = evaluatePrPollTick(args, (ghArgs) => {
+  const feedbackTick = await evaluatePrPollTick(args, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return {
         ok: true,
@@ -621,7 +625,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(gatedArgs.hasExplicitSinceCommentId, true);
   assert.deepEqual(gatedArgs.expectedReviewers, ["alice"]);
 
-  const blockedByExpectedReviewer = evaluatePrPollTick(gatedArgs, (ghArgs) => {
+  const blockedByExpectedReviewer = await evaluatePrPollTick(gatedArgs, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return {
         ok: true,
@@ -678,7 +682,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.deepEqual(blockedByExpectedReviewer.status.pendingReviewers, ["alice"]);
 
   // Unavailable workflow_runs inventory surfaces POLL_ERROR instead of assuming idle Copilot
-  const workflowErrTick = evaluatePrPollTick(args, (ghArgs) => {
+  const workflowErrTick = await evaluatePrPollTick(args, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return {
         ok: true,
@@ -709,7 +713,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.match(workflowErrTick.error, /503/);
 
   // 5. CI_FAILED is emitted when statusCheckRollup fails, and activeWorkflowRuns blocks readiness when checks haven't started
-  const ciFailedTick = evaluatePrPollTick(args, (ghArgs) => {
+  const ciFailedTick = await evaluatePrPollTick(args, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return {
         ok: true,
@@ -800,7 +804,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
     "--last-phase",
     "ci:running|review:copilot-reviewing",
   ]);
-  const phaseChangedTick = evaluatePrPollTick(phaseChangeArgs, (ghArgs) => {
+  const phaseChangedTick = await evaluatePrPollTick(phaseChangeArgs, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return {
         ok: true,
@@ -857,7 +861,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(phaseChangedTick.events[0].summary, "CI passed (1/1) | Copilot is reviewing");
 });
 
-test("requestCopilotReview cancels superseded branch runs, toggles existing requests, and guards head/state", () => {
+test("requestCopilotReview cancels superseded branch runs, toggles existing requests, and guards head/state", async () => {
   assert.match(skill, /--body-file.*@'\.\.\.'@/i);
   assert.match(skill, /pr-watch-daemon\.mjs request-copilot/);
   assert.match(skill, /cross-model `rubber-duck` sub-agent review/);
@@ -868,7 +872,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
     /Missing or invalid --head/
   );
   const unpinnedCalls = [];
-  const unpinnedRes = requestCopilotReview(
+  const unpinnedRes = await requestCopilotReview(
     { mode: "request-copilot", repo: "jongio/skills", pr: 177, head: "" },
     (ghArgs) => {
       unpinnedCalls.push(ghArgs);
@@ -894,7 +898,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
 
   // 1. Rejects head_mismatch without cancelling runs or editing reviewers
   const mismatchCalls = [];
-  const mismatchRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const mismatchRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     mismatchCalls.push(ghArgs);
     return {
       ok: true,
@@ -920,7 +924,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   assert.equal(mismatchCalls.length, 1);
 
   // 2. Rejects pr_not_open
-  const closedRes = requestCopilotReview(reqArgs, () => ({
+  const closedRes = await requestCopilotReview(reqArgs, () => ({
     ok: true,
     stdout: JSON.stringify({
       data: {
@@ -942,7 +946,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
 
   // 3. Cancels superseded runs BEFORE returning already_running when both old-head and current-head runs are active
   const activeCalls = [];
-  const alreadyRunningRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const alreadyRunningRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     activeCalls.push(ghArgs);
     if (ghArgs[1] === "graphql") {
       return {
@@ -1012,7 +1016,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   // 4. Cancels superseded Copilot runs on the same branch/PR (leaving other branches alone)
   // and toggles --remove-reviewer / --add-reviewer when @copilot is already requested
   const toggleCalls = [];
-  const toggledRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const toggledRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     toggleCalls.push(ghArgs);
     if (ghArgs[1] === "graphql") {
       return {
@@ -1094,7 +1098,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
     "head_new",
   ]);
   const forkCalls = [];
-  const forkRes = requestCopilotReview(forkArgs, (ghArgs) => {
+  const forkRes = await requestCopilotReview(forkArgs, (ghArgs) => {
     forkCalls.push(ghArgs);
     if (ghArgs[1] === "graphql") {
       return {
@@ -1152,7 +1156,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   assert.deepEqual(forkRes.cancelledRunIds, []);
 
   // 6. Paginates status-filtered workflow_runs beyond page 1 and detects an active review on page 2
-  const pagedRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const pagedRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return {
         ok: true,
@@ -1218,7 +1222,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
 
   // 7. Stops and returns cancel_failed when cancelling a superseded run fails
   const cancelFailCalls = [];
-  const cancelFailRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const cancelFailRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     cancelFailCalls.push(ghArgs);
     if (ghArgs[1] === "graphql") {
       return {
@@ -1270,7 +1274,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
 
   // 8. Stops and returns remove_reviewer_failed when removing the existing @copilot request fails
   const removeFailCalls = [];
-  const removeFailRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const removeFailRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     removeFailCalls.push(ghArgs);
     if (ghArgs[1] === "graphql") {
       return {
@@ -1311,7 +1315,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   // 9. Revalidates PR head after workflow inventory and aborts before cancelling a newer head's run
   let gqlCount = 0;
   const raceCalls = [];
-  const raceRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const raceRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     raceCalls.push(ghArgs);
     if (ghArgs[1] === "graphql") {
       gqlCount += 1;
@@ -1365,7 +1369,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   // after pass 1 misses it between bucket queries, returning already_running without reviewer edits
   let currentTransitionInProgressCalls = 0;
   const currentTransitionCalls = [];
-  const currentTransitionRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const currentTransitionRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     currentTransitionCalls.push(ghArgs);
     if (ghArgs[1] === "graphql") {
       return {
@@ -1416,7 +1420,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   // after pass 1 misses it, cancelling it before requesting @copilot
   let supersededTransitionInProgressCalls = 0;
   const supersededTransitionCalls = [];
-  const supersededTransitionRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const supersededTransitionRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     supersededTransitionCalls.push(ghArgs);
     if (ghArgs[1] === "graphql") {
       return {
@@ -1468,7 +1472,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
 
   // 12. Unrelated PRs starting/finishing Copilot runs between passes do NOT cause inventory_unstable
   let unrelatedPassCall = 0;
-  const unrelatedNoiseRes = requestCopilotReview(reqArgs, (ghArgs) => {
+  const unrelatedNoiseRes = await requestCopilotReview(reqArgs, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return {
         ok: true,
@@ -1516,7 +1520,7 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   assert.deepEqual(unrelatedNoiseRes.cancelledRunIds, []);
 });
 
-test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate-limit backoff", () => {
+test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate-limit backoff", async () => {
   const watchArgs = parsePrWatchArgs([
     "watch",
     "--repo",
@@ -1590,12 +1594,12 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   };
 
   // First tick caches ETag; second tick sends If-None-Match and reuses cached workflow_runs on 304
-  const tick1 = evaluatePrPollTick(watchArgs, execWithEtag, state);
+  const tick1 = await evaluatePrPollTick(watchArgs, execWithEtag, state);
   assert.equal(tick1.status.phase, "ci:running|review:copilot-reviewing");
   assert.equal(tick1.status.cacheHits304, 0);
   assert.equal(tick1.nextIntervalSec, 15);
 
-  const tick2 = evaluatePrPollTick(
+  const tick2 = await evaluatePrPollTick(
     { ...watchArgs, lastPhase: tick1.status.phase },
     execWithEtag,
     state
@@ -1626,7 +1630,7 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   );
 
   // HTTP 429 rate-limit response emits RATE_LIMITED with retryAfterSec backoff instead of crashing
-  const rateLimitedTick = evaluatePrPollTick(
+  const rateLimitedTick = await evaluatePrPollTick(
     watchArgs,
     (ghArgs) => {
       if (ghArgs[1] === "graphql") {
@@ -1645,7 +1649,7 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(rateLimitedTick.nextIntervalSec, 90);
 
   // GraphQL RATE_LIMITED errors also emit RATE_LIMITED instead of crashing with POLL_ERROR
-  const gqlRateLimitedTick = evaluatePrPollTick(
+  const gqlRateLimitedTick = await evaluatePrPollTick(
     watchArgs,
     () => ({
       ok: true,
@@ -1661,7 +1665,7 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(gqlRateLimitedTick.nextIntervalSec, 60);
 
   // GraphQL HTTP 429 with httpMeta retryAfter: 300 (even without "rate limit" body text) preserves 300s delay
-  const gql429MetaTick = evaluatePrPollTick(
+  const gql429MetaTick = await evaluatePrPollTick(
     watchArgs,
     () => ({
       ok: false,
@@ -1677,7 +1681,7 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
 
   // Primary rate-limit 403 with X-RateLimit-Remaining: 0 and X-RateLimit-Reset (no Retry-After) backs off until reset
   const futureReset = Math.floor(Date.now() / 1000) + 420;
-  const resetRateLimitedTick = evaluatePrPollTick(
+  const resetRateLimitedTick = await evaluatePrPollTick(
     watchArgs,
     (ghArgs) => {
       if (ghArgs[1] === "graphql") {
@@ -1697,7 +1701,7 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
 
   // Low GraphQL quota (100 remaining) is not overwritten by high REST quota (4500 remaining)
   const splitQuotaState = createPrWatchState();
-  const splitQuotaTick = evaluatePrPollTick(
+  const splitQuotaTick = await evaluatePrPollTick(
     watchArgs,
     (ghArgs) => {
       if (ghArgs[1] === "graphql") {
@@ -1723,7 +1727,7 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(splitQuotaState.metrics.rateLimitRemaining, 100);
 
   // once-mode (state === null) still classifies REST httpMeta 429 and preserves retryAfter: 300
-  const onceRest429Tick = evaluatePrPollTick(watchArgs, (ghArgs) => {
+  const onceRest429Tick = await evaluatePrPollTick(watchArgs, (ghArgs) => {
     if (ghArgs[1] === "graphql") {
       return { ok: true, stdout: gqlRunningPayload, stderr: "" };
     }
@@ -1740,7 +1744,7 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
 
   // --no-phase-events still resets consecutiveUnchangedPolls and nextIntervalSec on a phase transition
   state.consecutiveUnchangedPolls = 12;
-  const noPhaseEventsTick = evaluatePrPollTick(
+  const noPhaseEventsTick = await evaluatePrPollTick(
     parsePrWatchArgs([
       "watch",
       "--repo",
@@ -1834,18 +1838,18 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
     }
     return { ok: true, stdout: "{}", stderr: "" };
   };
-  const retriedTick = evaluatePrPollTick(retryWatchArgs, makeErrorExec(9901), retryState);
+  const retriedTick = await evaluatePrPollTick(retryWatchArgs, makeErrorExec(9901), retryState);
   assert.equal(retriedTick.events[0].type, "COPILOT_REVIEW_RETRIED");
   assert.equal(retriedTick.events[0].attempt, 1);
   assert.equal(retriedTick.events[0].reviewId, 9901);
 
   // Subsequent poll seeing the same reviewId before the new review request is visible stays in grace period
-  const graceTick = evaluatePrPollTick(retryWatchArgs, makeErrorExec(9901), retryState);
+  const graceTick = await evaluatePrPollTick(retryWatchArgs, makeErrorExec(9901), retryState);
   assert.equal(graceTick.events.length, 0);
   assert.equal(graceTick.status.phase, "ci:passed|review:copilot-queued");
 
   // Once a new errored reviewId appears after retry budget is exhausted, emits terminal COPILOT_REVIEW_ERROR
-  const exhaustedTick = evaluatePrPollTick(retryWatchArgs, makeErrorExec(9902), retryState);
+  const exhaustedTick = await evaluatePrPollTick(retryWatchArgs, makeErrorExec(9902), retryState);
   assert.equal(exhaustedTick.events[0].type, "COPILOT_REVIEW_ERROR");
   assert.equal(exhaustedTick.events[0].reviewId, 9902);
 
@@ -1856,7 +1860,7 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
 
   // Multi-PR once mode disables auto-retries so one-shot inspection stays observational
   const multiOnceArgs = parsePrWatchArgs(["once", "--repo", "jongio/skills", "--prs", "178:head123,179:head123"]);
-  const multiOnceTick = evaluateMultiPrPollTick(multiOnceArgs, makeErrorExec(9903), {});
+  const multiOnceTick = await evaluateMultiPrPollTick(multiOnceArgs, makeErrorExec(9903), {});
   assert.equal(multiOnceTick.events[0].type, "COPILOT_REVIEW_ERROR");
 
   // Multi-PR polling via --prs 178:head123,179:head123 aggregates statuses and tags events with pr number
@@ -1883,10 +1887,9 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
       stderr: "",
     };
   };
-  const multiTick = evaluateMultiPrPollTick(multiArgs, multiExec, multiState);
+  const multiTick = await evaluateMultiPrPollTick(multiArgs, multiExec, multiState);
   assert.deepEqual(multiTick.prs, [178, 179]);
   assert.equal(multiTick.statuses.length, 2);
   assert.equal(multiTick.statuses[0].pr, 178);
   assert.equal(multiTick.statuses[1].pr, 179);
 });
-
