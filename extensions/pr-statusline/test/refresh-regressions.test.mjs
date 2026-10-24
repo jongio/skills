@@ -9,6 +9,8 @@ import { collect } from "../collector.mjs";
 import { SessionTracker, readState, writeState } from "../tracker.mjs";
 import { readPrCache, OCTICONS } from "../github.mjs";
 import { clearSessionStatusline } from "../session-statusline.mjs";
+import { render as renderPr } from "../render.mjs";
+import { render as renderIssue } from "../../issue-statusline/render.mjs";
 import { IssueTracker, readState as readIssues, writeState as writeIssues, syncSession as syncIssues } from "../../issue-statusline/tracker.mjs";
 import { reconcilePrStates } from "../lifecycle.mjs";
 
@@ -224,7 +226,7 @@ test("refresh backoff honors numeric and HTTP-date Retry-After with bounded malf
   const now = Date.UTC(2026, 0, 1);
   for (const [header, delay, reset] of [
     ["180", 180000], [new Date(now + 180000).toUTCString(), 180000],
-    ["malformed", 60000], [new Date(now - 10000).toUTCString(), 60000],
+    ["malformed", 60000], ["9".repeat(400), 60000], [new Date(now - 10000).toUTCString(), 60000],
     [new Date(now + 180000).toUTCString(), 180000, "malformed"],
     ["60", 240000, String((now + 240000) / 1000)],
   ]) {
@@ -244,3 +246,81 @@ test("refresh backoff honors numeric and HTTP-date Retry-After with bounded malf
     assert.equal(calls, 1, "no retry before the server's deadline");
   }
 });
+
+test("branch discovery honors credential-scoped cooldown while known PRs keep refreshing", async (t) => {
+  for (const header of ["180", new Date(181000).toUTCString()]) {
+    const home = fixture(t), id = "branch-cooldown";
+    seed("pr", home, id);
+    const directory = join(home, "session-state", id);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "workspace.yaml"), "repository: fixture/workspace\nbranch: feature\n");
+    let scope = "one", branches = 0, known = 0;
+    t.mock.method(statuslineGitHub, "cacheScope", async () => scope);
+    t.mock.method(statuslineGitHub, "request", async ({ query }) => {
+      if (query.includes("pullRequests(")) {
+        branches++;
+        return { ok: false, status: 429, cacheScope: scope, error: "Discovery cooldown", headers: { "retry-after": header } };
+      }
+      known++;
+      return { ok: true, cacheScope: scope, data: { data: { repository: { pullRequest: { state: "OPEN", title: "Known PR" } } } } };
+    });
+    await refreshTracker("pr", id, { home, now: 1000 });
+    const key = "branch:github.com/fixture/workspace:feature";
+    assert.equal(readPrCache(home)[key]?.retryAt, 181000);
+    await refreshTracker("pr", id, { home, now: 61000 });
+    assert.equal(branches, 1, "feature discovery does not retry during server cooldown");
+    assert.equal(known, 2, "unrelated known PR refresh is not blocked");
+    assert.equal(readState(id, home).prs[0].title, "Known PR");
+    scope = "two";
+    await refreshTracker("pr", id, { home, now: 62000 });
+    assert.equal(branches, 2, "another credential does not inherit the old cooldown");
+    assert.equal(readPrCache(home)[key].scope, "two");
+  }
+});
+
+for (const kind of ["pr", "issue"]) {
+  test(`${kind} invalidated metadata is stale even when checkedAt is zero`, (t) => {
+    const home = fixture(t), id = `${kind}-invalidated`;
+    const tracker = seed(kind, home, id);
+    const list = kind === "pr" ? "prs" : "issues";
+    Object.assign(tracker.state[list][0], { status: "Cached metadata", checkedAt: 1000, stale: false });
+    tracker.observe({ type: "tool.execution_start", data: { toolCallId: "edit", toolName: "powershell",
+      arguments: { command: `gh ${kind === "pr" ? "pr" : "issue"} edit ${refs[kind]} --title Updated` } } });
+    assert.equal(tracker.state[list][0].checkedAt, 0);
+    (kind === "pr" ? writeState : writeIssues)(tracker.snapshot(), home);
+    assert.match((kind === "pr" ? renderPr : renderIssue)({ session_id: id },
+      { home, now: 2000, color: false, links: false, nerdFont: false }), /stale/);
+  });
+}
+
+for (const stage of ["metadata", "github"]) {
+  test(`a remote poll cannot reapply its old activity snapshot after a live idle event during ${stage}`, async (t) => {
+    const home = fixture(t), id = `activity-race-${stage}`;
+    seed("pr", home, id);
+    const entered = Promise.withResolvers(), finish = Promise.withResolvers();
+    let listener;
+    mockGitHub(t, async () => {
+      if (stage === "github") { entered.resolve(); await finish.promise; }
+      return { state: "OPEN" };
+    });
+    const sdkSession = { ...session(id), on: (callback) => { listener = callback; return () => {}; },
+      rpc: { metadata: { activity: async () => {
+        if (stage === "metadata") { entered.resolve(); await finish.promise; }
+        return { hasActiveWork: true };
+      } } } };
+    const collector = await collect(sdkSession, { home });
+    try {
+      await entered.promise;
+      listener({ type: "session.idle", data: {} });
+      assert.equal(readState(id, home).status, "Waiting on you");
+      finish.resolve();
+      await collector.initialPoll;
+      assert.equal(readState(id, home).status, "Waiting on you");
+      assert.equal(collector.tracker.state.status, "Waiting on you");
+    } finally {
+      finish.resolve();
+      await collector.initialPoll;
+      collector.stop();
+    }
+  });
+}

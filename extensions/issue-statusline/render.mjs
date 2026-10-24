@@ -83,7 +83,8 @@ export function renderEntries(payload, {
 	const currentRepo = state.repository || null;
 	return state.issues.map((issue) => {
 		const ttl = issueCacheTtlMs ?? (issue.closedAt ? ISSUE_CLOSED_TTL_MS : ISSUE_OPEN_TTL_MS);
-		const item = issue.checkedAt > 0 && now - issue.checkedAt >= ttl ? { ...issue, stale: true } : issue;
+		const stale = issue.checkedAt === 0 && Boolean(issue.status) || issue.checkedAt > 0 && now - issue.checkedAt >= ttl;
+		const item = stale ? { ...issue, stale: true } : issue;
 		return { ...item, text: formatIssueItem(item, currentRepo, { links, color, nerdFont: useNerdFont }).mid };
 	});
 }

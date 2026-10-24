@@ -7,6 +7,15 @@ import { withStateLock } from "./state-lock.mjs";
 import { isDeepStrictEqual } from "node:util";
 
 const pending = new Map();
+function retryDeadline(headers, now) {
+  const retryAfter = headers["retry-after"];
+  const retrySeconds = /^\d+$/.test(String(retryAfter ?? "")) ? Number(retryAfter)
+    : Math.max(0, (Date.parse(retryAfter) - now) / 1000) || 0;
+  const resetSeconds = headers["x-ratelimit-remaining"] === "0" ? Number(headers["x-ratelimit-reset"]) - now / 1000 : 0;
+  return now + Math.max(60, Number.isFinite(retrySeconds) ? retrySeconds : 0,
+    Number.isFinite(resetSeconds) ? resetSeconds : 0) * 1000;
+}
+
 export async function prefetchStatuses(kind, items, {
   home, now = Date.now(), force = false, fetchStatus, signal,
 } = {}) {
@@ -67,14 +76,8 @@ export async function prefetchStatuses(kind, items, {
           withStateLock(cacheFile, () => {
             const cache = read(home);
             if (cache[item.url]?.lease !== lease) return;
-            const headers = error.response?.headers || {};
-            const retryAfter = headers["retry-after"];
-            const retrySeconds = /^\d+$/.test(String(retryAfter ?? "")) ? Number(retryAfter)
-              : Math.max(0, (Date.parse(retryAfter) - now) / 1000) || 0;
-            const resetSeconds = headers["x-ratelimit-remaining"] === "0" ? Number(headers["x-ratelimit-reset"]) - now / 1000 : 0;
             cache[item.url] = { ...cache[item.url], scope, refreshingUntil: 0, lastError: error.message,
-              retryAt: now + Math.max(60, retrySeconds,
-                Number.isFinite(resetSeconds) ? resetSeconds : 0) * 1000 };
+              retryAt: retryDeadline(error.response?.headers || {}, now) };
             write(cache, home);
           });
           return error;
@@ -158,9 +161,23 @@ export async function refreshTracker(kind, sessionId, {
         const key = `branch:${tracker.host}/${repository}:${branch}`;
         const scope = await statuslineGitHub.cacheScope(tracker.host, { signal, target: key });
         const cache = github.readPrCache(home);
+        if (!force && cache[key]?.scope === scope && cache[key].retryAt > now) {
+          throw new Error(cache[key].lastError || "Branch discovery is backing off");
+        }
         let data = cache[key]?.scope === scope && now - cache[key].checkedAt < 45000 ? cache[key].data : undefined;
         if (data === undefined) {
-          data = await github.queryBranchPrWithGh(repository, branch, { host: tracker.host, signal });
+          try {
+            data = await github.queryBranchPrWithGh(repository, branch, { host: tracker.host, signal });
+          } catch (error) {
+            signal?.throwIfAborted();
+            withStateLock(join(home, "pr-statusline", "pr-cache.json"), () => {
+              const current = github.readPrCache(home);
+              current[key] = { ...(current[key]?.scope === scope ? current[key] : {}), scope,
+                lastError: error.message, retryAt: retryDeadline(error.response?.headers || {}, now) };
+              github.writePrCache(current, home);
+            });
+            throw error;
+          }
           withStateLock(join(home, "pr-statusline", "pr-cache.json"), () => {
             github.writePrCache({ ...github.readPrCache(home), [key]: { data, scope: data.cacheScope || scope, checkedAt: now, ttlMs: 45000 } }, home);
           });

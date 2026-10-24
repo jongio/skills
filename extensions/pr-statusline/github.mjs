@@ -330,7 +330,7 @@ export async function queryBranchPrWithGh(repository, branch, { request, host = 
   request ??= (await import("../github-transport.mjs")).statuslineGitHub.request;
   const response = await request({ kind: "graphql", query: BRANCH_PR_GRAPHQL, variables: { owner, name, head: branch } }, host,
     { signal, target: `branch:${host}/${repository}:${branch}` });
-  if (!response.ok) throw new Error(response.error || "Branch PR discovery unavailable");
+  if (!response.ok) throw Object.assign(new Error(response.error || "Branch PR discovery unavailable"), { response });
   const nodes = response.data?.data?.repository?.pullRequests?.nodes;
   if (!Array.isArray(nodes)) throw new Error("GitHub response missing branch PR inventory");
   if (nodes.some((item) => !["OPEN", "CLOSED", "MERGED"].includes(item?.state))) throw new Error("GitHub response has invalid branch PR state");

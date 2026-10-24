@@ -95,7 +95,8 @@ export function renderEntries(payload, {
 	const entries = state.prs.map((pr) => {
 		const ttl = prCacheTtlMs ?? (pr.mergedAt ? PR_CLOSED_TTL_MS
 			: pr.status?.includes(OCTICONS.running) ? PR_RUNNING_TTL_MS : PR_SETTLED_TTL_MS);
-		const item = pr.checkedAt > 0 && now - pr.checkedAt >= ttl ? { ...pr, stale: true } : pr;
+		const stale = pr.checkedAt === 0 && Boolean(pr.status) || pr.checkedAt > 0 && now - pr.checkedAt >= ttl;
+		const item = stale ? { ...pr, stale: true } : pr;
 		return { ...item, text: formatPrItem(item, currentRepo, { links, color, nerdFont: useNerdFont }).mid };
 	});
 	if (Object.keys(state.ignoredRevisions ?? {}).length) entries.push({ kind: "dismissal", text: "" });

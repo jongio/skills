@@ -336,6 +336,10 @@ failed refreshes keep last-known observations marked stale rather than claiming
 new success or merge state. Git comparisons still use bounded local Git reads.
 Local controls initialize before the first background poll finishes, so a slow
 GitHub response does not block tracking or clearing this session.
+Live session events remain authoritative while activity/GitHub requests are
+pending. Invalidated PR and issue metadata is marked stale immediately.
+Feature-branch discovery honors credential-scoped server backoff without
+blocking refreshes of known tracked items.
 
 `/session-statusline refresh` awaits a real refresh and reports partial failures.
 For standalone installs without a running SDK collector, refresh explicitly:
