@@ -247,6 +247,37 @@ for (const duringSync of [false, true]) {
 	}));
 }
 
+test("sync returns saved agent removal even when dismissal clocks do not change", async (t) => fixture((home) => {
+	const id = "concurrent-agent-remove";
+	const dir = join(home, "session-state", id);
+	mkdirSync(dir, { recursive: true });
+	const file = join(dir, "events.jsonl");
+	writeFileSync(file, ["keep", "removed"].map((agentId) =>
+		JSON.stringify(event("subagent.started", { agentId, toolCallId: `${agentId}-call` }))).join("\n") + "\n");
+	syncAgents({ session_id: id }, { home });
+	appendFileSync(file, JSON.stringify(event("subagent.completed", { agentId: "keep" })) + "\n");
+	const snapshot = SubagentTracker.prototype.snapshot;
+	let interleaved = false;
+	t.mock.method(SubagentTracker.prototype, "snapshot", function () {
+		const stale = snapshot.call(this);
+		if (!interleaved) {
+			interleaved = true;
+			const removal = new SubagentTracker(id, readAgents(id, home));
+			removal.manage("remove", "removed");
+			writeAgents(snapshot.call(removal), home);
+		}
+		return stale;
+	});
+	const current = syncAgents({ session_id: id }, { home }).tracker;
+	assert.equal(interleaved, true);
+	assert.deepEqual([...current.agents.keys()], ["keep"]);
+	assert.equal(current.agents.get("keep").status, "completed");
+	assert.ok(current.ignored.has("removed"));
+	assert.ok(current.ignored.has("removed-call"));
+	assert.equal(current.taskCalls.has("removed-call"), false);
+	assert.deepEqual(Object.keys(readAgents(id, home).agents), ["keep"]);
+}));
+
 test("legacy reference-only caches do not survive manual listing or a missing transcript", async () => fixture((home) => {
 	for (const [Tracker, write, sync, field, reference, fetch] of [
 		[SessionTracker, writeState, syncSession, "prs", pr, { fetchPrStatus: false }],

@@ -564,10 +564,7 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 	if (tracker.syncWithPrCache(prCache, now)) changed = true;
 	if (changed) {
 		const saved = writeState(tracker.snapshot(), home);
-		if ((saved.clearedAt ?? 0) > tracker.clearedAt ||
-			(saved.dismissedThroughAt ?? 0) > tracker.dismissedThroughAt) {
-			return { tracker: new SubagentTracker(sessionId, saved) };
-		}
+		return { tracker: new SubagentTracker(sessionId, saved) };
 	}
 	return { tracker };
 }
