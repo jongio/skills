@@ -356,11 +356,6 @@ export function detectNerdFontSupport({
 		? [...parsedCandidates.filter((c) => c.hasExplicitProfile), ...parsedCandidates.filter((c) => !c.hasExplicitProfile)]
 		: parsedCandidates;
 	for (const { parsed } of ordered) {
-		const matchedProfile = resolveWindowsTerminalProfile(parsed, { wtProfileId, wslDistroName, isWsl: wsl });
-		const effectiveFace = String(matchedProfile?.font?.face || parsed?.profiles?.defaults?.font?.face || "").trim();
-		if (!effectiveFace) {
-			return Boolean(detectInstalledWindowsNerdFontFace({ fontDirs }));
-		}
 		const res = detectNerdFontFromWindowsTerminalSettings(parsed, {
 			wtProfileId,
 			wslDistroName,

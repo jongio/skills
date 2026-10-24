@@ -278,7 +278,7 @@ try {
 					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
 					termProgram: "",
 				}),
-				true,
+				false,
 			);
 			assert.equal(
 				ensureWindowsTerminalNerdFont({
@@ -292,6 +292,15 @@ try {
 			assert.equal(
 				JSON.parse(readFileSync(fakeWtSettings, "utf8")).profiles.defaults.font.face,
 				"CaskaydiaCove Nerd Font Mono",
+			);
+			assert.equal(
+				detectNerdFontSupport({
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					termProgram: "",
+				}),
+				true,
 			);
 
 			// Explicit non-Nerd Font choice is never overwritten by ensureWindowsTerminalNerdFont
