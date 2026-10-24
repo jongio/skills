@@ -68,9 +68,13 @@ export async function prefetchStatuses(kind, items, {
             const cache = read(home);
             if (cache[item.url]?.lease !== lease) return;
             const headers = error.response?.headers || {};
+            const retryAfter = headers["retry-after"];
+            const retrySeconds = /^\d+$/.test(String(retryAfter ?? "")) ? Number(retryAfter)
+              : Math.max(0, (Date.parse(retryAfter) - now) / 1000) || 0;
+            const resetSeconds = headers["x-ratelimit-remaining"] === "0" ? Number(headers["x-ratelimit-reset"]) - now / 1000 : 0;
             cache[item.url] = { ...cache[item.url], scope, refreshingUntil: 0, lastError: error.message,
-              retryAt: now + Math.max(60, Number(headers["retry-after"]) || 0,
-                headers["x-ratelimit-remaining"] === "0" ? Number(headers["x-ratelimit-reset"]) - now / 1000 : 0) * 1000 };
+              retryAt: now + Math.max(60, retrySeconds,
+                Number.isFinite(resetSeconds) ? resetSeconds : 0) * 1000 };
             write(cache, home);
           });
           return error;

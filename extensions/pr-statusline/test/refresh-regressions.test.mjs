@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { refreshTracker } from "../../github-refresh.mjs";
+import { prefetchStatuses, refreshTracker } from "../../github-refresh.mjs";
 import { statuslineGitHub } from "../../github-transport.mjs";
 import { collect } from "../collector.mjs";
 import { SessionTracker, readState, writeState } from "../tracker.mjs";
@@ -218,4 +218,29 @@ test("local controls initialize while the first remote poll is blocked, and stop
   finish.resolve();
   await collector.initialPoll;
   assert.deepEqual(readState(id, home).prs, []);
+});
+
+test("refresh backoff honors numeric and HTTP-date Retry-After with bounded malformed-header fallback", async (t) => {
+  const now = Date.UTC(2026, 0, 1);
+  for (const [header, delay, reset] of [
+    ["180", 180000], [new Date(now + 180000).toUTCString(), 180000],
+    ["malformed", 60000], [new Date(now - 10000).toUTCString(), 60000],
+    [new Date(now + 180000).toUTCString(), 180000, "malformed"],
+    ["60", 240000, String((now + 240000) / 1000)],
+  ]) {
+    const home = fixture(t);
+    let calls = 0;
+    t.mock.method(statuslineGitHub, "cacheScope", async () => "fixture");
+    t.mock.method(statuslineGitHub, "request", async () => {
+      calls++;
+      return { ok: false, status: 429, error: "Server backoff", headers: { "retry-after": header,
+        ...(reset === undefined ? {} : { "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset }) } };
+    });
+    const first = await prefetchStatuses("pr", [{ url: refs.pr }], { home, now });
+    assert.throws(() => first(refs.pr), /Server backoff/);
+    assert.equal(readPrCache(home)[refs.pr].retryAt, now + delay);
+    const second = await prefetchStatuses("pr", [{ url: refs.pr }], { home, now: now + delay - 1 });
+    assert.throws(() => second(refs.pr), /Server backoff/);
+    assert.equal(calls, 1, "no retry before the server's deadline");
+  }
 });

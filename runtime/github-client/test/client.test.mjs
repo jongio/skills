@@ -247,3 +247,35 @@ test("secondary credentials remain target-scoped and invalidate when the primary
   assert.equal(calls.at(-1).auth, "token primary-2");
   assert.equal(await client.cacheScope({ target }), await client.cacheScope(), "primary replacement invalidates old target associations");
 });
+
+test("unavailable secondary credentials do not block a later account, but cancellation stops lookup", async (t) => {
+  for (const cancel of [false, true]) {
+    const abort = new AbortController();
+    const users = [];
+    const { client, calls } = await fixture(t, (req, res) => {
+      json(res, 200, req.headers.authorization.includes("working")
+        ? { data: { repository: { name: "repo" } } }
+        : { errors: [{ message: "Could not resolve to a Repository" }] });
+    }, {
+      env: { NO_PROXY: "*" }, secondaryAccounts: true,
+      run: async (args) => {
+        if (args[1] === "status") return { ok: true, stdout: JSON.stringify({ hosts: {
+          "github.com": [{ active: false, login: "unavailable" }, { active: false, login: "working" }],
+        } }) };
+        const user = args[args.indexOf("--user") + 1];
+        if (!args.includes("--user")) return { ok: true, stdout: "primary-token" };
+        users.push(user);
+        if (user === "unavailable") {
+          if (cancel) abort.abort();
+          return { ok: false, stdout: "" };
+        }
+        return { ok: true, stdout: "working-token" };
+      },
+    });
+    const result = await client.request({ kind: "graphql", query: "{ repository { name } }" }, { signal: abort.signal });
+    assert.equal(result.ok, !cancel);
+    assert.deepEqual(users, cancel ? ["unavailable"] : ["unavailable", "working"]);
+    assert.equal(calls.length, cancel ? 1 : 2);
+    if (cancel) assert.match(result.error, /cancelled|deadline/);
+  }
+});

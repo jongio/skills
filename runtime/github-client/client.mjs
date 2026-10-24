@@ -194,9 +194,19 @@ export function createGitHubClient({
             try { fallbackAccounts = JSON.parse(status.stdout)?.hosts?.[host]?.filter((a) => !a.active).map((a) => a.login).filter((user) => user && user !== auth.user) || []; }
             catch { fallbackAccounts = []; }
           }
-          const user = fallbackAccounts.shift();
-          if (user) {
-            auth = await resolveCredential(signal, user, true);
+          let nextAuth;
+          while (fallbackAccounts.length) {
+            signal.throwIfAborted();
+            const user = fallbackAccounts.shift();
+            try {
+              nextAuth = await resolveCredential(signal, user, true);
+              break;
+            } catch {
+              signal.throwIfAborted();
+            }
+          }
+          if (nextAuth) {
+            auth = nextAuth;
             for (const key of Object.keys(requestHeaders)) {
               if (key.toLowerCase() === "if-none-match") delete requestHeaders[key];
             }
