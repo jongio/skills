@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,12 +7,16 @@ import { SubagentTracker } from "../tracker.mjs";
 import { render } from "../render.mjs";
 import {
 	composeStatusLine,
+	detectInstalledWindowsNerdFontFace,
 	detectNerdFontFromWindowsTerminalSettings,
+	detectNerdFontSupport,
 	discoverRenderers,
 	ensurePluginStatuslineRegistered,
+	ensureWindowsTerminalNerdFont,
 	isNerdFontName,
 	joinOutputsHorizontally,
 	runInteractiveStatuslinePicker,
+	stripJsonComments,
 	toUnicodeIcons,
 } from "../compose.mjs";
 import { configureStatuslines, parseStatuslineArgs } from "../../../scripts/setup-statusline.mjs";
@@ -211,6 +215,106 @@ try {
 			const unicodeConverted = toUnicodeIcons("\uE726 microsoft/cae#3494 \uF058 23/23 \uF071 \uF440 \uF164 1/2 \uF075 3/5");
 			assert.equal(unicodeConverted, "\uE0A0 microsoft/cae#3494 \u2713 23/23 \u26A0 \u2691 \u2605 1/2 \u2709 3/5");
 			assert.doesNotMatch(unicodeConverted, /[\uE700-\uF8FF]/);
+			assert.equal(toUnicodeIcons("\uF41B Azure/azure-dev#3315 P1 \uE726 \uF415 jongio \uF075 4"), "\u25CE Azure/azure-dev#3315 P1 \uE0A0 @jongio \u2709 4");
+
+			// Test JSONC inline comment stripping with URLs and string-literal commas preserved
+			const parsedJsonc = JSON.parse(stripJsonComments(`{
+				"$help": "https://aka.ms/terminal-documentation", // inline URL comment
+				"commandline": "pwsh -Command \\"Write-Output ',]'\\", }",
+				"profiles": {
+					"defaults": {
+						"font": { "face": "CaskaydiaCove Nerd Font Mono" }, /* block */
+					},
+				}
+			}`));
+			assert.equal(parsedJsonc.$help, "https://aka.ms/terminal-documentation");
+			assert.equal(parsedJsonc.commandline, "pwsh -Command \"Write-Output ',]'\", }");
+			assert.equal(parsedJsonc.profiles.defaults.font.face, "CaskaydiaCove Nerd Font Mono");
+
+			// Test defaultProfile fallback when WT_PROFILE_ID is unset
+			assert.equal(
+				detectNerdFontFromWindowsTerminalSettings(
+					{
+						defaultProfile: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+						profiles: {
+							defaults: {},
+							list: [{ guid: "{574e775e-4f2a-5b96-ac1e-a2962a402336}", name: "PowerShell", font: { face: "CaskaydiaCove Nerd Font Mono" } }],
+						},
+					},
+					{ wtProfileId: "", isWsl: false },
+				),
+				true,
+			);
+
+			// Test auto-healing Windows Terminal settings.json when defaults.font.face was reset but Nerd Font is installed
+			const fakeFontsDir = join(pluginHome, "Fonts");
+			const emptyFontsDir = join(pluginHome, "EmptyFonts");
+			mkdirSync(fakeFontsDir, { recursive: true });
+			mkdirSync(emptyFontsDir, { recursive: true });
+			writeFileSync(join(fakeFontsDir, "CaskaydiaCoveNerdFontMono-Regular.ttf"), "font");
+			assert.equal(detectInstalledWindowsNerdFontFace({ fontDirs: [fakeFontsDir] }), "CaskaydiaCove Nerd Font Mono");
+			assert.equal(detectInstalledWindowsNerdFontFace({ fontDirs: [emptyFontsDir] }), null);
+			const fakeWtSettings = join(pluginHome, "wt-settings.json");
+			writeFileSync(fakeWtSettings, JSON.stringify({
+				defaultProfile: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+				profiles: {
+					defaults: {},
+					list: [{ guid: "{574e775e-4f2a-5b96-ac1e-a2962a402336}", name: "PowerShell" }],
+				},
+			}, null, 4));
+			assert.equal(
+				detectNerdFontSupport({
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [emptyFontsDir],
+					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					termProgram: "",
+				}),
+				false,
+			);
+			assert.equal(
+				detectNerdFontSupport({
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					termProgram: "",
+				}),
+				true,
+			);
+			assert.equal(
+				ensureWindowsTerminalNerdFont({
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					isWsl: false,
+				}),
+				"CaskaydiaCove Nerd Font Mono",
+			);
+			assert.equal(
+				JSON.parse(readFileSync(fakeWtSettings, "utf8")).profiles.defaults.font.face,
+				"CaskaydiaCove Nerd Font Mono",
+			);
+
+			// Explicit non-Nerd Font choice is never overwritten by ensureWindowsTerminalNerdFont
+			writeFileSync(fakeWtSettings, JSON.stringify({
+				defaultProfile: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+				profiles: {
+					defaults: { font: { face: "Cascadia Code PL" } },
+					list: [{ guid: "{574e775e-4f2a-5b96-ac1e-a2962a402336}", name: "PowerShell" }],
+				},
+			}, null, 4));
+			assert.equal(
+				ensureWindowsTerminalNerdFont({
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					isWsl: false,
+				}),
+				null,
+			);
+			assert.equal(
+				JSON.parse(readFileSync(fakeWtSettings, "utf8")).profiles.defaults.font.face,
+				"Cascadia Code PL",
+			);
 		} finally {
 			rmSync(pluginHome, { recursive: true, force: true });
 		}
