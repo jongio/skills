@@ -18,6 +18,7 @@ internal sealed class AttentionCommand
     public string style { get; set; }
     public string color { get; set; }
     public bool acknowledged { get; set; }
+    public string previewId { get; set; }
 }
 
 internal sealed class AttentionLatch
@@ -25,6 +26,7 @@ internal sealed class AttentionLatch
     public long Generation = -1;
     public bool Active, Acknowledged;
     public string Style = "both", Color = "#FFBB24";
+    public string PreviewId;
     private bool wasAway;
     private long inputAtStart;
 
@@ -42,6 +44,7 @@ internal sealed class AttentionLatch
         Active = command.kind != null;
         Style = command.style;
         Color = command.color;
+        PreviewId = command.previewId;
     }
 
     public bool Show(bool focused, long inputSequence, bool settled = true)
@@ -238,6 +241,7 @@ internal static class TerminalAttention
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr GetModuleHandle(string module);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool AttachConsole(uint processId);
     [DllImport("kernel32.dll")] private static extern bool FreeConsole();
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool AllocConsole();
     [DllImport("kernel32.dll")] private static extern IntPtr GetConsoleWindow();
     [DllImport("kernel32.dll")] private static extern IntPtr GetStdHandle(int handle);
     [DllImport("kernel32.dll")] private static extern bool SetStdHandle(int handle, IntPtr value);
@@ -299,6 +303,7 @@ internal static class TerminalAttention
                         target = terminal;
                         return;
                     }
+                    throw new NotSupportedException("The session console has no verified Windows Terminal owner; no ancestor window was selected.");
                 }
                 uint parent;
                 if (!parents.TryGetValue(processId, out parent)) break;
@@ -513,6 +518,9 @@ internal static class TerminalAttention
                 uint color;
                 if (!uint.TryParse(command.color.Substring(1), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out color))
                     throw new InvalidDataException("Invalid attention color.");
+                Guid previewId;
+                if (command.type == "preview" && (!Guid.TryParse(command.previewId, out previewId) || previewId == Guid.Empty))
+                    throw new InvalidDataException("Invalid attention preview ID.");
                 Commands.Enqueue(command);
             }
         }
@@ -659,6 +667,30 @@ internal static class TerminalAttention
         }
     }
 
+    private static void ClassicConsoleHost()
+    {
+        TextReader input = Console.In;
+        IntPtr stdin = GetStdHandle(-10), stdout = GetStdHandle(-11), stderr = GetStdHandle(-12);
+        try
+        {
+            FreeConsole();
+            Check(AllocConsole());
+            ShowWindow(GetConsoleWindow(), 0);
+            SetStdHandle(-10, stdin);
+            SetStdHandle(-11, stdout);
+            SetStdHandle(-12, stderr);
+            Emit(new { type = "classicConsoleHost" });
+            input.ReadLine();
+        }
+        finally
+        {
+            FreeConsole();
+            SetStdHandle(-10, stdin);
+            SetStdHandle(-11, stdout);
+            SetStdHandle(-12, stderr);
+        }
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -668,6 +700,7 @@ internal static class TerminalAttention
             if (args.Length == 1 && args[0] == "--self-test") { SelfTest(); return 0; }
             if (args.Length == 1 && args[0] == "--persistence-test") { PersistenceTest(); return 0; }
             if (args.Length == 1 && args[0] == "--focus-isolation-test") { FocusIsolationTest(); return 0; }
+            if (args.Length == 1 && args[0] == "--classic-console-host") { ClassicConsoleHost(); return 0; }
             uint ownerId;
             if (args.Length < 1 || !uint.TryParse(args[0], out ownerId) || ownerId == 0)
                 throw new ArgumentException("A live session process ID is required.");
@@ -735,8 +768,9 @@ internal static class TerminalAttention
                             windowHandle = target.ToInt64().ToString() });
                     if (preview != null && !preview.Show(focused, focus.SettledInputSequence, focus.Settled))
                     {
+                        string completedId = preview.PreviewId;
                         preview = null;
-                        Emit(new { type = "previewComplete", windowHandle = target.ToInt64().ToString() });
+                        Emit(new { type = "previewComplete", windowHandle = target.ToInt64().ToString(), previewId = completedId });
                     }
                     if (preview != null) Render(preview.Style, preview.Color, clock.Elapsed.TotalSeconds);
                     else if (visible) Render(latch.Style, latch.Color, clock.Elapsed.TotalSeconds);

@@ -1,6 +1,6 @@
 import { spawn as spawnProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, watchFile, unwatchFile, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, watchFile, unwatchFile, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,13 +31,23 @@ function normalizeConfig(value) {
 	return { ...value, version: 1, enabled: value.enabled ?? false, style: value.style ?? "both", colors };
 }
 
-export function readAttentionConfig(home = defaultHome()) {
+function readAttentionSettings(home) {
+	let descriptor;
 	try {
-		return normalizeConfig(JSON.parse(readFileSync(attentionConfigPath(home), "utf8")));
+		descriptor = openSync(attentionConfigPath(home), "r");
+		const config = normalizeConfig(JSON.parse(readFileSync(descriptor, "utf8")));
+		const stat = fstatSync(descriptor, { bigint: true });
+		return { config, revision: `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` };
 	} catch (error) {
-		if (error.code === "ENOENT") return normalizeConfig({});
+		if (error.code === "ENOENT") return { config: normalizeConfig({}), revision: "missing" };
 		throw error;
+	} finally {
+		if (descriptor !== undefined) closeSync(descriptor);
 	}
+}
+
+export function readAttentionConfig(home = defaultHome()) {
+	return readAttentionSettings(home).config;
 }
 
 export function setAttentionConfig(update, { home = defaultHome() } = {}) {
@@ -119,6 +129,7 @@ export function createSessionAttention({
 	let previous = null;
 	let preview = null;
 	let activePreview = null;
+	let appliedRevision = null;
 
 	const status = () => ({ enabled: config.enabled, supported, style: config.style,
 		binding, error: lastError, ...state.snapshot() });
@@ -216,7 +227,8 @@ export function createSessionAttention({
 								message.generation <= state.generation) {
 								acknowledgedGeneration = Math.max(acknowledgedGeneration, message.generation);
 							} else if (message.type === "previewComplete" &&
-								String(message.windowHandle) === binding) {
+								String(message.windowHandle) === binding &&
+								activePreview && message.previewId === activePreview.previewId) {
 								activePreview = null;
 								if (!config.enabled) stopChild();
 							} else if (message.type === "unavailable") {
@@ -263,15 +275,16 @@ export function createSessionAttention({
 		if (!child && (state.snapshot().kind || preview)) void start();
 		else publish();
 	}
-	function reload({ explicitDisable = false } = {}) {
+	function reload({ explicitDisable = false, fromWatch = false } = {}) {
 		try {
-			const next = readAttentionConfig(home);
-			if (!next.enabled && (explicitDisable || config.enabled)) {
+			const { config: next, revision } = readAttentionSettings(home);
+			if (!next.enabled && (explicitDisable || config.enabled || (fromWatch && revision !== appliedRevision))) {
 				preview = null;
 				activePreview = null;
 			}
 			if (!next.enabled) acknowledgedGeneration = Math.max(acknowledgedGeneration, state.generation);
 			config = next;
+			appliedRevision = revision;
 			synchronize();
 		} catch (error) {
 			config = { ...ATTENTION_DEFAULTS };
@@ -280,13 +293,11 @@ export function createSessionAttention({
 		}
 	}
 	reload();
-	const onConfigChange = (current, previous) => {
+	const onConfigChange = () => {
 		if (!stopped) {
 			failed = false;
 			lastError = null;
-			const changed = current.mtimeMs !== previous.mtimeMs || current.ino !== previous.ino ||
-				current.nlink !== previous.nlink;
-			reload({ explicitDisable: changed });
+			reload({ fromWatch: true });
 		}
 	};
 	if (watch) watchFile(attentionConfigPath(home), { persistent: false, interval: 1000 }, onConfigChange);
@@ -317,7 +328,7 @@ export function createSessionAttention({
 			if (!supported) throw new Error("Window attention requires Windows Terminal on Windows.");
 			failed = false;
 			lastError = null;
-			const request = { kind };
+			const request = { kind, previewId: randomUUID() };
 			preview = request;
 			await start();
 			publish();

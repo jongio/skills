@@ -180,7 +180,7 @@ const session = await joinSession({
 	],
 });
 
-attention = createSessionAttention();
+attention = createSessionAttention({ ownerProcessId: process.ppid });
 collector = await collect(session, { attention });
 
 if (firstRun && session.capabilities?.ui?.elicitation) {

@@ -201,6 +201,10 @@ are click-through and non-activating, follow the window's position, size and
 DPI, hide while minimized, and disappear when the extension exits. Focus
 acknowledgment is **window-wide, not tab-specific**: use a separate Terminal
 window for each Copilot session when you need independent alerts.
+The extension supplies its CLI host PID rather than its own forked-process
+console. An attachable classic console or an unowned pseudoconsole is rejected
+without falling back to an ancestor's Terminal, even if it inherited
+`WT_SESSION`.
 
 No shell profile changes, global hooks, system service, or AI requests are
 needed. On first use, the bundled C# source is compiled with Windows' .NET

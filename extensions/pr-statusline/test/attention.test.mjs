@@ -4,6 +4,7 @@ import { EventEmitter, once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { PassThrough, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -35,7 +36,11 @@ function fakeHelper({ startup = { type: "ready", windowHandle: "1234" } } = {}) 
 		});
 		child.stdin.once("finish", () => queueMicrotask(() => child.emit("close", 0)));
 		child.kill = () => { child.emit("close", 0); };
-		child.message = (value) => child.stdout.write(`${JSON.stringify({ windowHandle: "1234", ...value })}\n`);
+		child.message = (value) => child.stdout.write(`${JSON.stringify({
+			windowHandle: "1234",
+			...(value.type === "previewComplete" ? { previewId: messages.findLast((message) => message.type === "preview")?.previewId } : {}),
+			...value,
+		})}\n`);
 		children.push({ child, executable, args, options });
 		if (startup) queueMicrotask(() => child.message(startup));
 		return child;
@@ -425,6 +430,42 @@ test("the initial missing-preferences watch notification cannot cancel an opt-ou
 	} finally { attention.stop(); }
 }));
 
+test("an older preview completion cannot cancel a newer preview in the same bound window", async () => fixture(async (home) => {
+	const { attention, helper } = controller(home);
+	try {
+		await attention.preview("approval");
+		const first = helper.messages.findLast((message) => message.type === "preview").previewId;
+		await attention.preview("question");
+		const second = helper.messages.findLast((message) => message.type === "preview").previewId;
+		assert.notEqual(first, second);
+		const child = helper.children[0].child;
+		child.message({ type: "previewComplete", previewId: first });
+		assert.equal(child.stdin.writableEnded, false);
+		assert.equal(attention.status().binding, "1234");
+		child.message({ type: "previewComplete", previewId: second });
+		await flush();
+		assert.equal(child.stdin.writableEnded, true);
+	} finally { attention.stop(); }
+}));
+
+test("watch notifications for an applied local disable cannot cancel a newer preview, but external disables can", async () => fixture(async (home) => {
+	setAttentionConfig({ enabled: true }, { home });
+	const { attention, helper } = controller(home, { watch: true });
+	try {
+		attention.configure({ enabled: false });
+		await attention.preview("question");
+		const child = helper.children[0].child;
+		await new Promise((resolve) => setTimeout(resolve, 1200));
+		assert.equal(child.stdin.writableEnded, false, "An already-applied disable must not cancel a later preview.");
+		setAttentionConfig({ enabled: false }, { home });
+		const deadline = Date.now() + 4000;
+		while (!child.stdin.writableEnded && Date.now() < deadline) {
+			await new Promise((resolve) => setTimeout(resolve, 25));
+		}
+		assert.equal(child.stdin.writableEnded, true, "A new disable from another session must still cancel it.");
+	} finally { attention.stop(); }
+}));
+
 test("explicit off cancels a preview still compiling and prevents a later native launch", async () => fixture(async (home) => {
 	let finish;
 	const { attention, helper } = controller(home, { build: () => new Promise((resolve) => { finish = resolve; }) });
@@ -537,9 +578,35 @@ test("native helper compiles, caches its build, latches focus until a new genera
 	const unavailable = spawnSync(executable, ["429496729"], { encoding: "utf8", windowsHide: true, timeout: 10000 });
 	assert.equal(unavailable.status, 1);
 	assert.equal(JSON.parse(unavailable.stdout).type, "unavailable");
+	const classic = spawn(executable, ["--classic-console-host"], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+	const reader = createInterface({ input: classic.stdout });
+	try {
+		const [line] = await once(reader, "line", { signal: AbortSignal.timeout(10000) });
+		assert.equal(JSON.parse(line).type, "classicConsoleHost");
+		const rejected = spawnSync(executable, [String(classic.pid), "--probe"], {
+			encoding: "utf8", windowsHide: true, timeout: 10000,
+		});
+		assert.equal(rejected.status, 1, rejected.stdout || rejected.stderr);
+		const failure = JSON.parse(rejected.stdout);
+		assert.equal(failure.type, "unavailable");
+		assert.match(failure.message, /no verified Windows Terminal owner; no ancestor window was selected/);
+	} finally {
+		reader.close();
+		classic.stdin.end();
+		if (classic.exitCode === null) {
+			await Promise.race([once(classic, "close"), new Promise((resolve) => setTimeout(resolve, 2000))]);
+			if (classic.exitCode === null) classic.kill();
+		}
+	}
 	if (process.env.WT_SESSION) {
-		const bound = spawnSync(executable, [String(process.pid), "--probe"], { encoding: "utf8", windowsHide: true, timeout: 10000 });
-		assert.equal(bound.status, 0, bound.stderr || bound.stdout);
+		const hostPid = Number(process.env.COPILOT_ATTENTION_TEST_OWNER_PID) || process.pid;
+		const bound = spawnSync(executable, [String(hostPid), "--probe"], { encoding: "utf8", windowsHide: true, timeout: 10000 });
+		if (bound.status !== 0) {
+			assert.equal(bound.status, 1, bound.stderr || bound.stdout);
+			assert.match(JSON.parse(bound.stdout).message, /no verified Windows Terminal owner; no ancestor window was selected/);
+			t.diagnostic("Inherited WT_SESSION does not make this test subprocess a supported Terminal console; binding failed closed.");
+			return;
+		}
 		const value = JSON.parse(bound.stdout);
 		assert.equal(value.type, "ready");
 		assert.match(value.windowHandle, /^[1-9]\d*$/);
@@ -547,7 +614,7 @@ test("native helper compiles, caches its build, latches focus until a new genera
 		const powershell = join(process.env.WINDIR, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 		const rendered = spawnSync(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-File",
 			join(root, "extensions", "pr-statusline", "test", "attention-render.ps1"),
-			"-Executable", executable, "-OwnerProcessId", String(process.pid)], {
+			"-Executable", executable, "-OwnerProcessId", String(hostPid)], {
 			encoding: "utf8", windowsHide: true, timeout: 15000,
 		});
 		assert.equal(rendered.status, 0, rendered.stderr || rendered.stdout);
@@ -560,7 +627,7 @@ test("native helper compiles, caches its build, latches focus until a new genera
 		let helperProcess;
 		const reports = [];
 		const attention = createSessionAttention({
-			home, watch: false, build: async () => executable,
+			home, watch: false, build: async () => executable, ownerProcessId: hostPid,
 			spawn(...args) { helperProcess = spawn(...args); return helperProcess; },
 			report: (message) => reports.push(message),
 		});
