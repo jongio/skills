@@ -12,13 +12,13 @@
       "name": "jongio-skills",
       "source": "./",
       "description": "Install the complete Jon Gallant skills collection as one plugin.",
-      "version": "2.1.0"
+      "version": "2.1.3"
     },
     {
       "name": "statuslines",
       "source": "./extensions",
       "description": "Install only the composable PR, Issue, Subagent, and Branch/Worktree statusline extensions for GitHub Copilot CLI without installing skills.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "create-canvas-app",
@@ -90,7 +90,7 @@
       "name": "pr",
       "source": "./skills/pr",
       "description": "A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "go",
@@ -138,7 +138,7 @@
       "name": "ci-hound",
       "source": "./skills/ci-hound",
       "description": "Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     }
   ]
 }

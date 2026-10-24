@@ -13,3 +13,8 @@ skills/create-canvas-app/kit/vendor/lucide.mjs linguist-vendored linguist-genera
 skills/create-canvas-app/kit/vendor/preact-htm-standalone.mjs linguist-vendored linguist-generated
 skills/create-canvas-app/reference/decision-log/canvas-kit/vendor/lucide.mjs linguist-vendored linguist-generated
 skills/create-canvas-app/reference/decision-log/canvas-kit/vendor/preact-htm-standalone.mjs linguist-vendored linguist-generated
+extensions/github-client.mjs linguist-vendored linguist-generated
+skills/ci-hound/scripts/lib/github-client.mjs linguist-vendored linguist-generated
+skills/pr/scripts/lib/github-client.mjs linguist-vendored linguist-generated
+skills/ci-hound/test/github-fixtures.mjs linguist-generated
+skills/pr/test/github-fixtures.mjs linguist-generated

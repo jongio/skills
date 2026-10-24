@@ -166,6 +166,23 @@ and settled feedback. Use a literal `gh pr merge` command naming the PR, reposit
 authorized strategy, and full `--match-head-commit` OID, then verify actual merged
 state. GitHub auto-merge, admin, API, and wrapper bypasses are not allowed.
 
+## Watcher transport and notifications
+
+The PR watcher includes a self-contained, locked Octokit runtime; no end-user
+dependency install is required. Polling is asynchronous and preserves ETags,
+rate-limit metadata, host/account isolation, request deadlines, and exact-head
+review gates. Explicit environment tokens are never replaced with a different
+identity. A rejected gh-derived token is refreshed once for a safe read; writes
+are not blindly replayed. `gh auth token` and the bounded `gh pr edit` Copilot
+reviewer compatibility operation remain CLI calls.
+
+For optional Copilot timeline notifications, use
+`/daemon-notifications subscribe pr`, then add `--events-file "<returned-file>"`
+to the normal watcher command. The bridge only logs progress/actionable events;
+it never sends model prompts, starts repairs, or grants merge authorization.
+Unsubscribe with `/daemon-notifications unsubscribe pr`. Watchers retain normal
+stdout and host completion notifications when the bridge is absent or disabled.
+
 ## Development
 
 ```sh

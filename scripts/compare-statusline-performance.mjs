@@ -22,10 +22,11 @@ function git(root, ...args) {
 export function isRelevantPath(path) {
 	const value = path.replaceAll("\\", "/");
 	return /^extensions\/.+\.mjs$/.test(value) ||
+		/^runtime\/github-client\/(?:.*\.mjs|package(?:-lock)?\.json)$/.test(value) ||
 		/^extensions\/(?:.*\/)?(?:copilot-extension|plugin)\.json$/.test(value) ||
 		/^install-statusline\.(?:sh|ps1)$/.test(value) ||
 		/^scripts\/(?:setup-statusline|benchmark-statuslines|compare-statusline-performance|statusline-performance-offline)\.mjs$/.test(value) ||
-		value === "test/statusline-performance.test.mjs" ||
+		/^test\/(?:statusline-performance|github-runtime)\.test\.mjs$/.test(value) ||
 		value === ".github/workflows/statusline-performance.yml";
 }
 

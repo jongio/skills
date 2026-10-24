@@ -8,7 +8,8 @@ param(
 	[switch]$NoPrs,
 	[switch]$NoIssues,
 	[switch]$NoSubagents,
-	[switch]$NoWorktrees
+	[switch]$NoWorktrees,
+	[switch]$Notifications
 )
 
 Set-StrictMode -Version Latest
@@ -25,6 +26,7 @@ if ($NoPrs) { $forwardArgs += '--no-prs' }
 if ($NoIssues) { $forwardArgs += '--no-issues' }
 if ($NoSubagents) { $forwardArgs += '--no-subagents' }
 if ($NoWorktrees) { $forwardArgs += '--no-worktrees' }
+if ($Notifications) { $forwardArgs += '--notifications' }
 
 $localSetup = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'scripts\setup-statusline.mjs' } else { $null }
 if ($localSetup -and (Test-Path -LiteralPath $localSetup)) {
@@ -41,7 +43,13 @@ try {
 	New-Item -ItemType Directory -Path (Join-Path $tempRoot 'scripts') -Force | Out-Null
 	Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/scripts/setup-statusline.mjs" -OutFile (Join-Path $tempRoot 'scripts\setup-statusline.mjs')
 	New-Item -ItemType Directory -Path (Join-Path $tempRoot 'extensions') -Force | Out-Null
-	Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/extensions/state-lock.mjs" -OutFile (Join-Path $tempRoot 'extensions\state-lock.mjs')
+	foreach ($file in @('state-lock.mjs', 'github-client.mjs', 'github-client.LICENSE', 'github-transport.mjs', 'github-refresh.mjs', 'refresh-github.mjs')) {
+		Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/extensions/$file" -OutFile (Join-Path $tempRoot "extensions\$file")
+	}
+	New-Item -ItemType Directory -Path (Join-Path $tempRoot 'extensions\daemon-notifications') -Force | Out-Null
+	foreach ($file in @('extension.mjs', 'bridge.mjs')) {
+		Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/extensions/daemon-notifications/$file" -OutFile (Join-Path $tempRoot "extensions\daemon-notifications\$file")
+	}
 
 	$manifest = @{
 		'pr-statusline'       = @('extension.mjs', 'collector.mjs', 'session-statusline.mjs', 'tracker.mjs', 'github.mjs', 'provenance.mjs', 'lifecycle.mjs', 'render.mjs', 'compose.mjs', 'copilot-extension.json')

@@ -3,7 +3,7 @@ name: ci-hound
 description: >-
   **WORKFLOW SKILL** - Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows. USE FOR: ci-hound, monitor main CI, watch GitHub Actions workflows, auto-repair broken main builds, profile slow CI steps, harvest workflow flakes, optimize GitHub Actions. DO NOT USE FOR: single pull request delivery without continuous branch monitoring (use pr), implementing a feature issue end to end (use go), standalone test suite audits without GitHub Actions monitoring (use test-doctor).
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # CI Hound
@@ -60,6 +60,12 @@ Every repair or optimization created or tracked by `ci-hound` must be monitored 
 - Pass the selected `--merge` mode, its user-authorization source, squash strategy, and branch-cleanup choice through to `go` and `pr`.
 
 ## Workflow
+
+The bundled watcher uses async Octokit requests with host/credential-scoped caches.
+Treat `POLL_ERROR`, authentication failures, and incomplete inventories as degraded
+observations, never as green CI. Keep the user's existing repository scope when
+re-arming. Optional `--events-file <session-subscription-file>` publishes bounded
+progress notifications only; it does not authorize remediation or merge.
 
 1. **Confirm target scope, branch, and merge mode**:
    - Check the saved watchlist in `~/.copilot/ci-hound/config.json` first. Pass `--repo <owner/repo>` or `--repos <owner/repo,...>` only when the user explicitly requests a repository override; when no watchlist is configured and no override is given, `ci-hound-daemon.mjs` automatically falls back to the current git checkout.

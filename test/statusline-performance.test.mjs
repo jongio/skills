@@ -140,10 +140,12 @@ test("scope includes runtime, setup, manifests and gate self-changes but ignores
 		"scripts/setup-statusline.mjs", "scripts/benchmark-statuslines.mjs",
 		"scripts/statusline-performance-offline.mjs", "scripts/compare-statusline-performance.mjs",
 		"test/statusline-performance.test.mjs", ".github/workflows/statusline-performance.yml",
+		"test/github-runtime.test.mjs", "runtime/github-client/client.mjs", "runtime/github-client/package-lock.json",
 		"install-statusline.ps1", "install-statusline.sh",
 	]) assert.ok(isRelevantPath(path), path);
 	for (const path of [
 		"README.md", "extensions/worktree-statusline/README.md", "extensions/pr-statusline/screenshot.png",
+		"runtime/github-client/README.md",
 		"site/src/pages/index.astro", "skills/eli5/SKILL.md", "scripts/unrelated.mjs",
 	]) assert.equal(isRelevantPath(path), false, path);
 });

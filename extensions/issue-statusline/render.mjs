@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { ICONS, syncSession } from "./tracker.mjs";
+import { ISSUE_OPEN_TTL_MS, ISSUE_CLOSED_TTL_MS } from "./github.mjs";
 import { shouldUseNerdFont, toUnicodeIcons } from "./compose.mjs";
 
 const clean = (text) => String(text).replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
@@ -44,7 +45,9 @@ function issueAttentionLevel(rawStatus) {
 function formatIssueItem(issue, _currentRepo, { links, color, nerdFont = true }) {
 	const displayLabel = issue.label;
 	let raw = issue.status ? clean(issue.status).trim() : "";
-	const level = issueAttentionLevel(raw);
+	if (issue.stale) raw += " (stale)";
+	const attention = issueAttentionLevel(raw);
+	const level = issue.stale && attention !== "critical" ? "attention" : attention;
 	const theme = PALETTE[level] ?? PALETTE.neutral;
 	let leadIcon = `${ICONS.open} `;
 	if (raw.startsWith(ICONS.closed)) {
@@ -78,9 +81,11 @@ export function renderEntries(payload, {
 	if (!state || !state.issues.length) return [];
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: false });
 	const currentRepo = state.repository || null;
-	return state.issues.map((item) => ({
-		...item, text: formatIssueItem(item, currentRepo, { links, color, nerdFont: useNerdFont }).mid,
-	}));
+	return state.issues.map((issue) => {
+		const ttl = issueCacheTtlMs ?? (issue.closedAt ? ISSUE_CLOSED_TTL_MS : ISSUE_OPEN_TTL_MS);
+		const item = issue.checkedAt > 0 && now - issue.checkedAt >= ttl ? { ...issue, stale: true } : issue;
+		return { ...item, text: formatIssueItem(item, currentRepo, { links, color, nerdFont: useNerdFont }).mid };
+	});
 }
 
 export function render(payload, options = {}) {

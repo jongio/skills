@@ -504,7 +504,7 @@ function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = f
 	return startOffset + lastNewline + 1;
 }
 
-function inspectWorkspaceMetadata(tracker, sessionDir, { home, now, useGh }) {
+function inspectWorkspaceMetadata(tracker, sessionDir, { home, now }) {
 	const wsPath = join(sessionDir, "workspace.yaml");
 	if (!existsSync(wsPath)) return false;
 	let changed = false;
@@ -532,26 +532,15 @@ function inspectWorkspaceMetadata(tracker, sessionDir, { home, now, useGh }) {
 			const worktreePr = /\bpr-review-[\w.-]+-([1-9]\d*)-[0-9a-f]{7,}\b/i.exec(cwd);
 			if (worktreePr) tracker.add(`https://${tracker.host}/${tracker.repository}/pull/${worktreePr[1]}`);
 		}
-		if (useGh && tracker.repository && branch &&
+		if (tracker.repository && branch &&
 				!["main", "master", "HEAD"].includes(branch) &&
 				!branch.startsWith("detached@") &&
 				!/^pr-[1-9]\d*$/i.test(branch)) {
 			const cache = readPrCache(home);
-			const key = `branch:${tracker.repository}:${branch}`;
+			const key = `branch:${tracker.host}/${tracker.repository}:${branch}`;
 			const cached = cache[key];
 			let branchPr = cached && now - cached.checkedAt < (cached.ttlMs ?? PR_SETTLED_TTL_MS) ? cached.data : undefined;
-			if (branchPr === undefined && (!cached?.refreshingUntil || cached.refreshingUntil <= now)) {
-				cache[key] = { ...(cached ?? {}), refreshingUntil: now + 8000 };
-				writePrCache(cache, home);
-				branchPr = queryBranchPrWithGh(tracker.repository, branch);
-				cache[key] = {
-					data: branchPr,
-					checkedAt: now,
-					ttlMs: PR_SETTLED_TTL_MS,
-					refreshingUntil: 0,
-				};
-				writePrCache(cache, home);
-			}
+
 			if (branchPr?.url) {
 				tracker.add(branchPr.url);
 				const added = tracker.state.prs.find((p) => p.url === branchPr.url);
@@ -581,12 +570,13 @@ function inspectWorkspaceMetadata(tracker, sessionDir, { home, now, useGh }) {
 export function refreshTrackedPrStatuses(tracker, {
 	home = configHome(),
 	now = Date.now(),
-	fetchPrStatus = queryPrStatusWithGh,
+	fetchPrStatus,
 	prCacheTtlMs,
 	force = false,
+	prefetched = false,
 	onError,
 } = {}) {
-	return refreshTrackedPrStatusesImpl(tracker, { home, now, fetchPrStatus, prCacheTtlMs, force, onError });
+	return refreshTrackedPrStatusesImpl(tracker, { home, now, fetchPrStatus, prCacheTtlMs, force, prefetched, onError });
 }
 
 export function syncSession(payload, {
@@ -634,9 +624,7 @@ export function syncSession(payload, {
 	let changed = Boolean(previous && previous.mergeStateVersion !== tracker.state.mergeStateVersion) ||
 		((hasTranscript || hasWorkspace) && (!previous || reset));
 	if (initializeMergedPrs(tracker, now)) changed = true;
-	const useDefaultGh = fetchPrStatus === undefined && (hasTranscript || hasWorkspace);
-
-	if ((hasTranscript || hasWorkspace) && inspectWorkspaceMetadata(tracker, sessionDir, { home, now, useGh: useDefaultGh })) {
+	if ((hasTranscript || hasWorkspace) && inspectWorkspaceMetadata(tracker, sessionDir, { home, now })) {
 		changed = true;
 	}
 
@@ -679,8 +667,9 @@ export function syncSession(payload, {
 
 	const statusFetcher = typeof fetchPrStatus === "function"
 		? fetchPrStatus
-		: (fetchPrStatus !== false && (hasTranscript || hasWorkspace) ? queryPrStatusWithGh : null);
-	if (statusFetcher && refreshTrackedPrStatuses(tracker, { home, now, fetchPrStatus: statusFetcher, prCacheTtlMs })) {
+		: undefined;
+	if (fetchPrStatus !== false && (statusFetcher || hasTranscript || hasWorkspace) &&
+			refreshTrackedPrStatuses(tracker, { home, now, fetchPrStatus: statusFetcher, prCacheTtlMs })) {
 		changed = true;
 	}
 

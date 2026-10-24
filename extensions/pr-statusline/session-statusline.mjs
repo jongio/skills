@@ -15,6 +15,7 @@ import {
 	checkoutDivergence, readJson, sessionContexts, transcriptIdentity, withSessionDirectory, writeJson,
 } from "../worktree-statusline/tracker.mjs";
 import { resolveLinkedCheckouts } from "../worktree-statusline/worktrees.mjs";
+import { prefetchStatuses } from "../github-refresh.mjs";
 
 export function clearSessionStatusline(payload, { home = configHome(), now = Date.now() } = {}) {
 	const id = payload?.session_id;
@@ -83,8 +84,9 @@ export function clearSessionStatusline(payload, { home = configHome(), now = Dat
 	}, { home });
 }
 
-export function refreshSessionStatusline(payload, {
+export async function refreshSessionStatusline(payload, {
 	home = configHome(), now = Date.now(), fetchPrStatus, fetchIssueStatus, run,
+	force = true, remoteOnly = false, signal,
 } = {}) {
 	const id = payload?.session_id;
 	const prs = new SessionTracker(id, readState(id, home));
@@ -102,8 +104,10 @@ export function refreshSessionStatusline(payload, {
 		for (const url of agent.prs) remotePrs.add(url);
 	}
 	for (const [label, refresh] of [
-		["PRs", () => {
-			refreshTrackedPrStatuses(remotePrs, { home, now, fetchPrStatus, force: true, onError });
+		["PRs", async () => {
+			const fetch = await prefetchStatuses("pr", remotePrs.state.prs, { home, now, force, fetchStatus: fetchPrStatus, signal });
+			signal?.throwIfAborted();
+			refreshTrackedPrStatuses(remotePrs, { home, now, fetchPrStatus: fetch, force, prefetched: true, onError });
 			const saved = updateState(id, (current) => {
 				current ??= prs.snapshot();
 				if ((current.clearedAt ?? 0) !== prs.state.clearedAt) return current;
@@ -111,8 +115,10 @@ export function refreshSessionStatusline(payload, {
 			}, home);
 			prs.state.prs = saved.prs;
 		}],
-		["Issues", () => {
-			refreshTrackedIssueStatuses(issues, { home, now, fetchIssueStatus, force: true, onError });
+		["Issues", async () => {
+			const fetch = await prefetchStatuses("issue", issues.state.issues, { home, now, force, fetchStatus: fetchIssueStatus, signal });
+			signal?.throwIfAborted();
+			refreshTrackedIssueStatuses(issues, { home, now, fetchIssueStatus: fetch, force, prefetched: true, onError });
 			updateIssues(id, (current) => {
 				current ??= issues.snapshot();
 				if ((current.clearedAt ?? 0) !== issues.state.clearedAt) return current;
@@ -133,14 +139,16 @@ export function refreshSessionStatusline(payload, {
 			}, home);
 		}],
 		["Worktrees", () => {
+			if (remoteOnly) return;
 			const { contexts, catchingUp } = sessionContexts(payload, { home, run, force: true });
 			if (catchingUp) throw new Error("Transcript replay is still catching up; retry refresh after the next footer update.");
 			const linked = resolveLinkedCheckouts(payload, contexts, prs.state.prs, { home, now, run, force: true });
 			for (const context of [...contexts, ...linked]) checkoutDivergence(context, prs.state.prs, { run, force: true });
 		}],
 	]) {
+		if (signal?.aborted) break;
 		try {
-			refresh();
+			await refresh();
 		} catch (error) {
 			onError(new Error(`${label}: ${error.message}`));
 		}

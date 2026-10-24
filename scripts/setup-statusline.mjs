@@ -6,6 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
+export const SHARED_RUNTIME_FILES = [
+	"state-lock.mjs", "github-client.mjs", "github-client.LICENSE",
+	"github-transport.mjs", "github-refresh.mjs", "refresh-github.mjs",
+];
 
 export const EXTENSION_CATALOG = [
 	{
@@ -104,14 +108,30 @@ export function configureStatuslines({
 	home = process.env.COPILOT_HOME || join(homedir(), ".copilot"),
 	repoRoot = REPO_ROOT,
 	nodePath = process.execPath,
+	notifications = false,
+	notificationOnly = false,
 } = {}) {
 	mkdirSync(home, { recursive: true });
 	const extRoot = join(home, "extensions");
 	mkdirSync(extRoot, { recursive: true });
-	copyFileSync(join(repoRoot, "extensions", "state-lock.mjs"), join(extRoot, "state-lock.mjs"));
+	for (const file of SHARED_RUNTIME_FILES) {
+		copyFileSync(join(repoRoot, "extensions", file), join(extRoot, file));
+	}
+	if (notifications) {
+		const target = join(extRoot, "daemon-notifications");
+		mkdirSync(target, { recursive: true });
+		for (const file of ["extension.mjs", "bridge.mjs"]) {
+			copyFileSync(join(repoRoot, "extensions", "daemon-notifications", file), join(target, file));
+		}
+	}
 	const composerPath = join(home, "statusline-compose.mjs");
 	const configPath = join(home, "statusline-config.json");
 	const settingsPath = join(home, "settings.json");
+	if (notificationOnly) {
+		let current = [];
+		try { current = JSON.parse(readFileSync(configPath, "utf8")).enabled || []; } catch {}
+		return { home, composerPath, configPath, settingsPath, enabled: current };
+	}
 
 	let combinedEnabled = [...enabled];
 	if (merge && existsSync(configPath)) {
@@ -225,6 +245,7 @@ async function main() {
 			"  --subagents    Enable Subagents statusline (subagent-statusline)",
 			"  --worktrees    Enable Branch and Worktree statusline (worktree-statusline)",
 			"  --merge        Merge enabled flag(s) with existing statusline-config.json",
+			"  --notifications Install the opt-in daemon notification bridge",
 			"  --no-prs       Disable Pull Requests statusline",
 			"  --no-issues    Disable GitHub Issues statusline",
 			"  --no-subagents Disable Subagents statusline",
@@ -233,7 +254,13 @@ async function main() {
 		return;
 	}
 	const merge = argv.includes("--merge");
+	const notificationOnly = argv.includes("--notifications") && parseStatuslineArgs(argv) === null;
 	let enabled = parseStatuslineArgs(argv);
+	if (enabled === null && argv.includes("--notifications")) {
+		try {
+			enabled = JSON.parse(readFileSync(join(process.env.COPILOT_HOME || join(homedir(), ".copilot"), "statusline-config.json"), "utf8")).enabled || [];
+		} catch { enabled = []; }
+	}
 	if (enabled === null) {
 		if (!process.stdin.isTTY) {
 			enabled = EXTENSION_CATALOG.map((e) => e.id);
@@ -241,8 +268,10 @@ async function main() {
 			enabled = await promptStatuslineSelection();
 		}
 	}
-	const result = configureStatuslines({ enabled, merge });
-	if (result.enabled.length === 0) {
+	const result = configureStatuslines({ enabled, merge, notifications: argv.includes("--notifications"), notificationOnly });
+	if (notificationOnly) {
+		console.log("\nInstalled optional daemon notifications. Existing footer settings are unchanged.");
+	} else if (result.enabled.length === 0) {
 		console.log("\nDisabled custom statuslines in settings.json.");
 	} else {
 		console.log(`\nConfigured Copilot CLI statusline (${result.enabled.join(", ")})`);

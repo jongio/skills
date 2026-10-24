@@ -405,12 +405,13 @@ function inspectWorkspaceMetadata(tracker, sessionDir) {
 export function refreshTrackedIssueStatuses(tracker, {
 	home = configHome(),
 	now = Date.now(),
-	fetchIssueStatus = queryIssueStatusWithGh,
+	fetchIssueStatus,
 	issueCacheTtlMs,
 	force = false,
+	prefetched = false,
 	onError,
 } = {}) {
-	return refreshTrackedIssueStatusesImpl(tracker, { home, now, fetchIssueStatus, issueCacheTtlMs, force, onError });
+	return refreshTrackedIssueStatusesImpl(tracker, { home, now, fetchIssueStatus, issueCacheTtlMs, force, prefetched, onError });
 }
 
 export function syncSession(payload, {
@@ -481,8 +482,9 @@ export function syncSession(payload, {
 
 	const statusFetcher = typeof fetchIssueStatus === "function"
 		? fetchIssueStatus
-		: (fetchIssueStatus !== false && (hasTranscript || hasWorkspace) ? queryIssueStatusWithGh : null);
-	if (statusFetcher && refreshTrackedIssueStatuses(tracker, { home, now, fetchIssueStatus: statusFetcher, issueCacheTtlMs })) {
+		: undefined;
+	if (fetchIssueStatus !== false && (statusFetcher || hasTranscript || hasWorkspace) &&
+			refreshTrackedIssueStatuses(tracker, { home, now, fetchIssueStatus: statusFetcher, issueCacheTtlMs })) {
 		changed = true;
 	}
 

@@ -360,19 +360,19 @@ test("late linked checkouts receive PR-base enrichment once without repeating fu
 	assert.ok(!output.includes(`${cwd} [`), output);
 }));
 
-test("both GraphQL queries normalize and persist explicit PR base metadata through fresh shared caches", async () => fixture((home) => {
+test("both GraphQL queries normalize and persist explicit PR base metadata through fresh shared caches", async () => fixture(async (home) => {
 	const raw = { state: "OPEN", headRefName: "feat/login", headRepository: { url: fork },
 		baseRefName: "release", baseRepository: { url: widget } };
 	const queries = [];
-	const run = (args) => {
-		const query = args.find((arg) => arg.startsWith("query="));
+	const request = async (request) => {
+		const query = request.query;
 		queries.push(query);
 		assert.match(query, /\bbaseRefName\b/);
 		assert.match(query, /baseRepository\{url\}/);
-		const repository = args.includes("number=1") ? { pullRequest: raw } : { pullRequests: { nodes: [raw] } };
-		return { status: 0, stdout: JSON.stringify({ data: { repository } }) };
+		const repository = request.variables.number === 1 ? { pullRequest: raw } : { pullRequests: { nodes: [raw] } };
+		return { ok: true, status: 200, data: { data: { repository } } };
 	};
-	for (const info of [queryPrStatusWithGh(url, { run }), queryBranchPrWithGh("example/widget", "feat/login", { run })]) {
+	for (const info of [await queryPrStatusWithGh(url, { request }), await queryBranchPrWithGh("example/widget", "feat/login", { request })]) {
 		assert.deepEqual(prContextFields(info), {
 			headRefName: "feat/login", headRepositoryUrl: fork, baseRefName: "release", baseRepositoryUrl: widget,
 		});

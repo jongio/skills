@@ -1,3 +1,4 @@
+import { statuslineGitHub } from "../../github-transport.mjs";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
 import fs from "node:fs";
@@ -6,7 +7,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { collect } from "../collector.mjs";
+import { collect as collectNative } from "../collector.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "../session-statusline.mjs";
 import { readPrCache, writePrCache } from "../github.mjs";
 import { SessionTracker, readState, refreshTrackedPrStatuses, syncSession, writeState } from "../tracker.mjs";
@@ -15,6 +16,7 @@ import { readIssueCache, writeIssueCache } from "../../issue-statusline/github.m
 import { readState as readAgents, SubagentTracker, syncSession as syncAgents, writeState as writeAgents } from "../../subagent-statusline/tracker.mjs";
 import { checkoutDivergence, checkoutKey, readJson, sessionContexts, sessionDirectory, writeJson } from "../../worktree-statusline/tracker.mjs";
 import { resolveLinkedCheckouts } from "../../worktree-statusline/worktrees.mjs";
+const collect = (session, options) => collectNative(session, { ...options, refreshRemote: false });
 
 const prUrl = (n) => `https://github.com/example/widget/pull/${n}`;
 const issueUrl = (n) => `https://github.com/example/widget/issues/${n}`;
@@ -50,18 +52,15 @@ function fakeGit(_binary, args) {
 }
 function mockGithub(t, replies) {
 	const calls = [];
-	t.mock.method(childProcess, "spawnSync", (binary, args) => {
-		assert.equal(binary, "gh");
-		const kind = args.some((arg) => arg.includes("query=") && arg.includes("pullRequest(")) ? "pullRequest" : "issue";
-		const number = Number(args.find((arg) => /^number=/.test(arg))?.split("=")[1]);
-		calls.push([kind, number]);
-		return { status: 0, stdout: JSON.stringify({ data: { repository: { [kind]: replies(kind, number) } } }) };
-	});
-	syncBuiltinESMExports();
-	t.after(() => {
-		t.mock.restoreAll();
-		syncBuiltinESMExports();
-	});
+
+  t.mock.method(statuslineGitHub, "cacheScope", async () => "fixture");
+  t.mock.method(statuslineGitHub, "request", async (request) => {
+    const kind = request.query.includes("pullRequest(") ? "pullRequest" : "issue";
+    const number = request.variables.number;
+    calls.push([kind, number]);
+    return { ok: true, status: 200, headers: {}, cacheScope: "fixture",
+      data: { data: { repository: { [kind]: replies(kind, number) } } } };
+  });
 	return calls;
 }
 
@@ -196,7 +195,7 @@ test("a running collector retains context discovered by clear before saving or t
 }));
 
 for (const activity of ["context", "shell"]) {
-	test(`post-clear subagent ${activity} activity does not expose the retained root checkout before new successful root work`, async () => fixture((home) => {
+	test(`post-clear subagent ${activity} activity does not expose the retained root checkout before new successful root work`, async () => fixture(async (home) => {
 		const id = `agent-${activity}`;
 		const payload = { session_id: id, cwd: home };
 		const agentDirectory = join(home, "agent-checkout");
@@ -231,7 +230,7 @@ for (const activity of ["context", "shell"]) {
 }
 
 for (const reindexed of [false, true]) {
-	test(`clear preserves hidden agent directory context for new relative commands${reindexed ? " after cache re-indexing" : ""}`, async () => fixture((home) => {
+	test(`clear preserves hidden agent directory context for new relative commands${reindexed ? " after cache re-indexing" : ""}`, async () => fixture(async (home) => {
 		const id = "relative-agent";
 		const payload = { session_id: id, cwd: home };
 		const first = join(home, "first"), second = join(home, "second");
@@ -260,7 +259,7 @@ for (const reindexed of [false, true]) {
 }
 
 for (const agentId of [null, "child"]) {
-	test(`re-indexing after post-clear relative ${agentId ? "agent" : "root"} work starts from the clear-time directory baseline`, async () => fixture((home) => {
+	test(`re-indexing after post-clear relative ${agentId ? "agent" : "root"} work starts from the clear-time directory baseline`, async () => fixture(async (home) => {
 		const id = "relative-replay";
 		const payload = { session_id: id, cwd: home };
 		const agentDirectory = join(home, "agent");
@@ -284,7 +283,7 @@ for (const agentId of [null, "child"]) {
 	}));
 }
 
-test("clear reports incomplete worktree replay instead of skipping unread root and agent directory context", async () => fixture((home) => {
+test("clear reports incomplete worktree replay instead of skipping unread root and agent directory context", async () => fixture(async (home) => {
 	const id = "large-clear";
 	const payload = { session_id: id, cwd: home };
 	const latestRoot = join(home, "latest-root"), latestAgent = join(home, "latest-agent");
@@ -313,7 +312,7 @@ test("clear reports incomplete worktree replay instead of skipping unread root a
 	assert.deepEqual(location.directories, [join(latestRoot, "root-child"), join(latestAgent, "agent-child")]);
 }));
 
-test("clear waits for a complete transcript record before capturing its directory baseline", async () => fixture((home) => {
+test("clear waits for a complete transcript record before capturing its directory baseline", async () => fixture(async (home) => {
 	const id = "partial-clear";
 	const payload = { session_id: id, cwd: home };
 	const latest = join(home, "latest");
@@ -327,7 +326,7 @@ test("clear waits for a complete transcript record before capturing its director
 }));
 
 for (const agentId of [null, "child"]) {
-	test(`clear rejects a partial ${agentId ? "agent" : "root"} directory record appended during component synchronization`, async (t) => fixture((home) => {
+	test(`clear rejects a partial ${agentId ? "agent" : "root"} directory record appended during component synchronization`, async (t) => fixture(async (home) => {
 		const id = "append-during-clear";
 		const payload = { session_id: id, cwd: home };
 		const latest = join(home, "latest");
@@ -369,7 +368,7 @@ for (const agentId of [null, "child"]) {
 	}));
 }
 
-test("clear rejects a transcript replaced after replay and before dismissal", async (t) => fixture((home) => {
+test("clear rejects a transcript replaced after replay and before dismissal", async (t) => fixture(async (home) => {
 	const id = "replace-during-clear";
 	const payload = { session_id: id, cwd: home };
 	const file = transcript(home, id, [event("session.start", 1000, { cwd: home })]);
@@ -399,7 +398,7 @@ test("clear rejects a transcript replaced after replay and before dismissal", as
 }));
 
 for (const kind of ["PR message", "repository context", "issue message", "subagent start"]) {
-	test(`clear preserves component cursors for a complete ${kind} arriving between synchronization steps`, async (t) => fixture((home) => {
+	test(`clear preserves component cursors for a complete ${kind} arriving between synchronization steps`, async (t) => fixture(async (home) => {
 		const id = "complete-interleaving";
 		const payload = { session_id: id, cwd: home };
 		const file = transcript(home, id, [event("session.start", 1000, { cwd: home, repository: "example/widget" })]);
@@ -454,7 +453,7 @@ for (const kind of ["PR message", "repository context", "issue message", "subage
 }
 
 for (const agentId of [null, "child"]) {
-	test(`clear excludes a concurrent complete relative ${agentId ? "agent" : "root"} command from baseline replay without losing component activity`, async (t) => fixture((home) => {
+	test(`clear excludes a concurrent complete relative ${agentId ? "agent" : "root"} command from baseline replay without losing component activity`, async (t) => fixture(async (home) => {
 		const id = "baseline-interleaving";
 		const payload = { session_id: id, cwd: home };
 		const agentDirectory = join(home, "agent");
@@ -510,7 +509,7 @@ for (const agentId of [null, "child"]) {
 }
 
 for (const kind of ["file", "directory"]) {
-	test(`clear consistently normalizes padded transcript ${kind} paths for replay and validation`, async () => fixture((home) => {
+	test(`clear consistently normalizes padded transcript ${kind} paths for replay and validation`, async () => fixture(async (home) => {
 		const id = "normalized-path";
 		const file = transcript(home, id, [event("session.start", 1000, { cwd: home })]);
 		const explicitPath = kind === "file" ? file : join(home, "session-state", id);
@@ -529,7 +528,7 @@ for (const kind of ["file", "directory"]) {
 	}));
 }
 
-test("clear without a transcript suppresses payload directory fallback and remains repeatable", async () => fixture((home) => {
+test("clear without a transcript suppresses payload directory fallback and remains repeatable", async () => fixture(async (home) => {
 	const payload = { session_id: "empty", cwd: home };
 	seed(home, "empty");
 	for (const [read, write] of [[readState, writeState], [readIssues, writeIssues], [readAgents, writeAgents]]) {
@@ -543,7 +542,7 @@ test("clear without a transcript suppresses payload directory fallback and remai
 	for (const read of [readState, readIssues, readAgents]) assert.equal(read("empty", home).transcriptOffset, 0);
 }));
 
-test("refresh bypasses per-item TTLs, shared caches and in-flight locks, preserves tracking and settings, and updates agent-only PRs", async (t) => fixture((home) => {
+test("refresh bypasses per-item TTLs, shared caches and in-flight locks, preserves tracking and settings, and updates agent-only PRs", async (t) => fixture(async (home) => {
 	const id = "refresh";
 	seed(home, id);
 	seed(home, "other");
@@ -568,7 +567,7 @@ test("refresh bypasses per-item TTLs, shared caches and in-flight locks, preserv
 	const calls = mockGithub(t, (kind, number) => kind === "issue"
 		? { state: "OPEN", title: "Reopened issue" }
 		: { state: number === 3 ? "MERGED" : "OPEN", title: "Fresh PR" });
-	assert.match(refreshSessionStatusline({ session_id: id }, { home, now: 10000 }), /^Refreshed/);
+	assert.match(await refreshSessionStatusline({ session_id: id }, { home, now: 10000 }), /^Refreshed/);
 	assert.deepEqual(calls, [["pullRequest", 1], ["pullRequest", 3], ["issue", 2]]);
 	assert.equal(readState(id, home).prs.length, 1);
 	assert.equal(readState(id, home).prs[0].title, "Fresh PR");
@@ -584,10 +583,10 @@ test("refresh bypasses per-item TTLs, shared caches and in-flight locks, preserv
 	protectedPaths.forEach((path, i) => assert.equal(readFileSync(path, "utf8"), before[i]));
 }));
 
-test("refresh reports partial failures explicitly and leaves failed items tracked with their prior observations", async () => fixture((home) => {
+test("refresh reports partial failures explicitly and leaves failed items tracked with their prior observations", async () => fixture(async (home) => {
 	seed(home, "failure");
 	transcript(home, "failure", [event("session.start", 1000, { cwd: home })]);
-	const result = refreshSessionStatusline({ session_id: "failure" }, {
+	const result = await refreshSessionStatusline({ session_id: "failure" }, {
 		home, now: 2000, fetchPrStatus: () => { throw new Error("offline"); },
 		fetchIssueStatus: () => null, run: () => { throw new Error("Git unavailable"); },
 	});
@@ -600,13 +599,13 @@ test("refresh reports partial failures explicitly and leaves failed items tracke
 	assert.equal(readIssues("failure", home).issues.length, 1);
 }));
 
-test("default GitHub issue refresh reports a fetch failure and releases its shared-cache lock", async (t) => fixture((home) => {
+test("default GitHub issue refresh reports a fetch failure and releases its shared-cache lock", async (t) => fixture(async (home) => {
 	seed(home, "default-failure");
 	mockGithub(t, (kind) => {
 		if (kind === "issue") throw new Error("GitHub unavailable");
 		return { state: "OPEN" };
 	});
-	const result = refreshSessionStatusline({ session_id: "default-failure" }, { home, now: 2000 });
+	const result = await refreshSessionStatusline({ session_id: "default-failure" }, { home, now: 2000 });
 	assert.match(result, /^Session statusline refresh incomplete:/);
 	assert.match(result, /example\/widget#2: GitHub unavailable/);
 	assert.equal(readIssues("default-failure", home).issues.length, 1);
@@ -614,7 +613,7 @@ test("default GitHub issue refresh reports a fetch failure and releases its shar
 	assert.equal(readIssueCache(home)[issueUrl(2)].refreshingUntil, 0);
 }));
 
-test("refresh merges observations into current PR, issue and agent state without erasing interleaved tracking changes", async (t) => fixture((home) => {
+test("refresh merges observations into current PR, issue and agent state without erasing interleaved tracking changes", async (t) => fixture(async (home) => {
 	const id = "interleaved";
 	seed(home, id);
 	const initialPrs = new SessionTracker(id, readState(id, home));
@@ -658,7 +657,7 @@ test("refresh merges observations into current PR, issue and agent state without
 		}
 		return { state: "OPEN", title: "older observation" };
 	});
-	assert.match(refreshSessionStatusline({ session_id: id }, { home, now: 2000 }), /^Refreshed/);
+	assert.match(await refreshSessionStatusline({ session_id: id }, { home, now: 2000 }), /^Refreshed/);
 	assert.ok(calls.length >= 4);
 	const prs = readState(id, home);
 	assert.deepEqual(prs.prs.map((pr) => pr.url), [prUrl(4), prUrl(9)]);
@@ -681,7 +680,7 @@ test("refresh merges observations into current PR, issue and agent state without
 	assert.equal(agents.taskCalls["new-task-call"], "new-agent");
 }));
 
-test("refresh does not apply settlement observations based on stale agent PR membership", async (t) => fixture((home) => {
+test("refresh does not apply settlement observations based on stale agent PR membership", async (t) => fixture(async (home) => {
 	const id = "interleaved-link";
 	seed(home, id);
 	const initial = new SubagentTracker(id, readAgents(id, home));
@@ -697,7 +696,7 @@ test("refresh does not apply settlement observations based on stale agent PR mem
 		}
 		return { state: "OPEN" };
 	});
-	assert.match(refreshSessionStatusline({ session_id: id }, { home, now: 2000 }), /^Refreshed/);
+	assert.match(await refreshSessionStatusline({ session_id: id }, { home, now: 2000 }), /^Refreshed/);
 	const latest = new SubagentTracker(id, readAgents(id, home));
 	const agent = latest.agents.get("old-agent");
 	assert.deepEqual(agent.prs, [prUrl(1), prUrl(4)]);
@@ -707,10 +706,10 @@ test("refresh does not apply settlement observations based on stale agent PR mem
 	assert.equal(latest.counts().inPr, 1);
 }));
 
-test("a clear during remote refresh remains authoritative for every component", async () => fixture((home) => {
+test("a clear during remote refresh remains authoritative for every component", async () => fixture(async (home) => {
 	const id = "clear-during-refresh";
 	seed(home, id);
-	assert.match(refreshSessionStatusline({ session_id: id }, {
+	assert.match(await refreshSessionStatusline({ session_id: id }, {
 		home, now: 1000,
 		fetchPrStatus: () => {
 			clearSessionStatusline({ session_id: id }, { home, now: 2000 });
@@ -724,9 +723,9 @@ test("a clear during remote refresh remains authoritative for every component", 
 	for (const read of [readState, readIssues, readAgents]) assert.equal(read(id, home).clearedAt, 2000);
 }));
 
-test("refresh does not remove tracked closed or missing items", async () => fixture((home) => {
+test("refresh does not remove tracked closed or missing items", async () => fixture(async (home) => {
 	seed(home, "closed");
-	assert.match(refreshSessionStatusline({ session_id: "closed" }, {
+	assert.match(await refreshSessionStatusline({ session_id: "closed" }, {
 		home, fetchPrStatus: () => ({ state: "CLOSED" }),
 		fetchIssueStatus: () => ({ state: "NOT_FOUND" }),
 	}), /^Refreshed/);
@@ -736,7 +735,7 @@ test("refresh does not remove tracked closed or missing items", async () => fixt
 	assert.equal(readIssues("closed", home).issues[0].status, "NOT_FOUND");
 }));
 
-test("normal refresh retains TTL behavior while forced refresh queries every tracked item", async () => fixture((home) => {
+test("normal refresh retains TTL behavior while forced refresh queries every tracked item", async () => fixture(async (home) => {
 	const tracker = new SessionTracker("ttl");
 	tracker.add(prUrl(1));
 	let calls = 0;
@@ -748,7 +747,7 @@ test("normal refresh retains TTL behavior while forced refresh queries every tra
 	assert.equal(calls, 2);
 }));
 
-test("forced Git refresh reads all tracked directories instead of just the rotating cache budget", async () => fixture((home) => {
+test("forced Git refresh reads all tracked directories instead of just the rotating cache budget", async () => fixture(async (home) => {
 	const paths = Array.from({ length: 20 }, (_, i) => join(home, `checkout-${i}`));
 	for (const path of paths) mkdirSync(path);
 	transcript(home, "git", paths.map((cwd) => event("session.context_changed", 1000, { cwd })));
@@ -760,7 +759,7 @@ test("forced Git refresh reads all tracked directories instead of just the rotat
 	assert.equal(reads, 80);
 }));
 
-test("forced linked-worktree refresh bypasses fresh inventories and surfaces Git errors", async () => fixture((home) => {
+test("forced linked-worktree refresh bypasses fresh inventories and surfaces Git errors", async () => fixture(async (home) => {
 	const root = join(home, "repo");
 	const linked = join(home, "linked");
 	mkdirSync(root);

@@ -2,6 +2,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { collect } from "./collector.mjs";
+import { requestedGitHubEnvironment } from "../github-transport.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
 import {
 	ensurePluginStatuslineRegistered,
@@ -29,6 +30,7 @@ function manage(action, reference) {
 }
 
 const session = await joinSession({
+	requestedEnvironmentVariables: requestedGitHubEnvironment(),
 	commands: [
 		{
 			name: "session-statusline",
@@ -41,7 +43,7 @@ const session = await joinSession({
 					} else if ((action === "clear" || action === "refresh") && !selection.length) {
 						if (!collector) throw new Error("Session statusline is still loading; retry shortly.");
 						const payload = { session_id: session.sessionId };
-						await session.log(action === "clear" ? clearSessionStatusline(payload) : refreshSessionStatusline(payload));
+						await session.log(action === "clear" ? clearSessionStatusline(payload) : await refreshSessionStatusline(payload));
 						collector.reload();
 					} else {
 						await session.log("Usage: /session-statusline [refresh | clear | setup [all | none | prs issues subagents worktrees]]");

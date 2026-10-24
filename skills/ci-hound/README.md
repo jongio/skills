@@ -49,6 +49,32 @@ node skills/ci-hound/scripts/ci-hound-daemon.mjs status
 node skills/ci-hound/scripts/ci-hound-daemon.mjs optimize
 ```
 
+## GitHub transport and degraded state
+
+The daemon ships a locked, self-contained Octokit runtime. End users do not need
+to install npm dependencies. Normal polling uses asynchronous GitHub REST/GraphQL
+requests, not a `gh api` subprocess for every request. `gh` remains necessary for
+credential discovery when no suitable environment token is configured.
+
+Requests have an overall deadline, safe reads have a bounded retry, and rejected
+gh-derived credentials are re-resolved once. Explicit environment credentials are
+never silently replaced with another account. `GH_HOST` and enterprise tokens
+select the corresponding API host; HTTP proxies and `NO_PROXY` are supported.
+Cached responses are scoped to the host and credentials. Authentication, network,
+JSON, or incomplete inventory failures cannot establish `ALL_GREEN` or
+`WATCHED_RUNS_GREEN`; last-known history remains diagnostic evidence only.
+
+For optional Copilot timeline notifications, subscribe with
+`/daemon-notifications subscribe ci`, then pass the returned file:
+
+```powershell
+node skills\ci-hound\scripts\ci-hound-daemon.mjs watch --events-file "<returned-file>"
+```
+
+This opt-in channel does not start watchers, prompt a model, trigger repairs, or
+change merge consent. Normal stdout and host completion wake-ups still work
+without it. Disable with `/daemon-notifications unsubscribe ci`.
+
 ## Development
 
 ```sh
