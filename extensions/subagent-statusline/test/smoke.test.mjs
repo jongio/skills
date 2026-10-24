@@ -316,7 +316,7 @@ try {
 				true,
 			);
 
-			// Explicit non-Nerd Font choice is never overwritten by ensureWindowsTerminalNerdFont
+			// Explicit non-Nerd Font choice (including legacy fontFace) and JSONC comments are never overwritten by ensureWindowsTerminalNerdFont
 			writeFileSync(fakeWtSettings, JSON.stringify({
 				defaultProfile: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
 				profiles: {
@@ -337,6 +337,34 @@ try {
 				JSON.parse(readFileSync(fakeWtSettings, "utf8")).profiles.defaults.font.face,
 				"Cascadia Code PL",
 			);
+			writeFileSync(fakeWtSettings, JSON.stringify({
+				defaultProfile: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+				profiles: {
+					defaults: {},
+					list: [{ guid: "{574e775e-4f2a-5b96-ac1e-a2962a402336}", name: "PowerShell", fontFace: "Consolas" }],
+				},
+			}, null, 4));
+			assert.equal(
+				ensureWindowsTerminalNerdFont({
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					isWsl: false,
+				}),
+				null,
+			);
+			const commentedWtSettings = `{\n  // user comment preserved\n  "profiles": {\n    "defaults": {},\n    "list": [{ "guid": "{574e775e-4f2a-5b96-ac1e-a2962a402336}", "name": "PowerShell" }]\n  }\n}\n`;
+			writeFileSync(fakeWtSettings, commentedWtSettings);
+			assert.equal(
+				ensureWindowsTerminalNerdFont({
+					wtSettingsPaths: [fakeWtSettings],
+					fontDirs: [fakeFontsDir],
+					wtProfileId: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+					isWsl: false,
+				}),
+				null,
+			);
+			assert.equal(readFileSync(fakeWtSettings, "utf8"), commentedWtSettings);
 
 			// When multiple Windows Terminal candidates exist (e.g. Stable + Preview), only heal the unambiguous profile match
 			const fakeWtStable = join(pluginHome, "wt-stable.json");

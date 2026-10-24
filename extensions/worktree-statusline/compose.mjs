@@ -255,14 +255,16 @@ export function ensureWindowsTerminalNerdFont({
 	for (const p of paths) {
 		if (!existsSync(p)) continue;
 		try {
-			const parsed = JSON.parse(stripJsonComments(readFileSync(p, "utf8")));
+			const raw = readFileSync(p, "utf8");
+			const stripped = stripJsonComments(raw);
+			const parsed = JSON.parse(stripped);
 			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
 			const list = Array.isArray(parsed?.profiles?.list) ? parsed.profiles.list : [];
 			const hasExplicitProfile = Boolean(
 				wtProfileId &&
 				list.some((prof) => String(prof?.guid ?? "").toLowerCase() === String(wtProfileId).toLowerCase()),
 			);
-			candidates.push({ path: p, parsed, hasExplicitProfile });
+			candidates.push({ path: p, raw, stripped, parsed, hasExplicitProfile });
 		} catch {
 			// Ignore unreadable or malformed candidate.
 		}
@@ -272,11 +274,12 @@ export function ensureWindowsTerminalNerdFont({
 		? candidates.filter((c) => c.hasExplicitProfile)
 		: candidates;
 	if (scoped.length !== 1) return null;
-	const { path: targetPath, parsed } = scoped[0];
+	const { path: targetPath, raw, stripped, parsed } = scoped[0];
+	if (raw !== stripped) return null;
 	try {
 		const matchedProfile = resolveWindowsTerminalProfile(parsed, { wtProfileId, wslDistroName, isWsl });
-		const defaultFace = String(parsed?.profiles?.defaults?.font?.face ?? "").trim();
-		const profileFace = String(matchedProfile?.font?.face ?? "").trim();
+		const defaultFace = String(parsed?.profiles?.defaults?.font?.face ?? parsed?.profiles?.defaults?.fontFace ?? "").trim();
+		const profileFace = String(matchedProfile?.font?.face ?? matchedProfile?.fontFace ?? "").trim();
 		if (profileFace || defaultFace) {
 			return isNerdFontName(profileFace || defaultFace) ? (profileFace || defaultFace) : null;
 		}
@@ -303,9 +306,9 @@ export function detectNerdFontFromWindowsTerminalSettings(settingsObj, {
 	isWsl = process.platform === "linux",
 } = {}) {
 	if (!settingsObj || typeof settingsObj !== "object") return null;
-	const defaultFace = settingsObj?.profiles?.defaults?.font?.face ?? "";
+	const defaultFace = settingsObj?.profiles?.defaults?.font?.face ?? settingsObj?.profiles?.defaults?.fontFace ?? "";
 	const matchedProfile = resolveWindowsTerminalProfile(settingsObj, { wtProfileId, wslDistroName, isWsl });
-	const effectiveFace = matchedProfile?.font?.face || defaultFace || "";
+	const effectiveFace = matchedProfile?.font?.face || matchedProfile?.fontFace || defaultFace || "";
 	return isNerdFontName(effectiveFace);
 }
 
