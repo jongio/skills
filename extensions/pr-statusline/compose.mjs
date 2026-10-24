@@ -228,7 +228,7 @@ function resolveWindowsTerminalProfile(settingsObj, {
 			matchedProfile = list.find((p) => String(p?.source ?? "").toLowerCase().includes("wsl")) ?? null;
 		}
 	}
-	if (!matchedProfile && !isWsl && settingsObj?.defaultProfile) {
+	if (!matchedProfile && !wtProfileId && !isWsl && settingsObj?.defaultProfile) {
 		const defTarget = String(settingsObj.defaultProfile).toLowerCase();
 		matchedProfile = list.find((p) =>
 			String(p?.guid ?? "").toLowerCase() === defTarget ||
@@ -245,6 +245,8 @@ export function ensureWindowsTerminalNerdFont({
 	wslDistroName = process.env.WSL_DISTRO_NAME,
 	isWsl = isWslEnvironment(),
 } = {}) {
+	const envChoice = String(process.env.COPILOT_STATUSLINE_ICONS ?? "").trim().toLowerCase();
+	if (["unicode", "ascii", "plain", "false", "0"].includes(envChoice)) return null;
 	if (isWsl && !wtSettingsPaths) return null;
 	const installedFace = detectInstalledWindowsNerdFontFace({ fontDirs });
 	if (!installedFace) return null;

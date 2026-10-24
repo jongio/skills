@@ -231,7 +231,7 @@ try {
 			assert.equal(parsedJsonc.commandline, "pwsh -Command \"Write-Output ',]'\", }");
 			assert.equal(parsedJsonc.profiles.defaults.font.face, "CaskaydiaCove Nerd Font Mono");
 
-			// Test defaultProfile fallback when WT_PROFILE_ID is unset
+			// Test defaultProfile fallback when WT_PROFILE_ID is unset (and not when WT_PROFILE_ID is set to an unknown GUID)
 			assert.equal(
 				detectNerdFontFromWindowsTerminalSettings(
 					{
@@ -244,6 +244,19 @@ try {
 					{ wtProfileId: "", isWsl: false },
 				),
 				true,
+			);
+			assert.equal(
+				detectNerdFontFromWindowsTerminalSettings(
+					{
+						defaultProfile: "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+						profiles: {
+							defaults: {},
+							list: [{ guid: "{574e775e-4f2a-5b96-ac1e-a2962a402336}", name: "PowerShell", font: { face: "CaskaydiaCove Nerd Font Mono" } }],
+						},
+					},
+					{ wtProfileId: "{99999999-9999-9999-9999-999999999999}", isWsl: false },
+				),
+				false,
 			);
 
 			// Test auto-healing Windows Terminal settings.json when defaults.font.face was reset but Nerd Font is installed
@@ -386,6 +399,25 @@ try {
 				}),
 				false,
 			);
+
+			// COPILOT_STATUSLINE_ICONS=unicode skips ensureWindowsTerminalNerdFont without modifying settings
+			const prevIconsEnv = process.env.COPILOT_STATUSLINE_ICONS;
+			process.env.COPILOT_STATUSLINE_ICONS = "unicode";
+			try {
+				assert.equal(
+					ensureWindowsTerminalNerdFont({
+						wtSettingsPaths: [fakeWtStable],
+						fontDirs: [fakeFontsDir],
+						wtProfileId: "{11111111-1111-1111-1111-111111111111}",
+						isWsl: false,
+					}),
+					null,
+				);
+				assert.equal(JSON.parse(readFileSync(fakeWtStable, "utf8")).profiles.defaults.font, undefined);
+			} finally {
+				if (prevIconsEnv === undefined) delete process.env.COPILOT_STATUSLINE_ICONS;
+				else process.env.COPILOT_STATUSLINE_ICONS = prevIconsEnv;
+			}
 		} finally {
 			rmSync(pluginHome, { recursive: true, force: true });
 		}
