@@ -101,9 +101,9 @@ function extractPrUrls(text) {
 }
 
 function extractGhPrNumber(command) {
-	const match = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(?:view|diff|checks|checkout|co|edit|review|comment|merge|close|reopen|ready)\b([^;&|\r\n]*)/.exec(command);
-	if (!match) return null;
-	const tokens = match[1].match(/"(?:\\.|`.|[^"\\`])*"|'(?:''|[^'])*'|\S+/g) ?? [];
+	const match = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(view|diff|checks|checkout|co|create|edit|review|comment|merge|close|reopen|ready)\b([^;&|\r\n]*)/.exec(command);
+	if (!match || match[1] === "create") return null;
+	const tokens = match[2].match(/"(?:\\.|`.|[^"\\`])*"|'(?:''|[^'])*'|\S+/g) ?? [];
 	let flags = true;
 	for (let i = 0; i < tokens.length; i++) {
 		const token = tokens[i].replace(/^["']|["']$/g, "");
@@ -111,7 +111,8 @@ function extractGhPrNumber(command) {
 			flags = false;
 			continue;
 		}
-		if (flags && /^(?:-R|--repo|-B|--base|-H|--head|-t|--title|-b|--body|--branch|--worktree|-F|--body-file|-r|--reviewer|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template)$/.test(token)) {
+		const reviewBoolean = match[1] === "review" && ["-c", "--comment", "-r"].includes(token);
+		if (flags && !reviewBoolean && /^(?:-R|--repo|-B|--base|-H|--head|-t|--title|-b|--body|--branch|--worktree|-F|--body-file|-c|--comment|-r|--reviewer|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template)$/.test(token)) {
 			i++;
 			continue;
 		}
@@ -145,6 +146,7 @@ export function writeState(state, home = configHome()) {
 		}
 		return {
 			...state, ignored: [...ignored],
+			dismissedThroughAt: Math.max(current?.dismissedThroughAt ?? 0, state.dismissedThroughAt ?? 0),
 			agents: Object.fromEntries(Object.entries(state.agents).filter(([id]) => !ignored.has(id))),
 			taskCalls: Object.fromEntries(Object.entries(state.taskCalls ?? {}).filter(([call, id]) => !ignored.has(call) && !ignored.has(id))),
 			agentToolCalls: Object.fromEntries(Object.entries(state.agentToolCalls ?? {}).filter(([, call]) => !ignored.has(call.agentId))),
@@ -173,6 +175,7 @@ export class SubagentTracker {
 		statePath(sessionId);
 		this.sessionId = sessionId;
 		this.clearedAt = previous?.clearedAt ?? 0;
+		this.dismissedThroughAt = Number.isFinite(previous?.dismissedThroughAt) ? previous.dismissedThroughAt : 0;
 		this.repository = previous?.repository ?? null;
 		this.host = previous?.host ?? "github.com";
 		this.lastUserInputAt = Number.isFinite(previous?.lastUserInputAt) ? previous.lastUserInputAt : 0;
@@ -274,11 +277,12 @@ export class SubagentTracker {
 		return [...this.agents.values()];
 	}
 
-	observe(event) {
+	observe(event, dismissedHistory = false) {
 		if (this.clearedAt && event.timestamp && Date.parse(event.timestamp) <= this.clearedAt) return;
 		const data = event.data ?? {};
 		const ts = event.timestamp ? Date.parse(event.timestamp) : NaN;
 		const eventTime = Number.isFinite(ts) ? ts : Date.now();
+		if (this.dismissedThroughAt && (!Number.isFinite(ts) || eventTime <= this.dismissedThroughAt)) dismissedHistory = true;
 
 		if (event.type === "session.start" || event.type === "session.resume" || event.type === "session.context_changed") {
 			const context = data.context ?? data;
@@ -302,6 +306,10 @@ export class SubagentTracker {
 
 		if (event.type === "subagent.started") {
 			const id = event.agentId || data.agentId || data.toolCallId;
+			if (dismissedHistory) {
+				if (id) this.ignored.add(id);
+				if (data.toolCallId) this.ignored.add(data.toolCallId);
+			}
 			if (this.ignored.has(id) || this.ignored.has(data.toolCallId)) return;
 			if (data.toolCallId && id && data.toolCallId !== id && this.agents.has(data.toolCallId)) {
 				const prior = this.agents.get(data.toolCallId);
@@ -360,6 +368,7 @@ export class SubagentTracker {
 
 			if (/(?:^|[._-])task$/.test(name)) {
 				const id = data.toolCallId;
+				if (dismissedHistory && id) this.ignored.add(id);
 				if (this.ignored.has(id)) return;
 				const rawDesc = String(args.description || String(args.prompt ?? "").split(/\r?\n/)[0] || "").trim().slice(0, 140);
 				this.ensureAgent(id, {
@@ -375,7 +384,11 @@ export class SubagentTracker {
 
 			const agentId = event.agentId || data.agentId;
 			if (agentId && this.agents.has(agentId)) {
-				const targetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
+				const reviewCommand = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+review\b/.exec(command);
+				const contentFlags = reviewCommand?.index === command.search(/\bgh\b/)
+					? /\s+(?:-b|--body|-t|--title|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g
+					: /\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g;
+				const targetText = command.replace(contentFlags, "");
 				const ghSubcommand = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(checkout|co|create|edit|review|comment|merge|ready|reopen)\b/.exec(targetText)?.[1];
 				const isPrCmd = Boolean(ghSubcommand) ||
 					/(?:^|[_-])(?:create_pull_request|update_pull_request|merge_pull_request)$/.test(name);
@@ -387,7 +400,7 @@ export class SubagentTracker {
 					const hasRepoArgument = /(?:^|\s)(?:--repo(?:=|\s|$)|-R)/.test(targetText);
 					const repository = explicitRepo ?? (changedDirectory || hasRepoArgument ? null : this.repository);
 					const host = repoArgument?.length === 3 ? repoArgument[0] : this.host;
-					const numMatch = args.pullNumber ?? args.pull_number ?? extractGhPrNumber(targetText);
+					const numMatch = args.pullNumber ?? args.pull_number ?? extractGhPrNumber(command);
 					const targets = extractPrUrls(targetText);
 					if (repository && /^[1-9]\d*$/.test(String(numMatch))) {
 						targets.push(`https://${host}/${repository}/pull/${numMatch}`);
@@ -501,6 +514,7 @@ export class SubagentTracker {
 			mergeStateVersion: 1,
 			sessionId: this.sessionId,
 			clearedAt: this.clearedAt,
+			dismissedThroughAt: this.dismissedThroughAt,
 			repository: this.repository,
 			host: this.host,
 			lastUserInputAt: this.lastUserInputAt,
@@ -516,7 +530,7 @@ export class SubagentTracker {
 	}
 }
 
-function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false) {
+function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false, replayed = null) {
 	if (length <= 0) return startOffset;
 	const buffer = Buffer.allocUnsafe(Math.min(length, READ_CHUNK_BYTES));
 	let position = startOffset, completed = startOffset;
@@ -534,7 +548,10 @@ function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = f
 				const line = (fragments.length ? Buffer.concat([...fragments, part]) : part).toString("utf8");
 				if (line.trim() && RELEVANT_EVENT_LINE.test(line)) {
 					try {
-						tracker.observe(JSON.parse(line));
+						const event = JSON.parse(line);
+						const time = Date.parse(event.timestamp);
+						const dismissedHistory = Boolean(replayed && (completed <= replayed.offset || !Number.isFinite(time) || time <= replayed.savedAt));
+						tracker.observe(event, dismissedHistory);
 					} catch {
 						// Ignore malformed transcript lines.
 					}
@@ -579,10 +596,14 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 		!Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new SubagentTracker(
 		sessionId,
-		reset ? { ...(previous?.simulated ? { agents: previous.agents, simulated: true } : {}), ignored: previous?.ignored, clearedAt: previous?.clearedAt,
+		reset ? { ...(previous?.simulated ? { agents: previous.agents, simulated: true } : {}), ignored: previous?.ignored, dismissed: previous?.dismissed,
+			dismissedThroughAt: previous?.dismissedThroughAt, clearedAt: previous?.clearedAt,
 			...(previous?.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);
 	let offset = reset ? 0 : tracker.transcriptOffset;
+	if (migrate && previous.dismissed && !previous.simulated && Number.isFinite(previous.updatedAt)) {
+		tracker.dismissedThroughAt = Math.max(tracker.dismissedThroughAt, previous.updatedAt);
+	}
 	let changed = Boolean(previous && (previous.mergeStateVersion !== 1 || previous.activeTrackingVersion !== 1)) ||
 		(hasTranscript && (!previous || reset));
 
@@ -593,12 +614,16 @@ export function syncSession(payload, { home = configHome(), now = Date.now() } =
 		const fd = openSync(transcriptFile, "r");
 		try {
 			let nextOffset = offset;
+			const replayed = migrate && previous.dismissed && !previous.simulated ? {
+				offset: Number.isInteger(previous.transcriptOffset) && previous.transcriptOffset <= stat.size ? previous.transcriptOffset : 0,
+				savedAt: Number.isFinite(previous.updatedAt) ? previous.updatedAt : Infinity,
+			} : null;
 			if (!migrate && offset === 0 && stat.size > INITIAL_HEAD_BYTES + INITIAL_TAIL_BYTES) {
-				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES, false);
+				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES, false, replayed);
 				const tailStart = stat.size - INITIAL_TAIL_BYTES;
-				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true);
+				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true, replayed);
 			} else {
-				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset, false);
+				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset, false, replayed);
 			}
 			if (nextOffset !== offset) {
 				tracker.transcriptOffset = nextOffset;

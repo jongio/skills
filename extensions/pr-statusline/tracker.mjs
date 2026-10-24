@@ -114,9 +114,9 @@ function urls(text, repository = null, host = "github.com") {
 }
 
 function extractGhPrNumber(command) {
-	const match = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(?:view|diff|checks|checkout|co|edit|review|comment|merge|close|reopen|ready)\b([^;&|\r\n]*)/.exec(command);
-	if (!match) return null;
-	const tokens = match[1].match(/"(?:\\.|`.|[^"\\`])*"|'(?:''|[^'])*'|\S+/g) ?? [];
+	const match = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+(view|diff|checks|checkout|co|create|edit|review|comment|merge|close|reopen|ready)\b([^;&|\r\n]*)/.exec(command);
+	if (!match || match[1] === "create") return null;
+	const tokens = match[2].match(/"(?:\\.|`.|[^"\\`])*"|'(?:''|[^'])*'|\S+/g) ?? [];
 	let flags = true;
 	for (let i = 0; i < tokens.length; i++) {
 		const token = tokens[i].replace(/^["']|["']$/g, "");
@@ -124,7 +124,8 @@ function extractGhPrNumber(command) {
 			flags = false;
 			continue;
 		}
-		if (flags && /^(?:-R|--repo|-B|--base|-H|--head|-t|--title|-b|--body|--branch|--worktree|-F|--body-file|-r|--reviewer|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template)$/.test(token)) {
+		const reviewBoolean = match[1] === "review" && ["-c", "--comment", "-r"].includes(token);
+		if (flags && !reviewBoolean && /^(?:-R|--repo|-B|--base|-H|--head|-t|--title|-b|--body|--branch|--worktree|-F|--body-file|-c|--comment|-r|--reviewer|-a|--assignee|-l|--label|-p|--project|-m|--milestone|-jq|--jq|--template)$/.test(token)) {
 			i++;
 			continue;
 		}
@@ -293,7 +294,11 @@ export class SessionTracker {
 			const args = data.arguments ?? {};
 			const name = data.mcpToolName ?? data.toolName ?? "";
 			const command = String(args.command ?? "");
-			const commandTargetText = command.replace(/\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "");
+			const reviewCommand = /\bgh(?:\s+(?:(?:--repo(?:=|\s+)|-R(?:=?|\s+))\S+|-C\s+\S+))*\s+pr\s+review\b/.exec(command);
+			const contentFlags = reviewCommand?.index === command.search(/\bgh\b/)
+				? /\s+(?:-b|--body|-t|--title|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g
+				: /\s+(?:-c|--comment|-b|--body|-t|--title|-r|--reason)(?:=|\s+)(?:'[^']*'|"[^"]*"|\S+)/g;
+			const commandTargetText = command.replace(contentFlags, "");
 			if (/(?:^|[._-])session_prs$/.test(name) && args.action === "add") {
 				try {
 					this.add(args.reference, false, prSource);
@@ -344,7 +349,7 @@ export class SessionTracker {
 					call.targets.push(pr.url);
 					if (!closing) addTarget(pr.url);
 				}
-				const number = args.pullNumber ?? args.pull_number ?? extractGhPrNumber(commandTargetText);
+				const number = args.pullNumber ?? args.pull_number ?? extractGhPrNumber(command);
 				if (api) {
 					const targetUrl = `https://${this.host}/${api[1]}/pull/${api[2]}`;
 					call.targets.push(targetUrl);

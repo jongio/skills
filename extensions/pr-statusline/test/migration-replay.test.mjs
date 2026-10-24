@@ -85,6 +85,58 @@ test("collector migration preserves a dismissed selector-free reopen but still a
 	} finally { collector.stop(); }
 }));
 
+for (const appendBeforeMigration of [false, true]) {
+	test(`legacy agent clear survives migration without tombstones${appendBeforeMigration ? " while unread new launches remain visible" : ""}`, async () => fixture((home) => {
+		const id = "legacy-agent-clear";
+		const old = encode([
+			event("session.start", 500, { repository: "acme/app" }),
+			event("tool.execution_start", 750, { toolCallId: "old-call", toolName: "task", arguments: { agent_type: "general-purpose", description: "old work" } }),
+			event("subagent.started", 1000, { agentId: "old", toolCallId: "old-call", agentType: "general-purpose" }),
+		]);
+		const fresh = event("subagent.started", 2500, { agentId: "new", agentType: "general-purpose" });
+		const file = transcript(home, id, old + (appendBeforeMigration ? encode([fresh]) : ""));
+		const previous = new SubagentTracker(id).snapshot();
+		delete previous.activeTrackingVersion;
+		delete previous.ignored;
+		previous.dismissed = true;
+		previous.transcriptOffset = Buffer.byteLength(old);
+		previous.updatedAt = 1500;
+		writeAgents(previous, home);
+		let current = syncAgents({ session_id: id }, { home }).tracker;
+		assert.deepEqual([...current.agents.keys()], appendBeforeMigration ? ["new"] : []);
+		assert.ok(current.ignored.has("old"));
+		assert.ok(current.ignored.has("old-call"));
+		if (!appendBeforeMigration) {
+			appendFileSync(file, encode([fresh]));
+			current = syncAgents({ session_id: id }, { home }).tracker;
+			assert.deepEqual([...current.agents.keys()], ["new"]);
+		}
+
+		assert.equal(current.dismissed, false);
+	}));
+}
+
+test("a partial historical launch completing after migration cannot undo a legacy agent clear", async () => fixture((home) => {
+	const id = "partial-agent-clear";
+	const prefix = encode([event("session.start", 500, { repository: "acme/app" })]);
+	const old = JSON.stringify(event("subagent.started", 1000, { agentId: "old", agentType: "general-purpose" }));
+	const file = transcript(home, id, prefix + old);
+	const previous = new SubagentTracker(id).snapshot();
+	delete previous.activeTrackingVersion;
+	delete previous.ignored;
+	previous.dismissed = true;
+	previous.transcriptOffset = Buffer.byteLength(prefix);
+	previous.updatedAt = 1500;
+	writeAgents(previous, home);
+	assert.equal(syncAgents({ session_id: id }, { home }).tracker.agents.size, 0);
+	writeAgents({ ...readAgents(id, home), dismissedThroughAt: 0 }, home);
+	assert.equal(readAgents(id, home).dismissedThroughAt, 1500, "a stale writer cannot move the dismissal boundary backwards");
+	appendFileSync(file, "\n" + encode([event("subagent.started", 2500, { agentId: "new", agentType: "general-purpose" })]));
+	const current = syncAgents({ session_id: id }, { home }).tracker;
+	assert.deepEqual([...current.agents.keys()], ["new"]);
+	assert.ok(current.ignored.has("old"));
+}));
+
 for (const [name, Tracker, read, write, sync] of [
 	["PR", SessionTracker, readState, writeState, syncSession],
 	["issue", IssueTracker, readIssues, writeIssues, syncIssues],

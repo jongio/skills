@@ -340,3 +340,20 @@ for (const [command, expected] of [
 		assert.deepEqual(agents.agents.get("worker").prs, expected, "agent target");
 	});
 }
+
+for (const flag of ["--comment", "-c", "--request-changes", "-r", "--approve"]) {
+	for (const selector of ["42", "https://github.com/other/project/pull/42"]) {
+		test(`boolean review flag ${flag} cannot consume the root or agent PR selector ${selector}`, () => {
+			const command = `gh pr review ${flag} ${selector} --body LGTM --repo other/project`;
+			const prs = new SessionTracker("review-root");
+			const agents = new SubagentTracker("review-agent");
+			for (const tracker of [prs, agents]) tracker.observe(event("session.start", { repository: "acme/app" }));
+			agents.observe(event("subagent.started", { agentId: "worker", agentType: "general-purpose" }));
+			prs.observe(start("review", command));
+			agents.observe(start("review", command, "powershell", {}, "worker"));
+			for (const tracker of [prs, agents]) tracker.observe(complete("review", "Review submitted"));
+			assert.deepEqual(prs.state.prs.map((item) => item.url), ["https://github.com/other/project/pull/42"]);
+			assert.deepEqual(agents.agents.get("worker").prs, ["https://github.com/other/project/pull/42"]);
+		});
+	}
+}
