@@ -231,6 +231,10 @@ its sibling runtime dependencies even when those footer components are hidden.
 Legacy tracking is rebuilt from concrete transcript activity on first load;
 previously pinned read-only targets without that evidence may need one explicit
 re-add. Workspace and remote metadata alone no longer enroll targets.
+Legacy migration reads the complete available history in 1 MiB I/O chunks,
+reassembling records that cross chunk boundaries. Saved dismissals survive
+already-consumed reopen history; genuinely new reopen or explicit add requests
+can resume tracking.
 State writes and worktree replay use per-session, cross-process locks. A lock
 timeout reports its exact path rather than overwriting potentially active state.
 If a process crashed while holding a lock, stop the session's collectors before

@@ -96,7 +96,9 @@ export async function collect(session, { home, interval = 15000, report = consol
 		reload();
 		for (const event of events) {
 			if (RELEVANT_EVENT_TYPE.test(String(event?.type ?? ""))) {
-				tracker.observe(event, true);
+				const time = Date.parse(event.timestamp);
+				const consumed = Boolean(previous && (!Number.isFinite(time) || time <= previous.updatedAt));
+				tracker.observe(event, true, consumed);
 			}
 		}
 		loading = false;

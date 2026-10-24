@@ -23,6 +23,7 @@ export {
 
 const INITIAL_HEAD_BYTES = 64 * 1024;
 const INITIAL_TAIL_BYTES = 16 * 1024 * 1024;
+const READ_CHUNK_BYTES = 1024 * 1024;
 const PLACEHOLDER_REPOS = new Set([
 	"owner/repo",
 	"org/repo",
@@ -212,7 +213,7 @@ export class IssueTracker {
 		return this.state.issues;
 	}
 
-	observe(event) {
+	observe(event, consumed = false) {
 		if (this.state.clearedAt && event.timestamp && Date.parse(event.timestamp) <= this.state.clearedAt) return;
 		const data = event.data ?? {};
 		if (event.type === "session.start" || event.type === "session.resume" || event.type === "session.context_changed") {
@@ -266,7 +267,7 @@ export class IssueTracker {
 			const mcpTargeted = /(?:^|[_-])(?:issue_read|issue_write|create_issue|update_issue)$/.test(name);
 			const mcpWrite = mcpTargeted && !/(?:^|[_-])issue_read$/.test(name);
 			const closing = ghSubcommand === "close" || (/(?:^|[_-])(?:issue_write|update_issue)$/.test(name) && String(args.state ?? "").toLowerCase() === "closed");
-			const reopening = ghSubcommand === "reopen";
+			const reopening = ghSubcommand === "reopen" && !consumed;
 			const isPrPollCommand = /\brepos\/[\w.-]+\/[\w.-]+\/pulls\/[1-9]\d*\b/.test(command) || /\bpullRequest\s*\(/.test(command);
 			const api = isPrPollCommand
 				? null
@@ -339,29 +340,40 @@ export class IssueTracker {
 	}
 }
 
-function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false) {
+function observeChunk(tracker, fd, startOffset, length, skipFirstPartialLine = false, replayed = null) {
 	if (length <= 0) return startOffset;
-	const chunk = Buffer.allocUnsafe(length);
-	const bytesRead = readSync(fd, chunk, 0, length, startOffset);
-	if (bytesRead <= 0) return startOffset;
-	let sliceStart = 0;
-	if (skipFirstPartialLine) {
-		const firstNewline = chunk.subarray(0, bytesRead).indexOf(0x0a);
-		if (firstNewline === -1) return startOffset;
-		sliceStart = firstNewline + 1;
-	}
-	const lastNewline = chunk.subarray(0, bytesRead).lastIndexOf(0x0a);
-	if (lastNewline < sliceStart) return startOffset;
-	const text = chunk.subarray(sliceStart, lastNewline + 1).toString("utf8");
-	for (const line of text.split("\n")) {
-		if (!line.trim() || !RELEVANT_EVENT_LINE.test(line)) continue;
-		try {
-			tracker.observe(JSON.parse(line));
-		} catch {
-			// Ignore malformed transcript lines.
+	const buffer = Buffer.allocUnsafe(Math.min(length, READ_CHUNK_BYTES));
+	let position = startOffset, completed = startOffset;
+	let fragments = [];
+	while (position < startOffset + length) {
+		const bytesRead = readSync(fd, buffer, 0, Math.min(buffer.length, startOffset + length - position), position);
+		if (bytesRead <= 0) break;
+		const chunk = buffer.subarray(0, bytesRead);
+		let from = 0;
+		for (let newline = chunk.indexOf(0x0a); newline !== -1; newline = chunk.indexOf(0x0a, from)) {
+			completed = position + newline + 1;
+			if (skipFirstPartialLine) skipFirstPartialLine = false;
+			else {
+				const part = chunk.subarray(from, newline);
+				const line = (fragments.length ? Buffer.concat([...fragments, part]) : part).toString("utf8");
+				if (line.trim() && RELEVANT_EVENT_LINE.test(line)) {
+					try {
+						const event = JSON.parse(line);
+						const time = Date.parse(event.timestamp);
+						const consumed = Boolean(replayed && (completed <= replayed.offset || !Number.isFinite(time) || time <= replayed.savedAt));
+						tracker.observe(event, consumed);
+					} catch {
+						// Ignore malformed transcript lines.
+					}
+				}
+			}
+			fragments = [];
+			from = newline + 1;
 		}
+		if (!skipFirstPartialLine && from < bytesRead) fragments.push(Buffer.from(chunk.subarray(from)));
+		position += bytesRead;
 	}
-	return startOffset + lastNewline + 1;
+	return completed;
 }
 
 function inspectWorkspaceMetadata(tracker, sessionDir) {
@@ -443,12 +455,16 @@ export function syncSession(payload, {
 		const fd = openSync(transcriptFile, "r");
 		try {
 			let nextOffset = offset;
-			if (offset === 0 && stat.size > INITIAL_HEAD_BYTES + INITIAL_TAIL_BYTES) {
-				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES, false);
+			const replayed = offset === 0 && previous ? {
+				offset: Number.isInteger(previous.transcriptOffset) && previous.transcriptOffset <= stat.size ? previous.transcriptOffset : 0,
+				savedAt: Number.isFinite(previous.updatedAt) ? previous.updatedAt : Infinity,
+			} : null;
+			if (!migrate && offset === 0 && stat.size > INITIAL_HEAD_BYTES + INITIAL_TAIL_BYTES) {
+				observeChunk(tracker, fd, 0, INITIAL_HEAD_BYTES, false, replayed);
 				const tailStart = stat.size - INITIAL_TAIL_BYTES;
-				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true);
+				nextOffset = observeChunk(tracker, fd, tailStart, stat.size - tailStart, true, replayed);
 			} else {
-				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset, false);
+				nextOffset = observeChunk(tracker, fd, offset, stat.size - offset, false, replayed);
 			}
 			if (nextOffset !== offset) {
 				tracker.state.transcriptOffset = nextOffset;
