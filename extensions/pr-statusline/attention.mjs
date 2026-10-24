@@ -305,7 +305,10 @@ export function createSessionAttention({
 			preview = { kind };
 			await start();
 			publish();
-			if (lastError) throw new Error(lastError);
+			if (lastError) {
+				preview = null;
+				throw new Error(lastError);
+			}
 		},
 		stop() {
 			stopped = true;

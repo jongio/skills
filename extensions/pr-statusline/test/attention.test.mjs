@@ -24,7 +24,7 @@ async function fixture(run) {
 	try { await run(home); } finally { rmSync(home, { recursive: true, force: true }); }
 }
 
-function fakeHelper() {
+function fakeHelper({ startup = { type: "ready", windowHandle: "1234" } } = {}) {
 	const children = [], messages = [];
 	function spawn(executable, args, options) {
 		const child = new EventEmitter();
@@ -37,7 +37,7 @@ function fakeHelper() {
 		child.kill = () => { child.emit("close", 0); };
 		child.message = (value) => child.stdout.write(`${JSON.stringify({ windowHandle: "1234", ...value })}\n`);
 		children.push({ child, executable, args, options });
-		queueMicrotask(() => child.message({ type: "ready", windowHandle: "1234" }));
+		queueMicrotask(() => child.message(startup));
 		return child;
 	}
 	return { children, messages, spawn };
@@ -389,6 +389,21 @@ test("preview has no timer, clears on interaction, works while disabled and does
 		assert.equal(helper.children[0].child.stdin.writableEnded, true);
 		await assert.rejects(runAttentionCommand(attention, "preview invalid"), /Preview kind/);
 		await assert.rejects(runAttentionCommand(attention, "on invalid"), /Usage:/);
+	} finally { attention.stop(); }
+}));
+
+test("failed preview startup cannot leave a stale preview that relaunches after preferences change", async () => fixture(async (home) => {
+	const helper = fakeHelper({ startup: { type: "unavailable", message: "No verified console owner." } });
+	const { attention } = controller(home, { spawn: helper.spawn });
+	try {
+		await assert.rejects(attention.preview("question"), /verified console owner/);
+		await flush();
+		assert.equal(helper.children.length, 1);
+		assert.equal(helper.children[0].child.stdin.writableEnded, true);
+		attention.configure({ enabled: true, style: "border" });
+		await flush();
+		assert.equal(helper.children.length, 1, "Settings changes must not retry an already failed preview.");
+		assert.equal(attention.status().binding, null);
 	} finally { attention.stop(); }
 }));
 
