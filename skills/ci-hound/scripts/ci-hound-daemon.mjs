@@ -1551,6 +1551,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   }
 
   let activeMainRuns = 0;
+  let activeTargetRuns = 0;
   const activeRunProgress = [];
 
   for (const run of workflowRuns) {
@@ -1569,6 +1570,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
 
     const isActiveTargetRun = (isMainBranch || isWatchedRun) && run.status !== "completed";
+    if (isActiveTargetRun) {
+      activeTargetRuns += 1;
+    }
     const prevJobsSettled = Boolean(
       prevRun?.telemetryRecorded || (prevRun?.emptyJobsPolls || 0) >= 2
     );
@@ -1583,14 +1587,36 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     let jobsComplete = true;
     if (needsJobsInspection) {
       if (tickRateLimited) {
+        if (isActiveTargetRun) {
+          activeRunProgress.push({
+            id: run.id,
+            name: run.name,
+            headSha: run.head_sha,
+            totalJobsCount: jobs.length,
+            completedJobsCount: 0,
+            inProgressJobsCount: 0,
+            inProgressJobs: [],
+          });
+        }
         continue;
       }
       const jobsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
       if (jobsRes.rateLimited) {
         tickRateLimited = true;
+        if (isActiveTargetRun) {
+          activeRunProgress.push({
+            id: run.id,
+            name: run.name,
+            headSha: run.head_sha,
+            totalJobsCount: jobs.length,
+            completedJobsCount: 0,
+            inProgressJobsCount: 0,
+            inProgressJobs: [],
+          });
+        }
         continue;
       }
-      if (Array.isArray(jobsRes.data?.jobs)) {
+      if (!jobsRes.error && Array.isArray(jobsRes.data?.jobs)) {
         const collectedJobs = [...jobsRes.data.jobs];
         const totalJobsExpected =
           typeof jobsRes.data.total_count === "number"
@@ -1609,7 +1635,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
             break;
           }
           const pageJobs = pageRes.data?.jobs;
-          if (!Array.isArray(pageJobs) || pageJobs.length === 0) {
+          if (pageRes.error || !Array.isArray(pageJobs) || pageJobs.length === 0) {
             jobsComplete = false;
             break;
           }
@@ -1628,7 +1654,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       }
     }
 
-    if ((isMainBranch || isWatchedRun) && run.status !== "completed" && jobsComplete) {
+    if (isActiveTargetRun) {
       const completedJobsCount = jobs.filter(
         (j) => j.status === "completed" && (j.conclusion === "success" || j.conclusion === "skipped")
       ).length;
@@ -1782,7 +1808,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   pruneState(state, { protectedRunIds: args.watchRunIds || [] });
   state.rateLimited = tickRateLimited;
 
-  const effectiveActiveRuns = Math.max(activeMainRuns, activeRunProgress.length);
+  const effectiveActiveRuns = Math.max(activeMainRuns, activeTargetRuns, activeRunProgress.length);
   const nextIntervalSec = computeNextPollIntervalSec(args, effectiveActiveRuns, state.metrics);
 
   if (tickRateLimited) {
@@ -1866,6 +1892,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   return {
     events,
     activeMainRuns,
+    activeTargetRuns: effectiveActiveRuns,
     rateLimited: tickRateLimited,
     nextIntervalSec,
     ...(statusPayload ? { status: statusPayload } : {}),
@@ -1994,7 +2021,11 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       if (tick.status) {
         statuses.push(tick.status);
       }
-      totalActiveMainRuns += Math.max(tick.activeMainRuns, tick.status?.activeRuns?.length || 0);
+      totalActiveMainRuns += Math.max(
+        tick.activeMainRuns,
+        tick.activeTargetRuns || 0,
+        tick.status?.activeRuns?.length || 0
+      );
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
       if (tick.rateLimited) {

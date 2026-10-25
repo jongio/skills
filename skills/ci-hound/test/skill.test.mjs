@@ -1316,6 +1316,44 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
   assert.equal(watchTick.events.length, 0, "unrelated failed run 2001 must not abort --watch-run 2002");
   assert.equal(watchTick.nextIntervalSec, 15, "active watched PR run must poll at activeIntervalSec (15s)");
   assert.match(watchTick.status.summary, /c925c3e2/, "displaySha must prefer the watched run SHA over active main SHA");
+
+  // 2b. Even if /jobs fails transiently on an active watched PR run, it remains in activeRuns and polls at 15s
+  const incompleteWatchState = loadState("/nonexistent/state.json");
+  const incompleteWatchTick = evaluatePollTick(watchArgs, incompleteWatchState, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main12345678"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 2002,
+              workflow_id: 10,
+              name: "CI",
+              event: "pull_request",
+              head_branch: "update-marketplace",
+              head_sha: "c925c3e2b741789f",
+              status: "in_progress",
+              conclusion: null,
+              updated_at: "2026-10-24T16:20:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/2002",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/2002/jobs?per_page=50") {
+      return { ok: false, stdout: "HTTP/2.0 502 Bad Gateway\n\n{}", stderr: "HTTP 502" };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(incompleteWatchTick.nextIntervalSec, 15);
+  assert.equal(incompleteWatchTick.status.activeRuns.length, 1);
+  assert.equal(incompleteWatchTick.status.activeRuns[0].id, 2002);
 });
 
 test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout heartbeat bound state and output", () => {
@@ -1460,9 +1498,10 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
   assert.equal(unwatchedPrJobsCalls, 0, "in-progress unwatched PR runs must not fetch /jobs");
   assert.equal(prSkipState.flakeSightings.length, 0, "cancelled steps and fan-in aggregator steps must not pollute flakeSightings");
 
-  // 2c. Completed runs with empty jobs[] retry once conditionally (retaining /jobs ETag) and settle after 2 empty polls
+  // 2c. Completed runs with empty jobs[] retry once conditionally (retaining /jobs ETag), ignore transient errors, and settle after 2 empty polls
   const emptyJobsState = loadState("/nonexistent/state.json");
   let emptyJobsEndpointCalls = 0;
+  let failNextEmptyJobsCall = false;
   const runEmptyJobsPoll = () =>
     evaluatePollTick(parseArgs(["watch", "--repo", "github/evals"]), emptyJobsState, (ghArgs) => {
       const endpoint = ghArgs[2];
@@ -1493,6 +1532,9 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
       }
       if (endpoint === "repos/github/evals/actions/runs/4001/jobs?per_page=50") {
         emptyJobsEndpointCalls += 1;
+        if (failNextEmptyJobsCall) {
+          return { ok: false, stdout: "HTTP/2.0 502 Bad Gateway\n\n{}", stderr: "HTTP 502" };
+        }
         return {
           ok: true,
           stdout: 'HTTP/2.0 200 OK\nETag: "empty-jobs-etag"\n\n{"jobs":[]}',
@@ -1508,8 +1550,17 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
     emptyJobsState.etags["repos/github/evals/actions/runs/4001/jobs?per_page=50"],
     "/jobs ETag must be retained for the single empty-jobs eventual-consistency retry"
   );
+  failNextEmptyJobsCall = true;
   runEmptyJobsPoll();
   assert.equal(emptyJobsEndpointCalls, 2);
+  assert.equal(
+    emptyJobsState.runs["4001"].emptyJobsPolls,
+    1,
+    "transient HTTP error returning cached jobs: [] must not increment emptyJobsPolls"
+  );
+  failNextEmptyJobsCall = false;
+  runEmptyJobsPoll();
+  assert.equal(emptyJobsEndpointCalls, 3);
   assert.equal(emptyJobsState.runs["4001"].emptyJobsPolls, 2);
   assert.equal(
     emptyJobsState.etags["repos/github/evals/actions/runs/4001/jobs?per_page=50"],
@@ -1517,7 +1568,7 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
     "/jobs ETag is evicted once empty-jobs inspection settles after 2 polls"
   );
   runEmptyJobsPoll();
-  assert.equal(emptyJobsEndpointCalls, 2, "settled jobless run must not be re-queried on poll 3");
+  assert.equal(emptyJobsEndpointCalls, 3, "settled jobless run must not be re-queried on poll 4");
 
   // 3. shouldEmitWatchStatus suppresses duplicate 15s ticks until summary changes or 60s heartbeat elapses
   assert.equal(
