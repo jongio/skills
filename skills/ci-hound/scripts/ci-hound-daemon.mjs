@@ -698,7 +698,14 @@ export function pruneState(
             (protectedSet.has(runIdStr) ||
               (runRecord.head_branch === targetBranch && !isPullRequestRunEvent(runRecord.event)))
         );
-        if (!isWatchedOrActiveMain) {
+        const isPendingEmptyJobsRecheck = Boolean(
+          runRecord &&
+            runRecord.status === "completed" &&
+            !runRecord.telemetryRecorded &&
+            (runRecord.emptyJobsPolls || 0) > 0 &&
+            (runRecord.emptyJobsPolls || 0) < 2
+        );
+        if (!isWatchedOrActiveMain && !isPendingEmptyJobsRecheck) {
           delete state.etags[endpoint];
           continue;
         }
@@ -1350,11 +1357,38 @@ function workflowKeyForRun(run) {
   return String(run.workflow_id || run.path || run.name || run.id || "unknown");
 }
 
-function latestRunsByWorkflow(runs) {
+function buildWorkflowIdentityResolver(runs) {
+  const explicitKeysByName = new Map();
+  for (const r of runs || []) {
+    if (!r || typeof r !== "object") continue;
+    const explicitKey = r.workflow_id || r.path;
+    if (explicitKey && r.name) {
+      const nameKey = String(r.name).trim();
+      if (!explicitKeysByName.has(nameKey)) {
+        explicitKeysByName.set(nameKey, new Set());
+      }
+      explicitKeysByName.get(nameKey).add(String(explicitKey));
+    }
+  }
+  return (run) => {
+    if (!run || typeof run !== "object") return "unknown";
+    if (run.workflow_id || run.path) {
+      return String(run.workflow_id || run.path);
+    }
+    const nameKey = String(run.name || "").trim();
+    const matchedExplicit = nameKey ? explicitKeysByName.get(nameKey) : null;
+    if (matchedExplicit && matchedExplicit.size === 1) {
+      return [...matchedExplicit][0];
+    }
+    return workflowKeyForRun(run);
+  };
+}
+
+function latestRunsByWorkflow(runs, resolveKey = buildWorkflowIdentityResolver(runs)) {
   const byWorkflow = new Map();
   for (const r of runs || []) {
     if (!r || typeof r !== "object") continue;
-    const wfKey = workflowKeyForRun(r);
+    const wfKey = resolveKey(r);
     const prev = byWorkflow.get(wfKey);
     if (!prev || (Number(r.id) || 0) > (Number(prev.id) || 0)) {
       byWorkflow.set(wfKey, r);
@@ -1495,6 +1529,10 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
   const workflowRuns = [...runMap.values()];
+  const resolveWorkflowKey = buildWorkflowIdentityResolver([
+    ...Object.values(state.runs || {}),
+    ...workflowRuns,
+  ]);
 
   const latestMainRunIdByWorkflow = new Map();
   for (const candidate of [...Object.values(state.runs || {}), ...workflowRuns]) {
@@ -1504,7 +1542,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       !isPullRequestRunEvent(candidate.event) &&
       candidate.head_sha === state.lastMainSha
     ) {
-      const wfKey = workflowKeyForRun(candidate);
+      const wfKey = resolveWorkflowKey(candidate);
       const prevId = latestMainRunIdByWorkflow.get(wfKey) || 0;
       if ((Number(candidate.id) || 0) > prevId) {
         latestMainRunIdByWorkflow.set(wfKey, Number(candidate.id));
@@ -1524,16 +1562,19 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     const isCurrentHeadMainRun = isMainBranch && run.head_sha === state.lastMainSha;
     const isLatestWorkflowRunOnHead =
       isCurrentHeadMainRun &&
-      latestMainRunIdByWorkflow.get(workflowKeyForRun(run)) === Number(run.id);
+      latestMainRunIdByWorkflow.get(resolveWorkflowKey(run)) === Number(run.id);
 
     if (isMainBranch && run.status !== "completed") {
       activeMainRuns += 1;
     }
 
     const isActiveTargetRun = (isMainBranch || isWatchedRun) && run.status !== "completed";
+    const prevJobsSettled = Boolean(
+      prevRun?.telemetryRecorded || (prevRun?.emptyJobsPolls || 0) >= 2
+    );
     const isCompletedNeedsInspection =
       run.status === "completed" &&
-      (!prevRun?.telemetryRecorded ||
+      (!prevJobsSettled ||
         ((isCurrentHeadMainRun || isWatchedRun) &&
           (!prevRun || prevRun.updated_at !== run.updated_at)));
     const needsJobsInspection = isActiveTargetRun || isCompletedNeedsInspection;
@@ -1608,6 +1649,18 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       });
     }
 
+    const telemetryRecorded = Boolean(
+      prevRun?.telemetryRecorded || (run.status === "completed" && jobsComplete && jobs.length > 0)
+    );
+    const prevEmptyPolls =
+      prevRun && prevRun.updated_at === run.updated_at ? prevRun.emptyJobsPolls || 0 : 0;
+    const emptyJobsPolls =
+      run.status === "completed" && !telemetryRecorded
+        ? needsJobsInspection && jobsComplete && jobs.length === 0
+          ? prevEmptyPolls + 1
+          : prevEmptyPolls
+        : 0;
+
     state.runs[runKey] = {
       id: run.id,
       ...(run.workflow_id !== undefined
@@ -1628,9 +1681,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       conclusion: run.conclusion,
       updated_at: jobsComplete ? run.updated_at : prevRun?.updated_at || "",
       html_url: run.html_url,
-      telemetryRecorded: Boolean(
-        prevRun?.telemetryRecorded || (run.status === "completed" && jobsComplete && jobs.length > 0)
-      ),
+      telemetryRecorded,
+      ...(emptyJobsPolls > 0 ? { emptyJobsPolls } : {}),
       alertedFailure: Boolean(prevRun?.alertedFailure),
     };
 
@@ -1756,13 +1808,15 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         });
       }
     } else if (state.lastMainSha) {
+      const allHeadCandidates = Object.values(state.runs).filter(
+        (r) =>
+          r.head_branch === args.branch &&
+          !isPullRequestRunEvent(r.event) &&
+          r.head_sha === state.lastMainSha
+      );
       const headMainRuns = latestRunsByWorkflow(
-        Object.values(state.runs).filter(
-          (r) =>
-            r.head_branch === args.branch &&
-            !isPullRequestRunEvent(r.event) &&
-            r.head_sha === state.lastMainSha
-        )
+        allHeadCandidates,
+        buildWorkflowIdentityResolver(Object.values(state.runs))
       );
       const allCompletedGreen =
         headMainRuns.length > 0 &&
@@ -1778,10 +1832,15 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
 
-  const displaySha =
-    args.watchRunIds.length > 0 && activeRunProgress.length > 0 && activeRunProgress[0].headSha
-      ? activeRunProgress[0].headSha
-      : state.lastMainSha;
+  const activeWatchedRun =
+    args.watchRunIds.length > 0
+      ? activeRunProgress.find((r) => args.watchRunIds.includes(r.id) && r.headSha)
+      : null;
+  const watchedRecordSha =
+    args.watchRunIds.length > 0
+      ? args.watchRunIds.map((id) => state.runs[String(id)]?.head_sha).find(Boolean)
+      : "";
+  const displaySha = activeWatchedRun?.headSha || watchedRecordSha || state.lastMainSha;
   const phaseInfo = computeCiHoundPhase({
     repo: args.repo,
     branch: args.branch,

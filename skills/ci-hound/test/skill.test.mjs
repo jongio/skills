@@ -1170,11 +1170,22 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
     [1000, 1002]
   );
 
-  // 2. When --watch-run 2002 is specified, an unrelated already-failed run 2001 on main does not abort the watch,
-  // and watching an active PR run 2002 uses activeIntervalSec (15s) instead of idleIntervalSec (60s)
-  const watchState = loadState("/nonexistent/state.json");
-  const watchArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "2002"]);
-  const watchTick = evaluatePollTick(watchArgs, watchState, (ghArgs) => {
+  // 1b. Legacy persisted run in state.runs lacking workflow_id/path is reconciled with newer run having workflow_id
+  const legacyState = loadState("/nonexistent/state.json");
+  legacyState.runs["900"] = {
+    id: 900,
+    name: "Release",
+    event: "push",
+    head_branch: "main",
+    head_sha: "sha-main",
+    status: "completed",
+    conclusion: "failure",
+    updated_at: "2026-10-24T14:00:00Z",
+    html_url: "https://github.com/github/evals/actions/runs/900",
+    telemetryRecorded: true,
+    alertedFailure: true,
+  };
+  const legacyTick = evaluatePollTick(args, legacyState, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "repos/github/evals/commits/main") {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main"}', stderr: "" };
@@ -1185,12 +1196,64 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
         stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
           workflow_runs: [
             {
-              id: 2001,
+              id: 1002,
               workflow_id: 20,
               name: "Release",
               event: "workflow_dispatch",
               head_branch: "main",
               head_sha: "sha-main",
+              status: "completed",
+              conclusion: "success",
+              updated_at: "2026-10-24T16:00:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/1002",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.includes("/jobs?per_page=50")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"jobs":[]}', stderr: "" };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(legacyTick.events.length, 1, "legacy persisted run without workflow_id must be superseded by newer workflow_id run");
+  assert.equal(legacyTick.events[0].type, "ALL_GREEN");
+  assert.deepEqual(legacyTick.events[0].runs.map((r) => r.id), [1002]);
+
+  // 2. When --watch-run 2002 is specified, an unrelated already-failed run 2001 on main does not abort the watch,
+  // an active main run 2000 before 2002 does not hijack displaySha, and watching an active PR run 2002 uses activeIntervalSec (15s)
+  const watchState = loadState("/nonexistent/state.json");
+  const watchArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "2002"]);
+  const watchTick = evaluatePollTick(watchArgs, watchState, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main12345678"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 2000,
+              workflow_id: 10,
+              name: "CI",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha-main12345678",
+              status: "in_progress",
+              conclusion: null,
+              updated_at: "2026-10-24T16:19:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/2000",
+            },
+            {
+              id: 2001,
+              workflow_id: 20,
+              name: "Release",
+              event: "workflow_dispatch",
+              head_branch: "main",
+              head_sha: "sha-main12345678",
               status: "completed",
               conclusion: "failure",
               updated_at: "2026-10-24T15:15:00Z",
@@ -1210,6 +1273,15 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
             },
           ],
         })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/2000/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [{ id: 10, name: "Main checks", status: "in_progress", conclusion: null, steps: [] }],
+        }),
         stderr: "",
       };
     }
@@ -1243,7 +1315,7 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
   });
   assert.equal(watchTick.events.length, 0, "unrelated failed run 2001 must not abort --watch-run 2002");
   assert.equal(watchTick.nextIntervalSec, 15, "active watched PR run must poll at activeIntervalSec (15s)");
-  assert.match(watchTick.status.summary, /c925c3e2/);
+  assert.match(watchTick.status.summary, /c925c3e2/, "displaySha must prefer the watched run SHA over active main SHA");
 });
 
 test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout heartbeat bound state and output", () => {
@@ -1387,6 +1459,65 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
   });
   assert.equal(unwatchedPrJobsCalls, 0, "in-progress unwatched PR runs must not fetch /jobs");
   assert.equal(prSkipState.flakeSightings.length, 0, "cancelled steps and fan-in aggregator steps must not pollute flakeSightings");
+
+  // 2c. Completed runs with empty jobs[] retry once conditionally (retaining /jobs ETag) and settle after 2 empty polls
+  const emptyJobsState = loadState("/nonexistent/state.json");
+  let emptyJobsEndpointCalls = 0;
+  const runEmptyJobsPoll = () =>
+    evaluatePollTick(parseArgs(["watch", "--repo", "github/evals"]), emptyJobsState, (ghArgs) => {
+      const endpoint = ghArgs[2];
+      if (endpoint === "repos/github/evals/commits/main") {
+        return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main"}', stderr: "" };
+      }
+      if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+        return {
+          ok: true,
+          stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+            workflow_runs: [
+              {
+                id: 4001,
+                workflow_id: 10,
+                name: "CI",
+                event: "push",
+                head_branch: "main",
+                head_sha: "sha-main",
+                status: "completed",
+                conclusion: "skipped",
+                updated_at: "2026-10-24T17:10:00Z",
+                html_url: "https://github.com/github/evals/actions/runs/4001",
+              },
+            ],
+          })}`,
+          stderr: "",
+        };
+      }
+      if (endpoint === "repos/github/evals/actions/runs/4001/jobs?per_page=50") {
+        emptyJobsEndpointCalls += 1;
+        return {
+          ok: true,
+          stdout: 'HTTP/2.0 200 OK\nETag: "empty-jobs-etag"\n\n{"jobs":[]}',
+          stderr: "",
+        };
+      }
+      throw new Error(`Unexpected endpoint: ${endpoint}`);
+    });
+  runEmptyJobsPoll();
+  assert.equal(emptyJobsEndpointCalls, 1);
+  assert.equal(emptyJobsState.runs["4001"].emptyJobsPolls, 1);
+  assert.ok(
+    emptyJobsState.etags["repos/github/evals/actions/runs/4001/jobs?per_page=50"],
+    "/jobs ETag must be retained for the single empty-jobs eventual-consistency retry"
+  );
+  runEmptyJobsPoll();
+  assert.equal(emptyJobsEndpointCalls, 2);
+  assert.equal(emptyJobsState.runs["4001"].emptyJobsPolls, 2);
+  assert.equal(
+    emptyJobsState.etags["repos/github/evals/actions/runs/4001/jobs?per_page=50"],
+    undefined,
+    "/jobs ETag is evicted once empty-jobs inspection settles after 2 polls"
+  );
+  runEmptyJobsPoll();
+  assert.equal(emptyJobsEndpointCalls, 2, "settled jobless run must not be re-queried on poll 3");
 
   // 3. shouldEmitWatchStatus suppresses duplicate 15s ticks until summary changes or 60s heartbeat elapses
   assert.equal(
