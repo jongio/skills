@@ -39,3 +39,9 @@ Use these verified patterns when `ci-hound` wakes on a `JOB_FAILED`, `WORKFLOW_F
 
 - **Static validation**: Run `actionlint` and `shellcheck` (ensuring LF line endings on `.sh` scripts).
 - **Local job execution**: When Docker or Podman is available (`act workflow_dispatch --job <job>`), verify workflow wiring locally before opening the PR.
+
+## 7. Fixture Teardown & Bot-Authored PR `action_required` Runs
+
+- **Canvas / Playwright fixture teardown (`Owned Canvas fixture required forced termination`)**: Ensure test fixture HTTP servers close active SSE/keep-alive connections before awaiting `server.close()` during shutdown.
+- **Bot-authored PR workflows (`conclusion: action_required`)**: When a release workflow opens a catalog PR authored by `github-actions[bot]`, its `pull_request` runs start in `action_required`. Approve and rerun them (`gh api -X POST repos/<owner>/<repo>/actions/runs/<runId>/approve && gh run rerun <runId> -R <owner>/<repo>`) before waiting on PR checks.
+

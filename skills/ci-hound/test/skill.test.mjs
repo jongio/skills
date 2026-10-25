@@ -24,6 +24,8 @@ import {
   saveConfig,
   saveState,
   selectDeliverySkill,
+  shouldEmitWatchStatus,
+  slimEtagData,
 } from "../scripts/ci-hound-daemon.mjs";
 
 const skill = await readFile(new URL("../SKILL.md", import.meta.url), "utf8");
@@ -1098,5 +1100,340 @@ test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and ba
   assert.equal(deferTick.events[0].type, "RATE_LIMITED");
   assert.equal(deferTick.nextIntervalSec, 75);
 });
+
+test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run scopes failures and active intervals", (t) => {
+  disableAlertsForTest(t);
+  const state = loadState("/nonexistent/state.json");
+  const args = parseArgs(["watch", "--repo", "github/evals"]);
+
+  // 1. Earlier Release run 1001 failed on sha-main, newer Release run 1002 succeeded on sha-main -> emits ALL_GREEN
+  const tick = evaluatePollTick(args, state, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 1000,
+              workflow_id: 10,
+              name: "CI",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha-main",
+              status: "completed",
+              conclusion: "success",
+              updated_at: "2026-10-24T15:00:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/1000",
+            },
+            {
+              id: 1001,
+              workflow_id: 20,
+              name: "Release",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha-main",
+              status: "completed",
+              conclusion: "failure",
+              updated_at: "2026-10-24T15:05:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/1001",
+            },
+            {
+              id: 1002,
+              workflow_id: 20,
+              name: "Release",
+              event: "workflow_dispatch",
+              head_branch: "main",
+              head_sha: "sha-main",
+              status: "completed",
+              conclusion: "success",
+              updated_at: "2026-10-24T16:00:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/1002",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint.includes("/jobs?per_page=50")) {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"jobs":[]}', stderr: "" };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(tick.events.length, 1);
+  assert.equal(tick.events[0].type, "ALL_GREEN");
+  assert.deepEqual(
+    tick.events[0].runs.map((r) => r.id).sort((a, b) => a - b),
+    [1000, 1002]
+  );
+
+  // 2. When --watch-run 2002 is specified, an unrelated already-failed run 2001 on main does not abort the watch,
+  // and watching an active PR run 2002 uses activeIntervalSec (15s) instead of idleIntervalSec (60s)
+  const watchState = loadState("/nonexistent/state.json");
+  const watchArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "2002"]);
+  const watchTick = evaluatePollTick(watchArgs, watchState, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 2001,
+              workflow_id: 20,
+              name: "Release",
+              event: "workflow_dispatch",
+              head_branch: "main",
+              head_sha: "sha-main",
+              status: "completed",
+              conclusion: "failure",
+              updated_at: "2026-10-24T15:15:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/2001",
+            },
+            {
+              id: 2002,
+              workflow_id: 10,
+              name: "CI",
+              event: "pull_request",
+              head_branch: "update-marketplace",
+              head_sha: "c925c3e2b741789f",
+              status: "in_progress",
+              conclusion: null,
+              updated_at: "2026-10-24T16:20:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/2002",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/2001/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [{ id: 1, name: "Admit Main", status: "completed", conclusion: "failure", steps: [] }],
+        }),
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/2002/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [
+            {
+              id: 2,
+              name: "Portable checks",
+              status: "in_progress",
+              conclusion: null,
+              steps: [{ name: "Exercise Canvas browser workflows", status: "in_progress", conclusion: null }],
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(watchTick.events.length, 0, "unrelated failed run 2001 must not abort --watch-run 2002");
+  assert.equal(watchTick.nextIntervalSec, 15, "active watched PR run must poll at activeIntervalSec (15s)");
+  assert.match(watchTick.status.summary, /c925c3e2/);
+});
+
+test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout heartbeat bound state and output", () => {
+  // 1. slimEtagData strips commit file patches and nested run/job bloat
+  const slimmedCommit = slimEtagData("repos/jongio/skills/commits/main", {
+    sha: "8e23f105",
+    files: [{ filename: "a.js", patch: "x".repeat(200_000) }],
+    commit: { message: "msg" },
+  });
+  assert.deepEqual(slimmedCommit, { sha: "8e23f105" });
+
+  // 2. pruneState slims legacy etags, normalizes dynamic Dependabot telemetry keys, caps telemetry maps, and backfills flake patterns
+  const state = loadState("/nonexistent/state.json");
+  state.etags["repos/jongio/skills/commits/main"] = {
+    etag: '"e1"',
+    data: { sha: "8e23f105", files: [{ patch: "y".repeat(50_000) }] },
+    updatedAt: "2026-10-24T00:00:00Z",
+  };
+  state.jobTelemetry["npm_and_yarn in /skills/ci-hound - Update #1650010279 :: dependabot"] = {
+    workflow: "npm_and_yarn in /skills/ci-hound - Update #1650010279",
+    job: "dependabot",
+    samples: 1,
+    failures: 0,
+    totalDurationSec: 40,
+    maxDurationSec: 40,
+    totalQueueSec: 2,
+    maxQueueSec: 2,
+  };
+  state.jobTelemetry["npm_and_yarn in /skills/pr - Update #1650010247 :: dependabot"] = {
+    workflow: "npm_and_yarn in /skills/pr - Update #1650010247",
+    job: "dependabot",
+    samples: 1,
+    failures: 0,
+    totalDurationSec: 50,
+    maxDurationSec: 50,
+    totalQueueSec: 3,
+    maxQueueSec: 3,
+  };
+  for (let i = 0; i < 10; i += 1) {
+    state.stepTelemetry[`WF :: job :: step-${i}`] = {
+      workflow: "WF",
+      job: "job",
+      step: `step-${i}`,
+      samples: 1,
+      failures: 0,
+      totalDurationSec: i,
+      maxDurationSec: i,
+    };
+  }
+  state.flakeSightings = [
+    {
+      timestamp: "2026-10-24T15:00:00Z",
+      runId: 1,
+      workflow: "CI",
+      job: "Windows portable (integration)",
+      step: "Exercise Canvas browser workflows",
+      conclusion: "failure",
+      matchedPattern: null,
+    },
+  ];
+
+  pruneState(state, { maxStepTelemetry: 5 });
+  assert.deepEqual(state.etags["repos/jongio/skills/commits/main"].data, { sha: "8e23f105" });
+  assert.ok(state.jobTelemetry["Dependabot Updates :: dependabot"]);
+  assert.equal(state.jobTelemetry["Dependabot Updates :: dependabot"].samples, 2);
+  assert.equal(Object.keys(state.stepTelemetry).length, 5);
+  assert.equal(state.flakeSightings[0].matchedPattern?.id, "canvas-browser-fixture-timeout");
+
+  // 2b. In-progress unwatched PR runs do not trigger /jobs API calls, and cancelled/aggregator steps are excluded from flakeSightings
+  const prSkipState = loadState("/nonexistent/state.json");
+  let unwatchedPrJobsCalls = 0;
+  evaluatePollTick(parseArgs(["watch", "--repo", "github/evals"]), prSkipState, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main"}', stderr: "" };
+    }
+    if (endpoint === "repos/github/evals/actions/runs?branch=main&per_page=20") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"workflow_runs":[]}', stderr: "" };
+    }
+    if (endpoint === "repos/github/evals/actions/runs?per_page=25") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          workflow_runs: [
+            {
+              id: 3001,
+              name: "CI",
+              event: "pull_request",
+              head_branch: "feat/in-progress",
+              head_sha: "prsha1",
+              status: "in_progress",
+              conclusion: null,
+              updated_at: "2026-10-24T17:00:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/3001",
+            },
+            {
+              id: 3002,
+              name: "CI",
+              event: "pull_request",
+              head_branch: "feat/cancelled",
+              head_sha: "prsha2",
+              status: "completed",
+              conclusion: "cancelled",
+              updated_at: "2026-10-24T17:01:00Z",
+              html_url: "https://github.com/github/evals/actions/runs/3002",
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/3001/jobs?per_page=50") {
+      unwatchedPrJobsCalls += 1;
+      return { ok: true, stdout: '{"jobs":[]}', stderr: "" };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/3002/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [
+            {
+              id: 1,
+              name: "Windows portable (unit)",
+              status: "completed",
+              conclusion: "cancelled",
+              steps: [{ name: "Measure portable unit coverage", status: "completed", conclusion: "cancelled" }],
+            },
+            {
+              id: 2,
+              name: "CI result",
+              status: "completed",
+              conclusion: "failure",
+              steps: [{ name: "Require every selected job to succeed", status: "completed", conclusion: "failure" }],
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(unwatchedPrJobsCalls, 0, "in-progress unwatched PR runs must not fetch /jobs");
+  assert.equal(prSkipState.flakeSightings.length, 0, "cancelled steps and fan-in aggregator steps must not pollute flakeSightings");
+
+  // 3. shouldEmitWatchStatus suppresses duplicate 15s ticks until summary changes or 60s heartbeat elapses
+  assert.equal(
+    shouldEmitWatchStatus({
+      polls: 1,
+      hasActiveRuns: true,
+      phaseChangesCount: 0,
+      summaryChanged: false,
+      nowMs: 1000,
+      lastEmitMs: 0,
+    }),
+    true
+  );
+  assert.equal(
+    shouldEmitWatchStatus({
+      polls: 2,
+      hasActiveRuns: true,
+      phaseChangesCount: 0,
+      summaryChanged: false,
+      nowMs: 16_000,
+      lastEmitMs: 1000,
+    }),
+    false
+  );
+  assert.equal(
+    shouldEmitWatchStatus({
+      polls: 3,
+      hasActiveRuns: true,
+      phaseChangesCount: 0,
+      summaryChanged: true,
+      nowMs: 31_000,
+      lastEmitMs: 1000,
+    }),
+    true
+  );
+  assert.equal(
+    shouldEmitWatchStatus({
+      polls: 5,
+      hasActiveRuns: true,
+      phaseChangesCount: 0,
+      summaryChanged: false,
+      nowMs: 62_000,
+      lastEmitMs: 1000,
+    }),
+    true
+  );
+});
+
 
 
