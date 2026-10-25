@@ -875,10 +875,12 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   let allWorkflowRuns = [];
   let previousPassSignature = null;
   let inventoryStabilized = false;
+  let lastTruncationError = "";
 
   for (let pass = 1; pass <= maxInventoryPasses; pass += 1) {
     const passRuns = [];
     const seenPassRunIds = new Set();
+    let passTruncated = false;
 
     for (const runStatus of activeRunStatuses) {
       const statusRuns = [];
@@ -931,15 +933,20 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
           break;
         }
         if (pageRuns.length === 0) {
-          return {
-            ok: false,
-            status: "collection_truncated",
-            collections: ["workflow_runs"],
-            error: `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`,
-          };
+          passTruncated = true;
+          lastTruncationError = `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`;
+          break;
         }
         page += 1;
       }
+      if (passTruncated) {
+        break;
+      }
+    }
+
+    if (passTruncated) {
+      previousPassSignature = null;
+      continue;
     }
 
     const passSignature = passRuns
@@ -957,6 +964,14 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   }
 
   if (!inventoryStabilized) {
+    if (lastTruncationError) {
+      return {
+        ok: false,
+        status: "collection_truncated",
+        collections: ["workflow_runs"],
+        error: lastTruncationError,
+      };
+    }
     return {
       ok: false,
       status: "inventory_unstable",
@@ -1462,9 +1477,24 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
       return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
     }
     if (state && parsedRunsHttp.etag && Array.isArray(runsData?.workflow_runs)) {
+      const slimRunsData = {
+        ...(typeof runsData.total_count === "number" ? { total_count: runsData.total_count } : {}),
+        workflow_runs: runsData.workflow_runs.map((r) => ({
+          id: r?.id,
+          workflow_id: r?.workflow_id,
+          path: r?.path,
+          name: r?.name,
+          event: r?.event,
+          head_branch: r?.head_branch,
+          head_sha: r?.head_sha,
+          status: r?.status,
+          conclusion: r?.conclusion,
+          html_url: r?.html_url,
+        })),
+      };
       state.etags[runsEndpoint] = {
         etag: parsedRunsHttp.etag,
-        data: runsData,
+        data: slimRunsData,
         updatedAt: new Date().toISOString(),
       };
       const etagKeys = Object.keys(state.etags);
@@ -1508,6 +1538,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     }
   }
 
+  const actionRequiredRuns = [];
   for (const run of latestByWorkflowKey.values()) {
     if (run.status !== "completed") {
       activeWorkflowRuns.push(run.name || "workflow");
@@ -1515,6 +1546,13 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
       run.conclusion &&
       !["success", "skipped", "neutral"].includes(run.conclusion.toLowerCase())
     ) {
+      if (run.conclusion.toLowerCase() === "action_required" && run.id) {
+        actionRequiredRuns.push({
+          runId: run.id,
+          name: run.name || "workflow",
+          url: run.html_url,
+        });
+      }
       const runIdMarker = run.id ? `/runs/${run.id}` : "";
       const alreadyRecorded = failedChecks.some(
         (fc) =>
@@ -1533,6 +1571,17 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
   }
 
   if (failedChecks.length > 0) {
+    const actionReqCommands = actionRequiredRuns
+      .map(
+        (r) =>
+          `gh api -X POST repos/${args.repo}/actions/runs/${r.runId}/approve && gh run rerun ${r.runId} -R ${args.repo}`
+      )
+      .join("; ");
+    const hasNonActionRequiredFailures = failedChecks.some(
+      (fc) => String(fc?.conclusion || "").toUpperCase() !== "ACTION_REQUIRED"
+    );
+    const defaultFailureRemediation =
+      "Inspect the failed job logs via `gh api repos/<owner>/<repo>/actions/jobs/<jobId>/logs`, fix the root cause (or rebase if base SHA drifted during push), commit, push, and restart pr-watch-daemon.mjs.";
     return {
       events: [
         {
@@ -1540,8 +1589,13 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
           timestamp: new Date().toISOString(),
           headRefOid: headOid,
           failedChecks,
+          ...(actionRequiredRuns.length > 0 ? { actionRequiredRuns } : {}),
           remediation:
-            "Inspect the failed job logs via `gh api repos/<owner>/<repo>/actions/jobs/<jobId>/logs`, fix the root cause (or rebase if base SHA drifted during push), commit, push, and restart pr-watch-daemon.mjs.",
+            actionRequiredRuns.length > 0 && hasNonActionRequiredFailures
+              ? `Approve and rerun action_required workflow runs (${actionReqCommands}); also inspect the other failed job logs and fix the root cause, then restart pr-watch-daemon.mjs.`
+              : actionRequiredRuns.length > 0
+                ? `Approve and rerun action_required workflow runs (${actionReqCommands}), then restart pr-watch-daemon.mjs.`
+                : defaultFailureRemediation,
         },
       ],
     };
@@ -2001,6 +2055,18 @@ const NON_TERMINAL_PR_EVENTS = new Set([
   "RATE_LIMITED",
 ]);
 
+export function shouldEmitPrWatchStatus({
+  polls = 1,
+  eventsCount = 0,
+  summaryChanged = false,
+  nowMs = Date.now(),
+  lastEmitMs = 0,
+  heartbeatSec = 60,
+} = {}) {
+  if (polls <= 1 || eventsCount > 0 || summaryChanged) return true;
+  return nowMs - lastEmitMs >= heartbeatSec * 1000;
+}
+
 export async function runCli(argv = process.argv.slice(2)) {
   const args = parsePrWatchArgs(argv);
   if (args.mode === "request-copilot") {
@@ -2030,6 +2096,8 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   if (args.prs.length > 1) {
     const multiState = {};
+    const lastSummaryByPr = new Map();
+    let lastEmitMs = 0;
     let polls = 0;
     while (true) {
       polls += 1;
@@ -2052,7 +2120,27 @@ export async function runCli(argv = process.argv.slice(2)) {
         await sleepSeconds(multi.nextIntervalSec || 60);
         continue;
       }
-      console.log(JSON.stringify({ prs: multi.prs, events: multi.events, statuses: multi.statuses }, null, 2));
+      let summaryChanged = false;
+      for (const st of multi.statuses || []) {
+        const prevSummary = lastSummaryByPr.get(st.pr);
+        if (prevSummary && prevSummary !== st.summary) {
+          summaryChanged = true;
+        }
+        lastSummaryByPr.set(st.pr, st.summary);
+      }
+      const nowMs = Date.now();
+      if (
+        shouldEmitPrWatchStatus({
+          polls,
+          eventsCount: multi.events.length,
+          summaryChanged,
+          nowMs,
+          lastEmitMs,
+        })
+      ) {
+        lastEmitMs = nowMs;
+        console.log(JSON.stringify({ prs: multi.prs, events: multi.events, statuses: multi.statuses }, null, 2));
+      }
       if (args.maxPolls > 0 && polls >= args.maxPolls) {
         console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }], statuses: multi.statuses }, null, 2));
         return;
@@ -2063,6 +2151,8 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   const watchState = createPrWatchState();
   let baselinePhase = args.lastPhase;
+  let lastSummary = "";
+  let lastEmitMs = 0;
   let hasCommentBaseline = args.hasExplicitSinceCommentId;
   let baselineCommentId = args.sinceCommentId;
   let polls = 0;
@@ -2096,8 +2186,23 @@ export async function runCli(argv = process.argv.slice(2)) {
       console.log(JSON.stringify(tick, null, 2));
       return;
     }
-    // Emit live status and nonterminal phase changes / auto-retries to stdout while continuing to watch
-    console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
+    const currentSummary = tick.status?.summary || "";
+    const summaryChanged = Boolean(lastSummary && currentSummary && currentSummary !== lastSummary);
+    lastSummary = currentSummary || lastSummary;
+    const nowMs = Date.now();
+    // Emit live status on initial poll, phase/summary transitions, auto-retries, or 60s heartbeats
+    if (
+      shouldEmitPrWatchStatus({
+        polls,
+        eventsCount: tick.events.length,
+        summaryChanged,
+        nowMs,
+        lastEmitMs,
+      })
+    ) {
+      lastEmitMs = nowMs;
+      console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
+    }
     if (tick.status?.phase) {
       baselinePhase = tick.status.phase;
     }

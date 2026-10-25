@@ -146,7 +146,10 @@ so superseded `Running Copilot Code Review` runs on the PR branch are cancelled
 and existing `@copilot` requests are toggled before re-requesting. During `watch`
 (supporting single `--pr <number>` or multi-PR `--prs <p1[:head1],p2[:head2]>`),
 transient `Copilot encountered an error` reviews are automatically retried up to
-`--max-copilot-retries <n>` (default `2`) per head SHA (`COPILOT_REVIEW_RETRIED`).
+`--max-copilot-retries <n>` (default `2`) per head SHA (`COPILOT_REVIEW_RETRIED`),
+`action_required` workflow runs on bot-authored PRs surface `actionRequiredRuns`
+with approval/rerun commands, and live stdout status emits on phase/summary
+transitions and 60s heartbeats.
 Only an explicit user-authorized exception for a verified private repository with the exact allowed
 owner skips requesting and waiting, including already-pending requests. Posted
 feedback and other required reviews still apply.

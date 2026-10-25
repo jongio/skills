@@ -12,6 +12,7 @@ import {
   parseGhApiArgs,
   parsePrWatchArgs,
   requestCopilotReview,
+  shouldEmitPrWatchStatus,
 } from "../scripts/pr-watch-daemon.mjs";
 
 const skill = (await readFile(new URL("../SKILL.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
@@ -1514,6 +1515,63 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   assert.equal(unrelatedNoiseRes.ok, true);
   assert.equal(unrelatedNoiseRes.status, "requested");
   assert.deepEqual(unrelatedNoiseRes.cancelledRunIds, []);
+
+  // 13. Transient total_count drift on pass 1 (when a run finishes mid-query) retries on pass 2 & 3 instead of failing immediately
+  let driftInProgressPage1Calls = 0;
+  const driftRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[1] === "repos/jongio/skills/actions/runs?status=in_progress&per_page=100") {
+      driftInProgressPage1Calls += 1;
+      if (driftInProgressPage1Calls === 1) {
+        return {
+          ok: true,
+          stdout: JSON.stringify({
+            total_count: 2,
+            workflow_runs: [{ id: 9401, name: "Skill Lint", status: "in_progress" }],
+          }),
+          stderr: "",
+        };
+      }
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          total_count: 1,
+          workflow_runs: [{ id: 9401, name: "Skill Lint", status: "in_progress" }],
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[1] === "repos/jongio/skills/actions/runs?status=in_progress&per_page=100&page=2") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({ total_count: 2, workflow_runs: [] }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1]?.startsWith("repos/jongio/skills/actions/runs?status=")) {
+      return { ok: true, stdout: JSON.stringify({ total_count: 0, workflow_runs: [] }), stderr: "" };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(driftRes.ok, true);
+  assert.equal(driftRes.status, "requested");
 });
 
 test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate-limit backoff", () => {
@@ -1888,5 +1946,106 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(multiTick.statuses.length, 2);
   assert.equal(multiTick.statuses[0].pr, 178);
   assert.equal(multiTick.statuses[1].pr, 179);
+
+  // action_required workflow runs surface actionRequiredRuns with approval/rerun remediation,
+  // and shouldEmitPrWatchStatus suppresses unchanged ticks until 60s heartbeat
+  const actionReqTick = evaluatePrPollTick(watchArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+    }
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        total_count: 1,
+        workflow_runs: [
+          {
+            id: 40110872292,
+            workflow_id: 1,
+            name: "CI",
+            event: "pull_request",
+            head_branch: "update-marketplace",
+            status: "completed",
+            conclusion: "action_required",
+            html_url: "https://github.com/github/evals/actions/runs/40110872292",
+          },
+        ],
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(actionReqTick.events[0].type, "CI_FAILED");
+  assert.equal(actionReqTick.events[0].actionRequiredRuns.length, 1);
+  assert.equal(actionReqTick.events[0].actionRequiredRuns[0].runId, 40110872292);
+  assert.match(actionReqTick.events[0].remediation, /actions\/runs\/40110872292\/approve/);
+  assert.match(actionReqTick.events[0].remediation, /^Approve and rerun action_required workflow runs/);
+
+  // When both action_required and genuine failures coexist, remediation includes both instructions
+  const mixedActionReqTick = evaluatePrPollTick(watchArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+    }
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        total_count: 2,
+        workflow_runs: [
+          {
+            id: 40110872292,
+            workflow_id: 1,
+            name: "CI",
+            event: "pull_request",
+            head_branch: "update-marketplace",
+            status: "completed",
+            conclusion: "action_required",
+            html_url: "https://github.com/github/evals/actions/runs/40110872292",
+          },
+          {
+            id: 40110872293,
+            workflow_id: 2,
+            name: "Lint",
+            event: "pull_request",
+            head_branch: "update-marketplace",
+            status: "completed",
+            conclusion: "failure",
+            html_url: "https://github.com/github/evals/actions/runs/40110872293",
+          },
+        ],
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(mixedActionReqTick.events[0].type, "CI_FAILED");
+  assert.match(mixedActionReqTick.events[0].remediation, /also inspect the other failed job logs/);
+
+  assert.equal(
+    shouldEmitPrWatchStatus({
+      polls: 1,
+      eventsCount: 0,
+      summaryChanged: false,
+      nowMs: 1000,
+      lastEmitMs: 0,
+    }),
+    true
+  );
+  assert.equal(
+    shouldEmitPrWatchStatus({
+      polls: 2,
+      eventsCount: 0,
+      summaryChanged: false,
+      nowMs: 16_000,
+      lastEmitMs: 1000,
+    }),
+    false
+  );
+  assert.equal(
+    shouldEmitPrWatchStatus({
+      polls: 5,
+      eventsCount: 0,
+      summaryChanged: false,
+      nowMs: 62_000,
+      lastEmitMs: 1000,
+    }),
+    true
+  );
 });
 
