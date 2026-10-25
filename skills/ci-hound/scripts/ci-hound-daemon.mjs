@@ -1399,16 +1399,13 @@ function latestRunsByWorkflow(runs, resolveKey = buildWorkflowIdentityResolver(r
 
 export function shouldEmitWatchStatus({
   polls = 1,
-  hasActiveRuns = false,
   phaseChangesCount = 0,
   summaryChanged = false,
   nowMs = Date.now(),
   lastEmitMs = 0,
   heartbeatSec = 60,
 } = {}) {
-  if (phaseChangesCount > 0) return true;
-  if (!hasActiveRuns) return false;
-  if (polls <= 1 || summaryChanged) return true;
+  if (polls <= 1 || phaseChangesCount > 0 || summaryChanged) return true;
   return nowMs - lastEmitMs >= heartbeatSec * 1000;
 }
 
@@ -2158,14 +2155,10 @@ export async function runCli(argv = process.argv.slice(2)) {
       lastPhaseByRepo.set(st.repo, st.phase);
       lastSummaryByRepo.set(st.repo, st.summary);
     }
-    const hasActiveRuns =
-      multi.activeMainRuns > 0 ||
-      (multi.statuses || []).some((st) => (st.activeRuns?.length || 0) > 0);
     const nowMs = Date.now();
     if (
       shouldEmitWatchStatus({
         polls,
-        hasActiveRuns,
         phaseChangesCount: phaseChanges.length,
         summaryChanged,
         nowMs,

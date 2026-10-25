@@ -1574,13 +1574,26 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
   assert.equal(
     shouldEmitWatchStatus({
       polls: 1,
-      hasActiveRuns: true,
+      hasActiveRuns: false,
       phaseChangesCount: 0,
       summaryChanged: false,
       nowMs: 1000,
       lastEmitMs: 0,
     }),
-    true
+    true,
+    "initial idle watch poll must emit status"
+  );
+  assert.equal(
+    shouldEmitWatchStatus({
+      polls: 2,
+      hasActiveRuns: false,
+      phaseChangesCount: 0,
+      summaryChanged: false,
+      nowMs: 61_000,
+      lastEmitMs: 1000,
+    }),
+    true,
+    "60s heartbeat must emit even when no run is active"
   );
   assert.equal(
     shouldEmitWatchStatus({
