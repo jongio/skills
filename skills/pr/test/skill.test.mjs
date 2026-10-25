@@ -858,6 +858,131 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(phaseChangedTick.events[0].summary, "CI passed (1/1) | Copilot is reviewing");
 });
 
+test("Copilot reviewer aliases match without weakening review gates", async (t) => {
+  const head = "a".repeat(40);
+  const aliases = [
+    "copilot",
+    "copilot-pull-request-reviewer",
+    "copilot-pull-request-reviewer[bot]",
+    "github-copilot",
+    "github-copilot[bot]",
+  ];
+  function poll({
+    expected = "copilot",
+    author = "copilot-pull-request-reviewer",
+    review = {},
+    pr = {},
+    workflowRuns = [],
+    noCopilot = false,
+  } = {}) {
+    const args = parsePrWatchArgs([
+      "once", "--repo", "example/skills", "--pr", "7", "--head", head,
+      "--expected-reviewers", expected, "--max-copilot-retries", "0",
+      ...(noCopilot ? ["--no-copilot"] : []),
+    ]);
+    const pullRequest = {
+      state: "OPEN",
+      headRefOid: head,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: "APPROVED",
+      reviewRequests: { nodes: [] },
+      reviews: { nodes: [{
+        databaseId: 1,
+        state: "APPROVED",
+        submittedAt: "2026-01-01T00:00:00Z",
+        commit: { oid: head },
+        author: { login: author },
+        body: "Looks good.",
+        ...review,
+      }] },
+      reviewThreads: { nodes: [] },
+      comments: { nodes: [] },
+      commits: { nodes: [{ commit: { statusCheckRollup: {
+        state: "SUCCESS",
+        contexts: { nodes: [{
+          __typename: "CheckRun", name: "tests", status: "COMPLETED", conclusion: "SUCCESS",
+        }] },
+      } } }] },
+      ...pr,
+    };
+    return evaluatePrPollTick(args, (ghArgs) => {
+      assert.equal(ghArgs[0], "api");
+      if (ghArgs[1] === "graphql") {
+        return {
+          ok: true,
+          stdout: JSON.stringify({ data: { repository: { pullRequest } } }),
+          stderr: "",
+        };
+      }
+      assert.ok(ghArgs[1].startsWith("repos/example/skills/actions/runs?"));
+      return { ok: true, stdout: JSON.stringify({ workflow_runs: workflowRuns }), stderr: "" };
+    });
+  }
+
+  await t.test("matches all supported expected and returned Copilot names", () => {
+    for (const expected of [...aliases, " CoPiLoT "]) {
+      for (const author of [...aliases, "CoPiLoT-Pull-Request-Reviewer[BoT]"]) {
+        const result = poll({ expected, author });
+        assert.equal(result.events[0]?.type, "PR_READY_TO_MERGE", `${expected} / ${author}`);
+        assert.equal(result.events[0].headRefOid, head);
+      }
+    }
+    assert.equal(poll({ expected: aliases.join(",") }).events[0]?.type, "PR_READY_TO_MERGE");
+  });
+
+  await t.test("COMMENTED completes review without claiming approval", () => {
+    const result = poll({
+      review: { state: "COMMENTED", body: "### 🟢 Approval recommended\n\n**No open issues**" },
+      pr: { reviewDecision: null },
+    });
+    assert.equal(result.events[0]?.type, "PR_READY_TO_MERGE");
+    assert.equal(result.events[0].reviewDecision, null);
+  });
+
+  await t.test("requires a submitted current-head review and separate approval gates", () => {
+    for (const [name, options, count] of [
+      ["missing", { pr: { reviews: { nodes: [] } } }, 0],
+      ["stale", { review: { commit: { oid: "b".repeat(40) } } }, 0],
+      ["dismissed", { review: { state: "DISMISSED" } }, 0],
+      ["draft", { review: { state: "PENDING" } }, 0],
+      ["unsubmitted", { review: { submittedAt: null } }, 0],
+      ["requested", { pr: { reviewRequests: { nodes: [{
+        requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" },
+      }] } } }, 1],
+      ["running", { workflowRuns: [{
+        id: 2, name: "Running Copilot Code Review", status: "in_progress",
+      }] }, 1],
+      ["approval required", { pr: { reviewDecision: "REVIEW_REQUIRED" } }, 1],
+      ["changes requested", { pr: { reviewDecision: "CHANGES_REQUESTED" } }, 1],
+    ]) {
+      const result = poll(options);
+      assert.ok(!result.events.some((event) => event.type === "PR_READY_TO_MERGE"), name);
+      assert.equal(result.status?.validHeadCopilotReviewsCount, count, name);
+    }
+    assert.equal(
+      poll({ review: {
+        state: "COMMENTED",
+        body: "Copilot encountered an error and was unable to review this pull request.",
+      } }).events[0]?.type,
+      "COPILOT_REVIEW_ERROR",
+    );
+    assert.equal(poll({ pr: { headRefOid: "b".repeat(40) } }).events[0]?.type, "HEAD_CHANGED");
+    assert.equal(poll({ review: { state: "COMMENTED" } }).events[0]?.type, "FEEDBACK_ACTION_NEEDED");
+  });
+
+  await t.test("keeps unrelated reviewers and lookalike names distinct", () => {
+    const missingHuman = poll({ expected: "copilot,alice" });
+    assert.deepEqual(missingHuman.status?.pendingReviewers, ["alice"]);
+    const lookalike = poll({ expected: "copilot-helper" });
+    assert.deepEqual(lookalike.status?.pendingReviewers, ["copilot-helper"]);
+    assert.equal(
+      poll({ author: "ALICE", expected: "alice", noCopilot: true }).events[0]?.type,
+      "PR_READY_TO_MERGE",
+    );
+  });
+});
+
 test("requestCopilotReview cancels superseded branch runs, toggles existing requests, and guards head/state", () => {
   assert.match(skill, /--body-file.*@'\.\.\.'@/i);
   assert.match(skill, /pr-watch-daemon\.mjs request-copilot/);
@@ -2048,4 +2173,3 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
     true
   );
 });
-
