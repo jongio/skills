@@ -875,10 +875,12 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   let allWorkflowRuns = [];
   let previousPassSignature = null;
   let inventoryStabilized = false;
+  let lastTruncationError = "";
 
   for (let pass = 1; pass <= maxInventoryPasses; pass += 1) {
     const passRuns = [];
     const seenPassRunIds = new Set();
+    let passTruncated = false;
 
     for (const runStatus of activeRunStatuses) {
       const statusRuns = [];
@@ -931,15 +933,20 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
           break;
         }
         if (pageRuns.length === 0) {
-          return {
-            ok: false,
-            status: "collection_truncated",
-            collections: ["workflow_runs"],
-            error: `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`,
-          };
+          passTruncated = true;
+          lastTruncationError = `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`;
+          break;
         }
         page += 1;
       }
+      if (passTruncated) {
+        break;
+      }
+    }
+
+    if (passTruncated) {
+      previousPassSignature = null;
+      continue;
     }
 
     const passSignature = passRuns
@@ -957,6 +964,14 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
   }
 
   if (!inventoryStabilized) {
+    if (lastTruncationError) {
+      return {
+        ok: false,
+        status: "collection_truncated",
+        collections: ["workflow_runs"],
+        error: lastTruncationError,
+      };
+    }
     return {
       ok: false,
       status: "inventory_unstable",

@@ -1515,6 +1515,63 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   assert.equal(unrelatedNoiseRes.ok, true);
   assert.equal(unrelatedNoiseRes.status, "requested");
   assert.deepEqual(unrelatedNoiseRes.cancelledRunIds, []);
+
+  // 13. Transient total_count drift on pass 1 (when a run finishes mid-query) retries on pass 2 & 3 instead of failing immediately
+  let driftInProgressPage1Calls = 0;
+  const driftRes = requestCopilotReview(reqArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[1] === "repos/jongio/skills/actions/runs?status=in_progress&per_page=100") {
+      driftInProgressPage1Calls += 1;
+      if (driftInProgressPage1Calls === 1) {
+        return {
+          ok: true,
+          stdout: JSON.stringify({
+            total_count: 2,
+            workflow_runs: [{ id: 9401, name: "Skill Lint", status: "in_progress" }],
+          }),
+          stderr: "",
+        };
+      }
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          total_count: 1,
+          workflow_runs: [{ id: 9401, name: "Skill Lint", status: "in_progress" }],
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[1] === "repos/jongio/skills/actions/runs?status=in_progress&per_page=100&page=2") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({ total_count: 2, workflow_runs: [] }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1]?.startsWith("repos/jongio/skills/actions/runs?status=")) {
+      return { ok: true, stdout: JSON.stringify({ total_count: 0, workflow_runs: [] }), stderr: "" };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(driftRes.ok, true);
+  assert.equal(driftRes.status, "requested");
 });
 
 test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate-limit backoff", () => {
