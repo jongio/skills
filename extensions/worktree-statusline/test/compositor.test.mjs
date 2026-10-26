@@ -59,6 +59,32 @@ test("legacy self-render hooks preserve sibling composition without re-entering 
 	assert.equal(calls, 1);
 }));
 
+test("a named standalone fallback preserves self-rendered pills without registered modules", async () => fixture(async (home) => {
+	const payload = { session_id: "standalone-name" };
+	setSessionName(payload.session_id, "API migration", { home });
+	for (const color of [false, true]) {
+		const label = await composeStatusLine(payload, { home, ...plain, color });
+		let calls = 0;
+		const output = await composeStatusLine(payload, {
+			home, ...plain, color,
+			selfRender: (input, options) => {
+				calls++;
+				assert.deepEqual(input, payload);
+				assert.equal(options.home, home);
+				assert.equal(options.color, color);
+				assert.equal(options.nerdFont, false);
+				return "PR";
+			},
+		});
+		assert.equal(output, `${label}${color ? " " : " · "}PR`);
+		assert.equal(calls, 1);
+	}
+	setSessionName(payload.session_id, null, { home });
+	assert.equal(await composeStatusLine(payload, {
+		home, ...plain, selfRender: () => assert.fail("unnamed callers retain their own fallback"),
+	}), "");
+}));
+
 test("all distributable composers share the same session name implementation", () => {
 	const source = readFileSync(new URL("../compose.mjs", import.meta.url), "utf8");
 	for (const id of ["pr", "issue", "subagent"]) {

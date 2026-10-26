@@ -1053,8 +1053,13 @@ export async function composeStatusLine(payload, {
 	const name = readSessionName(payload?.session_id, { home });
 	const label = name && (color ? `\x1b[1;38;2;219;234;254;48;2;30;64;120m ${name} \x1b[0m` : name);
 	const renderers = discoverRenderers(home);
-	if (!renderers.length) return label;
+	if (!renderers.length && (!label || typeof selfRender !== "function")) return label;
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: true });
+	if (!renderers.length) {
+		const rendered = await selfRender(payload, { home, now, links, color, nerdFont: useNerdFont });
+		const output = useNerdFont ? rendered : toUnicodeIcons(rendered);
+		return output ? `${label}${color ? " " : " · "}${output}` : label;
+	}
 	const options = {
 		home, now, links, color, nerdFont: useNerdFont,
 		deferCheckoutDivergence: true,

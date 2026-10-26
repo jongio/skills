@@ -6,7 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { configureStatuslines } from "../../../scripts/setup-statusline.mjs";
-import { discoverRenderers, ensurePluginStatuslineRegistered, getEnabledStatuslines } from "../compose.mjs";
+import { discoverRenderers, ensurePluginStatuslineRegistered, getEnabledStatuslines, setSessionName } from "../compose.mjs";
+import { SessionTracker, writeState as writePrState } from "../../pr-statusline/tracker.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const ids = ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"];
@@ -237,6 +238,23 @@ test("installed composer reads session names across processes without changing e
 	assert.equal(other.status, 0, other.stderr);
 	assert.equal(other.stdout, "");
 	assert.equal(readFileSync(join(home, "statusline-config.json"), "utf8"), config);
+}));
+
+test("a named standalone PR renderer keeps tracked pills without an installed composer registry", () => fixture((home) => {
+	const id = "standalone-pr-name";
+	const tracker = new SessionTracker(id);
+	tracker.add("example/widget#99");
+	Object.assign(tracker.state.prs[0], { status: "CI passed", checkedAt: Date.now() + 60_000 });
+	writePrState(tracker.snapshot(), home);
+	const renderer = join(root, "extensions", "pr-statusline", "render.mjs");
+	const payload = JSON.stringify({ session_id: id });
+	const before = node(home, [renderer, "--plain"], payload);
+	assert.equal(before.status, 0, before.stderr);
+	assert.match(before.stdout, /example\/widget#99/);
+	setSessionName(id, "API migration", { home });
+	const after = node(home, [renderer, "--plain"], payload);
+	assert.equal(after.status, 0, after.stderr);
+	assert.equal(after.stdout.trim(), `API migration · ${before.stdout.trim()}`);
 }));
 
 test("installer exposes one SDK controller and preserves standalone entry points when upgrading to unified controls", () => fixture((home) => {
