@@ -13,6 +13,11 @@ export function isCopilotBotLogin(login) {
   );
 }
 
+function normalizeReviewerLogin(login) {
+  const normalized = String(login || "").trim().toLowerCase();
+  return isCopilotBotLogin(normalized) ? "copilot-pull-request-reviewer" : normalized;
+}
+
 export function detectRepoFromGit(cwd = process.cwd()) {
   try {
     const remote = execFileSync("git", ["remote", "get-url", "origin"], {
@@ -1806,13 +1811,13 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
 
   // Verify every non-exempt expected reviewer has a non-dismissed, non-errored submitted review on headOid
   const headReviewerLogins = new Set(
-    headReviews.map((r) => (r.author?.login || "").toLowerCase()).filter(Boolean)
+    headReviews.map((r) => normalizeReviewerLogin(r.author?.login)).filter(Boolean)
   );
   const nonExemptExpectedReviewers = (args.expectedReviewers || []).filter(
     (login) => args.expectCopilot || !isCopilotBotLogin(login)
   );
   const missingExpectedReviewers = nonExemptExpectedReviewers.filter(
-    (login) => !headReviewerLogins.has(login)
+    (login) => !headReviewerLogins.has(normalizeReviewerLogin(login))
   );
 
   const copilotReviewPending = args.expectCopilot && (copilotWorkflowActive || copilotRequested);
