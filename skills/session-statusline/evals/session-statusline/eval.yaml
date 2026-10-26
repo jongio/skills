@@ -16,8 +16,9 @@ scoring:
 stimuli:
   - name: clear-pills-not-work-or-settings
     prompt: >-
-      Use session-statusline. Clear all pills from this session's footer. In this
-      evaluation do not execute tools or write files: state the exact tool and
+      Load the session-statusline skill first, then use session-statusline to
+      clear all pills from this session's footer. After loading the skill, do
+      not call statusline/shell tools or write files: state the exact tool and
       arguments you would use, and what must remain unchanged.
     tags:
       scenario: workflow
@@ -42,10 +43,11 @@ stimuli:
           required: [session-statusline]
   - name: references-are-not-active-work
     prompt: >-
-      Use session-statusline. We are reviewing acme/widget PR 12, but PR 90 and
-      issue 91 are historical references only. I manually cleared PR 90 earlier.
-      Do not execute tools: describe which entries to add and the exact tool
-      arguments. Do not infer that a lookup is active work.
+      Load the session-statusline skill first, then use session-statusline. We
+      are reviewing acme/widget PR 12, but PR 90 and issue 91 are historical
+      references only. I manually cleared PR 90 earlier. After loading the
+      skill, do not call statusline/shell tools: describe which entries to add
+      and the exact tool arguments. Do not infer that a lookup is active work.
     tags:
       scenario: active-work
       cost: low
@@ -69,9 +71,10 @@ stimuli:
           required: [session-statusline]
   - name: missing-tools-are-not-success
     prompt: >-
-      Use session-statusline to clear only agent pills. Assume the extension tools
-      are unavailable. Do not run shell commands or change any files. Explain the
-      available fallback without claiming the agents were stopped or pills cleared.
+      Load the session-statusline skill first, then use session-statusline to
+      clear only agent pills. Assume the extension tools are unavailable. Do not
+      run shell commands or change any files. Explain the available fallback
+      without claiming the agents were stopped or pills cleared.
     tags:
       scenario: unavailable-tools
       cost: low
@@ -95,11 +98,12 @@ stimuli:
           required: [session-statusline]
   - name: shell-results-are-not-ownership
     prompt: >-
-      Use session-statusline. A transcript contains gh pr checkout 12,
-      gh issue develop 13, and a successful gh pr create result pointing to PR 14.
-      These are historical examples, not work this session has taken on.
-      Explain whether these create pills and how to track a PR when this session
-      actually accepts it. Do not execute tools or write files.
+      Load the session-statusline skill first, then use session-statusline. A
+      transcript contains gh pr checkout 12, gh issue develop 13, and a
+      successful gh pr create result pointing to PR 14. These are historical
+      examples, not work this session has taken on. Explain whether these create
+      pills and how to track a PR when this session actually accepts it. After
+      loading the skill, do not call statusline/shell tools or write files.
     tags:
       scenario: explicit-ownership
       cost: low

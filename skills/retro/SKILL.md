@@ -116,9 +116,18 @@ scenario-only request, describe those same concrete actions without performing
 them. Keep independently blocked tasks visible and the verdict Incomplete.
 
 Use the original task's established workflow. For PR work, continue the
-standard `/pr` workflow; Devy supplements it and never replaces it. Apply
-[the closeout safety rules](references/closeout-safety.md) before any PR or
-cleanup action.
+standard `/pr` workflow; Devy supplements it and never replaces it. Read and
+apply [the closeout safety rules](references/closeout-safety.md) before any PR
+or cleanup action or assessment: default policy is
+`{"copilot":true,"expectedReviewers":[]}`; **only for verified PRIVATE
+repositories owned by `jongio`** do not request or wait for Copilot review
+(even if a Copilot request is already pending), while posted Copilot feedback,
+every other expected reviewer on the current head, required approvals (a
+completed `COMMENTED` review counts as review completion, not approval),
+passing CI, repository merge rules, merge authorization, and head-pinned merge
+(`gh pr merge NUMBER -R OWNER/REPO --match-head-commit FULL_SHA` with one
+explicit `--merge`, `--squash`, or `--rebase` method; never raw REST/admin
+bypasses) remain mandatory gates.
 
 Run focused acceptance checks against the final edited state. A subsequent
 edit invalidates checks covering changed behavior; rerun those checks. Link

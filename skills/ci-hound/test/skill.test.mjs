@@ -1221,6 +1221,96 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
   assert.equal(legacyTick.events[0].type, "ALL_GREEN");
   assert.deepEqual(legacyTick.events[0].runs.map((r) => r.id), [1002]);
 
+  // 1c. Scheduled runs on main (event: "schedule") block ALL_GREEN while in_progress and alert on failure even if main SHA advanced,
+  // and rerunning a failed run resets alertedFailure so a second failure alerts again
+  const scheduleState = loadState("/nonexistent/state.json");
+  let scheduledStatus = "in_progress";
+  let scheduledConclusion = null;
+  let scheduledUpdatedAt = "2026-10-25T03:37:13Z";
+  const execScheduleScenario = (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"947d82e0"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 5000,
+              workflow_id: 30,
+              name: "Skill Lint",
+              event: "push",
+              head_branch: "main",
+              head_sha: "947d82e0",
+              status: "completed",
+              conclusion: "success",
+              updated_at: "2026-10-25T04:33:16Z",
+              html_url: "https://github.com/jongio/skills/actions/runs/5000",
+            },
+            {
+              id: 5001,
+              workflow_id: 40,
+              name: "Skill Eval",
+              event: "schedule",
+              head_branch: "main",
+              head_sha: "8e23f105",
+              status: scheduledStatus,
+              conclusion: scheduledConclusion,
+              updated_at: scheduledUpdatedAt,
+              html_url: "https://github.com/jongio/skills/actions/runs/5001",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/5000/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [{ id: 1, name: "lint", status: "completed", conclusion: "success", steps: [] }],
+        }),
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/5001/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [
+            {
+              id: 2,
+              name: "eval (skills/go)",
+              status: scheduledStatus,
+              conclusion: scheduledConclusion,
+              steps: [],
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  };
+  const inProgressSchedTick = evaluatePollTick(args, scheduleState, execScheduleScenario);
+  assert.equal(inProgressSchedTick.events.length, 0, "ALL_GREEN must not fire while scheduled main run is in_progress");
+
+  scheduledStatus = "completed";
+  scheduledConclusion = "failure";
+  scheduledUpdatedAt = "2026-10-25T05:30:12Z";
+  const failedSchedTick = evaluatePollTick(args, scheduleState, execScheduleScenario);
+  assert.equal(failedSchedTick.events.length, 1, "failed scheduled main run must emit JOB_FAILED even after main SHA advanced");
+  assert.equal(failedSchedTick.events[0].type, "JOB_FAILED");
+  assert.equal(failedSchedTick.events[0].runId, 5001);
+
+  // Rerun of 5001 that fails again at a newer updated_at must re-emit JOB_FAILED
+  scheduledUpdatedAt = "2026-10-25T06:00:00Z";
+  const rerunFailedTick = evaluatePollTick(args, scheduleState, execScheduleScenario);
+  assert.equal(rerunFailedTick.events.length, 1, "rerun failure at newer updated_at must re-alert");
+  assert.equal(rerunFailedTick.events[0].type, "JOB_FAILED");
+
   // 2. When --watch-run 2002 is specified, an unrelated already-failed run 2001 on main does not abort the watch,
   // an active main run 2000 before 2002 does not hijack displaySha, and watching an active PR run 2002 uses activeIntervalSec (15s)
   const watchState = loadState("/nonexistent/state.json");

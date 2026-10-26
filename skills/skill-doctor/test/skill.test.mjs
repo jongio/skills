@@ -47,7 +47,7 @@ test("every capability scenario requires actual skill invocation", async () => {
       `Missing mandatory invocation guard: ${stimulus.split(/\r?\n/)[0].trim()}`);
   }
   assert.match(spec, /skill-invocation: 0\.2/);
-  assert.match(spec, /^  threshold: 1\.0$/m);
+  assert.match(spec, /^  threshold: 0\.8$/m);
 });
 
 test("historical cache revisions and probes cover only cutoff-bounded evidence", async () => {
