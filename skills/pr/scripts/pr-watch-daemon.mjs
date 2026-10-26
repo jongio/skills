@@ -616,6 +616,7 @@ export function parseGhApiArgs(ghArgs) {
 
 let keepAliveWorkerState = null;
 let nextWorkerReqId = 0;
+let activeChunkDeadlineMs = 0;
 
 function resolveGhTokenOnce() {
   const envToken = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim();
@@ -655,7 +656,7 @@ function getKeepAliveWorker() {
           replyPort = msg.initPort;
           return;
         }
-        const { reqId, token, req, signalBuf } = msg;
+        const { reqId, token, req, timeoutMs, signalBuf } = msg;
         const signal = new Int32Array(signalBuf);
         try {
           const res = await fetch(req.url, {
@@ -668,7 +669,7 @@ function getKeepAliveWorker() {
               ...req.headers,
             },
             body: req.body,
-            signal: AbortSignal.timeout(28000),
+            signal: AbortSignal.timeout(timeoutMs || 28000),
           });
           const bodyText = await res.text();
           const httpMeta = {
@@ -720,6 +721,16 @@ function getKeepAliveWorker() {
 }
 
 function defaultExecGh(ghArgs) {
+  const remainingMs = activeChunkDeadlineMs > 0 ? activeChunkDeadlineMs - Date.now() : 30000;
+  if (activeChunkDeadlineMs > 0 && remainingMs <= 0) {
+    return {
+      ok: false,
+      timedOut: true,
+      stdout: "",
+      stderr: "Chunk deadline exceeded",
+    };
+  }
+  const boundedTimeoutMs = Math.min(30000, Math.max(500, remainingMs));
   const parsedReq = parseGhApiArgs(ghArgs);
   if (parsedReq) {
     const ka = getKeepAliveWorker();
@@ -731,9 +742,10 @@ function defaultExecGh(ghArgs) {
         reqId,
         token: ka.token,
         req: parsedReq,
+        timeoutMs: Math.min(28000, boundedTimeoutMs),
         signalBuf,
       });
-      const waitRes = Atomics.wait(signal, 0, 0, 30000);
+      const waitRes = Atomics.wait(signal, 0, 0, boundedTimeoutMs);
       while (true) {
         const msg = receiveMessageOnPort(ka.port1);
         if (!msg) break;
@@ -753,14 +765,24 @@ function defaultExecGh(ghArgs) {
       }
     }
   }
+  const secondRemainingMs = activeChunkDeadlineMs > 0 ? activeChunkDeadlineMs - Date.now() : 30000;
+  if (activeChunkDeadlineMs > 0 && secondRemainingMs <= 0) {
+    return {
+      ok: false,
+      timedOut: true,
+      stdout: "",
+      stderr: "Chunk deadline exceeded",
+    };
+  }
   const res = spawnSync("gh", ghArgs, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
+    timeout: Math.min(30000, Math.max(500, secondRemainingMs)),
   });
   return {
     ok: res.status === 0,
     stdout: res.stdout || "",
-    stderr: res.stderr || "",
+    stderr: res.stderr || (res.error ? res.error.message : ""),
   };
 }
 
@@ -2067,10 +2089,17 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
   let firstError = null;
 
   for (const prNumber of targetPrs) {
+    if (activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
+      break;
+    }
     if (!multiState[prNumber]) {
       const useSinglePrBaseline = targetPrs.length === 1 || prNumber === args.pr;
+      const ws = createPrWatchState();
+      if (Number.isFinite(args.initialCooldownMs) && args.initialCooldownMs > Date.now()) {
+        ws.cooldownUntilMs = args.initialCooldownMs;
+      }
       multiState[prNumber] = {
-        watchState: createPrWatchState(),
+        watchState: ws,
         lastPhase: targetPrs.length === 1 ? args.lastPhase || "" : "",
         hasExplicitSinceCommentId: useSinglePrBaseline
           ? Boolean(args.hasExplicitSinceCommentId)
@@ -2190,38 +2219,96 @@ export async function runCli(argv = process.argv.slice(2)) {
   if (args.prs.length > 1) {
     const multiState = {};
     const initialCooldownMs = loadPrCooldownMs(args.repo);
-    if (initialCooldownMs) {
-      for (const prNum of args.prs) {
-        multiState[prNum] = { state: { ...createPrWatchState(), cooldownUntilMs: initialCooldownMs } };
-      }
-    }
     const watchStartedAtMs = Date.now();
+    activeChunkDeadlineMs = args.maxWaitSec > 0 ? watchStartedAtMs + args.maxWaitSec * 1000 : 0;
     const lastSummaryByPr = new Map();
     let lastEmitMs = 0;
     let polls = 0;
-    while (true) {
-      polls += 1;
-      const multi = evaluateMultiPrPollTick(args, defaultExecGh, multiState);
-      if (multi.error) {
-        console.error(JSON.stringify(multi, null, 2));
-        process.exit(1);
-      }
-      const terminalEvents = multi.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
-      if (terminalEvents.length > 0) {
-        console.log(JSON.stringify(multi, null, 2));
-        return;
-      }
-      if (multi.rateLimited) {
-        const rateSleepSec = multi.nextIntervalSec || 60;
-        savePrCooldownMs(args.repo, Date.now() + rateSleepSec * 1000);
-        console.log(JSON.stringify(multi, null, 2));
-        if (args.maxPolls > 0 && polls >= args.maxPolls) {
-          console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+    try {
+      while (true) {
+        polls += 1;
+        const multi = evaluateMultiPrPollTick(
+          { ...args, ...(initialCooldownMs ? { initialCooldownMs } : {}) },
+          defaultExecGh,
+          multiState
+        );
+        if (multi.error) {
+          console.error(JSON.stringify(multi, null, 2));
+          process.exit(1);
+        }
+        const terminalEvents = multi.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
+        if (terminalEvents.length > 0) {
+          console.log(JSON.stringify(multi, null, 2));
           return;
         }
+        if (multi.rateLimited) {
+          const rateSleepSec = multi.nextIntervalSec || 60;
+          savePrCooldownMs(args.repo, Date.now() + rateSleepSec * 1000);
+          console.log(JSON.stringify(multi, null, 2));
+          if (args.maxPolls > 0 && polls >= args.maxPolls) {
+            console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+            return;
+          }
+          if (args.maxWaitSec > 0) {
+            const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
+            if (elapsedSec + rateSleepSec >= args.maxWaitSec) {
+              const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+              if (remainingWaitSec > 0) {
+                await sleepSeconds(remainingWaitSec);
+              }
+              console.log(
+                JSON.stringify(
+                  {
+                    prs: args.prs,
+                    events: [
+                      {
+                        type: "WATCH_CHUNK_TIMEOUT",
+                        elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
+                        maxWaitSec: args.maxWaitSec,
+                      },
+                    ],
+                    statuses: multi.statuses,
+                  },
+                  null,
+                  2
+                )
+              );
+              return;
+            }
+          }
+          await sleepSeconds(rateSleepSec);
+          continue;
+        }
+        savePrCooldownMs(args.repo, null);
+        let summaryChanged = false;
+        for (const st of multi.statuses || []) {
+          const prevSummary = lastSummaryByPr.get(st.pr);
+          if (prevSummary && prevSummary !== st.summary) {
+            summaryChanged = true;
+          }
+          lastSummaryByPr.set(st.pr, st.summary);
+        }
+        const nowMs = Date.now();
+        if (
+          shouldEmitPrWatchStatus({
+            polls,
+            eventsCount: multi.events.length,
+            summaryChanged,
+            nowMs,
+            lastEmitMs,
+          })
+        ) {
+          lastEmitMs = nowMs;
+          console.log(JSON.stringify({ prs: multi.prs, events: multi.events, statuses: multi.statuses }, null, 2));
+        }
+        if (args.maxPolls > 0 && polls >= args.maxPolls) {
+          console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }], statuses: multi.statuses }, null, 2));
+          return;
+        }
+        const nextSleepSec = multi.nextIntervalSec || args.intervalSec;
         if (args.maxWaitSec > 0) {
           const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
-          if (elapsedSec + rateSleepSec >= args.maxWaitSec) {
+          if (elapsedSec + nextSleepSec >= args.maxWaitSec) {
             const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
             if (remainingWaitSec > 0) {
               await sleepSeconds(remainingWaitSec);
@@ -2246,89 +2333,118 @@ export async function runCli(argv = process.argv.slice(2)) {
             return;
           }
         }
-        await sleepSeconds(rateSleepSec);
-        continue;
+        await sleepSeconds(nextSleepSec);
       }
-      savePrCooldownMs(args.repo, null);
-      let summaryChanged = false;
-      for (const st of multi.statuses || []) {
-        const prevSummary = lastSummaryByPr.get(st.pr);
-        if (prevSummary && prevSummary !== st.summary) {
-          summaryChanged = true;
-        }
-        lastSummaryByPr.set(st.pr, st.summary);
-      }
-      const nowMs = Date.now();
-      if (
-        shouldEmitPrWatchStatus({
-          polls,
-          eventsCount: multi.events.length,
-          summaryChanged,
-          nowMs,
-          lastEmitMs,
-        })
-      ) {
-        lastEmitMs = nowMs;
-        console.log(JSON.stringify({ prs: multi.prs, events: multi.events, statuses: multi.statuses }, null, 2));
-      }
-      if (args.maxPolls > 0 && polls >= args.maxPolls) {
-        console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }], statuses: multi.statuses }, null, 2));
-        return;
-      }
-      const nextSleepSec = multi.nextIntervalSec || args.intervalSec;
-      if (args.maxWaitSec > 0) {
-        const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
-        if (elapsedSec + nextSleepSec >= args.maxWaitSec) {
-          console.log(
-            JSON.stringify(
-              {
-                prs: args.prs,
-                events: [{ type: "WATCH_CHUNK_TIMEOUT", elapsedSec, maxWaitSec: args.maxWaitSec }],
-                statuses: multi.statuses,
-              },
-              null,
-              2
-            )
-          );
-          return;
-        }
-      }
-      await sleepSeconds(nextSleepSec);
+    } finally {
+      activeChunkDeadlineMs = 0;
     }
   }
 
   const watchState = createPrWatchState();
   watchState.cooldownUntilMs = loadPrCooldownMs(args.repo);
   const watchStartedAtMs = Date.now();
+  activeChunkDeadlineMs = args.maxWaitSec > 0 ? watchStartedAtMs + args.maxWaitSec * 1000 : 0;
   let baselinePhase = args.lastPhase;
   let lastSummary = "";
   let lastEmitMs = 0;
   let hasCommentBaseline = args.hasExplicitSinceCommentId;
   let baselineCommentId = args.sinceCommentId;
   let polls = 0;
-  while (true) {
-    polls += 1;
-    const tick = evaluatePrPollTick(
-      {
-        ...args,
-        lastPhase: baselinePhase,
-        hasExplicitSinceCommentId: hasCommentBaseline,
-        sinceCommentId: baselineCommentId,
-      },
-      defaultExecGh,
-      watchState
-    );
-    if (tick.rateLimited) {
-      savePrCooldownMs(args.repo, watchState.cooldownUntilMs);
-      console.log(JSON.stringify(tick, null, 2));
-      if (args.maxPolls > 0 && polls >= args.maxPolls) {
-        console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+  try {
+    while (true) {
+      polls += 1;
+      const tick = evaluatePrPollTick(
+        {
+          ...args,
+          lastPhase: baselinePhase,
+          hasExplicitSinceCommentId: hasCommentBaseline,
+          sinceCommentId: baselineCommentId,
+        },
+        defaultExecGh,
+        watchState
+      );
+      if (tick.rateLimited) {
+        savePrCooldownMs(args.repo, watchState.cooldownUntilMs);
+        console.log(JSON.stringify(tick, null, 2));
+        if (args.maxPolls > 0 && polls >= args.maxPolls) {
+          console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+          return;
+        }
+        const rateSleepSec = tick.nextIntervalSec || 60;
+        if (args.maxWaitSec > 0) {
+          const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
+          if (elapsedSec + rateSleepSec >= args.maxWaitSec) {
+            const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+            if (remainingWaitSec > 0) {
+              await sleepSeconds(remainingWaitSec);
+            }
+            console.log(
+              JSON.stringify(
+                {
+                  events: [
+                    {
+                      type: "WATCH_CHUNK_TIMEOUT",
+                      headRefOid: tick.status?.headRefOid || args.head || "",
+                      latestCommentId: baselineCommentId,
+                      lastPhase: baselinePhase || "",
+                      elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
+                      maxWaitSec: args.maxWaitSec,
+                    },
+                  ],
+                  ...(tick.status ? { status: tick.status } : {}),
+                },
+                null,
+                2
+              )
+            );
+            return;
+          }
+        }
+        await sleepSeconds(rateSleepSec);
+        continue;
+      }
+      savePrCooldownMs(args.repo, null);
+      if (tick.error) {
+        console.error(JSON.stringify(tick, null, 2));
+        process.exit(1);
+      }
+      const terminalEvents = tick.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
+      if (terminalEvents.length > 0) {
+        console.log(JSON.stringify(tick, null, 2));
         return;
       }
-      const rateSleepSec = tick.nextIntervalSec || 60;
+      const currentSummary = tick.status?.summary || "";
+      const summaryChanged = Boolean(lastSummary && currentSummary && currentSummary !== lastSummary);
+      lastSummary = currentSummary || lastSummary;
+      const nowMs = Date.now();
+      // Emit live status on initial poll, phase/summary transitions, auto-retries, or 60s heartbeats
+      if (
+        shouldEmitPrWatchStatus({
+          polls,
+          eventsCount: tick.events.length,
+          summaryChanged,
+          nowMs,
+          lastEmitMs,
+        })
+      ) {
+        lastEmitMs = nowMs;
+        console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
+      }
+      if (tick.status?.phase) {
+        baselinePhase = tick.status.phase;
+      }
+      if (!hasCommentBaseline && Number.isSafeInteger(tick.status?.latestCommentId)) {
+        hasCommentBaseline = true;
+        baselineCommentId = tick.status.latestCommentId;
+      }
+      if (args.maxPolls > 0 && polls >= args.maxPolls) {
+        console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], status: tick.status }, null, 2));
+        return;
+      }
+      const nextSleepSec = tick.nextIntervalSec || args.intervalSec;
       if (args.maxWaitSec > 0) {
         const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
-        if (elapsedSec + rateSleepSec >= args.maxWaitSec) {
+        if (elapsedSec + nextSleepSec >= args.maxWaitSec) {
           const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
           if (remainingWaitSec > 0) {
             await sleepSeconds(remainingWaitSec);
@@ -2346,7 +2462,7 @@ export async function runCli(argv = process.argv.slice(2)) {
                     maxWaitSec: args.maxWaitSec,
                   },
                 ],
-                ...(tick.status ? { status: tick.status } : {}),
+                status: tick.status,
               },
               null,
               2
@@ -2355,74 +2471,10 @@ export async function runCli(argv = process.argv.slice(2)) {
           return;
         }
       }
-      await sleepSeconds(rateSleepSec);
-      continue;
+      await sleepSeconds(nextSleepSec);
     }
-    savePrCooldownMs(args.repo, null);
-    if (tick.error) {
-      console.error(JSON.stringify(tick, null, 2));
-      process.exit(1);
-    }
-    const terminalEvents = tick.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
-    if (terminalEvents.length > 0) {
-      console.log(JSON.stringify(tick, null, 2));
-      return;
-    }
-    const currentSummary = tick.status?.summary || "";
-    const summaryChanged = Boolean(lastSummary && currentSummary && currentSummary !== lastSummary);
-    lastSummary = currentSummary || lastSummary;
-    const nowMs = Date.now();
-    // Emit live status on initial poll, phase/summary transitions, auto-retries, or 60s heartbeats
-    if (
-      shouldEmitPrWatchStatus({
-        polls,
-        eventsCount: tick.events.length,
-        summaryChanged,
-        nowMs,
-        lastEmitMs,
-      })
-    ) {
-      lastEmitMs = nowMs;
-      console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
-    }
-    if (tick.status?.phase) {
-      baselinePhase = tick.status.phase;
-    }
-    if (!hasCommentBaseline && Number.isSafeInteger(tick.status?.latestCommentId)) {
-      hasCommentBaseline = true;
-      baselineCommentId = tick.status.latestCommentId;
-    }
-    if (args.maxPolls > 0 && polls >= args.maxPolls) {
-      console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], status: tick.status }, null, 2));
-      return;
-    }
-    const nextSleepSec = tick.nextIntervalSec || args.intervalSec;
-    if (args.maxWaitSec > 0) {
-      const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
-      if (elapsedSec + nextSleepSec >= args.maxWaitSec) {
-        console.log(
-          JSON.stringify(
-            {
-              events: [
-                {
-                  type: "WATCH_CHUNK_TIMEOUT",
-                  headRefOid: tick.status?.headRefOid || args.head || "",
-                  latestCommentId: baselineCommentId,
-                  lastPhase: baselinePhase || "",
-                  elapsedSec,
-                  maxWaitSec: args.maxWaitSec,
-                },
-              ],
-              status: tick.status,
-            },
-            null,
-            2
-          )
-        );
-        return;
-      }
-    }
-    await sleepSeconds(nextSleepSec);
+  } finally {
+    activeChunkDeadlineMs = 0;
   }
 }
 
