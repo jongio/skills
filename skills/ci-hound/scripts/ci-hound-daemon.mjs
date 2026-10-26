@@ -934,6 +934,14 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
       error: result.stderr || `HTTP ${parsed.status} rate limited`,
     };
   }
+  if (result?.timedOut) {
+    return {
+      fromCache: false,
+      data: null,
+      chunkTimedOut: true,
+      error: result.stderr || "Chunk deadline exceeded",
+    };
+  }
   if (!result.ok && parsed.status !== 304) {
     return { fromCache: false, data: cached?.data ?? null, error: result.stderr || `HTTP ${parsed.status}` };
   }
@@ -1169,6 +1177,14 @@ function defaultExecGh(ghArgs) {
           const isReadOnlyRequest =
             parsedReq.method === "GET" || parsedReq.url.endsWith("/graphql");
           if (msg.message.transportError && isReadOnlyRequest) {
+            if (activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
+              return {
+                ok: false,
+                timedOut: true,
+                stdout: "",
+                stderr: "Chunk deadline exceeded",
+              };
+            }
             break;
           }
           return {
@@ -1177,6 +1193,14 @@ function defaultExecGh(ghArgs) {
             stderr: msg.message.stderr,
           };
         }
+      }
+      if (waitRes === "timed-out" && activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
+        return {
+          ok: false,
+          timedOut: true,
+          stdout: "",
+          stderr: "Chunk deadline exceeded",
+        };
       }
     }
   }
@@ -1194,8 +1218,13 @@ function defaultExecGh(ghArgs) {
     maxBuffer: 16 * 1024 * 1024,
     timeout: Math.min(30000, Math.max(500, secondRemainingMs)),
   });
+  const timedOutByDeadline =
+    Boolean(res.error && res.error.code === "ETIMEDOUT") &&
+    activeChunkDeadlineMs > 0 &&
+    Date.now() >= activeChunkDeadlineMs;
   return {
     ok: res.status === 0,
+    ...(timedOutByDeadline ? { timedOut: true } : {}),
     stdout: res.stdout || "",
     stderr: res.stderr || (res.error ? res.error.message : ""),
   };
@@ -1528,13 +1557,17 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
 
   const events = [];
   let tickRateLimited = false;
+  let tickChunkTimedOut = false;
 
   const commitRes = ghApiWithEtag(`repos/${args.repo}/commits/${args.branch}`, state, execFn);
   if (commitRes.rateLimited) {
     tickRateLimited = true;
   }
+  if (commitRes.chunkTimedOut) {
+    tickChunkTimedOut = true;
+  }
   const currentSha = commitRes.data?.sha || state.lastMainSha;
-  if (!tickRateLimited && currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
+  if (!tickRateLimited && !tickChunkTimedOut && currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
     const prevSha = state.lastMainSha;
     state.lastMainSha = currentSha;
     if (args.wakeOnNewCommit) {
@@ -1550,7 +1583,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   }
 
   let branchRunsRes = { data: null };
-  if (!tickRateLimited) {
+  if (!tickRateLimited && !tickChunkTimedOut) {
     branchRunsRes = ghApiWithEtag(
       `repos/${args.repo}/actions/runs?branch=${encodeURIComponent(args.branch)}&per_page=20`,
       state,
@@ -1559,13 +1592,19 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     if (branchRunsRes.rateLimited) {
       tickRateLimited = true;
     }
+    if (branchRunsRes.chunkTimedOut) {
+      tickChunkTimedOut = true;
+    }
   }
 
   let allRunsRes = { data: null };
-  if (!tickRateLimited) {
+  if (!tickRateLimited && !tickChunkTimedOut) {
     allRunsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs?per_page=25`, state, execFn);
     if (allRunsRes.rateLimited) {
       tickRateLimited = true;
+    }
+    if (allRunsRes.chunkTimedOut) {
+      tickChunkTimedOut = true;
     }
   }
 
@@ -1589,13 +1628,17 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
   for (const watchId of trackedActiveIds) {
-    if (tickRateLimited) {
+    if (tickRateLimited || tickChunkTimedOut) {
       break;
     }
     if (!runMap.has(watchId)) {
       const watchRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${watchId}`, state, execFn);
       if (watchRes.rateLimited) {
         tickRateLimited = true;
+        break;
+      }
+      if (watchRes.chunkTimedOut) {
+        tickChunkTimedOut = true;
         break;
       }
       if (watchRes.data?.id) {
@@ -1650,7 +1693,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     let jobs = prevRun?.jobs || [];
     let jobsComplete = true;
     if (needsJobsInspection) {
-      if (tickRateLimited) {
+      if (tickRateLimited || tickChunkTimedOut) {
         if (isActiveTargetRun) {
           activeRunProgress.push({
             id: run.id,
@@ -1665,8 +1708,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         continue;
       }
       const jobsRes = ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
-      if (jobsRes.rateLimited) {
-        tickRateLimited = true;
+      if (jobsRes.rateLimited || jobsRes.chunkTimedOut) {
+        if (jobsRes.rateLimited) tickRateLimited = true;
+        if (jobsRes.chunkTimedOut) tickChunkTimedOut = true;
         if (isActiveTargetRun) {
           activeRunProgress.push({
             id: run.id,
@@ -1693,8 +1737,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
             state,
             execFn
           );
-          if (pageRes.rateLimited) {
-            tickRateLimited = true;
+          if (pageRes.rateLimited || pageRes.chunkTimedOut) {
+            if (pageRes.rateLimited) tickRateLimited = true;
+            if (pageRes.chunkTimedOut) tickChunkTimedOut = true;
             jobsComplete = false;
             break;
           }
@@ -1922,7 +1967,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       retryAfterSec: nextIntervalSec,
       rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
     });
-  } else if (events.length === 0 && args.wakeOnAllGreen) {
+  } else if (!tickChunkTimedOut && events.length === 0 && args.wakeOnAllGreen) {
     if (args.watchRunIds.length > 0) {
       const watchedRecords = args.watchRunIds.map((id) => state.runs[String(id)]).filter(Boolean);
       const allWatchedDone =
@@ -1995,6 +2040,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     activeMainRuns,
     activeTargetRuns: effectiveActiveRuns,
     rateLimited: tickRateLimited,
+    ...(tickChunkTimedOut ? { chunkTimedOut: true } : {}),
     nextIntervalSec,
     ...(statusPayload ? { status: statusPayload } : {}),
   };
@@ -2017,9 +2063,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     Number.isFinite(discoveryState.metrics?.cooldownUntilMs) &&
     discoveryState.metrics.cooldownUntilMs > nowMs &&
     args.explicitRepos.length === 0 &&
-    !args.repo &&
-    (!Array.isArray(config?.repos) || config.repos.length === 0) &&
-    (args.owner || config?.owner)
+    Boolean(args.owner || config?.owner)
   ) {
     const remainingSec = Math.max(1, Math.ceil((discoveryState.metrics.cooldownUntilMs - nowMs) / 1000));
     discoveryState.rateLimited = true;
@@ -2072,6 +2116,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const statuses = [];
   let totalActiveMainRuns = 0;
   let anyRateLimited = Boolean(discoveryState.rateLimited);
+  let anyChunkTimedOut = false;
   let minRateLimitRemaining = Number.isFinite(discoveryState.metrics?.rateLimitRemaining)
     ? discoveryState.metrics.rateLimitRemaining
     : null;
@@ -2116,6 +2161,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     const pendingAllGreenEvents = [];
     for (const repo of targetRepos) {
       if (activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
+        anyChunkTimedOut = true;
         break;
       }
       const repoStateFile = stateFileForRepo(repo, args);
@@ -2159,6 +2205,10 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       );
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
+      if (tick.chunkTimedOut) {
+        anyChunkTimedOut = true;
+        break;
+      }
       if (tick.rateLimited) {
         anyRateLimited = true;
         break;
@@ -2167,6 +2217,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     if (
       targetRepos.length > 1 &&
       !anyRateLimited &&
+      !anyChunkTimedOut &&
       totalActiveMainRuns === 0 &&
       allEvents.length === 0 &&
       pendingAllGreenEvents.length === targetRepos.length
@@ -2186,6 +2237,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     events: allEvents,
     activeMainRuns: totalActiveMainRuns,
     rateLimited: anyRateLimited,
+    ...(anyChunkTimedOut ? { chunkTimedOut: true } : {}),
     nextIntervalSec,
     statuses,
     reports,
@@ -2278,6 +2330,26 @@ export async function runCli(argv = process.argv.slice(2)) {
       const terminalEvents = multi.events.filter((e) => e.type !== "RATE_LIMITED");
       if (terminalEvents.length > 0) {
         console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
+        return;
+      }
+      if (multi.chunkTimedOut) {
+        console.log(
+          JSON.stringify(
+            {
+              repos: multi.repos,
+              events: [
+                {
+                  type: "WATCH_CHUNK_TIMEOUT",
+                  elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
+                  maxWaitSec: args.maxWaitSec,
+                },
+              ],
+              statuses: multi.statuses,
+            },
+            null,
+            2
+          )
+        );
         return;
       }
       const phaseChanges = [];

@@ -390,40 +390,100 @@ export function createPrWatchState() {
   };
 }
 
-const PR_COOLDOWN_FILE = join(homedir(), ".copilot", "pr-watch", "cooldown.json");
+const PR_WATCH_DIR = join(homedir(), ".copilot", "pr-watch");
 
-function loadPrCooldownMs(repo) {
-  if (!repo || !existsSync(PR_COOLDOWN_FILE)) return null;
+function prSessionFileForRepo(repo) {
+  const safeSlug = String(repo || "default")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "__");
+  return join(PR_WATCH_DIR, `${safeSlug}.json`);
+}
+
+function hydrateWatchState(raw) {
+  const base = createPrWatchState();
+  if (!raw || typeof raw !== "object") return base;
+  if (raw.etags && typeof raw.etags === "object") base.etags = raw.etags;
+  if (Number.isInteger(raw.consecutiveUnchangedPolls) && raw.consecutiveUnchangedPolls >= 0) {
+    base.consecutiveUnchangedPolls = raw.consecutiveUnchangedPolls;
+  }
+  if (raw.copilotErrorRetriesByHead && typeof raw.copilotErrorRetriesByHead === "object") {
+    base.copilotErrorRetriesByHead = raw.copilotErrorRetriesByHead;
+  }
+  if (Array.isArray(raw.retriedCopilotReviewIds)) {
+    base.retriedCopilotReviewIds = raw.retriedCopilotReviewIds;
+  }
+  if (raw.pendingRetryReviewId !== undefined) {
+    base.pendingRetryReviewId = raw.pendingRetryReviewId;
+  }
+  if (Number.isInteger(raw.pendingRetryGracePolls) && raw.pendingRetryGracePolls >= 0) {
+    base.pendingRetryGracePolls = raw.pendingRetryGracePolls;
+  }
+  if (Number.isFinite(raw.cooldownUntilMs) && raw.cooldownUntilMs > Date.now()) {
+    base.cooldownUntilMs = raw.cooldownUntilMs;
+  }
+  if (raw.metrics && typeof raw.metrics === "object") {
+    base.metrics = { ...base.metrics, ...raw.metrics };
+  }
+  return base;
+}
+
+function loadPersistedPrSession(repo) {
+  const filePath = prSessionFileForRepo(repo);
+  if (!repo || !existsSync(filePath)) {
+    return { cooldownUntilMs: null, entries: {} };
+  }
   try {
-    const parsed = JSON.parse(readFileSync(PR_COOLDOWN_FILE, "utf8"));
-    const val = parsed?.[String(repo).toLowerCase()];
-    return Number.isFinite(val) && val > Date.now() ? val : null;
+    const parsed = JSON.parse(readFileSync(filePath, "utf8")) || {};
+    const cooldownUntilMs =
+      Number.isFinite(parsed.cooldownUntilMs) && parsed.cooldownUntilMs > Date.now()
+        ? parsed.cooldownUntilMs
+        : null;
+    const entries = {};
+    if (parsed.entries && typeof parsed.entries === "object") {
+      for (const [prKey, entry] of Object.entries(parsed.entries)) {
+        if (!entry || typeof entry !== "object") continue;
+        const ws = hydrateWatchState(entry.watchState);
+        if (cooldownUntilMs && (!ws.cooldownUntilMs || ws.cooldownUntilMs < cooldownUntilMs)) {
+          ws.cooldownUntilMs = cooldownUntilMs;
+        }
+        entries[prKey] = {
+          watchState: ws,
+          lastPhase: typeof entry.lastPhase === "string" ? entry.lastPhase : "",
+          hasExplicitSinceCommentId: Boolean(entry.hasExplicitSinceCommentId),
+          sinceCommentId: Number.isSafeInteger(entry.sinceCommentId) ? entry.sinceCommentId : 0,
+        };
+      }
+    }
+    return { cooldownUntilMs, entries };
   } catch {
-    return null;
+    return { cooldownUntilMs: null, entries: {} };
   }
 }
 
-function savePrCooldownMs(repo, cooldownUntilMs) {
+function savePersistedPrSession(repo, { cooldownUntilMs = null, entries = {} } = {}) {
   if (!repo) return;
   try {
-    mkdirSync(dirname(PR_COOLDOWN_FILE), { recursive: true });
-    let existing = {};
-    if (existsSync(PR_COOLDOWN_FILE)) {
+    const filePath = prSessionFileForRepo(repo);
+    mkdirSync(dirname(filePath), { recursive: true });
+    let existing = { cooldownUntilMs: null, entries: {} };
+    if (existsSync(filePath)) {
       try {
-        existing = JSON.parse(readFileSync(PR_COOLDOWN_FILE, "utf8")) || {};
+        existing = JSON.parse(readFileSync(filePath, "utf8")) || existing;
       } catch {
-        existing = {};
+        existing = { cooldownUntilMs: null, entries: {} };
       }
     }
-    const key = String(repo).toLowerCase();
-    if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now()) {
-      existing[key] = cooldownUntilMs;
-    } else {
-      delete existing[key];
-    }
-    writeFileSync(PR_COOLDOWN_FILE, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
+    const mergedEntries = { ...(existing.entries || {}), ...entries };
+    const validCooldown =
+      Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now() ? cooldownUntilMs : null;
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({ cooldownUntilMs: validCooldown, entries: mergedEntries }, null, 2)}\n`,
+      "utf8"
+    );
   } catch {
-    // Best-effort persistence across chunk restarts
+    // Best-effort persistence across chunk rotations
   }
 }
 
@@ -753,6 +813,14 @@ function defaultExecGh(ghArgs) {
           const isReadOnlyRequest =
             parsedReq.method === "GET" || parsedReq.url.endsWith("/graphql");
           if (msg.message.transportError && isReadOnlyRequest) {
+            if (activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
+              return {
+                ok: false,
+                timedOut: true,
+                stdout: "",
+                stderr: "Chunk deadline exceeded",
+              };
+            }
             break;
           }
           return {
@@ -762,6 +830,14 @@ function defaultExecGh(ghArgs) {
             httpMeta: msg.message.httpMeta,
           };
         }
+      }
+      if (waitRes === "timed-out" && activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
+        return {
+          ok: false,
+          timedOut: true,
+          stdout: "",
+          stderr: "Chunk deadline exceeded",
+        };
       }
     }
   }
@@ -779,8 +855,13 @@ function defaultExecGh(ghArgs) {
     maxBuffer: 16 * 1024 * 1024,
     timeout: Math.min(30000, Math.max(500, secondRemainingMs)),
   });
+  const timedOutByDeadline =
+    Boolean(res.error && res.error.code === "ETIMEDOUT") &&
+    activeChunkDeadlineMs > 0 &&
+    Date.now() >= activeChunkDeadlineMs;
   return {
     ok: res.status === 0,
+    ...(timedOutByDeadline ? { timedOut: true } : {}),
     stdout: res.stdout || "",
     stderr: res.stderr || (res.error ? res.error.message : ""),
   };
@@ -1310,6 +1391,9 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     return Math.max(parsedGqlHttp.retryAfterSec || 0, resetDelaySec || 0, 60);
   };
   if (!gqlRes || !gqlRes.ok) {
+    if (gqlRes?.timedOut) {
+      return { events: [], chunkTimedOut: true, nextIntervalSec: args.intervalSec };
+    }
     const errMsg = gqlRes?.stderr || "GraphQL query failed";
     const isHttpRateLimited =
       parsedGqlHttp.status === 429 ||
@@ -1582,6 +1666,9 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
       };
     }
     if (!runsRes || !runsRes.ok || !parsedRunsHttp.bodyText) {
+      if (runsRes?.timedOut) {
+        return { events: [], chunkTimedOut: true, nextIntervalSec: args.intervalSec };
+      }
       const errMsg = runsRes?.stderr || "Workflow runs inventory unavailable";
       return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
     }
@@ -2084,12 +2171,14 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
   const allEvents = [];
   const statuses = [];
   let anyRateLimited = false;
+  let anyChunkTimedOut = false;
   let maxRateLimitIntervalSec = 0;
   let minActiveIntervalSec = Infinity;
   let firstError = null;
 
   for (const prNumber of targetPrs) {
     if (activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
+      anyChunkTimedOut = true;
       break;
     }
     if (!multiState[prNumber]) {
@@ -2121,6 +2210,10 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
       sinceCommentId: entry.sinceCommentId,
     };
     const tick = evaluatePrPollTick(prArgs, execFn, entry.watchState);
+    if (tick.chunkTimedOut) {
+      anyChunkTimedOut = true;
+      break;
+    }
     if (tick.error && !firstError) {
       firstError = tick.error;
     }
@@ -2159,6 +2252,7 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
     events: allEvents,
     statuses,
     rateLimited: anyRateLimited,
+    ...(anyChunkTimedOut ? { chunkTimedOut: true } : {}),
     nextIntervalSec,
   };
   if (firstError) {
@@ -2217,33 +2311,94 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
 
   if (args.prs.length > 1) {
+    const persistedSession = loadPersistedPrSession(args.repo);
     const multiState = {};
-    const initialCooldownMs = loadPrCooldownMs(args.repo);
+    for (const prNum of args.prs) {
+      const savedEntry = persistedSession.entries[String(prNum)];
+      if (savedEntry) {
+        const useSinglePrBaseline = prNum === args.pr;
+        multiState[prNum] = {
+          watchState: savedEntry.watchState,
+          lastPhase: savedEntry.lastPhase || "",
+          hasExplicitSinceCommentId:
+            useSinglePrBaseline && args.hasExplicitSinceCommentId
+              ? true
+              : savedEntry.hasExplicitSinceCommentId,
+          sinceCommentId:
+            useSinglePrBaseline && args.hasExplicitSinceCommentId
+              ? args.sinceCommentId
+              : savedEntry.sinceCommentId,
+        };
+      }
+    }
     const watchStartedAtMs = Date.now();
     activeChunkDeadlineMs = args.maxWaitSec > 0 ? watchStartedAtMs + args.maxWaitSec * 1000 : 0;
     const lastSummaryByPr = new Map();
+    let lastStatuses = [];
     let lastEmitMs = 0;
     let polls = 0;
     try {
       while (true) {
         polls += 1;
         const multi = evaluateMultiPrPollTick(
-          { ...args, ...(initialCooldownMs ? { initialCooldownMs } : {}) },
+          {
+            ...args,
+            ...(persistedSession.cooldownUntilMs
+              ? { initialCooldownMs: persistedSession.cooldownUntilMs }
+              : {}),
+          },
           defaultExecGh,
           multiState
         );
+        if (multi.statuses && multi.statuses.length > 0) {
+          lastStatuses = multi.statuses;
+        }
+        const entriesToSave = {};
+        for (const [k, v] of Object.entries(multiState)) {
+          entriesToSave[String(k)] = v;
+        }
+        if (multi.chunkTimedOut) {
+          savePersistedPrSession(args.repo, {
+            cooldownUntilMs: persistedSession.cooldownUntilMs,
+            entries: entriesToSave,
+          });
+          console.log(
+            JSON.stringify(
+              {
+                prs: args.prs,
+                events: [
+                  {
+                    type: "WATCH_CHUNK_TIMEOUT",
+                    elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
+                    maxWaitSec: args.maxWaitSec,
+                  },
+                ],
+                statuses: lastStatuses,
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
         if (multi.error) {
           console.error(JSON.stringify(multi, null, 2));
           process.exit(1);
         }
         const terminalEvents = multi.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
         if (terminalEvents.length > 0) {
+          savePersistedPrSession(args.repo, { cooldownUntilMs: null, entries: entriesToSave });
           console.log(JSON.stringify(multi, null, 2));
           return;
         }
         if (multi.rateLimited) {
           const rateSleepSec = multi.nextIntervalSec || 60;
-          savePrCooldownMs(args.repo, Date.now() + rateSleepSec * 1000);
+          const nextCooldownMs = Date.now() + rateSleepSec * 1000;
+          persistedSession.cooldownUntilMs = nextCooldownMs;
+          savePersistedPrSession(args.repo, {
+            cooldownUntilMs: nextCooldownMs,
+            entries: entriesToSave,
+          });
           console.log(JSON.stringify(multi, null, 2));
           if (args.maxPolls > 0 && polls >= args.maxPolls) {
             console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
@@ -2267,7 +2422,7 @@ export async function runCli(argv = process.argv.slice(2)) {
                         maxWaitSec: args.maxWaitSec,
                       },
                     ],
-                    statuses: multi.statuses,
+                    statuses: lastStatuses,
                   },
                   null,
                   2
@@ -2279,7 +2434,8 @@ export async function runCli(argv = process.argv.slice(2)) {
           await sleepSeconds(rateSleepSec);
           continue;
         }
-        savePrCooldownMs(args.repo, null);
+        persistedSession.cooldownUntilMs = null;
+        savePersistedPrSession(args.repo, { cooldownUntilMs: null, entries: entriesToSave });
         let summaryChanged = false;
         for (const st of multi.statuses || []) {
           const prevSummary = lastSummaryByPr.get(st.pr);
@@ -2324,7 +2480,7 @@ export async function runCli(argv = process.argv.slice(2)) {
                       maxWaitSec: args.maxWaitSec,
                     },
                   ],
-                  statuses: multi.statuses,
+                  statuses: lastStatuses,
                 },
                 null,
                 2
@@ -2340,15 +2496,20 @@ export async function runCli(argv = process.argv.slice(2)) {
     }
   }
 
-  const watchState = createPrWatchState();
-  watchState.cooldownUntilMs = loadPrCooldownMs(args.repo);
+  const persistedSession = loadPersistedPrSession(args.repo);
+  const savedPrEntry = persistedSession.entries[String(args.pr)];
+  const watchState = savedPrEntry?.watchState || createPrWatchState();
+  if (persistedSession.cooldownUntilMs && (!watchState.cooldownUntilMs || watchState.cooldownUntilMs < persistedSession.cooldownUntilMs)) {
+    watchState.cooldownUntilMs = persistedSession.cooldownUntilMs;
+  }
   const watchStartedAtMs = Date.now();
   activeChunkDeadlineMs = args.maxWaitSec > 0 ? watchStartedAtMs + args.maxWaitSec * 1000 : 0;
-  let baselinePhase = args.lastPhase;
+  let baselinePhase = args.lastPhase || savedPrEntry?.lastPhase || "";
   let lastSummary = "";
+  let lastStatus = null;
   let lastEmitMs = 0;
-  let hasCommentBaseline = args.hasExplicitSinceCommentId;
-  let baselineCommentId = args.sinceCommentId;
+  let hasCommentBaseline = args.hasExplicitSinceCommentId || Boolean(savedPrEntry?.hasExplicitSinceCommentId);
+  let baselineCommentId = args.hasExplicitSinceCommentId ? args.sinceCommentId : (savedPrEntry?.sinceCommentId || 0);
   let polls = 0;
   try {
     while (true) {
@@ -2363,8 +2524,54 @@ export async function runCli(argv = process.argv.slice(2)) {
         defaultExecGh,
         watchState
       );
+      if (tick.status) {
+        lastStatus = tick.status;
+      }
+      if (tick.chunkTimedOut) {
+        savePersistedPrSession(args.repo, {
+          cooldownUntilMs: watchState.cooldownUntilMs,
+          entries: {
+            [String(args.pr)]: {
+              watchState,
+              lastPhase: baselinePhase,
+              hasExplicitSinceCommentId: hasCommentBaseline,
+              sinceCommentId: baselineCommentId,
+            },
+          },
+        });
+        console.log(
+          JSON.stringify(
+            {
+              events: [
+                {
+                  type: "WATCH_CHUNK_TIMEOUT",
+                  headRefOid: lastStatus?.headRefOid || args.head || "",
+                  latestCommentId: baselineCommentId,
+                  lastPhase: baselinePhase || "",
+                  elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
+                  maxWaitSec: args.maxWaitSec,
+                },
+              ],
+              ...(lastStatus ? { status: lastStatus } : {}),
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
       if (tick.rateLimited) {
-        savePrCooldownMs(args.repo, watchState.cooldownUntilMs);
+        savePersistedPrSession(args.repo, {
+          cooldownUntilMs: watchState.cooldownUntilMs,
+          entries: {
+            [String(args.pr)]: {
+              watchState,
+              lastPhase: baselinePhase,
+              hasExplicitSinceCommentId: hasCommentBaseline,
+              sinceCommentId: baselineCommentId,
+            },
+          },
+        });
         console.log(JSON.stringify(tick, null, 2));
         if (args.maxPolls > 0 && polls >= args.maxPolls) {
           console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
@@ -2384,14 +2591,14 @@ export async function runCli(argv = process.argv.slice(2)) {
                   events: [
                     {
                       type: "WATCH_CHUNK_TIMEOUT",
-                      headRefOid: tick.status?.headRefOid || args.head || "",
+                      headRefOid: lastStatus?.headRefOid || args.head || "",
                       latestCommentId: baselineCommentId,
                       lastPhase: baselinePhase || "",
                       elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
                       maxWaitSec: args.maxWaitSec,
                     },
                   ],
-                  ...(tick.status ? { status: tick.status } : {}),
+                  ...(lastStatus ? { status: lastStatus } : {}),
                 },
                 null,
                 2
@@ -2403,11 +2610,28 @@ export async function runCli(argv = process.argv.slice(2)) {
         await sleepSeconds(rateSleepSec);
         continue;
       }
-      savePrCooldownMs(args.repo, null);
       if (tick.error) {
         console.error(JSON.stringify(tick, null, 2));
         process.exit(1);
       }
+      if (tick.status?.phase) {
+        baselinePhase = tick.status.phase;
+      }
+      if (!hasCommentBaseline && Number.isSafeInteger(tick.status?.latestCommentId)) {
+        hasCommentBaseline = true;
+        baselineCommentId = tick.status.latestCommentId;
+      }
+      savePersistedPrSession(args.repo, {
+        cooldownUntilMs: null,
+        entries: {
+          [String(args.pr)]: {
+            watchState,
+            lastPhase: baselinePhase,
+            hasExplicitSinceCommentId: hasCommentBaseline,
+            sinceCommentId: baselineCommentId,
+          },
+        },
+      });
       const terminalEvents = tick.events.filter((e) => !NON_TERMINAL_PR_EVENTS.has(e.type));
       if (terminalEvents.length > 0) {
         console.log(JSON.stringify(tick, null, 2));
@@ -2430,13 +2654,6 @@ export async function runCli(argv = process.argv.slice(2)) {
         lastEmitMs = nowMs;
         console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
       }
-      if (tick.status?.phase) {
-        baselinePhase = tick.status.phase;
-      }
-      if (!hasCommentBaseline && Number.isSafeInteger(tick.status?.latestCommentId)) {
-        hasCommentBaseline = true;
-        baselineCommentId = tick.status.latestCommentId;
-      }
       if (args.maxPolls > 0 && polls >= args.maxPolls) {
         console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], status: tick.status }, null, 2));
         return;
@@ -2455,14 +2672,14 @@ export async function runCli(argv = process.argv.slice(2)) {
                 events: [
                   {
                     type: "WATCH_CHUNK_TIMEOUT",
-                    headRefOid: tick.status?.headRefOid || args.head || "",
+                    headRefOid: lastStatus?.headRefOid || args.head || "",
                     latestCommentId: baselineCommentId,
                     lastPhase: baselinePhase || "",
                     elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
                     maxWaitSec: args.maxWaitSec,
                   },
                 ],
-                status: tick.status,
+                status: lastStatus,
               },
               null,
               2
