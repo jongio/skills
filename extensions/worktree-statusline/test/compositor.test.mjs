@@ -118,6 +118,7 @@ test("custom names preserve structured checkout rows and do not repeat on each r
 
 test("session names reject invalid writes and never render terminal controls or malformed state", async () => fixture(async (home) => {
 	const payload = { session_id: "safe-name" };
+	renderer(home, "pr-statusline", 'export const render = () => "PR";');
 	for (const id of [undefined, "", ".", "..", "..\\escape", "../escape", "C:\\escape", {}, 123]) {
 		assert.throws(() => setSessionName(id, "Bad path", { home }), /valid session ID/);
 		assert.throws(() => setSessionName(id, null, { home }), /valid session ID/);
@@ -128,12 +129,12 @@ test("session names reject invalid writes and never render terminal controls or 
 	}
 	const unsafe = "\x1b[31mAPI\x1b[0m\nmigration\t\x1b]8;;https://example.com\x07link\x1b]8;;\x07\x00";
 	assert.equal(setSessionName(payload.session_id, unsafe, { home }), "API migration link");
-	assert.equal(await composeStatusLine(payload, { home, ...plain }), "API migration link");
+	assert.equal(await composeStatusLine(payload, { home, ...plain }), "API migration link · PR");
 	const statePath = join(home, "session-statusline", `${payload.session_id}.json`);
 	for (const raw of ["{", "null", "42", "[]", '{"name":42}']) {
 		writeFileSync(statePath, raw);
-		assert.equal(await composeStatusLine(payload, { home, ...plain }), "");
+		assert.equal(await composeStatusLine(payload, { home, ...plain }), "PR");
 	}
 	writeFileSync(statePath, JSON.stringify({ name: unsafe }));
-	assert.equal(await composeStatusLine(payload, { home, ...plain }), "API migration link");
+	assert.equal(await composeStatusLine(payload, { home, ...plain }), "API migration link · PR");
 }));

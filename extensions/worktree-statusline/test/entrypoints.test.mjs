@@ -180,13 +180,27 @@ function extensionScript(entry, full) {
 			assert.match(logs.pop(), /^Refreshed this session/);
 			assert.equal(await tool("session_statusline")({ action: "name" }), "Session name: Release work",
 				"clear and refresh must preserve the custom session name");
+			await tool("session_prs")({ action: "add", reference: "example/widget#5" });
+			await tool("session_issues")({ action: "add", reference: "example/widget#6" });
+			const namedAgents = new agentsModule.SubagentTracker(session.sessionId, agentsModule.readState(session.sessionId));
+			namedAgents.ensureAgent("keep-on-name-clear");
+			agentsModule.writeState(namedAgents.snapshot());
+			const keptPrs = JSON.parse(await tool("session_prs")({ action: "list" }));
+			const keptIssues = JSON.parse(await tool("session_issues")({ action: "list" }));
+			const keptAgents = agentsModule.readState(session.sessionId);
 			await command("session-statusline")({ args: "clear-name" });
 			assert.equal(logs.pop(), "Session name cleared.");
 			assert.equal(await tool("session_statusline")({ action: "name" }), "No custom session name.");
+			assert.deepEqual(JSON.parse(await tool("session_prs")({ action: "list" })), keptPrs);
+			assert.deepEqual(JSON.parse(await tool("session_issues")({ action: "list" })), keptIssues);
+			assert.deepEqual(agentsModule.readState(session.sessionId), keptAgents);
 			await command("session-statusline")({ args: "name Final name" });
 			logs.pop();
 			assert.equal(await tool("session_statusline")({ action: "clear-name" }), "Session name cleared.");
 			assert.equal(await tool("session_statusline")({ action: "name" }), "No custom session name.");
+			assert.deepEqual(JSON.parse(await tool("session_prs")({ action: "list" })), keptPrs);
+			assert.deepEqual(JSON.parse(await tool("session_issues")({ action: "list" })), keptIssues);
+			assert.deepEqual(agentsModule.readState(session.sessionId), keptAgents);
 			await command("session-statusline")({ args: "setup none" });
 			const { getEnabledStatuslines } = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "pr-statusline", "compose.mjs")).href)});
 			assert.deepEqual(getEnabledStatuslines(process.env.COPILOT_HOME), []);
