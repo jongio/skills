@@ -32,7 +32,13 @@ export function detectRepoFromGit(cwd = process.cwd()) {
   }
 }
 
-export function parsePrWatchArgs(argv) {
+export function defaultPrMaxWaitSec(env = process.env) {
+  const raw = Number.parseInt(String(env?.COPILOT_TASK_WAIT_TIMEOUT_SECONDS ?? ""), 10);
+  const hostWaitSec = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 600) : 600;
+  return Math.max(60, hostWaitSec - 60);
+}
+
+export function parsePrWatchArgs(argv, env = process.env) {
   const args = {
     mode: "watch",
     repo: "",
@@ -42,6 +48,7 @@ export function parsePrWatchArgs(argv) {
     head: "",
     intervalSec: 15,
     maxPolls: 0,
+    maxWaitSec: defaultPrMaxWaitSec(env),
     maxCopilotRetries: 2,
     expectCopilot: true,
     expectedReviewers: [],
@@ -109,6 +116,12 @@ export function parsePrWatchArgs(argv) {
       args.intervalSec = Math.max(5, Number.parseInt(argv[++i], 10) || 15);
     } else if (token === "--max-polls" && argv[i + 1]) {
       args.maxPolls = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
+    } else if (token === "--max-wait-sec" && argv[i + 1]) {
+      const parsedWait = Number.parseInt(argv[++i], 10);
+      if (!Number.isSafeInteger(parsedWait) || parsedWait < 0) {
+        throw new Error(`Invalid --max-wait-sec "${parsedWait}". Expected a non-negative integer.`);
+      }
+      args.maxWaitSec = parsedWait;
     } else if (token === "--max-copilot-retries" && argv[i + 1]) {
       const parsedRetries = Number.parseInt(argv[++i], 10);
       if (!Number.isSafeInteger(parsedRetries) || parsedRetries < 0) {
@@ -2101,6 +2114,7 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   if (args.prs.length > 1) {
     const multiState = {};
+    const watchStartedAtMs = Date.now();
     const lastSummaryByPr = new Map();
     let lastEmitMs = 0;
     let polls = 0;
@@ -2150,11 +2164,30 @@ export async function runCli(argv = process.argv.slice(2)) {
         console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }], statuses: multi.statuses }, null, 2));
         return;
       }
-      await sleepSeconds(multi.nextIntervalSec || args.intervalSec);
+      const nextSleepSec = multi.nextIntervalSec || args.intervalSec;
+      if (args.maxWaitSec > 0) {
+        const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
+        if (elapsedSec + nextSleepSec >= args.maxWaitSec) {
+          console.log(
+            JSON.stringify(
+              {
+                prs: args.prs,
+                events: [{ type: "WATCH_CHUNK_TIMEOUT", elapsedSec, maxWaitSec: args.maxWaitSec }],
+                statuses: multi.statuses,
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
+      }
+      await sleepSeconds(nextSleepSec);
     }
   }
 
   const watchState = createPrWatchState();
+  const watchStartedAtMs = Date.now();
   let baselinePhase = args.lastPhase;
   let lastSummary = "";
   let lastEmitMs = 0;
@@ -2219,7 +2252,33 @@ export async function runCli(argv = process.argv.slice(2)) {
       console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }], status: tick.status }, null, 2));
       return;
     }
-    await sleepSeconds(tick.nextIntervalSec || args.intervalSec);
+    const nextSleepSec = tick.nextIntervalSec || args.intervalSec;
+    if (args.maxWaitSec > 0) {
+      const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
+      if (elapsedSec + nextSleepSec >= args.maxWaitSec) {
+        console.log(
+          JSON.stringify(
+            {
+              events: [
+                {
+                  type: "WATCH_CHUNK_TIMEOUT",
+                  headRefOid: tick.status?.headRefOid || args.head || "",
+                  latestCommentId: baselineCommentId,
+                  lastPhase: baselinePhase || "",
+                  elapsedSec,
+                  maxWaitSec: args.maxWaitSec,
+                },
+              ],
+              status: tick.status,
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
+    }
+    await sleepSeconds(nextSleepSec);
   }
 }
 

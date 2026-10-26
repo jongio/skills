@@ -434,10 +434,22 @@ test("parseArgs parses mode, repo, intervals, merge modes, flags, and watched ru
   assert.equal(parsed.maxPolls, 3);
   assert.equal(parsed.mergeMode, "auto");
 
-  const defaultMerge = parseArgs(["watch", "--repo", "github/evals", "--merge", "approval"]);
+  const defaultMerge = parseArgs(["watch", "--repo", "github/evals", "--merge", "approval"], {});
   assert.equal(defaultMerge.mergeMode, "approval");
+  assert.equal(defaultMerge.maxWaitSec, 540, "default maxWaitSec is 540s (60s below 600s Autopilot timeout)");
+
+  const customWait = parseArgs(
+    ["watch", "--repo", "github/evals", "--max-wait-sec", "0"],
+    { COPILOT_TASK_WAIT_TIMEOUT_SECONDS: "300" }
+  );
+  assert.equal(customWait.maxWaitSec, 0);
+  assert.equal(
+    parseArgs(["watch", "--repo", "github/evals"], { COPILOT_TASK_WAIT_TIMEOUT_SECONDS: "300" }).maxWaitSec,
+    240
+  );
 
   assert.throws(() => parseArgs(["watch", "--repo", "github/evals", "--merge=invalid"]), /Invalid --merge mode/);
+  assert.throws(() => parseArgs(["watch", "--repo", "github/evals", "--max-wait-sec", "-1"]), /Invalid --max-wait-sec/);
 });
 
 test("saveState and loadState round-trip state and recover from corrupted JSON", async (t) => {

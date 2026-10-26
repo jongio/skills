@@ -84,6 +84,8 @@ Every repair or optimization created or tracked by `ci-hound` must be monitored 
    - **`WATCHED_RUNS_GREEN` / `ALL_GREEN`**:
      1. Execute any queued green-gated action requested by the user for `<event.repo>` (such as dispatching `source-release.yml` on `main` and re-arming with `--watch-run <event.repo>:<releaseRunId>`). If a release opens a bot-authored catalog PR (e.g. `github-actions[bot]`) whose `pull_request` runs start in `action_required`, approve and rerun those runs (`gh api -X POST repos/<event.repo>/actions/runs/<runId>/approve && gh run rerun <runId> -R <event.repo>`) and monitor the PR through **`pr`**.
      2. Always re-arm `ci-hound-daemon.mjs` with `--no-wake-on-green` afterward to stay on guard for future merges or failures.
+   - **`WATCH_CHUNK_TIMEOUT` (Autopilot 540s chunk rotation)**:
+     - By default, `ci-hound-daemon.mjs watch` bounds each watch invocation to `540s` (`--max-wait-sec 540`, 60s under Copilot CLI's default 600s `COPILOT_TASK_WAIT_TIMEOUT_SECONDS` limit) and exits cleanly with `WATCH_CHUNK_TIMEOUT` so Autopilot wakes the agent without timing out. When `WATCH_CHUNK_TIMEOUT` is emitted, report the current status summary and immediately re-launch the same `watch` command to continue monitoring across the next 9-minute window.
 4. **Proactive Workflow Optimization (`optimize` mode, Tier 2 telemetry across `main` + PRs)**:
    - Run `node <skill-dir>/scripts/ci-hound-daemon.mjs optimize --merge <approval|auto>` (passing `--repo <owner/repo>` only when the user asks to optimize a specific repository).
    - Review `slowJobs`, `slowSteps`, and `recentFailures` (harvested from both `main` and `pull_request` runs even when no merges occur).

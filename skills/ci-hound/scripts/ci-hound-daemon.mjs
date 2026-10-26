@@ -96,7 +96,13 @@ export function selectDeliverySkill({
   return "pr";
 }
 
-export function parseArgs(argv) {
+export function defaultMaxWaitSec(env = process.env) {
+  const raw = Number.parseInt(String(env?.COPILOT_TASK_WAIT_TIMEOUT_SECONDS ?? ""), 10);
+  const hostWaitSec = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 600) : 600;
+  return Math.max(60, hostWaitSec - 60);
+}
+
+export function parseArgs(argv, env = process.env) {
   const args = {
     mode: "watch",
     repo: "",
@@ -119,6 +125,7 @@ export function parseArgs(argv) {
     wakeOnNewCommit: false,
     wakeOnAllGreen: true,
     maxPolls: 0,
+    maxWaitSec: defaultMaxWaitSec(env),
     mergeMode: "approval",
     explicitMergeMode: false,
     hasExistingPr: false,
@@ -220,6 +227,12 @@ export function parseArgs(argv) {
       args.wakeOnAllGreen = false;
     } else if (token === "--max-polls" && argv[i + 1]) {
       args.maxPolls = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
+    } else if (token === "--max-wait-sec" && argv[i + 1]) {
+      const parsedWait = Number.parseInt(argv[++i], 10);
+      if (!Number.isSafeInteger(parsedWait) || parsedWait < 0) {
+        throw new Error(`Invalid --max-wait-sec "${parsedWait}". Expected a non-negative integer.`);
+      }
+      args.maxWaitSec = parsedWait;
     } else if (token === "--merge" && argv[i + 1]) {
       args.mergeMode = argv[++i];
       args.explicitMergeMode = true;
@@ -2179,6 +2192,7 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   const lastPhaseByRepo = new Map();
   const lastSummaryByRepo = new Map();
+  const watchStartedAtMs = Date.now();
   let lastEmitMs = 0;
   let polls = 0;
   while (true) {
@@ -2242,6 +2256,29 @@ export async function runCli(argv = process.argv.slice(2)) {
     if (args.maxPolls > 0 && polls >= args.maxPolls) {
       console.log(JSON.stringify({ repos: multi.repos, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
       return;
+    }
+    if (args.maxWaitSec > 0) {
+      const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
+      if (elapsedSec + multi.nextIntervalSec >= args.maxWaitSec) {
+        console.log(
+          JSON.stringify(
+            {
+              repos: multi.repos,
+              events: [
+                {
+                  type: "WATCH_CHUNK_TIMEOUT",
+                  elapsedSec,
+                  maxWaitSec: args.maxWaitSec,
+                },
+              ],
+              statuses: multi.statuses,
+            },
+            null,
+            2
+          )
+        );
+        return;
+      }
     }
     await sleepSeconds(multi.nextIntervalSec);
   }
