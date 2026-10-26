@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_threads";
 
 const ERRORED_COPILOT_REVIEW_RE = /Copilot encountered an error and was unable to review this pull request/i;
@@ -35,7 +38,7 @@ export function detectRepoFromGit(cwd = process.cwd()) {
 export function defaultPrMaxWaitSec(env = process.env) {
   const raw = Number.parseInt(String(env?.COPILOT_TASK_WAIT_TIMEOUT_SECONDS ?? ""), 10);
   const hostWaitSec = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 600) : 600;
-  return Math.max(60, hostWaitSec - 60);
+  return hostWaitSec > 60 ? hostWaitSec - 60 : Math.max(5, Math.floor(hostWaitSec / 2));
 }
 
 export function parsePrWatchArgs(argv, env = process.env) {
@@ -376,6 +379,7 @@ export function createPrWatchState() {
     consecutiveUnchangedPolls: 0,
     copilotErrorRetriesByHead: {},
     retriedCopilotReviewIds: [],
+    cooldownUntilMs: null,
     metrics: {
       apiCalls: 0,
       cacheHits304: 0,
@@ -384,6 +388,43 @@ export function createPrWatchState() {
       retryAfterSec: null,
     },
   };
+}
+
+const PR_COOLDOWN_FILE = join(homedir(), ".copilot", "pr-watch", "cooldown.json");
+
+function loadPrCooldownMs(repo) {
+  if (!repo || !existsSync(PR_COOLDOWN_FILE)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(PR_COOLDOWN_FILE, "utf8"));
+    const val = parsed?.[String(repo).toLowerCase()];
+    return Number.isFinite(val) && val > Date.now() ? val : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePrCooldownMs(repo, cooldownUntilMs) {
+  if (!repo) return;
+  try {
+    mkdirSync(dirname(PR_COOLDOWN_FILE), { recursive: true });
+    let existing = {};
+    if (existsSync(PR_COOLDOWN_FILE)) {
+      try {
+        existing = JSON.parse(readFileSync(PR_COOLDOWN_FILE, "utf8")) || {};
+      } catch {
+        existing = {};
+      }
+    }
+    const key = String(repo).toLowerCase();
+    if (Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now()) {
+      existing[key] = cooldownUntilMs;
+    } else {
+      delete existing[key];
+    }
+    writeFileSync(PR_COOLDOWN_FILE, `${JSON.stringify(existing, null, 2)}\n`, "utf8");
+  } catch {
+    // Best-effort persistence across chunk restarts
+  }
 }
 
 function parseRetryAfterHeader(rawVal) {
@@ -1095,6 +1136,28 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
 }
 
 export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
+  const nowMs = Date.now();
+  if (Number.isFinite(state?.cooldownUntilMs) && state.cooldownUntilMs > nowMs) {
+    const remainingSec = Math.max(1, Math.ceil((state.cooldownUntilMs - nowMs) / 1000));
+    if (state?.metrics) {
+      state.metrics.retryAfterSec = remainingSec;
+    }
+    return {
+      events: [
+        {
+          type: "RATE_LIMITED",
+          headRefOid: args.head || "",
+          retryAfterSec: remainingSec,
+          rateLimitRemaining: state?.metrics?.rateLimitRemaining ?? null,
+        },
+      ],
+      rateLimited: true,
+      nextIntervalSec: remainingSec,
+    };
+  }
+  if (state) {
+    state.cooldownUntilMs = null;
+  }
   const [owner, name] = args.repo.split("/");
   const query = `query($owner: String!, $name: String!, $pr: Int!) {
     repository(owner: $owner, name: $name) {
@@ -1235,8 +1298,18 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
       /rate limit|secondary rate limit|HTTP 429/i.test(`${errMsg} ${gqlRes?.stdout || ""}`);
     if (isHttpRateLimited) {
       const retryAfterSec = computeGqlRetrySec();
-      if (state?.metrics) {
-        state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, retryAfterSec);
+      const nextIntervalSec = computeAdaptivePrIntervalSec({
+        baseIntervalSec: args.intervalSec,
+        consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
+        rateLimitRemaining: parsedGqlHttp.rateLimitRemaining,
+        rateLimitReset: parsedGqlHttp.rateLimitReset,
+        retryAfterSec,
+      });
+      if (state) {
+        state.cooldownUntilMs = Date.now() + nextIntervalSec * 1000;
+        if (state.metrics) {
+          state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, retryAfterSec);
+        }
       }
       return {
         events: [
@@ -1248,13 +1321,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
           },
         ],
         rateLimited: true,
-        nextIntervalSec: computeAdaptivePrIntervalSec({
-          baseIntervalSec: args.intervalSec,
-          consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
-          rateLimitRemaining: parsedGqlHttp.rateLimitRemaining,
-          rateLimitReset: parsedGqlHttp.rateLimitReset,
-          retryAfterSec,
-        }),
+        nextIntervalSec,
       };
     }
     return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
@@ -1273,8 +1340,18 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     );
     if (isGqlRateLimited) {
       const retryAfterSec = computeGqlRetrySec();
-      if (state?.metrics) {
-        state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, retryAfterSec);
+      const nextIntervalSec = computeAdaptivePrIntervalSec({
+        baseIntervalSec: args.intervalSec,
+        consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
+        rateLimitRemaining: parsedGqlHttp.rateLimitRemaining,
+        rateLimitReset: parsedGqlHttp.rateLimitReset,
+        retryAfterSec,
+      });
+      if (state) {
+        state.cooldownUntilMs = Date.now() + nextIntervalSec * 1000;
+        if (state.metrics) {
+          state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, retryAfterSec);
+        }
       }
       return {
         events: [
@@ -1286,13 +1363,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
           },
         ],
         rateLimited: true,
-        nextIntervalSec: computeAdaptivePrIntervalSec({
-          baseIntervalSec: args.intervalSec,
-          consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
-          rateLimitRemaining: parsedGqlHttp.rateLimitRemaining,
-          rateLimitReset: parsedGqlHttp.rateLimitReset,
-          retryAfterSec,
-        }),
+        nextIntervalSec,
       };
     }
     const errMsg = parsed.errors.map((e) => e?.message || "GraphQL error").join("; ");
@@ -1462,8 +1533,18 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
           ? computeResetDelaySec(parsedRunsHttp.rateLimitReset)
           : null;
       const retryAfterSec = Math.max(parsedRunsHttp.retryAfterSec || 0, resetDelaySec || 0, 60);
-      if (state?.metrics) {
-        state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, retryAfterSec);
+      const nextIntervalSec = computeAdaptivePrIntervalSec({
+        baseIntervalSec: args.intervalSec,
+        consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
+        rateLimitRemaining: parsedRunsHttp.rateLimitRemaining,
+        rateLimitReset: parsedRunsHttp.rateLimitReset,
+        retryAfterSec,
+      });
+      if (state) {
+        state.cooldownUntilMs = Date.now() + nextIntervalSec * 1000;
+        if (state.metrics) {
+          state.metrics.retryAfterSec = Math.max(state.metrics.retryAfterSec || 0, retryAfterSec);
+        }
       }
       return {
         events: [
@@ -1475,13 +1556,7 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
           },
         ],
         rateLimited: true,
-        nextIntervalSec: computeAdaptivePrIntervalSec({
-          baseIntervalSec: args.intervalSec,
-          consecutiveUnchangedPolls: state?.consecutiveUnchangedPolls || 0,
-          rateLimitRemaining: parsedRunsHttp.rateLimitRemaining,
-          rateLimitReset: parsedRunsHttp.rateLimitReset,
-          retryAfterSec,
-        }),
+        nextIntervalSec,
       };
     }
     if (!runsRes || !runsRes.ok || !parsedRunsHttp.bodyText) {
@@ -2114,6 +2189,12 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   if (args.prs.length > 1) {
     const multiState = {};
+    const initialCooldownMs = loadPrCooldownMs(args.repo);
+    if (initialCooldownMs) {
+      for (const prNum of args.prs) {
+        multiState[prNum] = { state: { ...createPrWatchState(), cooldownUntilMs: initialCooldownMs } };
+      }
+    }
     const watchStartedAtMs = Date.now();
     const lastSummaryByPr = new Map();
     let lastEmitMs = 0;
@@ -2131,14 +2212,44 @@ export async function runCli(argv = process.argv.slice(2)) {
         return;
       }
       if (multi.rateLimited) {
+        const rateSleepSec = multi.nextIntervalSec || 60;
+        savePrCooldownMs(args.repo, Date.now() + rateSleepSec * 1000);
         console.log(JSON.stringify(multi, null, 2));
         if (args.maxPolls > 0 && polls >= args.maxPolls) {
           console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
           return;
         }
-        await sleepSeconds(multi.nextIntervalSec || 60);
+        if (args.maxWaitSec > 0) {
+          const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
+          if (elapsedSec + rateSleepSec >= args.maxWaitSec) {
+            const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+            if (remainingWaitSec > 0) {
+              await sleepSeconds(remainingWaitSec);
+            }
+            console.log(
+              JSON.stringify(
+                {
+                  prs: args.prs,
+                  events: [
+                    {
+                      type: "WATCH_CHUNK_TIMEOUT",
+                      elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
+                      maxWaitSec: args.maxWaitSec,
+                    },
+                  ],
+                  statuses: multi.statuses,
+                },
+                null,
+                2
+              )
+            );
+            return;
+          }
+        }
+        await sleepSeconds(rateSleepSec);
         continue;
       }
+      savePrCooldownMs(args.repo, null);
       let summaryChanged = false;
       for (const st of multi.statuses || []) {
         const prevSummary = lastSummaryByPr.get(st.pr);
@@ -2187,6 +2298,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
 
   const watchState = createPrWatchState();
+  watchState.cooldownUntilMs = loadPrCooldownMs(args.repo);
   const watchStartedAtMs = Date.now();
   let baselinePhase = args.lastPhase;
   let lastSummary = "";
@@ -2207,14 +2319,46 @@ export async function runCli(argv = process.argv.slice(2)) {
       watchState
     );
     if (tick.rateLimited) {
+      savePrCooldownMs(args.repo, watchState.cooldownUntilMs);
       console.log(JSON.stringify(tick, null, 2));
       if (args.maxPolls > 0 && polls >= args.maxPolls) {
         console.log(JSON.stringify({ events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
         return;
       }
-      await sleepSeconds(tick.nextIntervalSec || 60);
+      const rateSleepSec = tick.nextIntervalSec || 60;
+      if (args.maxWaitSec > 0) {
+        const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
+        if (elapsedSec + rateSleepSec >= args.maxWaitSec) {
+          const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+          if (remainingWaitSec > 0) {
+            await sleepSeconds(remainingWaitSec);
+          }
+          console.log(
+            JSON.stringify(
+              {
+                events: [
+                  {
+                    type: "WATCH_CHUNK_TIMEOUT",
+                    headRefOid: tick.status?.headRefOid || args.head || "",
+                    latestCommentId: baselineCommentId,
+                    lastPhase: baselinePhase || "",
+                    elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
+                    maxWaitSec: args.maxWaitSec,
+                  },
+                ],
+                ...(tick.status ? { status: tick.status } : {}),
+              },
+              null,
+              2
+            )
+          );
+          return;
+        }
+      }
+      await sleepSeconds(rateSleepSec);
       continue;
     }
+    savePrCooldownMs(args.repo, null);
     if (tick.error) {
       console.error(JSON.stringify(tick, null, 2));
       process.exit(1);

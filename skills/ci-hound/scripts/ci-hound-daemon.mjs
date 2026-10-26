@@ -99,7 +99,7 @@ export function selectDeliverySkill({
 export function defaultMaxWaitSec(env = process.env) {
   const raw = Number.parseInt(String(env?.COPILOT_TASK_WAIT_TIMEOUT_SECONDS ?? ""), 10);
   const hostWaitSec = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 600) : 600;
-  return Math.max(60, hostWaitSec - 60);
+  return hostWaitSec > 60 ? hostWaitSec - 60 : Math.max(5, Math.floor(hostWaitSec / 2));
 }
 
 export function parseArgs(argv, env = process.env) {
@@ -1477,7 +1477,28 @@ export function computeCiHoundPhase({
 export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   state.repo = args.repo;
   state.branch = args.branch;
-  state.metrics.lastPollAt = new Date().toISOString();
+  const nowMs = Date.now();
+  state.metrics.lastPollAt = new Date(nowMs).toISOString();
+  if (Number.isFinite(state.metrics?.cooldownUntilMs) && state.metrics.cooldownUntilMs > nowMs) {
+    const remainingSec = Math.max(1, Math.ceil((state.metrics.cooldownUntilMs - nowMs) / 1000));
+    state.rateLimited = true;
+    state.metrics.retryAfterSec = remainingSec;
+    return {
+      events: [
+        {
+          type: "RATE_LIMITED",
+          repo: args.repo,
+          retryAfterSec: remainingSec,
+          rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
+        },
+      ],
+      activeMainRuns: 0,
+      activeTargetRuns: 0,
+      rateLimited: true,
+      nextIntervalSec: remainingSec,
+    };
+  }
+  state.metrics.cooldownUntilMs = null;
   state.metrics.rateLimitRemaining = null;
   state.metrics.rateLimitReset = null;
   state.metrics.retryAfterSec = null;
@@ -1870,6 +1891,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
   const nextIntervalSec = computeNextPollIntervalSec(args, effectiveActiveRuns, state.metrics);
 
   if (tickRateLimited) {
+    if (state.metrics) {
+      state.metrics.cooldownUntilMs = Date.now() + nextIntervalSec * 1000;
+    }
     events.push({
       type: "RATE_LIMITED",
       repo: args.repo,
@@ -2260,6 +2284,10 @@ export async function runCli(argv = process.argv.slice(2)) {
     if (args.maxWaitSec > 0) {
       const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
       if (elapsedSec + multi.nextIntervalSec >= args.maxWaitSec) {
+        const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+        if (multi.rateLimited && remainingWaitSec > 0) {
+          await sleepSeconds(remainingWaitSec);
+        }
         console.log(
           JSON.stringify(
             {
@@ -2267,7 +2295,7 @@ export async function runCli(argv = process.argv.slice(2)) {
               events: [
                 {
                   type: "WATCH_CHUNK_TIMEOUT",
-                  elapsedSec,
+                  elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
                   maxWaitSec: args.maxWaitSec,
                 },
               ],
