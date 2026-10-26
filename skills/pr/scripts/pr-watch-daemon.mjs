@@ -2288,12 +2288,12 @@ export async function runCli(argv = process.argv.slice(2)) {
       const savedEntry = persistedSession.entries[String(prNum)];
       const explicitPrCommentId = args.prSinceCommentIds?.[prNum];
       if (savedEntry) {
+        const useSinglePrBaseline = prNum === args.pr;
         const hasOverride =
-          explicitPrCommentId !== undefined || Boolean(args.hasExplicitSinceCommentId);
+          explicitPrCommentId !== undefined ||
+          (useSinglePrBaseline && Boolean(args.hasExplicitSinceCommentId));
         const overrideId =
-          explicitPrCommentId !== undefined
-            ? explicitPrCommentId
-            : Math.max(savedEntry.sinceCommentId || 0, args.sinceCommentId || 0);
+          explicitPrCommentId !== undefined ? explicitPrCommentId : args.sinceCommentId || 0;
         multiState[prNum] = {
           watchState: savedEntry.watchState,
           lastPhase: savedEntry.lastPhase || "",
@@ -2341,7 +2341,13 @@ export async function runCli(argv = process.argv.slice(2)) {
             );
           }
         }
-        savePersistedPrSession(args.repo, { cooldownUntilMs: null, entries: entriesToSave });
+        const terminalCooldownMs = multi.rateLimited
+          ? Date.now() + (multi.nextIntervalSec || 60) * 1000
+          : null;
+        savePersistedPrSession(args.repo, {
+          cooldownUntilMs: terminalCooldownMs,
+          entries: entriesToSave,
+        });
         console.log(JSON.stringify(multi, null, 2));
         return;
       }
