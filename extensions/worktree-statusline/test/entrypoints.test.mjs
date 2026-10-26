@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { configureStatuslines } from "../../../scripts/setup-statusline.mjs";
-import { discoverRenderers, ensurePluginStatuslineRegistered, getEnabledStatuslines } from "../compose.mjs";
+import { discoverRenderers, ensurePluginStatuslineRegistered, getEnabledStatuslines, setSessionName } from "../compose.mjs";
+import { SessionTracker, writeState as writePrState } from "../../pr-statusline/tracker.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const ids = ["pr-statusline", "issue-statusline", "subagent-statusline", "worktree-statusline"];
@@ -87,6 +88,25 @@ function extensionScript(entry, full) {
 			await command("session-statusline")({ args: "invalid" });
 			assert.match(logs.pop(), /Usage:.*refresh.*clear.*setup/);
 			const tool = name => configuration.tools.find(item => item.name === name).handler;
+			const statuslineTool = configuration.tools.find(item => item.name === "session_statusline");
+			assert.ok(statuslineTool.parameters.properties.action.enum.includes("name"));
+			assert.ok(statuslineTool.parameters.properties.action.enum.includes("clear-name"));
+			assert.equal(statuslineTool.parameters.properties.name.type, "string");
+			await command("session-statusline")({ args: "name" });
+			assert.equal(logs.pop(), "No custom session name.");
+			await command("session-statusline")({ args: "name API migration" });
+			assert.equal(logs.pop(), "Session name: API migration");
+			assert.equal(await tool("session_statusline")({ action: "name" }), "Session name: API migration");
+			assert.equal(await tool("session_statusline")({ action: "name", name: "Release work" }), "Session name: Release work");
+			await command("session-statusline")({ args: "name" });
+			assert.equal(logs.pop(), "Session name: Release work");
+			for (const args of [{ action: "name", name: "" }, { action: "name", name: null },
+				{ action: "clear", name: "Not a rename" }, { action: "clear-name", name: "Not a rename" }]) {
+				assert.equal((await tool("session_statusline")(args)).resultType, "failure");
+			}
+			await command("session-statusline")({ args: "clear-name unexpected" });
+			assert.match(logs.pop(), /Usage:/);
+			assert.equal(await tool("session_statusline")({ action: "name" }), "Session name: Release work");
 			assert.deepEqual(JSON.parse(await tool("session_prs")({ action: "list" })), []);
 			await assert.rejects(tool("session_prs")({ action: "add", reference: "invalid" }));
 			assert.equal(JSON.parse(await tool("session_prs")({ action: "add", reference: "example/widget#1" })).length, 1);
@@ -159,6 +179,29 @@ function extensionScript(entry, full) {
 			assert.match(await tool("session_statusline")({ action: "refresh" }), /^Refreshed this session/);
 			await command("session-statusline")({ args: "refresh" });
 			assert.match(logs.pop(), /^Refreshed this session/);
+			assert.equal(await tool("session_statusline")({ action: "name" }), "Session name: Release work",
+				"clear and refresh must preserve the custom session name");
+			await tool("session_prs")({ action: "add", reference: "example/widget#5" });
+			await tool("session_issues")({ action: "add", reference: "example/widget#6" });
+			const namedAgents = new agentsModule.SubagentTracker(session.sessionId, agentsModule.readState(session.sessionId));
+			namedAgents.ensureAgent("keep-on-name-clear");
+			agentsModule.writeState(namedAgents.snapshot());
+			const keptPrs = JSON.parse(await tool("session_prs")({ action: "list" }));
+			const keptIssues = JSON.parse(await tool("session_issues")({ action: "list" }));
+			const keptAgents = agentsModule.readState(session.sessionId);
+			await command("session-statusline")({ args: "clear-name" });
+			assert.equal(logs.pop(), "Session name cleared.");
+			assert.equal(await tool("session_statusline")({ action: "name" }), "No custom session name.");
+			assert.deepEqual(JSON.parse(await tool("session_prs")({ action: "list" })), keptPrs);
+			assert.deepEqual(JSON.parse(await tool("session_issues")({ action: "list" })), keptIssues);
+			assert.deepEqual(agentsModule.readState(session.sessionId), keptAgents);
+			await command("session-statusline")({ args: "name Final name" });
+			logs.pop();
+			assert.equal(await tool("session_statusline")({ action: "clear-name" }), "Session name cleared.");
+			assert.equal(await tool("session_statusline")({ action: "name" }), "No custom session name.");
+			assert.deepEqual(JSON.parse(await tool("session_prs")({ action: "list" })), keptPrs);
+			assert.deepEqual(JSON.parse(await tool("session_issues")({ action: "list" })), keptIssues);
+			assert.deepEqual(agentsModule.readState(session.sessionId), keptAgents);
 			await command("session-statusline")({ args: "setup none" });
 			const { getEnabledStatuslines } = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "pr-statusline", "compose.mjs")).href)});
 			assert.deepEqual(getEnabledStatuslines(process.env.COPILOT_HOME), []);
@@ -177,6 +220,47 @@ test("unified extension handlers manage session state, validate references and c
 		extensionScript(join(home, "extensions", "pr-statusline", "extension.mjs"), true)]);
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stdout, /handlers passed/);
+}));
+
+test("installed composer reads session names across processes without changing enabled components", () => fixture((home) => {
+	configureStatuslines({ home, repoRoot: root, enabled: ["pr-statusline"] });
+	const composer = join(home, "statusline-compose.mjs");
+	const config = readFileSync(join(home, "statusline-config.json"), "utf8");
+	const result = node(home, ["--input-type=module", "-e", `
+		import { setSessionName } from ${JSON.stringify(pathToFileURL(composer).href)};
+		setSessionName("resumed-session", "API migration");
+	`]);
+	assert.equal(result.status, 0, result.stderr);
+	const resumed = node(home, [composer, "--plain"], JSON.stringify({ session_id: "resumed-session" }));
+	assert.equal(resumed.status, 0, resumed.stderr);
+	assert.equal(resumed.stdout.trim(), "API migration");
+	const other = node(home, [composer, "--plain"], JSON.stringify({ session_id: "different-session" }));
+	assert.equal(other.status, 0, other.stderr);
+	assert.equal(other.stdout, "");
+	assert.equal(readFileSync(join(home, "statusline-config.json"), "utf8"), config);
+}));
+
+test("a named standalone PR renderer keeps tracked pills with a missing or empty composer registry", () => fixture((home) => {
+	const id = "standalone-pr-name";
+	const tracker = new SessionTracker(id);
+	tracker.add("example/widget#99");
+	Object.assign(tracker.state.prs[0], { status: "CI passed", checkedAt: Date.now() + 60_000 });
+	writePrState(tracker.snapshot(), home);
+	const renderer = join(root, "extensions", "pr-statusline", "render.mjs");
+	const payload = JSON.stringify({ session_id: id });
+	const before = node(home, [renderer, "--plain"], payload);
+	assert.equal(before.status, 0, before.stderr);
+	assert.match(before.stdout, /example\/widget#99/);
+	setSessionName(id, "API migration", { home });
+	const after = node(home, [renderer, "--plain"], payload);
+	assert.equal(after.status, 0, after.stderr);
+	assert.equal(after.stdout.trim(), `API migration · ${before.stdout.trim()}`);
+	const sibling = join(home, "extensions", "issue-statusline");
+	mkdirSync(sibling, { recursive: true });
+	writeFileSync(join(sibling, "render.mjs"), 'export const render = () => "";');
+	const empty = node(home, [renderer, "--plain"], payload);
+	assert.equal(empty.status, 0, empty.stderr);
+	assert.equal(empty.stdout.trim(), `API migration · ${before.stdout.trim()}`);
 }));
 
 test("installer exposes one SDK controller and preserves standalone entry points when upgrading to unified controls", () => fixture((home) => {

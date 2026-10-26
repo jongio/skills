@@ -96,6 +96,12 @@ irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 
 curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash
 ```
 
+**Custom session names:** run `/session-statusline name API migration`, or ask
+the `session-statusline` skill to "name this session API migration". The label
+appears first in that session's footer and persists on resume. Use
+`/session-statusline name` to show it or `/session-statusline clear-name` to
+remove it. Clearing tracked pills preserves the name.
+
 **Windows Terminal attention alerts** are also available, independently of the
 footer rows. Run `/session-attention both` to enable a pulsing border and
 background wash until that session's window gets focus, or

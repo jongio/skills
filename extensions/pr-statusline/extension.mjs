@@ -8,7 +8,9 @@ import { createSessionAttention, runAttentionCommand } from "./attention.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
 import {
 	ensurePluginStatuslineRegistered,
+	readSessionName,
 	runInteractiveStatuslinePicker,
+	setSessionName,
 } from "./compose.mjs";
 import {
 	IssueTracker,
@@ -40,7 +42,12 @@ function manageAgents(action, id) {
 	return agents;
 }
 
-function updateSession(action) {
+function updateSession(action, name) {
+	if (action === "name" || action === "clear-name") {
+		const value = action === "clear-name" ? setSessionName(session.sessionId, null)
+			: name === undefined ? readSessionName(session.sessionId) : setSessionName(session.sessionId, name);
+		return value ? `Session name: ${value}` : action === "clear-name" ? "Session name cleared." : "No custom session name.";
+	}
 	if (!collector) throw new Error("Session statusline is still loading; retry shortly.");
 	const payload = { session_id: session.sessionId };
 	const result = action === "clear" ? clearSessionStatusline(payload) : refreshSessionStatusline(payload);
@@ -64,16 +71,18 @@ const configuration = {
 		},
 		{
 			name: "session-statusline",
-			description: "Refresh tracked session data, clear session entries, or set up enabled statusline components",
+			description: "Set, show, or clear this session's custom footer name; refresh or clear entries; set up components",
 			handler: async ({ args = "" }) => {
 				const [action, ...selection] = args.trim().split(/\s+/);
 				try {
-					if (action === "setup") {
+					if (action === "name") {
+						await session.log(updateSession(action, selection.length ? selection.join(" ") : undefined));
+					} else if (action === "setup") {
 						await runInteractiveStatuslinePicker(session, { args: selection.join(" ") });
-					} else if ((action === "clear" || action === "refresh") && !selection.length) {
+					} else if (["clear", "refresh", "clear-name"].includes(action) && !selection.length) {
 						await session.log(updateSession(action));
 					} else {
-						await session.log("Usage: /session-statusline [refresh | clear | setup [all | none | prs issues subagents worktrees]]");
+						await session.log("Usage: /session-statusline [name [<label>] | clear-name | refresh | clear | setup [all | none | prs issues subagents worktrees]]");
 					}
 				} catch (error) {
 					await session.log(`Session statusline ${action || "command"} failed: ${error.message}`);
@@ -143,17 +152,23 @@ const configuration = {
 	tools: [
 		{
 			name: "session_statusline",
-			description: "Clear or refresh only this session's statusline pills. Clear dismisses entries without changing enabled components, deleting work, or stopping agents.",
+			description: "Manage only this session's statusline: name sets a custom footer label (omit name to show it), clear-name removes it, clear dismisses pills, refresh updates data. Clear preserves the name, enabled components, and underlying work.",
 			parameters: {
 				type: "object",
-				properties: { action: { type: "string", enum: ["clear", "refresh"] } },
+				properties: {
+					action: { type: "string", enum: ["clear", "refresh", "name", "clear-name"] },
+					name: { type: "string", description: "Custom footer label for action name; omit to show the current name." },
+				},
 				required: ["action"],
 				additionalProperties: false,
 			},
-			handler: ({ action }) => {
-				if (!["clear", "refresh"].includes(action)) throw new Error("Use clear or refresh.");
+			handler: ({ action, name }) => {
+				if (!["clear", "refresh", "name", "clear-name"].includes(action)) throw new Error("Use clear or refresh, name, or clear-name.");
 				try {
-					return updateSession(action);
+					if (name !== undefined && (action !== "name" || typeof name !== "string")) {
+						throw new Error("A name string is only supported with action name.");
+					}
+					return updateSession(action, name);
 				} catch (error) {
 					return { resultType: "failure", textResultForLlm: error instanceof Error ? error.message : String(error) };
 				}
