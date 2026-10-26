@@ -38,3 +38,16 @@ test("active-work policy excludes reference-only enrollment and respects manual 
   assert.match(skill, /unowned legacy references are dropped/);
   assert.match(skill, /Honor manual dismissal/);
 });
+
+test("custom names use session-bound controls without renaming terminals or changing settings", () => {
+  assert.match(skill, /USE FOR: name this session, custom statusline name/);
+  assert.match(skill, /"action":"name","name":"API migration"/);
+  assert.match(skill, /"action":"clear-name"/);
+  assert.match(skill, /\/session-statusline name <label>/);
+  assert.match(skill, /\/session-statusline clear-name/);
+  assert.match(skill, /use the user's supplied label; ask for it if missing/);
+  assert.match(skill, /After setting or removing a name, query `session_statusline`/);
+  assert.match(skill, /preserved on resume, not terminal tab titles or a global default/);
+  assert.match(skill, /Clear and refresh preserve the custom name/);
+  assert.match(skill, /naming does not enable it/);
+});

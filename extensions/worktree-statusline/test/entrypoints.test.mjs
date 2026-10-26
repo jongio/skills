@@ -87,6 +87,25 @@ function extensionScript(entry, full) {
 			await command("session-statusline")({ args: "invalid" });
 			assert.match(logs.pop(), /Usage:.*refresh.*clear.*setup/);
 			const tool = name => configuration.tools.find(item => item.name === name).handler;
+			const statuslineTool = configuration.tools.find(item => item.name === "session_statusline");
+			assert.ok(statuslineTool.parameters.properties.action.enum.includes("name"));
+			assert.ok(statuslineTool.parameters.properties.action.enum.includes("clear-name"));
+			assert.equal(statuslineTool.parameters.properties.name.type, "string");
+			await command("session-statusline")({ args: "name" });
+			assert.equal(logs.pop(), "No custom session name.");
+			await command("session-statusline")({ args: "name API migration" });
+			assert.equal(logs.pop(), "Session name: API migration");
+			assert.equal(await tool("session_statusline")({ action: "name" }), "Session name: API migration");
+			assert.equal(await tool("session_statusline")({ action: "name", name: "Release work" }), "Session name: Release work");
+			await command("session-statusline")({ args: "name" });
+			assert.equal(logs.pop(), "Session name: Release work");
+			for (const args of [{ action: "name", name: "" }, { action: "name", name: null },
+				{ action: "clear", name: "Not a rename" }, { action: "clear-name", name: "Not a rename" }]) {
+				assert.equal((await tool("session_statusline")(args)).resultType, "failure");
+			}
+			await command("session-statusline")({ args: "clear-name unexpected" });
+			assert.match(logs.pop(), /Usage:/);
+			assert.equal(await tool("session_statusline")({ action: "name" }), "Session name: Release work");
 			assert.deepEqual(JSON.parse(await tool("session_prs")({ action: "list" })), []);
 			await assert.rejects(tool("session_prs")({ action: "add", reference: "invalid" }));
 			assert.equal(JSON.parse(await tool("session_prs")({ action: "add", reference: "example/widget#1" })).length, 1);
@@ -159,6 +178,15 @@ function extensionScript(entry, full) {
 			assert.match(await tool("session_statusline")({ action: "refresh" }), /^Refreshed this session/);
 			await command("session-statusline")({ args: "refresh" });
 			assert.match(logs.pop(), /^Refreshed this session/);
+			assert.equal(await tool("session_statusline")({ action: "name" }), "Session name: Release work",
+				"clear and refresh must preserve the custom session name");
+			await command("session-statusline")({ args: "clear-name" });
+			assert.equal(logs.pop(), "Session name cleared.");
+			assert.equal(await tool("session_statusline")({ action: "name" }), "No custom session name.");
+			await command("session-statusline")({ args: "name Final name" });
+			logs.pop();
+			assert.equal(await tool("session_statusline")({ action: "clear-name" }), "Session name cleared.");
+			assert.equal(await tool("session_statusline")({ action: "name" }), "No custom session name.");
 			await command("session-statusline")({ args: "setup none" });
 			const { getEnabledStatuslines } = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "pr-statusline", "compose.mjs")).href)});
 			assert.deepEqual(getEnabledStatuslines(process.env.COPILOT_HOME), []);
@@ -177,6 +205,24 @@ test("unified extension handlers manage session state, validate references and c
 		extensionScript(join(home, "extensions", "pr-statusline", "extension.mjs"), true)]);
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stdout, /handlers passed/);
+}));
+
+test("installed composer reads session names across processes without changing enabled components", () => fixture((home) => {
+	configureStatuslines({ home, repoRoot: root, enabled: ["pr-statusline"] });
+	const composer = join(home, "statusline-compose.mjs");
+	const config = readFileSync(join(home, "statusline-config.json"), "utf8");
+	const result = node(home, ["--input-type=module", "-e", `
+		import { setSessionName } from ${JSON.stringify(pathToFileURL(composer).href)};
+		setSessionName("resumed-session", "API migration");
+	`]);
+	assert.equal(result.status, 0, result.stderr);
+	const resumed = node(home, [composer, "--plain"], JSON.stringify({ session_id: "resumed-session" }));
+	assert.equal(resumed.status, 0, resumed.stderr);
+	assert.equal(resumed.stdout.trim(), "API migration");
+	const other = node(home, [composer, "--plain"], JSON.stringify({ session_id: "different-session" }));
+	assert.equal(other.status, 0, other.stderr);
+	assert.equal(other.stdout, "");
+	assert.equal(readFileSync(join(home, "statusline-config.json"), "utf8"), config);
 }));
 
 test("installer exposes one SDK controller and preserves standalone entry points when upgrading to unified controls", () => fixture((home) => {

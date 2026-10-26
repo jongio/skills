@@ -11,9 +11,13 @@ npx skills add jongio/skills --skill session-statusline
 Included in the `jongio-skills` plugin and available as an individual skill.
 The statusline extensions must be loaded to execute its session-bound tools.
 Ask "clear the footer pills" or "remove the PR pill for owner/repo#123".
+To label this terminal's session, ask "name this session API migration".
 
 | Request | Extension command |
 | --- | --- |
+| Set or change the session name | `/session-statusline name API migration` |
+| Show the session name | `/session-statusline name` |
+| Remove only the name | `/session-statusline clear-name` |
 | Clear this session's pills | `/session-statusline clear` |
 | Clear only PRs / issues / agents | `/session-prs clear` / `/session-issues clear` / `/session-subagents clear` |
 | Remove one PR / issue | `/session-prs remove owner/repo#123` / `/session-issues remove owner/repo#123` |
@@ -22,6 +26,10 @@ Ask "clear the footer pills" or "remove the PR pill for owner/repo#123".
 
 Clearing dismisses tracking only: no PRs or issues are closed, agents stopped,
 worktrees deleted, transcripts removed, or component selections changed.
+The custom name appears first in the footer, is isolated to this Copilot session,
+and persists on resume. Clear and refresh preserve it; `clear-name` removes it.
+Names are single-line text, not terminal tab/window titles. Setting a name does
+not enable a disabled custom footer or change the enabled components.
 All PR and issue enrollment is explicit. Shell commands, GitHub writes/results,
 references, lookups, and other sessions' work never create pills. Add only work
 this session actually takes on, including read-only review/watch targets.
@@ -34,8 +42,8 @@ npm test
 npm run eval:lint
 ```
 
-The deterministic tests check skill shape, controls, and active-work policy.
-The Vally capability eval checks routing and dismissal boundaries.
+The deterministic tests check skill shape, naming controls, and active-work policy.
+The Vally capability eval checks routing, naming, and dismissal boundaries.
 
 ## License
 
