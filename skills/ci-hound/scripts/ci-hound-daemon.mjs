@@ -1694,12 +1694,14 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           : prevEmptyPolls
         : 0;
 
+    const prevAlertedAt = prevRun?.alertedAt || prevRun?.updated_at || "";
     const resetAlertedFailure = Boolean(
       prevRun?.alertedFailure &&
         prevRun?.status === "completed" &&
         (run.status !== "completed" ||
-          (prevRun?.updated_at && run.updated_at && prevRun.updated_at !== run.updated_at))
+          (prevAlertedAt && run.updated_at && prevAlertedAt !== run.updated_at))
     );
+    const initialAlertedFailure = resetAlertedFailure ? false : Boolean(prevRun?.alertedFailure);
 
     state.runs[runKey] = {
       id: run.id,
@@ -1723,7 +1725,10 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       html_url: run.html_url,
       telemetryRecorded,
       ...(emptyJobsPolls > 0 ? { emptyJobsPolls } : {}),
-      alertedFailure: resetAlertedFailure ? false : Boolean(prevRun?.alertedFailure),
+      alertedFailure: initialAlertedFailure,
+      ...(initialAlertedFailure && (prevAlertedAt || run.updated_at)
+        ? { alertedAt: prevAlertedAt || run.updated_at }
+        : {}),
     };
 
     const shouldAlertRunFailure =
@@ -1772,6 +1777,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
 
       if (failedJobs.length > 0) {
         state.runs[runKey].alertedFailure = true;
+        if (run.updated_at) {
+          state.runs[runKey].alertedAt = run.updated_at;
+        }
         const firstFailed = failedJobs[0];
         sendFailureAlert(
           `${args.repo} ${args.branch} CI Failed`,
@@ -1799,6 +1807,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         run.conclusion !== "neutral"
       ) {
         state.runs[runKey].alertedFailure = true;
+        if (run.updated_at) {
+          state.runs[runKey].alertedAt = run.updated_at;
+        }
         sendFailureAlert(
           `${args.repo} ${args.branch} Workflow Failed`,
           `${run.name} (${(run.head_sha || "").slice(0, 8)}) failed: ${run.conclusion}`
@@ -1854,8 +1865,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         state.lastMainSha
       );
       const headMainRuns = [...headEligibleByWorkflow.values()];
+      const hasCurrentShaRun = headMainRuns.some((r) => r.head_sha === state.lastMainSha);
       const allCompletedGreen =
-        headMainRuns.length > 0 &&
+        hasCurrentShaRun &&
         headMainRuns.every((r) => r.status === "completed" && (r.conclusion === "success" || r.conclusion === "skipped"));
       if (allCompletedGreen) {
         events.push({

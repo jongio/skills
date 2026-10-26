@@ -12,7 +12,7 @@ scoring:
     prompt: 0.5
     diff-empty: 0.25
     skill-invocation: 0.25
-  threshold: 0.75
+  threshold: 0.875
 
 stimuli:
   - name: missing-update-in-unchanged-docs

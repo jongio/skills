@@ -11,7 +11,7 @@ scoring:
   weights:
     prompt: 0.5
     skill-invocation: 0.5
-  threshold: 0.75
+  threshold: 0.875
 
 stimuli:
   - name: plan-to-merge

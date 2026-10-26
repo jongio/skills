@@ -13,7 +13,7 @@ scoring:
   weights:
     prompt: 0.8
     skill-invocation: 0.2
-  threshold: 0.8
+  threshold: 0.84
 
 stimuli:
   - name: incremental-week
