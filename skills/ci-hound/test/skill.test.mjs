@@ -1221,6 +1221,213 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
   assert.equal(legacyTick.events[0].type, "ALL_GREEN");
   assert.deepEqual(legacyTick.events[0].runs.map((r) => r.id), [1002]);
 
+  // 1c. Scheduled runs on main (event: "schedule") block ALL_GREEN while in_progress and alert on failure even if main SHA advanced,
+  // and rerunning a failed run resets alertedFailure so a second failure alerts again
+  const scheduleState = loadState("/nonexistent/state.json");
+  let scheduledStatus = "in_progress";
+  let scheduledConclusion = null;
+  let scheduledUpdatedAt = "2026-10-25T03:37:13Z";
+  const execScheduleScenario = (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"947d82e0"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 5000,
+              workflow_id: 30,
+              name: "Skill Lint",
+              event: "push",
+              head_branch: "main",
+              head_sha: "947d82e0",
+              status: "completed",
+              conclusion: "success",
+              updated_at: "2026-10-25T04:33:16Z",
+              html_url: "https://github.com/jongio/skills/actions/runs/5000",
+            },
+            {
+              id: 5001,
+              workflow_id: 40,
+              name: "Skill Eval",
+              event: "schedule",
+              head_branch: "main",
+              head_sha: "8e23f105",
+              status: scheduledStatus,
+              conclusion: scheduledConclusion,
+              updated_at: scheduledUpdatedAt,
+              html_url: "https://github.com/jongio/skills/actions/runs/5001",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/5000/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [{ id: 1, name: "lint", status: "completed", conclusion: "success", steps: [] }],
+        }),
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/5001/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [
+            {
+              id: 2,
+              name: "eval (skills/go)",
+              status: scheduledStatus,
+              conclusion: scheduledConclusion,
+              steps: [],
+            },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  };
+  const inProgressSchedTick = evaluatePollTick(args, scheduleState, execScheduleScenario);
+  assert.equal(inProgressSchedTick.events.length, 0, "ALL_GREEN must not fire while scheduled main run is in_progress");
+
+  scheduledStatus = "completed";
+  scheduledConclusion = "failure";
+  scheduledUpdatedAt = "2026-10-25T05:30:12Z";
+  const failedSchedTick = evaluatePollTick(args, scheduleState, execScheduleScenario);
+  assert.equal(failedSchedTick.events.length, 1, "failed scheduled main run must emit JOB_FAILED even after main SHA advanced");
+  assert.equal(failedSchedTick.events[0].type, "JOB_FAILED");
+  assert.equal(failedSchedTick.events[0].runId, 5001);
+
+  // Rerun of 5001 that fails again at a newer updated_at must re-emit JOB_FAILED
+  scheduledUpdatedAt = "2026-10-25T06:00:00Z";
+  const rerunFailedTick = evaluatePollTick(args, scheduleState, execScheduleScenario);
+  assert.equal(rerunFailedTick.events.length, 1, "rerun failure at newer updated_at must re-alert");
+  assert.equal(rerunFailedTick.events[0].type, "JOB_FAILED");
+
+  // Early failure while in_progress -> completion -> unchanged completed poll must NOT re-alert without a rerun
+  const earlyLatchState = loadState("/nonexistent/state.json");
+  let earlyRunStatus = "in_progress";
+  let earlyRunConclusion = null;
+  let earlyRunUpdatedAt = "2026-10-25T06:10:00Z";
+  let earlyJob2Status = "in_progress";
+  let earlyJob2Conclusion = null;
+  const execEarlyLatch = (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-early"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 5010,
+              workflow_id: 30,
+              run_attempt: 1,
+              name: "CI",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha-early",
+              status: earlyRunStatus,
+              conclusion: earlyRunConclusion,
+              updated_at: earlyRunUpdatedAt,
+              html_url: "https://github.com/github/evals/actions/runs/5010",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/5010/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [
+            { id: 1, name: "Job 1", status: "completed", conclusion: "failure", steps: [] },
+            { id: 2, name: "Job 2", status: earlyJob2Status, conclusion: earlyJob2Conclusion, steps: [] },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  };
+  const poll1Early = evaluatePollTick(args, earlyLatchState, execEarlyLatch);
+  assert.equal(poll1Early.events.length, 1, "poll 1 emits early JOB_FAILED while in_progress");
+  earlyRunStatus = "completed";
+  earlyRunConclusion = "failure";
+  earlyRunUpdatedAt = "2026-10-25T06:15:00Z";
+  earlyJob2Status = "completed";
+  earlyJob2Conclusion = "success";
+  const poll2Completed = evaluatePollTick(args, earlyLatchState, execEarlyLatch);
+  assert.equal(poll2Completed.events.length, 0, "poll 2 (completion of same attempt) must not duplicate alert");
+  const poll3Unchanged = evaluatePollTick(args, earlyLatchState, execEarlyLatch);
+  assert.equal(poll3Unchanged.events.length, 0, "poll 3 (unchanged completed poll) must not duplicate alert");
+
+  // Superseded scheduled failure on SHA A must not resurface after workflow_dispatch success on SHA B when main advances to SHA C
+  scheduleState.runs["5002"] = {
+    id: 5002,
+    workflow_id: 40,
+    name: "Skill Eval",
+    event: "workflow_dispatch",
+    head_branch: "main",
+    head_sha: "sha-B",
+    status: "completed",
+    conclusion: "success",
+    updated_at: "2026-10-25T07:00:00Z",
+    html_url: "https://github.com/jongio/skills/actions/runs/5002",
+    telemetryRecorded: true,
+    alertedFailure: false,
+  };
+  const shaCTick = evaluatePollTick(args, scheduleState, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-C"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 5003,
+              workflow_id: 30,
+              name: "Skill Lint",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha-C",
+              status: "completed",
+              conclusion: "success",
+              updated_at: "2026-10-25T08:00:00Z",
+              html_url: "https://github.com/jongio/skills/actions/runs/5003",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/5003/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [{ id: 1, name: "lint", status: "completed", conclusion: "success", steps: [] }],
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(shaCTick.events.length, 1);
+  assert.equal(shaCTick.events[0].type, "ALL_GREEN", "superseded scheduled failure on SHA A must not block ALL_GREEN on SHA C");
+
   // 2. When --watch-run 2002 is specified, an unrelated already-failed run 2001 on main does not abort the watch,
   // an active main run 2000 before 2002 does not hijack displaySha, and watching an active PR run 2002 uses activeIntervalSec (15s)
   const watchState = loadState("/nonexistent/state.json");

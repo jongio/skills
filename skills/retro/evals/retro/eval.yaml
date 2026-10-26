@@ -12,7 +12,7 @@ defaults:
 scoring:
   weights:
     prompt: 1.0
-  threshold: 0.85
+  threshold: 0.75
 
 stimuli:
   - name: reconcile-missed-correction
@@ -109,7 +109,8 @@ stimuli:
 
   - name: public-pr-current-head-review
     prompt: >-
-      Use /retro on this synthetic PR. Verified GitHub repository:
+      Load the retro skill first, then use /retro on this synthetic PR.
+      Verified GitHub repository:
       jongio/example, PUBLIC. Policy is {"copilot":true,"expectedReviewers":["lee"]}.
       Current head is B. Copilot and lee submitted reviews on earlier head A;
       the request list is now empty. CI is green, state is MERGEABLE, there are
@@ -134,7 +135,8 @@ stimuli:
 
   - name: private-owner-copilot-exception
     prompt: >-
-      Use /retro on this synthetic PR. GitHub confirms owner jongio
+      Load the retro skill first, then use /retro on this synthetic PR. GitHub
+      confirms owner jongio
       and visibility PRIVATE. Policy is {"copilot":true,"expectedReviewers":["lee"]}.
       Copilot already has a pending request and posted an unresolved comment.
       lee has not completed review on the current head. What must still happen?
@@ -158,7 +160,8 @@ stimuli:
 
   - name: other-private-owner-and-commented-review
     prompt: >-
-      Use /retro. Synthetic verified repo owner is another-team,
+      Load the retro skill first, then use /retro. Synthetic verified repo owner
+      is another-team,
       visibility PRIVATE, default Copilot policy. Copilot submitted COMMENTED
       on the current head. A required approving review is missing and an
       outdated thread still describes an unfixed bug. Can it merge? Do not

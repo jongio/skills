@@ -558,6 +558,7 @@ function slimWorkflowRunRecord(run) {
   };
   if (run.workflow_id !== undefined) slim.workflow_id = run.workflow_id;
   if (run.path !== undefined) slim.path = run.path;
+  if (run.run_attempt !== undefined) slim.run_attempt = run.run_attempt;
   if (run.head_repository && typeof run.head_repository === "object") {
     slim.head_repository = {
       ...(run.head_repository.id !== undefined ? { id: run.head_repository.id } : {}),
@@ -1352,6 +1353,27 @@ function isPullRequestRunEvent(event) {
   return event === "pull_request" || event === "pull_request_target";
 }
 
+function selectActiveBranchWorkflowRuns(runs, branch, lastMainSha) {
+  const resolveKey = buildWorkflowIdentityResolver(runs);
+  const latestOnBranch = new Map();
+  for (const r of runs || []) {
+    if (!r || typeof r !== "object") continue;
+    if (r.head_branch !== branch || isPullRequestRunEvent(r.event)) continue;
+    const wfKey = resolveKey(r);
+    const prev = latestOnBranch.get(wfKey);
+    if (!prev || (Number(r.id) || 0) > (Number(prev.id) || 0)) {
+      latestOnBranch.set(wfKey, r);
+    }
+  }
+  const eligibleByWorkflow = new Map();
+  for (const [wfKey, latestRun] of latestOnBranch.entries()) {
+    if (!lastMainSha || latestRun.head_sha === lastMainSha || latestRun.event === "schedule") {
+      eligibleByWorkflow.set(wfKey, latestRun);
+    }
+  }
+  return { resolveKey, eligibleByWorkflow };
+}
+
 function workflowKeyForRun(run) {
   if (!run || typeof run !== "object") return "unknown";
   return String(run.workflow_id || run.path || run.name || run.id || "unknown");
@@ -1526,26 +1548,14 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
   const workflowRuns = [...runMap.values()];
-  const resolveWorkflowKey = buildWorkflowIdentityResolver([
-    ...Object.values(state.runs || {}),
-    ...workflowRuns,
-  ]);
-
-  const latestMainRunIdByWorkflow = new Map();
-  for (const candidate of [...Object.values(state.runs || {}), ...workflowRuns]) {
-    if (
-      candidate &&
-      candidate.head_branch === args.branch &&
-      !isPullRequestRunEvent(candidate.event) &&
-      candidate.head_sha === state.lastMainSha
-    ) {
-      const wfKey = resolveWorkflowKey(candidate);
-      const prevId = latestMainRunIdByWorkflow.get(wfKey) || 0;
-      if ((Number(candidate.id) || 0) > prevId) {
-        latestMainRunIdByWorkflow.set(wfKey, Number(candidate.id));
-      }
-    }
-  }
+  const { resolveKey: resolveWorkflowKey, eligibleByWorkflow } = selectActiveBranchWorkflowRuns(
+    [...Object.values(state.runs || {}), ...workflowRuns],
+    args.branch,
+    state.lastMainSha
+  );
+  const latestMainRunIdByWorkflow = new Map(
+    [...eligibleByWorkflow.entries()].map(([wfKey, r]) => [wfKey, Number(r.id)])
+  );
 
   let activeMainRuns = 0;
   let activeTargetRuns = 0;
@@ -1557,10 +1567,11 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     const isPullRequestEvent = isPullRequestRunEvent(run.event);
     const isMainBranch = run.head_branch === args.branch && !isPullRequestEvent;
     const isWatchedRun = args.watchRunIds.includes(run.id);
-    const isCurrentHeadMainRun = isMainBranch && run.head_sha === state.lastMainSha;
     const isLatestWorkflowRunOnHead =
-      isCurrentHeadMainRun &&
+      isMainBranch &&
       latestMainRunIdByWorkflow.get(resolveWorkflowKey(run)) === Number(run.id);
+    const isCurrentHeadMainRun =
+      isLatestWorkflowRunOnHead || (isMainBranch && run.head_sha === state.lastMainSha);
 
     if (isMainBranch && run.status !== "completed") {
       activeMainRuns += 1;
@@ -1684,6 +1695,24 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           : prevEmptyPolls
         : 0;
 
+    const currentAttempt = run.run_attempt ?? prevRun?.run_attempt;
+    const prevAlertedAttempt = prevRun?.alertedAttempt;
+    const prevAlertedAt = prevRun?.alertedAt || prevRun?.updated_at || "";
+    const hasNewAttempt =
+      currentAttempt !== undefined && prevAlertedAttempt !== undefined
+        ? Number(currentAttempt) > Number(prevAlertedAttempt)
+        : Boolean(
+            prevRun?.status === "completed" &&
+              prevAlertedAt &&
+              run.updated_at &&
+              prevAlertedAt !== run.updated_at
+          );
+    const resetAlertedFailure = Boolean(
+      prevRun?.alertedFailure &&
+        (hasNewAttempt || (prevRun?.status === "completed" && run.status !== "completed"))
+    );
+    const initialAlertedFailure = resetAlertedFailure ? false : Boolean(prevRun?.alertedFailure);
+
     state.runs[runKey] = {
       id: run.id,
       ...(run.workflow_id !== undefined
@@ -1696,6 +1725,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         : prevRun?.path !== undefined
           ? { path: prevRun.path }
           : {}),
+      ...(currentAttempt !== undefined ? { run_attempt: currentAttempt } : {}),
       name: run.name,
       event: run.event,
       head_branch: run.head_branch,
@@ -1706,7 +1736,13 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       html_url: run.html_url,
       telemetryRecorded,
       ...(emptyJobsPolls > 0 ? { emptyJobsPolls } : {}),
-      alertedFailure: Boolean(prevRun?.alertedFailure),
+      alertedFailure: initialAlertedFailure,
+      ...(initialAlertedFailure && (run.updated_at || prevAlertedAt)
+        ? { alertedAt: run.updated_at || prevAlertedAt }
+        : {}),
+      ...(initialAlertedFailure && (currentAttempt !== undefined || prevAlertedAttempt !== undefined)
+        ? { alertedAttempt: currentAttempt ?? prevAlertedAttempt }
+        : {}),
     };
 
     const shouldAlertRunFailure =
@@ -1755,6 +1791,12 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
 
       if (failedJobs.length > 0) {
         state.runs[runKey].alertedFailure = true;
+        if (run.updated_at) {
+          state.runs[runKey].alertedAt = run.updated_at;
+        }
+        if (currentAttempt !== undefined) {
+          state.runs[runKey].alertedAttempt = currentAttempt;
+        }
         const firstFailed = failedJobs[0];
         sendFailureAlert(
           `${args.repo} ${args.branch} CI Failed`,
@@ -1782,6 +1824,12 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         run.conclusion !== "neutral"
       ) {
         state.runs[runKey].alertedFailure = true;
+        if (run.updated_at) {
+          state.runs[runKey].alertedAt = run.updated_at;
+        }
+        if (currentAttempt !== undefined) {
+          state.runs[runKey].alertedAttempt = currentAttempt;
+        }
         sendFailureAlert(
           `${args.repo} ${args.branch} Workflow Failed`,
           `${run.name} (${(run.head_sha || "").slice(0, 8)}) failed: ${run.conclusion}`
@@ -1830,19 +1878,16 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           runs: watchedRecords,
         });
       }
-    } else if (state.lastMainSha) {
-      const allHeadCandidates = Object.values(state.runs).filter(
-        (r) =>
-          r.head_branch === args.branch &&
-          !isPullRequestRunEvent(r.event) &&
-          r.head_sha === state.lastMainSha
+    } else if (state.lastMainSha && activeMainRuns === 0) {
+      const { eligibleByWorkflow: headEligibleByWorkflow } = selectActiveBranchWorkflowRuns(
+        Object.values(state.runs),
+        args.branch,
+        state.lastMainSha
       );
-      const headMainRuns = latestRunsByWorkflow(
-        allHeadCandidates,
-        buildWorkflowIdentityResolver(Object.values(state.runs))
-      );
+      const headMainRuns = [...headEligibleByWorkflow.values()];
+      const hasCurrentShaRun = headMainRuns.some((r) => r.head_sha === state.lastMainSha);
       const allCompletedGreen =
-        headMainRuns.length > 0 &&
+        hasCurrentShaRun &&
         headMainRuns.every((r) => r.status === "completed" && (r.conclusion === "success" || r.conclusion === "skipped"));
       if (allCompletedGreen) {
         events.push({
@@ -1989,6 +2034,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       rateLimitRemaining: discoveryState.metrics?.rateLimitRemaining ?? null,
     });
   } else {
+    const pendingAllGreenEvents = [];
     for (const repo of targetRepos) {
       const repoStateFile = stateFileForRepo(repo, args);
       const repoState = loadState(repoStateFile);
@@ -2014,7 +2060,13 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       };
       const tick = evaluatePollTick(repoArgs, repoState, execFn);
       saveState(repoStateFile, repoState);
-      allEvents.push(...tick.events);
+      for (const ev of tick.events) {
+        if (ev.type === "ALL_GREEN" && targetRepos.length > 1) {
+          pendingAllGreenEvents.push(ev);
+        } else {
+          allEvents.push(ev);
+        }
+      }
       if (tick.status) {
         statuses.push(tick.status);
       }
@@ -2029,6 +2081,15 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
         anyRateLimited = true;
         break;
       }
+    }
+    if (
+      targetRepos.length > 1 &&
+      !anyRateLimited &&
+      totalActiveMainRuns === 0 &&
+      allEvents.length === 0 &&
+      pendingAllGreenEvents.length === targetRepos.length
+    ) {
+      allEvents.push(...pendingAllGreenEvents);
     }
   }
 
