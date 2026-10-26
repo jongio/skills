@@ -1055,11 +1055,6 @@ export async function composeStatusLine(payload, {
 	const renderers = discoverRenderers(home);
 	if (!renderers.length && (!label || typeof selfRender !== "function")) return label;
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: true });
-	if (!renderers.length) {
-		const rendered = await selfRender(payload, { home, now, links, color, nerdFont: useNerdFont });
-		const output = useNerdFont ? rendered : toUnicodeIcons(rendered);
-		return output ? `${label}${color ? " " : " · "}${output}` : label;
-	}
 	const options = {
 		home, now, links, color, nerdFont: useNerdFont,
 		deferCheckoutDivergence: true,
@@ -1110,7 +1105,9 @@ export async function composeStatusLine(payload, {
 		: joinOutputsHorizontally(blocks.map((block) => block.renderGroup
 			? block.renderGroup(block.entries, options)
 			: block.entries.filter((entry) => !entry.compact).map((entry) => entry.text).join(color ? " " : " · ")), { color });
-	const output = useNerdFont ? joined : toUnicodeIcons(joined);
+	const rendered = joined || (label && typeof selfRender === "function"
+		? await selfRender(payload, { home, now, links, color, nerdFont: useNerdFont }) : "");
+	const output = useNerdFont ? rendered : toUnicodeIcons(rendered);
 	return label ? `${label}${output ? `${color ? " " : " · "}${output}` : ""}` : output;
 }
 

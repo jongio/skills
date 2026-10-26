@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -240,7 +240,7 @@ test("installed composer reads session names across processes without changing e
 	assert.equal(readFileSync(join(home, "statusline-config.json"), "utf8"), config);
 }));
 
-test("a named standalone PR renderer keeps tracked pills without an installed composer registry", () => fixture((home) => {
+test("a named standalone PR renderer keeps tracked pills with a missing or empty composer registry", () => fixture((home) => {
 	const id = "standalone-pr-name";
 	const tracker = new SessionTracker(id);
 	tracker.add("example/widget#99");
@@ -255,6 +255,12 @@ test("a named standalone PR renderer keeps tracked pills without an installed co
 	const after = node(home, [renderer, "--plain"], payload);
 	assert.equal(after.status, 0, after.stderr);
 	assert.equal(after.stdout.trim(), `API migration · ${before.stdout.trim()}`);
+	const sibling = join(home, "extensions", "issue-statusline");
+	mkdirSync(sibling, { recursive: true });
+	writeFileSync(join(sibling, "render.mjs"), 'export const render = () => "";');
+	const empty = node(home, [renderer, "--plain"], payload);
+	assert.equal(empty.status, 0, empty.stderr);
+	assert.equal(empty.stdout.trim(), `API migration · ${before.stdout.trim()}`);
 }));
 
 test("installer exposes one SDK controller and preserves standalone entry points when upgrading to unified controls", () => fixture((home) => {
