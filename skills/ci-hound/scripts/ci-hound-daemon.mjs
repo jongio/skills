@@ -934,14 +934,6 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
       error: result.stderr || `HTTP ${parsed.status} rate limited`,
     };
   }
-  if (result?.timedOut) {
-    return {
-      fromCache: false,
-      data: null,
-      chunkTimedOut: true,
-      error: result.stderr || "Chunk deadline exceeded",
-    };
-  }
   if (!result.ok && parsed.status !== 304) {
     return { fromCache: false, data: cached?.data ?? null, error: result.stderr || `HTTP ${parsed.status}` };
   }
@@ -1048,7 +1040,6 @@ export function parseGhApiArgs(ghArgs) {
 
 let keepAliveWorkerState = null;
 let nextWorkerReqId = 0;
-let activeChunkDeadlineMs = 0;
 
 function resolveGhTokenOnce() {
   const envToken = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim();
@@ -1088,7 +1079,7 @@ function getKeepAliveWorker() {
           replyPort = msg.initPort;
           return;
         }
-        const { reqId, token, req, timeoutMs, signalBuf } = msg;
+        const { reqId, token, req, signalBuf } = msg;
         const signal = new Int32Array(signalBuf);
         try {
           const res = await fetch(req.url, {
@@ -1101,7 +1092,7 @@ function getKeepAliveWorker() {
               ...req.headers,
             },
             body: req.body,
-            signal: AbortSignal.timeout(timeoutMs || 28000),
+            signal: AbortSignal.timeout(28000),
           });
           const bodyText = await res.text();
           let stdout = bodyText;
@@ -1145,16 +1136,6 @@ function getKeepAliveWorker() {
 }
 
 function defaultExecGh(ghArgs) {
-  const remainingMs = activeChunkDeadlineMs > 0 ? activeChunkDeadlineMs - Date.now() : 30000;
-  if (activeChunkDeadlineMs > 0 && remainingMs <= 0) {
-    return {
-      ok: false,
-      timedOut: true,
-      stdout: "",
-      stderr: "Chunk deadline exceeded",
-    };
-  }
-  const boundedTimeoutMs = Math.min(30000, Math.max(500, remainingMs));
   const parsedReq = parseGhApiArgs(ghArgs);
   if (parsedReq) {
     const ka = getKeepAliveWorker();
@@ -1166,10 +1147,9 @@ function defaultExecGh(ghArgs) {
         reqId,
         token: ka.token,
         req: parsedReq,
-        timeoutMs: Math.min(28000, boundedTimeoutMs),
         signalBuf,
       });
-      const waitRes = Atomics.wait(signal, 0, 0, boundedTimeoutMs);
+      const waitRes = Atomics.wait(signal, 0, 0, 30000);
       while (true) {
         const msg = receiveMessageOnPort(ka.port1);
         if (!msg) break;
@@ -1177,14 +1157,6 @@ function defaultExecGh(ghArgs) {
           const isReadOnlyRequest =
             parsedReq.method === "GET" || parsedReq.url.endsWith("/graphql");
           if (msg.message.transportError && isReadOnlyRequest) {
-            if (activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
-              return {
-                ok: false,
-                timedOut: true,
-                stdout: "",
-                stderr: "Chunk deadline exceeded",
-              };
-            }
             break;
           }
           return {
@@ -1194,37 +1166,15 @@ function defaultExecGh(ghArgs) {
           };
         }
       }
-      if (waitRes === "timed-out" && activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
-        return {
-          ok: false,
-          timedOut: true,
-          stdout: "",
-          stderr: "Chunk deadline exceeded",
-        };
-      }
     }
-  }
-  const secondRemainingMs = activeChunkDeadlineMs > 0 ? activeChunkDeadlineMs - Date.now() : 30000;
-  if (activeChunkDeadlineMs > 0 && secondRemainingMs <= 0) {
-    return {
-      ok: false,
-      timedOut: true,
-      stdout: "",
-      stderr: "Chunk deadline exceeded",
-    };
   }
   const res = spawnSync("gh", ghArgs, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
-    timeout: Math.min(30000, Math.max(500, secondRemainingMs)),
+    timeout: 30000,
   });
-  const timedOutByDeadline =
-    Boolean(res.error && res.error.code === "ETIMEDOUT") &&
-    activeChunkDeadlineMs > 0 &&
-    Date.now() >= activeChunkDeadlineMs;
   return {
     ok: res.status === 0,
-    ...(timedOutByDeadline ? { timedOut: true } : {}),
     stdout: res.stdout || "",
     stderr: res.stderr || (res.error ? res.error.message : ""),
   };
@@ -2116,7 +2066,6 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const statuses = [];
   let totalActiveMainRuns = 0;
   let anyRateLimited = Boolean(discoveryState.rateLimited);
-  let anyChunkTimedOut = false;
   let minRateLimitRemaining = Number.isFinite(discoveryState.metrics?.rateLimitRemaining)
     ? discoveryState.metrics.rateLimitRemaining
     : null;
@@ -2160,10 +2109,6 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   } else {
     const pendingAllGreenEvents = [];
     for (const repo of targetRepos) {
-      if (activeChunkDeadlineMs > 0 && Date.now() >= activeChunkDeadlineMs) {
-        anyChunkTimedOut = true;
-        break;
-      }
       const repoStateFile = stateFileForRepo(repo, args);
       const repoState = loadState(repoStateFile);
       const qualifiedIds = args.watchRunsByRepo?.[repo] || [];
@@ -2205,10 +2150,6 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       );
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
-      if (tick.chunkTimedOut) {
-        anyChunkTimedOut = true;
-        break;
-      }
       if (tick.rateLimited) {
         anyRateLimited = true;
         break;
@@ -2217,7 +2158,6 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     if (
       targetRepos.length > 1 &&
       !anyRateLimited &&
-      !anyChunkTimedOut &&
       totalActiveMainRuns === 0 &&
       allEvents.length === 0 &&
       pendingAllGreenEvents.length === targetRepos.length
@@ -2237,7 +2177,6 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     events: allEvents,
     activeMainRuns: totalActiveMainRuns,
     rateLimited: anyRateLimited,
-    ...(anyChunkTimedOut ? { chunkTimedOut: true } : {}),
     nextIntervalSec,
     statuses,
     reports,
@@ -2314,25 +2253,77 @@ export async function runCli(argv = process.argv.slice(2)) {
   const lastPhaseByRepo = new Map();
   const lastSummaryByRepo = new Map();
   const watchStartedAtMs = Date.now();
-  activeChunkDeadlineMs = args.maxWaitSec > 0 ? watchStartedAtMs + args.maxWaitSec * 1000 : 0;
   let lastEmitMs = 0;
   let polls = 0;
-  try {
-    while (true) {
-      polls += 1;
-      const multi = evaluateMultiRepoPollTick(args, existingConfig);
-      if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
-        console.error(
-          "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
-        );
-        process.exit(1);
+  while (true) {
+    polls += 1;
+    const multi = evaluateMultiRepoPollTick(args, existingConfig);
+    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
+      console.error(
+        "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
+      );
+      process.exit(1);
+    }
+    const terminalEvents = multi.events.filter((e) => e.type !== "RATE_LIMITED");
+    if (terminalEvents.length > 0) {
+      console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
+      return;
+    }
+    const phaseChanges = [];
+    let summaryChanged = false;
+    for (const st of multi.statuses || []) {
+      const prevPhase = lastPhaseByRepo.get(st.repo);
+      if (prevPhase && prevPhase !== st.phase) {
+        phaseChanges.push({
+          type: "PHASE_CHANGED",
+          timestamp: st.timestamp,
+          repo: st.repo,
+          previousPhase: prevPhase,
+          phase: st.phase,
+          summary: st.summary,
+        });
       }
-      const terminalEvents = multi.events.filter((e) => e.type !== "RATE_LIMITED");
-      if (terminalEvents.length > 0) {
-        console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
-        return;
+      const prevSummary = lastSummaryByRepo.get(st.repo);
+      if (prevSummary && prevSummary !== st.summary) {
+        summaryChanged = true;
       }
-      if (multi.chunkTimedOut) {
+      lastPhaseByRepo.set(st.repo, st.phase);
+      lastSummaryByRepo.set(st.repo, st.summary);
+    }
+    const nowMs = Date.now();
+    if (
+      shouldEmitWatchStatus({
+        polls,
+        phaseChangesCount: phaseChanges.length,
+        summaryChanged,
+        nowMs,
+        lastEmitMs,
+      })
+    ) {
+      lastEmitMs = nowMs;
+      console.log(
+        JSON.stringify(
+          {
+            repos: multi.repos,
+            events: phaseChanges,
+            statuses: multi.statuses,
+          },
+          null,
+          2
+        )
+      );
+    }
+    if (args.maxPolls > 0 && polls >= args.maxPolls) {
+      console.log(JSON.stringify({ repos: multi.repos, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+      return;
+    }
+    if (args.maxWaitSec > 0) {
+      const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
+      if (elapsedSec + multi.nextIntervalSec >= args.maxWaitSec) {
+        const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+        if (remainingWaitSec > 0) {
+          await sleepSeconds(remainingWaitSec);
+        }
         console.log(
           JSON.stringify(
             {
@@ -2352,85 +2343,8 @@ export async function runCli(argv = process.argv.slice(2)) {
         );
         return;
       }
-      const phaseChanges = [];
-      let summaryChanged = false;
-      for (const st of multi.statuses || []) {
-        const prevPhase = lastPhaseByRepo.get(st.repo);
-        if (prevPhase && prevPhase !== st.phase) {
-          phaseChanges.push({
-            type: "PHASE_CHANGED",
-            timestamp: st.timestamp,
-            repo: st.repo,
-            previousPhase: prevPhase,
-            phase: st.phase,
-            summary: st.summary,
-          });
-        }
-        const prevSummary = lastSummaryByRepo.get(st.repo);
-        if (prevSummary && prevSummary !== st.summary) {
-          summaryChanged = true;
-        }
-        lastPhaseByRepo.set(st.repo, st.phase);
-        lastSummaryByRepo.set(st.repo, st.summary);
-      }
-      const nowMs = Date.now();
-      if (
-        shouldEmitWatchStatus({
-          polls,
-          phaseChangesCount: phaseChanges.length,
-          summaryChanged,
-          nowMs,
-          lastEmitMs,
-        })
-      ) {
-        lastEmitMs = nowMs;
-        console.log(
-          JSON.stringify(
-            {
-              repos: multi.repos,
-              events: phaseChanges,
-              statuses: multi.statuses,
-            },
-            null,
-            2
-          )
-        );
-      }
-      if (args.maxPolls > 0 && polls >= args.maxPolls) {
-        console.log(JSON.stringify({ repos: multi.repos, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
-        return;
-      }
-      if (args.maxWaitSec > 0) {
-        const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
-        if (elapsedSec + multi.nextIntervalSec >= args.maxWaitSec) {
-          const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
-          if (remainingWaitSec > 0) {
-            await sleepSeconds(remainingWaitSec);
-          }
-          console.log(
-            JSON.stringify(
-              {
-                repos: multi.repos,
-                events: [
-                  {
-                    type: "WATCH_CHUNK_TIMEOUT",
-                    elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
-                    maxWaitSec: args.maxWaitSec,
-                  },
-                ],
-                statuses: multi.statuses,
-              },
-              null,
-              2
-            )
-          );
-          return;
-        }
-      }
-      await sleepSeconds(multi.nextIntervalSec);
     }
-  } finally {
-    activeChunkDeadlineMs = 0;
+    await sleepSeconds(multi.nextIntervalSec);
   }
 }
 
