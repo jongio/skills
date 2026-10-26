@@ -558,6 +558,7 @@ function slimWorkflowRunRecord(run) {
   };
   if (run.workflow_id !== undefined) slim.workflow_id = run.workflow_id;
   if (run.path !== undefined) slim.path = run.path;
+  if (run.run_attempt !== undefined) slim.run_attempt = run.run_attempt;
   if (run.head_repository && typeof run.head_repository === "object") {
     slim.head_repository = {
       ...(run.head_repository.id !== undefined ? { id: run.head_repository.id } : {}),
@@ -1694,12 +1695,21 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           : prevEmptyPolls
         : 0;
 
+    const currentAttempt = run.run_attempt ?? prevRun?.run_attempt;
+    const prevAlertedAttempt = prevRun?.alertedAttempt;
     const prevAlertedAt = prevRun?.alertedAt || prevRun?.updated_at || "";
+    const hasNewAttempt =
+      currentAttempt !== undefined && prevAlertedAttempt !== undefined
+        ? Number(currentAttempt) > Number(prevAlertedAttempt)
+        : Boolean(
+            prevRun?.status === "completed" &&
+              prevAlertedAt &&
+              run.updated_at &&
+              prevAlertedAt !== run.updated_at
+          );
     const resetAlertedFailure = Boolean(
       prevRun?.alertedFailure &&
-        prevRun?.status === "completed" &&
-        (run.status !== "completed" ||
-          (prevAlertedAt && run.updated_at && prevAlertedAt !== run.updated_at))
+        (hasNewAttempt || (prevRun?.status === "completed" && run.status !== "completed"))
     );
     const initialAlertedFailure = resetAlertedFailure ? false : Boolean(prevRun?.alertedFailure);
 
@@ -1715,6 +1725,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         : prevRun?.path !== undefined
           ? { path: prevRun.path }
           : {}),
+      ...(currentAttempt !== undefined ? { run_attempt: currentAttempt } : {}),
       name: run.name,
       event: run.event,
       head_branch: run.head_branch,
@@ -1726,8 +1737,11 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
       telemetryRecorded,
       ...(emptyJobsPolls > 0 ? { emptyJobsPolls } : {}),
       alertedFailure: initialAlertedFailure,
-      ...(initialAlertedFailure && (prevAlertedAt || run.updated_at)
-        ? { alertedAt: prevAlertedAt || run.updated_at }
+      ...(initialAlertedFailure && (run.updated_at || prevAlertedAt)
+        ? { alertedAt: run.updated_at || prevAlertedAt }
+        : {}),
+      ...(initialAlertedFailure && (currentAttempt !== undefined || prevAlertedAttempt !== undefined)
+        ? { alertedAttempt: currentAttempt ?? prevAlertedAttempt }
         : {}),
     };
 
@@ -1780,6 +1794,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         if (run.updated_at) {
           state.runs[runKey].alertedAt = run.updated_at;
         }
+        if (currentAttempt !== undefined) {
+          state.runs[runKey].alertedAttempt = currentAttempt;
+        }
         const firstFailed = failedJobs[0];
         sendFailureAlert(
           `${args.repo} ${args.branch} CI Failed`,
@@ -1809,6 +1826,9 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         state.runs[runKey].alertedFailure = true;
         if (run.updated_at) {
           state.runs[runKey].alertedAt = run.updated_at;
+        }
+        if (currentAttempt !== undefined) {
+          state.runs[runKey].alertedAttempt = currentAttempt;
         }
         sendFailureAlert(
           `${args.repo} ${args.branch} Workflow Failed`,

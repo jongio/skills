@@ -1311,6 +1311,67 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
   assert.equal(rerunFailedTick.events.length, 1, "rerun failure at newer updated_at must re-alert");
   assert.equal(rerunFailedTick.events[0].type, "JOB_FAILED");
 
+  // Early failure while in_progress -> completion -> unchanged completed poll must NOT re-alert without a rerun
+  const earlyLatchState = loadState("/nonexistent/state.json");
+  let earlyRunStatus = "in_progress";
+  let earlyRunConclusion = null;
+  let earlyRunUpdatedAt = "2026-10-25T06:10:00Z";
+  let earlyJob2Status = "in_progress";
+  let earlyJob2Conclusion = null;
+  const execEarlyLatch = (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-early"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 5010,
+              workflow_id: 30,
+              run_attempt: 1,
+              name: "CI",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha-early",
+              status: earlyRunStatus,
+              conclusion: earlyRunConclusion,
+              updated_at: earlyRunUpdatedAt,
+              html_url: "https://github.com/github/evals/actions/runs/5010",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/5010/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [
+            { id: 1, name: "Job 1", status: "completed", conclusion: "failure", steps: [] },
+            { id: 2, name: "Job 2", status: earlyJob2Status, conclusion: earlyJob2Conclusion, steps: [] },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  };
+  const poll1Early = evaluatePollTick(args, earlyLatchState, execEarlyLatch);
+  assert.equal(poll1Early.events.length, 1, "poll 1 emits early JOB_FAILED while in_progress");
+  earlyRunStatus = "completed";
+  earlyRunConclusion = "failure";
+  earlyRunUpdatedAt = "2026-10-25T06:15:00Z";
+  earlyJob2Status = "completed";
+  earlyJob2Conclusion = "success";
+  const poll2Completed = evaluatePollTick(args, earlyLatchState, execEarlyLatch);
+  assert.equal(poll2Completed.events.length, 0, "poll 2 (completion of same attempt) must not duplicate alert");
+  const poll3Unchanged = evaluatePollTick(args, earlyLatchState, execEarlyLatch);
+  assert.equal(poll3Unchanged.events.length, 0, "poll 3 (unchanged completed poll) must not duplicate alert");
+
   // Superseded scheduled failure on SHA A must not resurface after workflow_dispatch success on SHA B when main advances to SHA C
   scheduleState.runs["5002"] = {
     id: 5002,
