@@ -1311,6 +1311,62 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
   assert.equal(rerunFailedTick.events.length, 1, "rerun failure at newer updated_at must re-alert");
   assert.equal(rerunFailedTick.events[0].type, "JOB_FAILED");
 
+  // Superseded scheduled failure on SHA A must not resurface after workflow_dispatch success on SHA B when main advances to SHA C
+  scheduleState.runs["5002"] = {
+    id: 5002,
+    workflow_id: 40,
+    name: "Skill Eval",
+    event: "workflow_dispatch",
+    head_branch: "main",
+    head_sha: "sha-B",
+    status: "completed",
+    conclusion: "success",
+    updated_at: "2026-10-25T07:00:00Z",
+    html_url: "https://github.com/jongio/skills/actions/runs/5002",
+    telemetryRecorded: true,
+    alertedFailure: false,
+  };
+  const shaCTick = evaluatePollTick(args, scheduleState, (ghArgs) => {
+    const endpoint = ghArgs[2];
+    if (endpoint === "repos/github/evals/commits/main") {
+      return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-C"}', stderr: "" };
+    }
+    if (endpoint.includes("/actions/runs?branch=") || endpoint.includes("/actions/runs?per_page=")) {
+      return {
+        ok: true,
+        stdout: `HTTP/2.0 200 OK\n\n${JSON.stringify({
+          workflow_runs: [
+            {
+              id: 5003,
+              workflow_id: 30,
+              name: "Skill Lint",
+              event: "push",
+              head_branch: "main",
+              head_sha: "sha-C",
+              status: "completed",
+              conclusion: "success",
+              updated_at: "2026-10-25T08:00:00Z",
+              html_url: "https://github.com/jongio/skills/actions/runs/5003",
+            },
+          ],
+        })}`,
+        stderr: "",
+      };
+    }
+    if (endpoint === "repos/github/evals/actions/runs/5003/jobs?per_page=50") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          jobs: [{ id: 1, name: "lint", status: "completed", conclusion: "success", steps: [] }],
+        }),
+        stderr: "",
+      };
+    }
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  });
+  assert.equal(shaCTick.events.length, 1);
+  assert.equal(shaCTick.events[0].type, "ALL_GREEN", "superseded scheduled failure on SHA A must not block ALL_GREEN on SHA C");
+
   // 2. When --watch-run 2002 is specified, an unrelated already-failed run 2001 on main does not abort the watch,
   // an active main run 2000 before 2002 does not hijack displaySha, and watching an active PR run 2002 uses activeIntervalSec (15s)
   const watchState = loadState("/nonexistent/state.json");

@@ -19,7 +19,7 @@ scoring:
     skill-invocation: 0.25
     tool-calls: 0.25
     prompt: 0.25
-  threshold: 0.8
+  threshold: 0.95
 
 stimuli:
   - name: fresh-assessment

@@ -1352,14 +1352,25 @@ function isPullRequestRunEvent(event) {
   return event === "pull_request" || event === "pull_request_target";
 }
 
-function isEligibleBranchHeadRun(run, branch, lastMainSha) {
-  if (!run || run.head_branch !== branch || isPullRequestRunEvent(run.event)) {
-    return false;
+function selectActiveBranchWorkflowRuns(runs, branch, lastMainSha) {
+  const resolveKey = buildWorkflowIdentityResolver(runs);
+  const latestOnBranch = new Map();
+  for (const r of runs || []) {
+    if (!r || typeof r !== "object") continue;
+    if (r.head_branch !== branch || isPullRequestRunEvent(r.event)) continue;
+    const wfKey = resolveKey(r);
+    const prev = latestOnBranch.get(wfKey);
+    if (!prev || (Number(r.id) || 0) > (Number(prev.id) || 0)) {
+      latestOnBranch.set(wfKey, r);
+    }
   }
-  if (!lastMainSha || run.head_sha === lastMainSha) {
-    return true;
+  const eligibleByWorkflow = new Map();
+  for (const [wfKey, latestRun] of latestOnBranch.entries()) {
+    if (!lastMainSha || latestRun.head_sha === lastMainSha || latestRun.event === "schedule") {
+      eligibleByWorkflow.set(wfKey, latestRun);
+    }
   }
-  return run.event === "schedule";
+  return { resolveKey, eligibleByWorkflow };
 }
 
 function workflowKeyForRun(run) {
@@ -1536,21 +1547,14 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     }
   }
   const workflowRuns = [...runMap.values()];
-  const resolveWorkflowKey = buildWorkflowIdentityResolver([
-    ...Object.values(state.runs || {}),
-    ...workflowRuns,
-  ]);
-
-  const latestMainRunIdByWorkflow = new Map();
-  for (const candidate of [...Object.values(state.runs || {}), ...workflowRuns]) {
-    if (isEligibleBranchHeadRun(candidate, args.branch, state.lastMainSha)) {
-      const wfKey = resolveWorkflowKey(candidate);
-      const prevId = latestMainRunIdByWorkflow.get(wfKey) || 0;
-      if ((Number(candidate.id) || 0) > prevId) {
-        latestMainRunIdByWorkflow.set(wfKey, Number(candidate.id));
-      }
-    }
-  }
+  const { resolveKey: resolveWorkflowKey, eligibleByWorkflow } = selectActiveBranchWorkflowRuns(
+    [...Object.values(state.runs || {}), ...workflowRuns],
+    args.branch,
+    state.lastMainSha
+  );
+  const latestMainRunIdByWorkflow = new Map(
+    [...eligibleByWorkflow.entries()].map(([wfKey, r]) => [wfKey, Number(r.id)])
+  );
 
   let activeMainRuns = 0;
   let activeTargetRuns = 0;
@@ -1562,10 +1566,11 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     const isPullRequestEvent = isPullRequestRunEvent(run.event);
     const isMainBranch = run.head_branch === args.branch && !isPullRequestEvent;
     const isWatchedRun = args.watchRunIds.includes(run.id);
-    const isCurrentHeadMainRun = isEligibleBranchHeadRun(run, args.branch, state.lastMainSha);
     const isLatestWorkflowRunOnHead =
-      isCurrentHeadMainRun &&
+      isMainBranch &&
       latestMainRunIdByWorkflow.get(resolveWorkflowKey(run)) === Number(run.id);
+    const isCurrentHeadMainRun =
+      isLatestWorkflowRunOnHead || (isMainBranch && run.head_sha === state.lastMainSha);
 
     if (isMainBranch && run.status !== "completed") {
       activeMainRuns += 1;
@@ -1689,15 +1694,12 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
           : prevEmptyPolls
         : 0;
 
-    const resetAlertedFailure =
-      run.status !== "completed" ||
-      Boolean(
-        prevRun?.alertedFailure &&
-          prevRun?.status === "completed" &&
-          prevRun?.updated_at &&
-          run.updated_at &&
-          prevRun.updated_at !== run.updated_at
-      );
+    const resetAlertedFailure = Boolean(
+      prevRun?.alertedFailure &&
+        prevRun?.status === "completed" &&
+        (run.status !== "completed" ||
+          (prevRun?.updated_at && run.updated_at && prevRun.updated_at !== run.updated_at))
+    );
 
     state.runs[runKey] = {
       id: run.id,
@@ -1846,13 +1848,12 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         });
       }
     } else if (state.lastMainSha && activeMainRuns === 0) {
-      const allHeadCandidates = Object.values(state.runs).filter((r) =>
-        isEligibleBranchHeadRun(r, args.branch, state.lastMainSha)
+      const { eligibleByWorkflow: headEligibleByWorkflow } = selectActiveBranchWorkflowRuns(
+        Object.values(state.runs),
+        args.branch,
+        state.lastMainSha
       );
-      const headMainRuns = latestRunsByWorkflow(
-        allHeadCandidates,
-        buildWorkflowIdentityResolver(Object.values(state.runs))
-      );
+      const headMainRuns = [...headEligibleByWorkflow.values()];
       const allCompletedGreen =
         headMainRuns.length > 0 &&
         headMainRuns.every((r) => r.status === "completed" && (r.conclusion === "success" || r.conclusion === "skipped"));
