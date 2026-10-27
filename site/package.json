@@ -21,7 +21,6 @@
   },
   "overrides": {
     "astro": {
-      "http-cache-semantics": "4.3.0",
       "sharp": "0.35.5"
     },
     "unifont": {

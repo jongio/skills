@@ -129,3 +129,23 @@ test("renderer refuses a source lock that would invalidate the SDK security over
   const overrides = JSON.parse(files.get("package.json")).overrides;
   assert.equal(lock.packages["node_modules/zod"].version, overrides["@github/copilot-sdk"].zod);
 });
+
+test("renderer checks nested SDK copies and their nearest hoisted Zod", () => {
+  const source = minimalVallyLock();
+  const sdk = { version: "1.0.15", dependencies: { zod: "4.3.6" } };
+  const nested = "node_modules/@microsoft/vally/node_modules/@github/copilot-sdk";
+  const hoistedZod = "node_modules/@microsoft/vally/node_modules/zod";
+  source.packages["node_modules/@github/copilot-sdk"] = sdk;
+  source.packages["node_modules/zod"] = { version: "4.6.7" };
+  source.packages[nested] = sdk;
+  source.packages[`${nested}/node_modules/zod`] = { version: "4.3.6" };
+  assert.throws(() => renderSkillFiles(manifest, { lockfile: source }), /update the shared toolchain first/);
+  delete source.packages[`${nested}/node_modules/zod`];
+  source.packages[hoistedZod] = { version: "4.3.6" };
+  assert.throws(() => renderSkillFiles(manifest, { lockfile: source }), /update the shared toolchain first/);
+  source.packages[hoistedZod].version = "4.6.7";
+  assert.doesNotThrow(() => renderSkillFiles(manifest, { lockfile: source }));
+  delete source.packages["node_modules/@github/copilot-sdk"];
+  source.packages[hoistedZod].version = "4.3.6";
+  assert.throws(() => renderSkillFiles(manifest, { lockfile: source }), /update the shared toolchain first/);
+});

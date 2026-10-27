@@ -280,16 +280,16 @@ Vally 0.18's preferred `agent_environment` key replaces the deprecated
 `environment` alias in active eval specs. Fixture staging, scoring thresholds,
 and CI's trial-level safety guards remain unchanged.
 
-The site temporarily pins three compatible transitive security fixes through
-scoped overrides: `astro`'s `http-cache-semantics` 4.3.0
-([GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp)) and
-`sharp` 0.35.5
+The site temporarily pins two compatible transitive security fixes through
+scoped overrides: `astro`'s `sharp` 0.35.5
 ([GHSA-wq5f-xc86-pv6w](https://github.com/advisories/GHSA-wq5f-xc86-pv6w)),
 and `unifont`'s `undici` 8.12.3
 ([GHSA-w293-vg96-wgc3](https://github.com/advisories/GHSA-w293-vg96-wgc3)
 and the related undici advisories). Remove each override when a parent upgrade's
 resolved graph supplies a compatible patched version, then regenerate and audit
 the lockfile. These overrides do not authorize unrelated bot-owned updates.
+Astro 7.4.1 requires patched `http-cache-semantics` directly, so its obsolete
+override has been removed.
 
 Vally tooling roots and generated skills also override only Copilot SDK's exact
 `zod` dependency to 4.6.7 for GHSA-mrhx-c7xc-m3w5. Remove this override when the

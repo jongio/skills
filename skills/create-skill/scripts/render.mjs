@@ -87,9 +87,17 @@ export function renderPackageLock(name, source) {
   if (installed !== VALLY_VERSION) {
     throw new Error(`Vally tool lockfile must pin ${VALLY_VERSION}, found ${installed}`);
   }
-  if (lock.packages["node_modules/@github/copilot-sdk"]) {
-    const sdkZod = lock.packages["node_modules/@github/copilot-sdk/node_modules/zod"] ??
-      lock.packages["node_modules/zod"];
+  for (const sdkPath of Object.keys(lock.packages)) {
+    if (sdkPath !== "node_modules/@github/copilot-sdk" &&
+      !sdkPath.endsWith("/node_modules/@github/copilot-sdk")) continue;
+    let parent = sdkPath;
+    let sdkZod;
+    while (parent && !sdkZod) {
+      sdkZod = lock.packages[`${parent}/node_modules/zod`];
+      const boundary = parent.lastIndexOf("/node_modules/");
+      parent = boundary < 0 ? "" : parent.slice(0, boundary);
+    }
+    sdkZod ??= lock.packages["node_modules/zod"];
     if (sdkZod?.version !== "4.6.7") {
       throw new Error("Vally tool lockfile must resolve Copilot SDK's Zod override to 4.6.7; update the shared toolchain first");
     }

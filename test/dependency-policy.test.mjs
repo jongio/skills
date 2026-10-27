@@ -74,7 +74,7 @@ test("site security overrides remain scoped to the vulnerable parents", async ()
   const manifest = await json("site/package.json");
   const lock = await json("site/package-lock.json");
   assert.deepEqual(manifest.overrides, {
-    astro: { "http-cache-semantics": "4.3.0", sharp: "0.35.5" },
+    astro: { sharp: "0.35.5" },
     unifont: { undici: "8.12.3" },
   });
   for (const [name, version] of Object.entries({
