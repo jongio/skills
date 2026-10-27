@@ -1,7 +1,15 @@
+const trackedTargetSchema = {
+  type: "object", properties: {
+    reference: { type: "string" }, url: { type: "string" }, owned: { type: "boolean" },
+    title: { type: "string" }, state: { type: "string", enum: ["OPEN", "CLOSED", "MERGED", "UNKNOWN"] },
+    headRefOid: { type: "string" },
+  }, required: ["owned"], additionalProperties: false,
+};
+
 export const progressInputSchema = {
   type: "object",
   properties: {
-    action: { type: "string", enum: ["status", "refresh", "goal", "draft", "assign", "subtasks", "report", "phase"] },
+    action: { type: "string", enum: ["status", "refresh", "goal", "draft", "assign", "subtasks", "report", "phase", "references", "ci"] },
     goalId: { type: "string", description: "Originating goal for reports; preserve the delegation's identity across active-goal changes." }, title: { type: "string" },
     taskIds: { type: "array", items: { type: "string" } },
     taskId: { type: "string" }, agentId: { type: "string" },
@@ -11,6 +19,11 @@ export const progressInputSchema = {
     phase: { type: "string" }, verified: { type: "boolean" },
     expectedRevision: { type: "integer" }, confirmEmpty: { type: "boolean" },
     requiresOperator: { type: "boolean" },
+    prs: { type: "array", items: trackedTargetSchema }, issues: { type: "array", items: trackedTargetSchema },
+    referenceStatus: { type: "string", enum: ["verified", "unavailable"] }, error: { type: "string" },
+    reference: { type: "string" }, headRefOid: { type: "string" }, observedAt: { type: "string" },
+    passed: { type: "integer", minimum: 0 }, total: { type: "integer", minimum: 0 },
+    pendingChecks: { type: "array", items: { type: "string" } }, failedChecks: { type: "array", items: { type: "string" } },
     drafts: { type: "array", items: { type: "object", properties: { id: { type: "string" }, title: { type: "string" } }, required: ["id", "title"], additionalProperties: false } },
   },
   required: ["action"], additionalProperties: false,

@@ -14,11 +14,18 @@ revisions, known agents, task IDs and report sequences. UI actions are read-only
 | `subtasks` | Primary | `parentTaskId`, canonical child `taskIds` in the active goal |
 | `report` | Primary or subagent | Unique `updateId`, increasing `sequence`, `status`, `message`; optional `taskId`, `evidence` |
 | `phase` | Primary | `phase`, `status`; verified evidence for merged phases |
+| `references` | Primary | Complete owned `prs`/`issues` snapshots; optional verified title/state/head metadata |
+| `ci` | Primary | Tracked `reference`, full `headRefOid`, `status`, ISO `observedAt`; paired `passed`/`total` counts and check names when known |
 
 Primary may supply `agentId` to relay an observed restricted agent's report.
 The tool records that provenance. A subagent cannot report as another agent.
 Report states: `working`, `blocked`, `result_ready`, `failed`, `cancelled`.
 There is deliberately no report state named `done`.
+Keep one latest report per actor/task/goal; do not truncate live blockers or
+sequence guards because many tasks exist. Only historical activity is bounded.
+Task reassignment marks previous-owner task reports `superseded` and retires
+their operator alerts. Their sequence guards remain, so delayed reports cannot
+resurrect old requests when ownership returns.
 
 Pass the originating `goalId` from the delegation context with reports. Task
 membership and an established agent assignment also pin that origin; switching
@@ -87,3 +94,33 @@ canonical data because task invalidations are ephemeral. One runtime bundle
 serves independently scoped providers/state; it is not a shared global daemon.
 Older hosts lacking caller attribution cannot write reports; use observed
 lifecycle information and a primary text fallback rather than bypassing identity.
+
+## Active work and CI
+
+The board mirrors successful `session_prs`/`session_issues` list/add/remove/clear
+results through the SDK post-tool hook. A confirmed `session_statusline clear`
+also clears the board's reference view, not its tasks, agents, or work. Only
+entries with explicit `owned: true` are imported. No shell text, PR body,
+closing link, example, or another session's tracking is enrollment evidence.
+
+When tracking controls are unavailable, disclose that source limitation; do not
+claim an empty verified list. Primary may supply only explicitly owned current
+work through `references`, never search-derived targets. An unavailable source
+retains the last-known snapshot with an unverified label.
+
+Each reference uses `owner/repo#number`, a matching credential-free HTTPS URL
+when supplied, `owned: true`, and optional title/state metadata. PR metadata may
+include its verified full `headRefOid`. Different GitHub hosts remain distinct;
+use the full PR URL when qualified names are ambiguous.
+
+CI is fed by the existing `pr` watcher/controller, not another background poller.
+Before publishing CI, synchronize the current PR head through `references`.
+Then publish `ci` with that exact OID and the verified observation timestamp.
+Older observations and wrong-head data are rejected. A changed head resets CI
+to unknown; passed requires a complete non-empty inventory with all checks
+accepted and no pending/failed names. A failed API read is unknown, not passed.
+Freshness is displayed explicitly; Refresh reads canonical session sources,
+not an independent GitHub polling loop.
+
+If a target was manually removed or cleared, a CI update must not re-enroll it.
+Continue text reporting until new work or an explicit request owns it again.

@@ -1,7 +1,7 @@
 ---
 name: create-session-board-canvas
 description: >-
-  Open and maintain a live canvas for the current session's plan, kanban tasks, primary/subagent team, progress, blockers, and delivery status. USE FOR: create a canvas that shows session progress, session progress board, session kanban, show session tasks and agents, go progress board. DO NOT USE FOR: generic canvas apps (use create-canvas-app), footer pills (use session-statusline), implementation workflow (use go), cross-session dashboards.
+  Open and maintain a live canvas for the current session's plan, kanban tasks, primary/subagent team, progress, blockers, owned PRs/issues, head-pinned CI, and delivery status. USE FOR: create a canvas that shows session progress, session board canvas, session kanban, show session tasks and agents, show session PRs and CI in a canvas, go progress board. DO NOT USE FOR: generic canvas apps (use create-canvas-app), footer pill management (use session-statusline), implementation workflow (use go), cross-session dashboards.
 metadata:
   version: "1.0.0"
 ---
@@ -20,6 +20,9 @@ read-only view for the user; primary and subagents report through `session_progr
    exact hash, then run `--approve <hash>` and reload extensions. It installs
    only a thin shared loader, never runtime copies per session. Do not reinstall
    an already loaded provider or silently replace an unowned extension.
+   When available, list `session_prs` and `session_issues` to hydrate Active work.
+   Successful explicit tracking controls are mirrored automatically; never scan
+   mentions or search results, change footer settings, or enroll unrelated work.
 2. Read the current session's plan and SQL tasks. Do not scan other sessions,
    repo-wide plans, or raw statusline files. If an approved plan lacks task rows,
    the primary maps it to canonical tasks with stable IDs. Without a usable
@@ -32,6 +35,7 @@ read-only view for the user; primary and subagents report through `session_progr
    a new request and preserve prior history. `refresh` reads sources without
    changing tasks. Empty/failed reads must not erase known work; only primary
    can explicitly `confirmEmpty` after verifying deletion.
+   Map newly approved subtasks into the goal before starting their work.
 4. Open `session-progress` with `input: {}` and the stable
    `instanceId: "session-progress"`. Focus/reuse that panel instead of creating
    duplicates. Respect a manually closed panel within the invocation; reopen
@@ -50,6 +54,10 @@ read-only view for the user; primary and subagents report through `session_progr
 7. Carry board/goal identity through a `go` to `pr` handoff. Update phases and
    blockers on meaningful transitions; publish merged status only after `pr`
    verifies the actual head merged. Continue to show pending cleanup honestly.
+   Primary publishes verified `references` metadata and `ci` snapshots from
+   the existing PR workflow, with full head OID and observation timestamp.
+   A new head invalidates old CI; unknown or empty inventories are not green.
+   No separate CI poller or model loop is created.
 
 ## Safety
 

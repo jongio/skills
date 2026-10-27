@@ -1,3 +1,5 @@
+import { emptyReferences, normalizeTargets, updateCi } from "./references.mjs";
+
 const statuses = new Set(["pending", "in_progress", "blocked", "done"]);
 const reportStatuses = new Set(["working", "blocked", "result_ready", "failed", "cancelled"]);
 const phases = new Set(["planning", "testing", "implementing", "reviewing", "delivery", "ci", "remediation", "awaiting_review", "awaiting_merge_approval", "merged", "cleanup_pending", "blocked"]);
@@ -60,7 +62,7 @@ function decorateTasks(tasks, hierarchy) {
       else if (byId.has(id)) leaves.push(byId.get(id));
     }
     const done = leaves.filter((leaf) => leaf.status === "done").length;
-    task.subtaskProgress = { done, total: leaves.length, percent: leaves.length ? Math.floor(done / leaves.length * 100) : null };
+    task.subtaskProgress = { done, total: leaves.length, percent: leaves.length ? Math.floor(done * 100 / leaves.length) : null };
   }
   return tasks;
 }
@@ -81,6 +83,8 @@ export async function createProgressService({ sessionId, readSources, store, onC
   // Input completions are ephemeral; do not resurrect requests after reconnect.
   state.attention = [];
   state.hierarchy ||= [];
+  state.references ||= emptyReferences();
+  if (loaded) state.references.source = { ...state.references.source, status: "unknown", known: { prs: false, issues: false }, error: null };
   let tail = Promise.resolve();
   const queue = (work) => {
     const result = tail.catch(() => {}).then(work);
@@ -95,7 +99,7 @@ export async function createProgressService({ sessionId, readSources, store, onC
     const active = out.goals.find((goal) => goal.id === out.activeGoalId);
     const tasks = (active?.tasks || out.tasks).filter((task) => !task.childIds.length);
     const done = tasks.filter((task) => task.status === "done").length;
-    out.metrics = { done, total: tasks.length, percent: tasks.length ? Math.floor(done / tasks.length * 100) : null };
+    out.metrics = { done, total: tasks.length, percent: tasks.length ? Math.floor(done * 100 / tasks.length) : null };
     out.delivery = active?.delivery || out.delivery;
     return out;
   };
@@ -176,6 +180,28 @@ export async function createProgressService({ sessionId, readSources, store, onC
       const next = clone(state);
       const active = next.goals.find((goal) => goal.id === next.activeGoalId);
       switch (input.action) {
+        case "references": {
+          primaryOnly(actor);
+          if (input.referenceStatus === "unavailable") {
+            next.references.source = { ...next.references.source, status: "unavailable", known: { prs: false, issues: false },
+              error: input.error ? bounded(input.error, "tracking error", 1000) : "Session tracking unavailable", updatedAt: clock() };
+            break;
+          }
+          if (input.referenceStatus && input.referenceStatus !== "verified") throw new Error("Invalid tracking status");
+          next.references.prs = normalizeTargets(input.prs, "prs", next.references.prs);
+          next.references.issues = normalizeTargets(input.issues, "issues", next.references.issues);
+          next.references.source = { status: "verified", known: { prs: true, issues: true }, error: null, updatedAt: clock() };
+          if (JSON.stringify([next.references.prs, next.references.issues]) !== JSON.stringify([state.references.prs, state.references.issues])) {
+            activity(next, actor.id, `Tracking ${next.references.prs.length} PRs and ${next.references.issues.length} issues`, "references");
+          }
+          break;
+        }
+        case "ci": {
+          primaryOnly(actor);
+          const result = updateCi(next.references, input);
+          if (result.meaningful) activity(next, actor.id, `${result.reference}: CI ${input.status}`, "ci");
+          break;
+        }
         case "goal": {
           primaryOnly(actor);
           const id = identifier(input.goalId);
@@ -213,6 +239,12 @@ export async function createProgressService({ sessionId, readSources, store, onC
           for (const other of next.agents) other.taskIds = other.taskIds.filter((id) => !input.taskIds.includes(id));
           member.taskIds = [...new Set(input.taskIds)];
           member.goalId = active.id;
+          for (const report of next.reports) {
+            if (report.goalId === active.id && member.taskIds.includes(report.taskId) && report.actorId !== member.id) {
+              report.superseded = true;
+              report.requiresOperator = false;
+            }
+          }
           activity(next, actor.id, `Assigned ${member.taskIds.length} tasks to ${member.name}`, "assignment");
           break;
         }
@@ -278,7 +310,6 @@ export async function createProgressService({ sessionId, readSources, store, onC
             relayed: actorId !== actor.id, at: clock() };
           next.reports = next.reports.filter((r) => r !== previous);
           next.reports.push(report);
-          next.reports = next.reports.slice(-300);
           const member = agent(next, actorId);
           if (delegated && !member.goalId) member.goalId = goalId;
           Object.assign(member, { state: report.status, report: message, updatedAt: report.at });
@@ -336,5 +367,28 @@ export async function createProgressService({ sessionId, readSources, store, onC
       await commit(next);
     });
   }
-  return { snapshot, refresh, update, observe };
+  async function syncTracking(delta) {
+    return queue(async () => {
+      const next = clone(state);
+      if (delta.error) {
+        const known = { ...next.references.source.known };
+        if (delta.kind) known[delta.kind] = false;
+        else Object.assign(known, { prs: false, issues: false });
+        next.references.source = { status: "unavailable", known, error: delta.error, updatedAt: clock() };
+      } else {
+        const kinds = delta.clearAll ? ["prs", "issues"] : [delta.kind];
+        if (kinds.some((kind) => !["prs", "issues"].includes(kind))) throw new Error("Unknown tracking component");
+        for (const kind of kinds) {
+          next.references[kind] = normalizeTargets(delta.clearAll ? [] : delta.values, kind, next.references[kind], true);
+          next.references.source.known[kind] = true;
+        }
+        next.references.source.status = next.references.source.known.prs && next.references.source.known.issues ? "verified" : "partial";
+        next.references.source.updatedAt = clock();
+        next.references.source.error = null;
+      }
+      await commit(next);
+      return snapshot();
+    });
+  }
+  return { snapshot, refresh, update, observe, syncTracking };
 }

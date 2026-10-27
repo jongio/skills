@@ -25,9 +25,17 @@ first, then update canonical tasks. A status service is not a coordinator agent.
 Split large milestones into verifiable canonical subtasks, map their parent
 hierarchy, and accept/update each promptly. Percentages count leaf tasks, not
 both parents and children; reports and elapsed time are not completion evidence.
+When scope expands, map its approved canonical subtasks before implementation,
+not only at the end of the milestone.
 Never spawn agents or recurring model prompts merely to maintain the board.
 
 Pass board/goal identity and the reporting contract into `pr`. It owns delivery
 updates, including CI, review waits, remediation, merge approval, verified
 merge, and cleanup pending. Task completion can be 100% while delivery awaits
 approval. Neither agent completion, a passing command, nor green CI proves merge.
+
+Hydrate Active work from explicit session-owned PR/issue controls when available.
+Their successful operations mirror into the board without changing enrollment.
+Pass the same references and verified head context to `pr`; it publishes CI
+snapshots from the existing watcher. Unknown tracking/CI stays unknown, and
+manual clear/remove is never undone merely to populate the board.

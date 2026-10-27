@@ -257,3 +257,46 @@ test("late delegate reports remain bound to their originating goal and reject mi
   assert.equal(service.snapshot().reports.at(-1).goalId, "second");
   await assert.rejects(service.update({ action: "report", updateId: "unbound", sequence: 1, status: "working", message: "Unknown origin" }, { id: "unassigned", primary: false }), /goal/i);
 });
+
+test("exact whole percentages do not lose a point to binary rounding", async () => {
+  const rows = [task("parent"), ...Array.from({ length: 100 }, (_, i) => task(`leaf-${i}`, i < 29 ? "done" : "pending"))];
+  const { service } = await fixture(rows);
+  await goal(service, "g", rows.map((row) => row.id));
+  await service.update({ action: "subtasks", parentTaskId: "parent", taskIds: rows.slice(1).map((row) => row.id) }, primary);
+  const state = service.snapshot();
+  assert.equal(state.metrics.percent, 29);
+  assert.equal(state.tasks[0].subtaskProgress.percent, 29);
+});
+
+test("task handoffs retire old alerts without discarding report sequence guards", async () => {
+  const { service } = await fixture([task("a")]);
+  await goal(service, "g", ["a"]);
+  for (const id of ["worker", "other"]) await service.observe({ id, type: "subagent.started", agentId: id, data: {} });
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["a"] }, primary);
+  await service.update({ action: "report", updateId: "request", taskId: "a", sequence: 5, status: "blocked", message: "Need access", requiresOperator: true }, worker);
+  await service.update({ action: "assign", agentId: "other", taskIds: ["a"] }, primary);
+  const retired = service.snapshot().reports.find((report) => report.actorId === "worker");
+  assert.equal(retired.superseded, true);
+  assert.equal(retired.requiresOperator, false);
+  assert.equal(retired.sequence, 5);
+  await service.update({ action: "report", updateId: "resolved", taskId: "a", sequence: 1, status: "working", message: "Access restored" }, { id: "other", primary: false });
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["a"] }, primary);
+  await assert.rejects(service.update({ action: "report", updateId: "delayed", taskId: "a", sequence: 4, status: "blocked", message: "Stale request" }, worker), /Stale/);
+  await service.update({ action: "report", updateId: "current", taskId: "a", sequence: 6, status: "working", message: "New accepted report" }, worker);
+  assert.notEqual(service.snapshot().reports.find((report) => report.actorId === "worker").superseded, true);
+});
+
+test("latest reports and pending requests survive more than300 distinct task streams", async () => {
+  const rows = Array.from({ length: 301 }, (_, i) => task(`work-${i}`));
+  const { service } = await fixture(rows);
+  await goal(service, "g", rows.map((row) => row.id));
+  await service.update({ action: "report", updateId: "first", taskId: "work-0", sequence: 5, status: "blocked", requiresOperator: true, message: "Still unresolved" }, worker);
+  for (let i = 1; i < rows.length; i++) {
+    await service.update({ action: "report", updateId: `report-${i}`, taskId: rows[i].id, sequence: 1, status: "working", message: "Other work" }, worker);
+  }
+  const state = service.snapshot();
+  assert.equal(state.reports.length, 301);
+  assert.equal(state.reports.find((report) => report.taskId === "work-0").requiresOperator, true);
+  assert.ok(state.activity.length <= 100);
+  await assert.rejects(service.update({ action: "report", updateId: "old-first", taskId: "work-0", sequence: 4, status: "working", message: "Delayed old result" }, worker), /Stale/);
+});

@@ -3,6 +3,8 @@
 A live read-only session board: kanban, canonical completion percentage,
 primary/subagent team, blockers, ready-next tasks, plan, goal history, and
 delivery/approval status. No coordinator agent or background model loop.
+Active work shows explicitly session-owned PRs/issues, safe links, and
+head-pinned CI summaries with their observation time.
 
 ## Install
 
@@ -43,6 +45,12 @@ double-counting. No-task progress is unknown, and 100% tasks does not mean merge
 task failures, and dependency waits appear separately in **Blockers & dependencies**,
 with ownership and cross-subagent links. Reports default to
 `requiresOperator: false`; explicit operator requests clear when superseded.
+
+Successful session PR/issue controls mirror their explicitly owned targets into
+Active work. CI is a verified, head-pinned snapshot published by the existing
+PR workflow, with an observation time; the board does not start another poller.
+Wrong-head, stale, and incomplete green snapshots are rejected. Unknown tracking
+or CI is labelled unknown rather than shown as an empty verified list.
 
 See the [reporting contract](references/reporting.md) for action fields,
 ownership, sequences, assignments, relays, and delivery phases. Each new goal

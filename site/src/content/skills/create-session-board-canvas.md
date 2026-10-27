@@ -19,6 +19,12 @@ Uses one shared runtime/assets bundle with isolated, resumable session data.
 Primary verifies completion; subagent results alone do not mark tasks done.
 No coordinator agent or background model loop.
 
+Active work lists the session's explicitly owned PRs and issues, with safe
+links and head-pinned CI status/check summaries. It mirrors existing tracking
+controls and uses the existing PR workflow for CI; no extra poller is created.
+Unknown tracking remains explicit. Wrong-head and out-of-order CI updates cannot
+overwrite verified snapshots.
+
 `go` opens/reuses the board by default and carries reporting through `pr`.
 Missing canvas support uses text progress without weakening execution gates.
 Plain skill-only installs need the approved thin-loader setup described in

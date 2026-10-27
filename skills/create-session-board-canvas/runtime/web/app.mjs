@@ -1,8 +1,9 @@
 import { html, mountCanvas, useState } from "/kit/core-client.mjs";
 import { Icon } from "/kit/icons.mjs";
 import {
-  blockerEntries, blockingReportLabel, dependencyIds, isBlockingReport, latestReports,
-  operatorRequests, sessionBlockerReports, timestamp, waitingFor,
+  activeWorkView, blockerEntries, blockingReportLabel, childTaskIds, dependencyIds, isBlockingReport, isLeaf,
+  latestReports, leafProgress, milestoneProgress, operatorRequests, scopedReports, scopedTaskReports,
+  sessionBlockerReports, taskGoalIds, timestamp, waitingFor,
 } from "./view-model.mjs";
 
 const COLUMNS = [
@@ -20,8 +21,6 @@ const text = (value) => {
 const label = (value) => text(value).replace(/[_-]/g, " ").replace(/^\w/, (c) => c.toUpperCase());
 const taskStatus = (task) => COLUMNS.some((column) => column.id === task.status) ? task.status : "unknown";
 const isPrimary = (agent) => /^(primary|main|coordinator)$/i.test(text(agent.role)) || agent.id === "primary";
-const childTaskIds = (task) => [...new Set(list(task.childIds))];
-const isLeaf = (task) => childTaskIds(task).length === 0;
 const taskAnchor = (id) => `task-${encodeURIComponent(text(id))}`;
 
 function selectedTasks(goal, canonicalTasks, taskMap) {
@@ -36,45 +35,6 @@ function selectedTasks(goal, canonicalTasks, taskMap) {
     });
   }
   return [...selected.values()];
-}
-
-function leafProgress(tasks) {
-  const leaves = [...new Map(tasks.filter(isLeaf).map((task) => [task.id, task])).values()];
-  const done = leaves.filter((task) => task.status === "done").length;
-  const total = leaves.length;
-  return { leaves, done, total, percent: total ? Math.floor(done / total * 100) : null };
-}
-
-function milestoneProgress(task, taskMap) {
-  const pending = [...childTaskIds(task)];
-  const seen = new Set([task.id]);
-  const leaves = [];
-  let incomplete = false;
-  while (pending.length) {
-    const id = pending.pop();
-    if (id === task.id) incomplete = true;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    const child = taskMap.get(id);
-    if (!child) {
-      incomplete = true;
-      continue;
-    }
-    if (isLeaf(child)) leaves.push(child);
-    else pending.push(...childTaskIds(child));
-  }
-  const progress = leafProgress(leaves);
-  const provided = task.subtaskProgress;
-  const validProvided = provided && Number.isInteger(provided.done) && Number.isInteger(provided.total)
-    && provided.done >= 0 && provided.total >= provided.done;
-  if (incomplete && validProvided) return {
-    done: provided.done,
-    total: provided.total,
-    percent: provided.percent === null || !provided.total ? null : Math.floor(provided.done / provided.total * 100),
-    incomplete: true,
-    fromBackend: true,
-  };
-  return { ...progress, percent: incomplete ? null : progress.percent, incomplete, fromBackend: false };
 }
 
 function Time({ at }) {
@@ -147,11 +107,14 @@ function ownership(taskId, agents, relativeTaskId) {
   }).join("; ") : "Unassigned";
 }
 
-function DependencyLink({ id, taskMap, agents, goals, selectedTaskIds, sourceTaskId, reports }) {
+function DependencyLink({ id, taskMap, agents, goals, selectedTaskIds, sourceTaskId, reports, reportScope }) {
   const task = taskMap.get(id);
   const resolved = task?.status === "done";
-  const goal = goals.find((entry) => list(entry.taskIds).includes(id)
-    || list(entry.tasks).some((goalTask) => goalTask.id === id));
+  const dependencyScope = selectedTaskIds.has(id) ? reportScope : { ...reportScope, selectedGoalId: null };
+  const goalIds = taskGoalIds(id, dependencyScope);
+  const goal = goals.find((entry) => entry.id === dependencyScope.selectedGoalId)
+    || goals.find((entry) => goalIds.includes(entry.id));
+  const dependencyReports = scopedTaskReports(reports, id, dependencyScope);
   return html`<li class="dependency-item">
     <div class="dependency-heading"><span class=${`task-symbol tone-${resolved ? "success" : "attention"}`}>
       <${Icon} name=${resolved ? "circle-check" : "circle"} size=${14} />
@@ -163,7 +126,7 @@ function DependencyLink({ id, taskMap, agents, goals, selectedTaskIds, sourceTas
       ${goal && html`<span>Goal · ${goal.title || goal.id}</span>`}
       ${!selectedTaskIds.has(id) && html`<span class="cross-goal-label">Outside selected work</span>`}
     </div>
-    ${reports.filter((report) => report.taskId === id && isBlockingReport(report)).map((report, index) => html`
+    ${dependencyReports.filter(isBlockingReport).map((report, index) => html`
       <div class="blocker-report" key=${report.id || index}>
         <strong>${agents.find((agent) => agent.id === report.actorId)?.name || report.actorId || "Agent"} · ${blockingReportLabel(report)}</strong>
         <p>${text(report.message) || `Dependency report status: ${report.status}.`}</p>
@@ -173,8 +136,8 @@ function DependencyLink({ id, taskMap, agents, goals, selectedTaskIds, sourceTas
   </li>`;
 }
 
-function Blockers({ tasks, dependencies, taskMap, reports, agents, goals, selectedTaskIds, selectedGoal }) {
-  const entries = blockerEntries(tasks, dependencies, taskMap, reports);
+function Blockers({ tasks, dependencies, taskMap, reports, agents, goals, selectedTaskIds, selectedGoal, reportScope }) {
+  const entries = blockerEntries(tasks, dependencies, taskMap, reports, reportScope);
   const sessionReports = sessionBlockerReports(reports, selectedGoal?.id);
   const count = entries.length + sessionReports.length;
   return html`<section class="ck-card section-card blockers-card" aria-labelledby="blockers-heading">
@@ -189,7 +152,7 @@ function Blockers({ tasks, dependencies, taskMap, reports, agents, goals, select
         ${waiting.length > 0 && html`<p class="dependency-label">Waiting on ${waiting.length} ${waiting.length === 1 ? "task" : "tasks"}</p>
           <ul class="dependency-list">${waiting.map((id) => html`
             <${DependencyLink} key=${id} id=${id} taskMap=${taskMap} agents=${agents} goals=${goals}
-              selectedTaskIds=${selectedTaskIds} sourceTaskId=${task.id} reports=${reports} />
+              selectedTaskIds=${selectedTaskIds} sourceTaskId=${task.id} reports=${reports} reportScope=${reportScope} />
           `)}</ul>`}
         ${taskReports.map((report, index) => html`<div class="blocker-report" key=${report.id || index}>
           <strong>${agents.find((agent) => agent.id === report.actorId)?.name || report.actorId || "Agent"} · ${blockingReportLabel(report)}</strong>
@@ -223,7 +186,7 @@ function TaskReference({ id, taskMap, onSelect }) {
   }}>${task.title || id}</a>` : html`<span>${id} <span class="ck-muted">· not in snapshot</span></span>`;
 }
 
-function TaskCard({ task, dependencies, taskMap, reports, agents, goals, selectedTaskIds, selectedTaskId, onTaskSelect, expanded, onExpandedChange }) {
+function TaskCard({ task, dependencies, taskMap, reports, agents, goals, selectedTaskIds, selectedTaskId, onTaskSelect, expanded, onExpandedChange, reportScope }) {
   const status = taskStatus(task);
   const waiting = waitingFor(task, dependencies, taskMap);
   const linkedTasks = dependencyIds(task, dependencies);
@@ -231,7 +194,7 @@ function TaskCard({ task, dependencies, taskMap, reports, agents, goals, selecte
   const rollup = children.length ? milestoneProgress(task, taskMap) : null;
   const parent = task.parentId ? taskMap.get(task.parentId) : null;
   const issues = list(task.issues);
-  const taskReports = reports.filter((report) => report.taskId === task.id);
+  const taskReports = scopedTaskReports(reports, task.id, reportScope);
   const liveBlockers = taskReports.filter(isBlockingReport);
   const owners = agents.filter((agent) => list(agent.taskIds).includes(task.id));
   const actorName = (id) => agents.find((agent) => agent.id === id)?.name || id || "Agent";
@@ -299,7 +262,7 @@ function TaskCard({ task, dependencies, taskMap, reports, agents, goals, selecte
           <h4>Dependencies · ${waiting.length} waiting · ${linkedTasks.length - waiting.length} resolved</h4>
           <ul class="dependency-list">${linkedTasks.map((id) => html`
             <${DependencyLink} key=${id} id=${id} taskMap=${taskMap} agents=${agents} goals=${goals}
-              selectedTaskIds=${selectedTaskIds} sourceTaskId=${task.id} reports=${reports} />
+              selectedTaskIds=${selectedTaskIds} sourceTaskId=${task.id} reports=${reports} reportScope=${reportScope} />
           `)}</ul>
         `}
         ${issues.length > 0 && html`<h4>Issues</h4><ul class="plain-list">${issues.map((issue, index) => html`<li key=${index}>${text(issue)}</li>`)}</ul>`}
@@ -329,7 +292,8 @@ function Team({ agents, reports }) {
       const primary = isPrimary(agent);
       const actorReports = reports.filter((report) => report.actorId === agent.id);
       const blocked = actorReports.filter(isBlockingReport);
-      const note = blocked[0]?.message || agent.report?.message || agent.report;
+      const fallbackReport = agent.report?.superseded === true ? null : agent.report;
+      const note = blocked[0]?.message || actorReports[0]?.message || fallbackReport?.message || fallbackReport;
       return html`<details class="agent-row" key=${agent.id}>
         <summary>
           <span class=${`avatar ${primary ? "avatar-primary" : ""}`} aria-hidden="true">${text(agent.name || agent.id || "A").slice(0, 1).toUpperCase()}</span>
@@ -367,6 +331,69 @@ function Delivery({ delivery, allDone, total }) {
       ? "100% of tracked leaf tasks are done; approval and delivery are separate."
       : "Leaf-task progress does not imply approval or merge."}</p>
     <${Evidence} value=${delivery?.evidence} />
+  </section>`;
+}
+
+function ReferenceIdentity({ item }) {
+  const tone = item.state === "OPEN" ? "success" : item.state === "MERGED" ? "accent" : "muted";
+  return html`<div class="reference-identity">
+    <div class="reference-heading">
+      ${item.url ? html`<a href=${item.url} target="_blank" rel="noopener noreferrer" title=${item.url}>${item.reference || "Open reference"}</a>`
+        : html`<span class="reference-id">${item.reference || "Reference unavailable"}</span>`}
+      <${Badge} tone=${tone}>${label(item.state.toLowerCase())}</${Badge}>
+    </div>
+    ${item.title && html`<p class="reference-title">${item.title}</p>`}
+    ${!item.url && html`<p class="ck-caption">Safe HTTPS link unavailable.</p>`}
+  </div>`;
+}
+
+function PrCi({ ci }) {
+  const tone = { unknown: "muted", pending: "attention", running: "accent", passed: "success", failed: "danger" }[ci.status];
+  return html`<div class="pr-ci">
+    <div class="minor-spread"><${Badge} tone=${tone}>CI · ${label(ci.status)}</${Badge}>
+      ${ci.total != null && html`<span class="ci-count">${ci.headVerified ? "" : "Reported · "}${ci.passed} / ${ci.total} passed</span>`}
+    </div>
+    ${ci.reason && html`<p class="ci-reason">${ci.reason}</p>`}
+    ${ci.total == null && html`<p class="ck-caption">Check totals unavailable.</p>`}
+    <p class="ci-head"><span>PR head</span><code title=${ci.prHead || ""}>${ci.prHead ? ci.prHead.slice(0, 8) : "unknown"}</code>
+      ${(!ci.headVerified || ci.ciHead !== ci.prHead) && html`<span>CI head</span><code title=${ci.ciHead || ""}>${ci.ciHead ? ci.ciHead.slice(0, 8) : "unknown"}</code>`}
+    </p>
+    ${(ci.failedChecks.length > 0 || ci.pendingChecks.length > 0) && html`<details class="ci-checks">
+      <summary>${ci.failedChecks.length} failed · ${ci.pendingChecks.length} pending checks</summary>
+      ${!ci.headVerified && html`<p class="ck-caption">Names below belong to the unverified CI snapshot.</p>`}
+      ${ci.failedChecks.length > 0 && html`<h4 class="tone-danger">Failed checks</h4>
+        <ul>${ci.failedChecks.map((name, index) => html`<li key=${index}>${name}</li>`)}</ul>`}
+      ${ci.pendingChecks.length > 0 && html`<h4>Pending checks</h4>
+        <ul>${ci.pendingChecks.map((name, index) => html`<li key=${index}>${name}</li>`)}</ul>`}
+    </details>`}
+    <p class="ck-caption ci-observed">CI observed <${Time} at=${ci.observedAt} /></p>
+  </div>`;
+}
+
+function ActiveWork({ references }) {
+  const work = activeWorkView(references);
+  const sourceTone = work.source.status === "verified" ? "success" : work.source.status === "partial" ? "attention" : "muted";
+  return html`<section class="ck-card section-card active-work-card" aria-labelledby="active-work-heading">
+    <div class="section-heading"><h2 id="active-work-heading">Active work</h2>
+      <${Badge} tone=${sourceTone}>${label(work.source.status)}</${Badge}>
+    </div>
+    <p class="ck-caption section-intro">Session-owned references · independent of goal and task filters</p>
+    ${work.source.error && html`<p class="reference-error" role="status">${work.source.error}</p>`}
+    <section class="reference-group" aria-label="Session-owned pull requests">
+      <div class="reference-group-heading"><h3>Pull requests</h3><span class="count">${work.prs.length} observed</span></div>
+      ${work.prs.length ? html`<div class="reference-list">${work.prs.map((pr, index) => html`
+        <article class="reference-item" key=${pr.reference || index}>
+          <${ReferenceIdentity} item=${pr} /><${PrCi} ci=${pr.ci} />
+        </article>
+      `)}</div>` : html`<p class="reference-empty">${work.emptyPrs}</p>`}
+    </section>
+    <section class="reference-group" aria-label="Session-owned issues">
+      <div class="reference-group-heading"><h3>Issues</h3><span class="count">${work.issues.length} observed</span></div>
+      ${work.issues.length ? html`<div class="reference-list">${work.issues.map((issue, index) => html`
+        <article class="reference-item" key=${issue.reference || index}><${ReferenceIdentity} item=${issue} /></article>
+      `)}</div>` : html`<p class="reference-empty">${work.emptyIssues}</p>`}
+    </section>
+    <p class="ck-caption references-updated">References updated <${Time} at=${work.source.updatedAt} /></p>
   </section>`;
 }
 
@@ -431,6 +458,8 @@ function App({ state, invoke, connected }) {
   const selectedTaskIds = new Set(tasks.map((task) => task.id));
   const dependencies = list(model.dependencies);
   const reports = latestReports(model.reports);
+  const reportScope = { selectedGoalId: selectedGoal?.id ?? null, goals, taskMap };
+  const liveReports = scopedReports(reports, reportScope);
   const agents = [...list(model.agents)];
   if (!agents.some(isPrimary)) agents.unshift({
     id: "primary", name: "Primary agent", role: "primary", state: "unknown", report: "No primary status reported.",
@@ -449,7 +478,7 @@ function App({ state, invoke, connected }) {
   const ready = leaves.filter((task) => task.status === "pending"
     && waitingFor(task, dependencies, taskMap).length === 0
     && list(task.issues).length === 0
-    && !reports.some((report) => report.taskId === task.id && isBlockingReport(report)));
+    && !scopedTaskReports(reports, task.id, reportScope).some(isBlockingReport));
   const historical = selectedGoal && model.activeGoalId && selectedGoal.id !== model.activeGoalId;
   const history = goals.filter((goal) => goal.id !== model.activeGoalId);
   const loading = !state || source.status === "loading";
@@ -597,7 +626,7 @@ function App({ state, invoke, connected }) {
               <div class="column-tasks">${columnTasks.length ? columnTasks.map((task) => html`
                 <${TaskCard} key=${task.id} task=${task} dependencies=${dependencies} taskMap=${taskMap} reports=${reports} agents=${agents}
                   goals=${goals} selectedTaskIds=${selectedTaskIds} selectedTaskId=${selectedTaskId} onTaskSelect=${selectTask}
-                  expanded=${expandedTaskIds.includes(task.id)} onExpandedChange=${setTaskExpanded} />
+                  expanded=${expandedTaskIds.includes(task.id)} onExpandedChange=${setTaskExpanded} reportScope=${reportScope} />
               `) : html`<p class="column-empty">${column.id === "done" ? "Nothing done yet" : "No tasks"}</p>`}</div>
             </section>`;
           })}</div>
@@ -606,13 +635,13 @@ function App({ state, invoke, connected }) {
             <div class="unknown-list">${visible.filter((task) => taskStatus(task) === "unknown").map((task) => html`
               <${TaskCard} key=${task.id} task=${task} dependencies=${dependencies} taskMap=${taskMap} reports=${reports} agents=${agents}
                 goals=${goals} selectedTaskIds=${selectedTaskIds} selectedTaskId=${selectedTaskId} onTaskSelect=${selectTask}
-                expanded=${expandedTaskIds.includes(task.id)} onExpandedChange=${setTaskExpanded} />
+                expanded=${expandedTaskIds.includes(task.id)} onExpandedChange=${setTaskExpanded} reportScope=${reportScope} />
             `)}</div>
           </section>`}
         </section>
 
         <${Blockers} tasks=${tasks} dependencies=${dependencies} taskMap=${taskMap} reports=${reports} agents=${agents}
-          goals=${goals} selectedTaskIds=${selectedTaskIds} selectedGoal=${selectedGoal} />
+          goals=${goals} selectedTaskIds=${selectedTaskIds} selectedGoal=${selectedGoal} reportScope=${reportScope} />
 
         <div class="insights-grid">
           <section class="ck-card section-card" aria-labelledby="attention-heading">
@@ -640,7 +669,8 @@ function App({ state, invoke, connected }) {
       </div>
       <aside class="sidebar" aria-label="Session context">
         <${Delivery} delivery=${delivery} allDone=${allDone} total=${total} />
-        <${Team} agents=${agents} reports=${reports} />
+        <${ActiveWork} references=${model.references} />
+        <${Team} agents=${agents} reports=${liveReports} />
         <${Plan} plan=${model.plan} drafts=${list(model.drafts)} />
       </aside>
     </div>`}

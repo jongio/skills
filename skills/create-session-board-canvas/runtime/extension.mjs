@@ -7,6 +7,7 @@ import { workspaceStore, sessionStore } from "./canvas-kit/storage.mjs";
 import { validate } from "./canvas-kit/validate.mjs";
 import { actorFor, progressInputSchema, readSessionSources } from "./host.mjs";
 import { acquireProvider } from "./provider.mjs";
+import { trackingResult } from "./references.mjs";
 
 // One SDK connection is required: disconnect/rejoin loses canvas callbacks on
 // the supported host. An OS-owned session lease prevents duplicate loaders.
@@ -15,7 +16,9 @@ const lease = await acquireProvider(process.env.SESSION_ID);
 if (lease) {
   let service;
   let runtime;
-  let ready;
+  let resolveReady;
+  let rejectReady;
+  const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   const checkSession = (ctx, session) => {
     if (ctx.sessionId !== session.sessionId) throw new CanvasError("wrong_session", "Cross-session canvas rejected");
   };
@@ -41,6 +44,18 @@ if (lease) {
     onClose: async (ctx) => { await ready; await runtime.closeInstance(ctx.instanceId); },
   });
   const session = await joinSession({
+    hooks: {
+      onPostToolUse: async (input, invocation) => {
+        const delta = trackingResult(input);
+        if (!delta || invocation.sessionId !== process.env.SESSION_ID) return;
+        try {
+          await ready;
+          await service.syncTracking(delta);
+        } catch (error) {
+          await session.log(`Session board tracking sync unavailable: ${String(error.message).slice(0, 300)}`).catch(() => {});
+        }
+      },
+    },
     canvases: [canvas],
     tools: [{
       name: "session_progress",
@@ -78,7 +93,7 @@ if (lease) {
       if (/^(subagent\.|(?:permission|user_input|elicitation)\.|session\.(?:plan_changed|todos_changed|resume))/.test(event.type)) pending.push(event);
     } else handle(event);
   });
-  ready = (async () => {
+  const initializing = (async () => {
     const store = session.workspacePath
       ? workspaceStore(session.workspacePath, join("files", "session-progress", "board.json"))
       : sessionStore(session.sessionId, "session-progress", "board.json");
@@ -100,6 +115,7 @@ if (lease) {
     }
     for (const event of pending.splice(0)) handle(event);
   })();
+  void initializing.then(resolveReady, rejectReady);
   try { await ready; }
   catch (error) { await lease.close(); throw error; }
   const stop = async () => {
