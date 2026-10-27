@@ -14,6 +14,11 @@
     "eval:lint": "vally lint --eval-spec evals/repo-ready/eval.yaml",
     "eval": "vally eval --eval-spec evals/repo-ready/eval.yaml --skill-dir ."
   },
+  "overrides": {
+    "@github/copilot-sdk": {
+      "zod": "4.6.7"
+    }
+  },
   "allowScripts": {
     "@vscode/deviceid": false,
     "better-sqlite3": false,

@@ -75,12 +75,12 @@ test("site security overrides remain scoped to the vulnerable parents", async ()
   const lock = await json("site/package-lock.json");
   assert.deepEqual(manifest.overrides, {
     astro: { "http-cache-semantics": "4.3.0", sharp: "0.35.5" },
-    unifont: { undici: "8.10.2" },
+    unifont: { undici: "8.12.3" },
   });
   for (const [name, version] of Object.entries({
     "http-cache-semantics": "4.3.0",
     sharp: "0.35.5",
-    undici: "8.10.2",
+    undici: "8.12.3",
   })) {
     assert.equal(lock.packages[`node_modules/${name}`].version, version, name);
     assert.equal(manifest.dependencies[name], undefined, `${name} is not a direct dependency`);
