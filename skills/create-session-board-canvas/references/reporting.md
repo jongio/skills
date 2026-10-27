@@ -32,8 +32,12 @@ guards remain stored; they are not current operator requests.
 
 Pass the originating `goalId` from the delegation context with reports. Task
 membership and an established agent assignment also pin that origin; switching
-the active goal does not relabel late reports. Conflicting task/assignment/goal
-identities are rejected before sequence reconciliation. A taskless unassigned
+the active goal does not relabel late reports. New streams with conflicting
+task/assignment/goal identities are rejected before sequence reconciliation.
+After reassignment, an existing actor/task/goal stream can still resolve its
+request using the original `goalId`, subject to current task ownership and
+sequence checks. Prior-goal reports do not replace the agent's current-goal
+team status. A taskless unassigned
 delegate must specify `goalId` once a goal is active. Primary's own reports may
 default to the active goal. Before goal activation, session-level reports remain
 unscoped and explicit operator requests are still visible.

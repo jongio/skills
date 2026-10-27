@@ -309,7 +309,8 @@ export async function createProgressService({ sessionId, readSources, store, onC
             ? taskGoalId || memberGoalId || (delegated ? null : next.activeGoalId)
             : identifier(input.goalId);
           if (delegated && !goalId && next.activeGoalId && !knownUnscoped) throw new Error("goalId is required for an unassigned delegate report");
-          if ((memberGoalId && memberGoalId !== goalId && !knownUnscoped) || (taskGoalId && taskGoalId !== goalId)) throw new Error("Report goal conflicts with its delegated task or assignment");
+          const previous = next.reports.find((report) => report.actorId === actorId && report.taskId === taskId && report.goalId === goalId);
+          if ((memberGoalId && memberGoalId !== goalId && !knownUnscoped && !previous) || (taskGoalId && taskGoalId !== goalId)) throw new Error("Report goal conflicts with its delegated task or assignment");
           const reportGoal = next.goals.find((goal) => goal.id === goalId);
           if (goalId && !reportGoal) throw new Error("Unknown report goal");
           if (taskId && (!reportGoal?.taskIds.includes(taskId) || !next.tasks.some((task) => task.id === taskId))) throw new Error("Unknown report goal task");
@@ -321,7 +322,6 @@ export async function createProgressService({ sessionId, readSources, store, onC
           const owner = next.agents.find((member) => member.taskIds.includes(taskId) && member.goalId === goalId);
           if (owner && owner.id !== actorId) throw new Error("Task is assigned to another agent");
           if (!Number.isSafeInteger(input.sequence) || input.sequence < 1) throw new Error("Positive report sequence required");
-          const previous = next.reports.find((report) => report.actorId === actorId && report.taskId === taskId && report.goalId === goalId);
           if (previous && input.sequence <= previous.sequence) throw new Error("Stale report; reconcile the latest sequence");
           if (input.evidence !== undefined) bounded(input.evidence, "evidence", 4000);
           const report = { id: updateId, actorId, taskId, goalId, status: input.status, message,
@@ -331,7 +331,9 @@ export async function createProgressService({ sessionId, readSources, store, onC
           next.reports.push(report);
           const member = agent(next, actorId);
           if (delegated && !member.goalId) member.goalId = goalId;
-          Object.assign(member, { state: report.status, report: message, updatedAt: report.at });
+          if (!member.goalId || member.goalId === goalId) {
+            Object.assign(member, { state: report.status, report: message, updatedAt: report.at });
+          }
           next.seen.push(key);
           next.seen = next.seen.slice(-1000);
           activity(next, actorId, message, report.status);

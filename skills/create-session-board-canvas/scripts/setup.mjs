@@ -21,7 +21,7 @@ export function planSetup({ home = process.env.COPILOT_HOME || join(homedir(), "
   assertSafeDestination(home, file);
   if (!existsSync(entry) || !lstatSync(entry).isFile()) throw new Error("Installed runtime is missing; reinstall the skill");
   const before = existsSync(file) ? readFileSync(file, "utf8") : null;
-  if (before && !before.startsWith(`${marker}\n`)) throw new Error("Existing loader is not managed by this skill; preserve it");
+  if (before !== null && !before.startsWith(`${marker}\n`)) throw new Error("Existing loader is not managed by this skill; preserve it");
   const content = `${marker}\nawait import(${JSON.stringify(pathToFileURL(resolve(entry)).href)});\n`;
   const hash = createHash("sha256").update(file).update("\0").update(before ?? "<absent>").update("\0").update(content).digest("hex");
   return { home: resolve(home), entry: resolve(entry), file, content, hash, unchanged: before === content };

@@ -19,6 +19,9 @@ test("standalone setup installs only a thin shared loader and rejects stale/unow
   assert.throws(() => applySetup(plan, plan.hash), /Stale/);
   const again = planSetup({ home });
   assert.equal(applySetup(again, again.hash).unchanged, true);
-  writeFileSync(plan.file, "// user owned");
-  assert.throws(() => planSetup({ home }), /not managed/);
+  for (const content of ["// user owned", ""]) {
+    writeFileSync(plan.file, content);
+    assert.throws(() => planSetup({ home }), /not managed/);
+    assert.equal(readFileSync(plan.file, "utf8"), content);
+  }
 });

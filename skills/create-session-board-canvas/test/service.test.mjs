@@ -348,3 +348,31 @@ test("known pre-goal request streams remain resolvable after goal activation", a
   assert.ok(service.snapshot().reports.every((report) => report.goalId === null && report.requiresOperator === false));
   await assert.rejects(service.update({ action: "report", goalId: null, updateId: "new-global", sequence: 1, status: "working", message: "Ambiguous new origin" }, { id: "new-worker", primary: false }), /goal|unscoped/i);
 });
+
+test("existing prior-goal alerts remain resolvable after reassignment without claiming current work", async () => {
+  const { service } = await fixture([task("a"), task("b"), task("c")]);
+  await goal(service, "first", ["a", "c"]);
+  await service.observe({ type: "subagent.started", agentId: "worker", data: {} });
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["a"] }, primary);
+  for (const taskId of [undefined, "a"]) {
+    await service.update({ action: "report", taskId, goalId: "first", updateId: `request-${taskId || "goal"}`,
+      sequence: 5, status: "blocked", message: "Need access", requiresOperator: true }, worker);
+  }
+  await goal(service, "second", ["b"]);
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["b"] }, primary);
+  await service.update({ action: "report", goalId: "second", updateId: "current",
+    sequence: 1, status: "working", message: "Working on second goal" }, worker);
+  await service.update({ action: "report", goalId: "first", updateId: "clear-goal",
+    sequence: 6, status: "result_ready", message: "Access restored" }, worker);
+  await service.update({ action: "report", agentId: "worker", taskId: "a", goalId: "first", updateId: "clear-task",
+    sequence: 6, status: "result_ready", message: "Primary verified access restored" }, primary);
+  const state = service.snapshot();
+  assert.ok(state.reports.filter((report) => report.goalId === "first").every((report) => !report.requiresOperator));
+  assert.equal(state.agents.find((member) => member.id === "worker").goalId, "second");
+  assert.equal(state.agents.find((member) => member.id === "worker").state, "working");
+  assert.equal(state.agents.find((member) => member.id === "worker").report, "Working on second goal");
+  await assert.rejects(service.update({ action: "report", goalId: "first", taskId: "c", updateId: "new-conflict",
+    sequence: 1, status: "working", message: "Unrelated old work" }, worker), /goal/i);
+  await assert.rejects(service.update({ action: "report", goalId: "first", updateId: "stale",
+    sequence: 5, status: "blocked", message: "Delayed old request", requiresOperator: true }, worker), /Stale/i);
+});
