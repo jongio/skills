@@ -54,12 +54,13 @@ function Empty({ children }) {
   return html`<div class="ck-empty compact-empty"><${Icon} name="inbox" size=${20} /><span>${children}</span></div>`;
 }
 
-function Evidence({ value }) {
+function Evidence({ value, collapsed = false }) {
   const entries = Array.isArray(value) ? value : value ? [value] : [];
   if (!entries.length) return null;
-  return html`<ul class="evidence-list">${entries.slice(0, 4).map((entry, index) => html`
+  const content = html`<ul class="evidence-list">${entries.slice(0, 4).map((entry, index) => html`
     <li key=${index}>${text(entry)}</li>
   `)}${entries.length > 4 && html`<li class="ck-muted">${entries.length - 4} more evidence entries</li>`}</ul>`;
+  return collapsed ? html`<details class="evidence-disclosure"><summary>Evidence</summary>${content}</details>` : content;
 }
 
 function operatorAttention(model) {
@@ -75,7 +76,7 @@ function operatorAttention(model) {
   const attention = list(model.attention).map((entry, index) => ({
     id: `event:${entry.id || index}`,
     title: label(entry.kind || "operator action requested"),
-    message: text(entry.message) || "Operator input is required in the primary session.",
+    message: text(entry.message) || "Respond in the primary session.",
     at: entry.at,
   }));
   operatorRequests(model, activeTaskIds, taskMap).forEach((report, index) => {
@@ -84,15 +85,15 @@ function operatorAttention(model) {
       title: taskMap.get(report.taskId)?.title
         || agents.find((agent) => agent.id === report.actorId)?.name
         || "Operator input requested",
-      message: text(report.message) || "This agent explicitly requests operator input.",
+      message: text(report.message) || "Operator input required.",
       at: report.at,
     });
   });
   const delivery = model.delivery || activeGoal?.delivery;
   if (delivery?.phase === "awaiting_merge_approval") attention.push({
     id: "delivery:merge-approval",
-    title: "Merge approval requested",
-    message: "Review delivery evidence and respond to the merge approval request in the primary session.",
+    title: "Merge approval",
+    message: "Approve in the primary session.",
   });
   return attention;
 }
@@ -142,7 +143,6 @@ function Blockers({ tasks, dependencies, taskMap, reports, agents, goals, select
   const count = entries.length + sessionReports.length;
   return html`<section class="ck-card section-card blockers-card" aria-labelledby="blockers-heading">
     <div class="section-heading"><h2 id="blockers-heading">Blockers & dependencies</h2><span class="count">${count}</span></div>
-    <p class="ck-caption section-intro">Work coordination · canonical blockers, unresolved dependencies, and latest blocked or failed reports</p>
     ${count ? html`<div class="blocker-list">
       ${entries.map(({ task, waiting, reports: taskReports }) => html`<article class="blocker-entry" key=${task.id}>
         <div class="blocker-heading"><h3>${task.title || task.id}</h3>
@@ -164,12 +164,11 @@ function Blockers({ tasks, dependencies, taskMap, reports, agents, goals, select
         <div class="blocker-heading"><h3>${agents.find((agent) => agent.id === report.actorId)?.name || report.actorId || "Agent"}</h3>
           <${Badge} tone="danger">${blockingReportLabel(report)}</${Badge}>
         </div>
-        <p class="ck-caption">Session-level report · no task assigned</p>
+        <p class="ck-caption">Session report</p>
         <p class="blocker-report-message">${text(report.message) || `Agent report status: ${report.status}.`}</p>
         <span class="ck-caption"><${Time} at=${report.at} /></span>
       </article>`)}
-    </div>` : html`<${Empty}>No blockers or unresolved dependencies in the selected work.</${Empty}>`}
-    <p class="ck-caption">Reports do not change canonical task status or imply primary acceptance. Operator requests are listed separately in Needs attention.</p>
+    </div>` : html`<${Empty}>None</${Empty}>`}
   </section>`;
 }
 
@@ -214,16 +213,14 @@ function TaskCard({ task, dependencies, taskMap, reports, agents, goals, selecte
           <span class="detail-chevron" aria-hidden="true">›</span>
         </div>
         <div class="task-meta">
-          <code>${task.id || "No task ID"}</code>
           ${children.length > 0 && html`<${Badge} tone="accent">Milestone</${Badge}>`}
           ${task.parentId && html`<${Badge}>Subtask</${Badge}>`}
           ${status === "unknown" && html`<${Badge} tone="attention">Unknown status</${Badge}>`}
-          ${owners.length > 0 && html`<span class="task-owner">${owners.map((agent) => agent.name || agent.id).join(", ")}</span>`}
+          ${owners.length > 0 && html`<span class="task-owner" title=${owners.map((agent) => agent.name || agent.id).join(", ")}>${owners.map((agent) => agent.name === "Primary agent" ? "Primary" : agent.name || agent.id).join(", ")}</span>`}
           ${waiting.length > 0 && html`<span>${waiting.length} waiting</span>`}
         </div>
-        ${task.parentId && html`<p class="parent-context">Subtask of <strong>${parent?.title || task.parentId}</strong></p>`}
         ${rollup && html`<div class="subtask-rollup">
-          <div class="rollup-label"><span>${rollup.done} / ${rollup.total} ${rollup.incomplete && !rollup.fromBackend ? "known " : ""}leaf subtasks done</span>
+          <div class="rollup-label"><span>${rollup.done} / ${rollup.total}${rollup.incomplete && !rollup.fromBackend ? " known" : ""}</span>
             <strong>${rollup.percent == null ? "—" : `${rollup.percent}%`}</strong>
           </div>
           <div class="progress-track" role="progressbar" aria-label="Milestone leaf-subtask rollup" aria-valuemin="0" aria-valuemax="100"
@@ -238,6 +235,7 @@ function TaskCard({ task, dependencies, taskMap, reports, agents, goals, selecte
         ${issues.length > 0 && html`<p class="task-note tone-attention">${text(issues[0])}</p>`}
       </summary>
       <div class="task-detail">
+        <code>${task.id || "No task ID"}</code>
         <p class="detail-label">${status === "unknown" ? "Canonical status not recognized" : `Canonical status · ${COLUMNS.find((c) => c.id === status).label}`}</p>
         <p class="preserve-lines">${task.description || "No description provided."}</p>
         <p class="task-detail-owner">${ownership(task.id, agents)}</p>
@@ -287,7 +285,7 @@ function TaskCard({ task, dependencies, taskMap, reports, agents, goals, selecte
 
 function Team({ agents, reports }) {
   return html`<section class="ck-card section-card" aria-labelledby="team-heading">
-    <div class="section-heading"><h2 id="team-heading">Session team</h2><span class="count">${agents.length}</span></div>
+    <div class="section-heading"><h2 id="team-heading">Team</h2><span class="count">${agents.length}</span></div>
     <div class="roster">${agents.map((agent) => {
       const primary = isPrimary(agent);
       const actorReports = reports.filter((report) => report.actorId === agent.id);
@@ -322,15 +320,12 @@ function Delivery({ delivery, allDone, total }) {
   const headline = merged ? "Merged" : approved ? "Approved · delivery pending"
     : status ? label(status) : allDone ? "Awaiting approval" : total ? "Not reported" : "Not started";
   return html`<section class="ck-card section-card delivery-card" aria-labelledby="delivery-heading">
-    <div class="section-heading"><h2 id="delivery-heading">Approval & delivery</h2>
+    <div class="section-heading"><h2 id="delivery-heading">Delivery</h2>
       <span class=${`status-dot ${merged ? "tone-success" : "tone-attention"}`}></span>
     </div>
     <p class=${`delivery-status ${merged ? "tone-success" : ""}`}>${headline}</p>
-    ${phase && html`<p class="ck-caption">Phase · ${label(phase)}</p>`}
-    <p class="ck-caption">${merged ? "Confirmed by explicit delivery status." : allDone && !approved
-      ? "100% of tracked leaf tasks are done; approval and delivery are separate."
-      : "Leaf-task progress does not imply approval or merge."}</p>
-    <${Evidence} value=${delivery?.evidence} />
+    ${phase && html`<p class="ck-caption">${label(phase)}</p>`}
+    <${Evidence} value=${delivery?.evidence} collapsed=${true} />
   </section>`;
 }
 
@@ -353,7 +348,7 @@ function PrCi({ ci }) {
     <div class="minor-spread"><${Badge} tone=${tone}>CI · ${label(ci.status)}</${Badge}>
       ${ci.total != null && html`<span class="ci-count">${ci.headVerified ? "" : "Reported · "}${ci.passed} / ${ci.total} passed</span>`}
     </div>
-    ${ci.reason && html`<p class="ci-reason">${ci.reason}</p>`}
+    ${ci.reason && ci.status !== "passed" && html`<p class="ci-reason">${ci.reason}</p>`}
     ${ci.total == null && html`<p class="ck-caption">Check totals unavailable.</p>`}
     <p class="ci-head"><span>PR head</span><code title=${ci.prHead || ""}>${ci.prHead ? ci.prHead.slice(0, 8) : "unknown"}</code>
       ${(!ci.headVerified || ci.ciHead !== ci.prHead) && html`<span>CI head</span><code title=${ci.ciHead || ""}>${ci.ciHead ? ci.ciHead.slice(0, 8) : "unknown"}</code>`}
@@ -377,10 +372,9 @@ function ActiveWork({ references }) {
     <div class="section-heading"><h2 id="active-work-heading">Active work</h2>
       <${Badge} tone=${sourceTone}>${label(work.source.status)}</${Badge}>
     </div>
-    <p class="ck-caption section-intro">Session-owned references · independent of goal and task filters</p>
     ${work.source.error && html`<p class="reference-error" role="status">${work.source.error}</p>`}
     <section class="reference-group" aria-label="Session-owned pull requests">
-      <div class="reference-group-heading"><h3>Pull requests</h3><span class="count">${work.prs.length} observed</span></div>
+      <div class="reference-group-heading"><h3>PRs</h3><span class="count">${work.prs.length}</span></div>
       ${work.prs.length ? html`<div class="reference-list">${work.prs.map((pr, index) => html`
         <article class="reference-item" key=${pr.reference || index}>
           <${ReferenceIdentity} item=${pr} /><${PrCi} ci=${pr.ci} />
@@ -388,7 +382,7 @@ function ActiveWork({ references }) {
       `)}</div>` : html`<p class="reference-empty">${work.emptyPrs}</p>`}
     </section>
     <section class="reference-group" aria-label="Session-owned issues">
-      <div class="reference-group-heading"><h3>Issues</h3><span class="count">${work.issues.length} observed</span></div>
+      <div class="reference-group-heading"><h3>Issues</h3><span class="count">${work.issues.length}</span></div>
       ${work.issues.length ? html`<div class="reference-list">${work.issues.map((issue, index) => html`
         <article class="reference-item" key=${issue.reference || index}><${ReferenceIdentity} item=${issue} /></article>
       `)}</div>` : html`<p class="reference-empty">${work.emptyIssues}</p>`}
@@ -400,13 +394,11 @@ function ActiveWork({ references }) {
 function Plan({ plan, drafts }) {
   const content = text(plan?.content);
   const exists = plan?.exists === true || (plan?.exists !== false && Boolean(content));
-  const summary = content.split(/\r?\n/).map((line) => line.trim())
-    .filter((line) => line && !/^#|^---$/.test(line)).slice(0, 3).join(" ").slice(0, 260);
   return html`<section class="ck-card section-card" aria-labelledby="plan-heading">
-    <div class="section-heading"><h2 id="plan-heading">Plan source</h2><${Badge}>${exists ? "Available" : "Not found"}</${Badge}></div>
-    ${plan?.path && html`<p class="source-path">${text(plan.path)}</p>`}
-    <p class="plan-summary">${exists ? summary || "Plan exists; no preview was provided." : "No plan is available in this snapshot. Only tracked leaf tasks count toward progress."}</p>
+    <div class="section-heading"><h2 id="plan-heading">Plan</h2><${Badge}>${exists ? "Available" : "Not found"}</${Badge}></div>
+    ${exists && !content && html`<p class="plan-summary">Content unavailable.</p>`}
     ${content && exists && html`<details class="plan-disclosure"><summary>Read plan</summary>
+      ${plan?.path && html`<p class="source-path">${text(plan.path)}</p>`}
       <pre class="plan-content">${content.slice(0, 20000)}</pre>
       ${content.length > 20000 && html`<p class="ck-caption">Showing the first 20,000 characters.</p>`}
     </details>`}
@@ -423,7 +415,7 @@ function Activity({ activity, reports, agents }) {
   }))).map((event, index) => ({ ...event, localIndex: index }))
     .sort((a, b) => timestamp(b.at) - timestamp(a.at) || b.localIndex - a.localIndex);
   return html`<section class="ck-card section-card activity-card" aria-labelledby="activity-heading">
-    <div class="section-heading"><h2 id="activity-heading">Activity</h2><span class="ck-caption">Latest ${Math.min(events.length, 12)}</span></div>
+    <details class="activity-disclosure"><summary class="section-heading"><h2 id="activity-heading">Activity</h2><span class="count">${events.length}</span></summary>
     ${events.length ? html`<ol class="timeline">${events.slice(0, 12).map((event) => html`<li key=${event.id || event.localIndex}>
       <span class="timeline-marker" aria-hidden="true"><${Icon} name="circle" size=${12} /></span>
       <div><p class="activity-message">${text(event.message) || label(event.type || "update")}</p>
@@ -433,6 +425,7 @@ function Activity({ activity, reports, agents }) {
       </div>
     </li>`)}</ol>` : html`<${Empty}>No activity recorded yet.</${Empty}>`}
     ${events.length > 12 && html`<p class="ck-caption">Showing the latest 12 of ${events.length} events.</p>`}
+    </details>
   </section>`;
 }
 
@@ -524,7 +517,7 @@ function App({ state, invoke, connected }) {
   return html`<main class="dashboard">
     <header class="page-header">
       <div class="page-brand"><span class="brand-icon"><${Icon} name="layout-list" size=${20} /></span>
-        <div><p class="eyebrow">Live tasks & subtasks</p><h1>Session Board Canvas</h1></div>
+        <div><h1>Session Board Canvas</h1></div>
       </div>
       <div class="header-actions">
         <span class="ck-status" role="status"><span class=${`ck-dot ${!loading && connected && source.status !== "stale" ? "ck-dot-live" : "ck-dot-off"}`}></span>${freshness}</span>
@@ -543,7 +536,7 @@ function App({ state, invoke, connected }) {
       <${Icon} name="circle" size=${16} /><div>
         ${source.error && html`<p>${text(source.error)}</p>`}
         ${refreshError && html`<p>${refreshError}</p>`}
-        <p class="ck-caption">The last available snapshot is preserved. Refresh to try again.</p>
+        <p class="ck-caption">Saved snapshot. Refresh to retry.</p>
       </div>
     </div>`}
     ${source.status === "stale" && !source.error && html`<div class="ck-callout freshness-notice" role="status">Source data is stale. Treat progress as the last known snapshot, not current confirmation.</div>`}
@@ -551,19 +544,19 @@ function App({ state, invoke, connected }) {
 
     <section class="goal-overview ck-card" aria-labelledby="goal-title">
       <div class="goal-copy">
-        <div class="minor-spread"><span class="eyebrow">${historical ? "Goal history" : selectedGoal ? "Current focus" : "Session overview"}</span>
+        <div class="minor-spread">
           <${Badge} tone=${historical ? "muted" : "accent"}>${historical ? "Historical" : "Tracked work"}</${Badge}>
         </div>
         <h2 id="goal-title">${unavailableGoal ? "Selected goal unavailable" : selectedGoal?.title || (loading ? "Connecting to your session…" : "All session tasks")}</h2>
         <p class="ck-caption">${unavailableGoal ? "This goal is absent from the latest snapshot. Choose another goal below."
           : missingChildren.size ? `${missingChildren.size} child task records unavailable · waiting for a complete hierarchy snapshot.`
-          : total === 0 ? "Not started · no tracked leaf tasks yet."
-          : allDone ? "All tracked leaf tasks done. Milestone status, approval, and delivery remain separate."
-          : `${total - done} leaf tasks remaining · canonical status is the source of truth.`}</p>
+          : total === 0 ? "No tracked tasks."
+          : allDone ? "Tasks complete."
+          : `${total - done} ${total - done === 1 ? "task" : "tasks"} remaining.`}</p>
         <div class="goal-controls">
           <label class="sr-only" for="goal-select">Choose goal</label>
           <select id="goal-select" class="ck-select" value=${goalChoice} onChange=${(event) => setGoalChoice(event.target.value)}>
-            <option value="">${activeGoal ? `Follow active: ${activeGoal.title}` : "Default goal"}</option>
+            <option value="">${activeGoal ? "Current goal" : "Default goal"}</option>
             <option value=${SESSION_VIEW}>All session tasks</option>
             ${unavailableGoal && html`<option value=${goalChoice}>Selected goal (unavailable)</option>`}
             ${goals.map((goal) => html`<option key=${goal.id} value=${goal.id}>${goal.title || goal.id}${goal.id === model.activeGoalId ? " · active" : " · history"}</option>`)}
@@ -572,14 +565,15 @@ function App({ state, invoke, connected }) {
         </div>
       </div>
       <div class="progress-metric">
-        <span class="eyebrow">Verified leaf-task progress</span>
-        <div class="metric-value" aria-live="polite" aria-atomic="true"><strong>${percentage ?? "—"}${percentage != null && html`<span>%</span>`}</strong><span>${done}<span class="ck-muted"> / ${total} leaves done</span></span></div>
+        <span class="ck-caption">Progress</span>
+        <div class="metric-value" aria-live="polite" aria-atomic="true"><strong>${percentage ?? "—"}${percentage != null && html`<span>%</span>`}</strong>
+          <span class="metric-count"><strong>${done} / ${total}</strong><small>${total === 1 ? "leaf task done" : "leaf tasks done"}</small></span>
+        </div>
         <div class="progress-track" role="progressbar" aria-label="Canonical leaf tasks done" aria-valuemin="0" aria-valuemax="100" aria-valuenow=${percentage ?? undefined} aria-valuetext=${`${done} of ${total} recorded leaf tasks done${missingChildren.size ? "; hierarchy incomplete" : total ? "" : "; not started"}`}>
           <span style=${{ width: `${percentage ?? 0}%` }}></span>
         </div>
         <p class="ck-caption">${missingChildren.size ? "Incomplete hierarchy · percentage unavailable" : total === 0 ? "Not started"
-          : unknown.length ? `${unknown.length} unknown leaves · not counted as done` : "All selected leaves · unaffected by filters"}</p>
-        <p class="ck-caption">${milestones.length} milestone ${milestones.length === 1 ? "rollup" : "rollups"} excluded from totals</p>
+          : unknown.length ? `${unknown.length} unknown` : `${milestones.length} milestones excluded`}</p>
       </div>
     </section>
 
@@ -602,7 +596,7 @@ function App({ state, invoke, connected }) {
       <div class="main-column">
         <section class="board-section" aria-labelledby="board-heading">
           <div class="board-toolbar">
-            <div><h2 id="board-heading">Tasks & subtasks</h2><p class="ck-caption">${visible.length} of ${tasks.length} cards${query || statusFilter ? " match filters" : " tracked"} · ${total} leaf tasks · ${milestones.length} milestones</p></div>
+            <div><h2 id="board-heading">Tasks</h2><p class="ck-caption">${query || statusFilter ? `${visible.length} / ` : ""}${tasks.length} cards · ${total} tasks · ${milestones.length} milestones</p></div>
             <div class="board-filters">
               <label class="sr-only" for="task-search">Search tasks</label>
               <input id="task-search" class="ck-input" type="search" placeholder="Search tasks…" value=${query} onInput=${(event) => setQuery(event.target.value)} />
@@ -621,8 +615,9 @@ function App({ state, invoke, connected }) {
           <div class="kanban">${COLUMNS.map((column) => {
             const columnTasks = visible.filter((task) => taskStatus(task) === column.id);
             return html`<section class=${`kanban-column column-${column.id}`} key=${column.id} aria-label=${column.label}>
-              <div class="column-heading"><span class=${`status-dot tone-${column.tone}`}></span><h3>${column.label}</h3><span class="count" title="Cards, including milestone rollups">${columnTasks.length}</span></div>
-              <p class="column-breakdown">${columnTasks.filter(isLeaf).length} leaves · ${columnTasks.filter((task) => !isLeaf(task)).length} milestones</p>
+              <div class="column-heading"><span class=${`status-dot tone-${column.tone}`}></span><h3>${column.label}</h3>
+                <span class="column-count" title="Cards, including milestone rollups"><span class="count">${columnTasks.length}</span><small>${columnTasks.length === 1 ? "card" : "cards"}</small></span>
+              </div>
               <div class="column-tasks">${columnTasks.length ? columnTasks.map((task) => html`
                 <${TaskCard} key=${task.id} task=${task} dependencies=${dependencies} taskMap=${taskMap} reports=${reports} agents=${agents}
                   goals=${goals} selectedTaskIds=${selectedTaskIds} selectedTaskId=${selectedTaskId} onTaskSelect=${selectTask}
@@ -646,22 +641,20 @@ function App({ state, invoke, connected }) {
         <div class="insights-grid">
           <section class="ck-card section-card" aria-labelledby="attention-heading">
             <div class="section-heading"><h2 id="attention-heading">Needs attention</h2><span class="count">${attention.length}</span></div>
-            <p class="ck-caption section-intro">Operator action · current session, independent of board filters</p>
             ${attention.length ? html`<ul class="attention-list">
               ${attention.slice(0, 6).map((entry) => html`<li key=${entry.id}><span class="status-dot tone-attention"></span>
                 <div><strong>${entry.title}</strong><p>${entry.message}</p>
                   ${entry.at && html`<span class="ck-caption"><${Time} at=${entry.at} /></span>`}
                 </div>
               </li>`)}
-            </ul>` : html`<${Empty}>No operator action needed.</${Empty}>`}
+            </ul>` : html`<${Empty}>None</${Empty}>`}
             ${attention.length > 6 && html`<p class="ck-caption">Showing 6 of ${attention.length} operator action requests.</p>`}
           </section>
           <section class="ck-card section-card" aria-labelledby="ready-heading">
             <div class="section-heading"><h2 id="ready-heading">Ready next</h2><span class="count">${ready.length}</span></div>
-            <p class="ck-caption section-intro">Leaf tasks to do · dependencies resolved · no reported blocker</p>
             ${ready.length ? html`<ol class="ready-list">${ready.slice(0, 6).map((task, index) => html`<li key=${task.id}>
-              <span class="ready-number">${String(index + 1).padStart(2, "0")}</span><div><strong>${task.title || "Untitled task"}</strong><code>${task.id}</code></div>
-            </li>`)}</ol>` : html`<${Empty}>${allDone ? "All tracked leaf tasks are done." : "No leaf task is ready to start yet."}</${Empty}>`}
+              <span class="ready-number">${String(index + 1).padStart(2, "0")}</span><div><strong title=${task.id}>${task.title || "Untitled task"}</strong></div>
+            </li>`)}</ol>` : html`<${Empty}>None</${Empty}>`}
             ${ready.length > 6 && html`<p class="ck-caption">Showing the first 6 of ${ready.length} ready tasks.</p>`}
           </section>
         </div>
@@ -674,7 +667,6 @@ function App({ state, invoke, connected }) {
         <${Plan} plan=${model.plan} drafts=${list(model.drafts)} />
       </aside>
     </div>`}
-    <footer class="page-footer"><span>Canonical leaf tasks · milestone rollups · explicit delivery evidence</span><span>No edits or model calls from this view</span></footer>
   </main>`;
 }
 

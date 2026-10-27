@@ -46,6 +46,9 @@ task failures, and dependency waits appear separately in **Blockers & dependenci
 with ownership and cross-subagent links. Reports default to
 `requiresOperator: false`; explicit operator requests clear when superseded.
 
+All task titles stay visible. Expand a task for its ID, parent, and full reports;
+delivery evidence, activity, and the plan stay collapsed until requested.
+
 Successful session PR/issue controls mirror their explicitly owned targets into
 Active work. CI is a verified, head-pinned snapshot published by the existing
 PR workflow, with an observation time; the board does not start another poller.
