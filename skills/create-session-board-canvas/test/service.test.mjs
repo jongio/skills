@@ -300,3 +300,51 @@ test("latest reports and pending requests survive more than300 distinct task str
   assert.ok(state.activity.length <= 100);
   await assert.rejects(service.update({ action: "report", updateId: "old-first", taskId: "work-0", sequence: 4, status: "working", message: "Delayed old result" }, worker), /Stale/);
 });
+
+test("goal remapping cleans assignments and retires invalid task alerts without losing guards", async () => {
+  const { service, saved } = await fixture([task("a")]);
+  await goal(service, "first", ["a"]);
+  await service.observe({ id: "worker", type: "subagent.started", agentId: "worker", data: {} });
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["a"] }, primary);
+  await service.update({ action: "report", taskId: "a", updateId: "old", sequence: 5, status: "blocked", message: "Old scope request", requiresOperator: true }, worker);
+  const legacy = structuredClone(saved());
+  legacy.goals[0].taskIds = [];
+  legacy.goals[0].tasks = [];
+  await goal(service, "first", []);
+  const state = service.snapshot();
+  assert.deepEqual(state.agents.find((entry) => entry.id === "worker").taskIds, []);
+  assert.equal(state.reports[0].superseded, true);
+  assert.equal(state.reports[0].requiresOperator, false);
+  assert.equal(state.reports[0].sequence, 5);
+  await goal(service, "second", ["a"]);
+  assert.equal(service.snapshot().reports[0].goalId, "first");
+  const restored = await createProgressService({
+    sessionId: legacy.sessionId,
+    store: { load: async () => legacy, save: async () => {} },
+    readSources: async () => ({ plan: {}, rows: [task("a")], dependencies: [] }),
+  });
+  assert.deepEqual(restored.snapshot().agents.find((entry) => entry.id === "worker").taskIds, []);
+  assert.equal(restored.snapshot().reports[0].superseded, true);
+});
+
+test("native plan approval requests are shown and completed independently of permissions", async () => {
+  const { service } = await fixture([]);
+  await service.observe({ type: "exit_plan_mode.requested", data: { requestId: "plan", summary: "Approve the implementation plan" } });
+  await service.observe({ type: "permission.requested", data: { requestId: "permission" } });
+  assert.equal(service.snapshot().attention.find((request) => request.kind === "exit_plan_mode").message, "Approve the implementation plan");
+  await service.observe({ type: "exit_plan_mode.completed", data: { requestId: "plan", approved: true } });
+  assert.deepEqual(service.snapshot().attention.map((request) => request.kind), ["permission"]);
+});
+
+test("known pre-goal request streams remain resolvable after goal activation", async () => {
+  const { service } = await fixture([task("a")]);
+  await service.update({ action: "report", updateId: "global-primary", sequence: 1, status: "blocked", message: "Planning choice", requiresOperator: true }, primary);
+  await service.update({ action: "report", updateId: "global-worker", sequence: 1, status: "blocked", message: "Global input", requiresOperator: true }, worker);
+  await goal(service, "g", ["a"]);
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["a"] }, primary);
+  for (const actor of [primary, worker]) {
+    await service.update({ action: "report", goalId: null, updateId: `clear-${actor.id}`, sequence: 2, status: "working", message: "Input resolved" }, actor);
+  }
+  assert.ok(service.snapshot().reports.every((report) => report.goalId === null && report.requiresOperator === false));
+  await assert.rejects(service.update({ action: "report", goalId: null, updateId: "new-global", sequence: 1, status: "working", message: "Ambiguous new origin" }, { id: "new-worker", primary: false }), /goal|unscoped/i);
+});

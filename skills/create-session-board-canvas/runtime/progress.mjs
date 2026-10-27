@@ -16,6 +16,20 @@ const primaryOnly = (actor) => {
   if (!actor.primary) throw new Error("Only the primary agent may configure the board");
 };
 const initialDelivery = () => ({ phase: "planning", status: "running", evidence: null });
+export const isOperatorEvent = (type) => /^(permission|user_input|elicitation|exit_plan_mode)\.(requested|completed)$/.test(type);
+
+function constrainGoalMembership(state, goal) {
+  const membership = new Set(goal.taskIds);
+  for (const member of state.agents) {
+    if (member.goalId === goal.id) member.taskIds = member.taskIds.filter((id) => membership.has(id));
+  }
+  for (const report of state.reports) {
+    if (report.goalId === goal.id && report.taskId && !membership.has(report.taskId)) {
+      report.superseded = true;
+      report.requiresOperator = false;
+    }
+  }
+}
 
 function projectTasks(rows, dependencies) {
   const seen = new Set();
@@ -84,6 +98,7 @@ export async function createProgressService({ sessionId, readSources, store, onC
   state.attention = [];
   state.hierarchy ||= [];
   state.references ||= emptyReferences();
+  for (const goal of state.goals) constrainGoalMembership(state, goal);
   if (loaded) state.references.source = { ...state.references.source, status: "unknown", known: { prs: false, issues: false }, error: null };
   let tail = Promise.resolve();
   const queue = (work) => {
@@ -220,6 +235,7 @@ export async function createProgressService({ sessionId, readSources, store, onC
           const goal = existing || { id, createdAt: clock(), delivery: initialDelivery() };
           Object.assign(goal, { title, taskIds, tasks: next.tasks.filter((task) => taskIds.includes(task.id)), plan: clone(next.plan) });
           if (!existing) next.goals.push(goal);
+          constrainGoalMembership(next, goal);
           next.activeGoalId = id;
           next.drafts = [];
           activity(next, actor.id, `Tracking goal: ${title}`, "goal");
@@ -286,11 +302,14 @@ export async function createProgressService({ sessionId, readSources, store, onC
           const delegated = !actor.primary || input.agentId !== undefined;
           const memberGoalId = delegated ? next.agents.find((member) => member.id === actorId)?.goalId || null : null;
           const taskGoalId = taskId ? next.goals.find((goal) => goal.taskIds.includes(taskId))?.id || null : null;
-          const goalId = input.goalId === undefined
+          const knownUnscoped = input.goalId === null && !taskId && next.reports.some((report) =>
+            report.actorId === actorId && report.goalId === null && report.taskId === null);
+          if (input.goalId === null && (taskId || (next.activeGoalId && !knownUnscoped))) throw new Error("An existing unscoped report is required for a null goal");
+          const goalId = input.goalId === null ? null : input.goalId === undefined
             ? taskGoalId || memberGoalId || (delegated ? null : next.activeGoalId)
             : identifier(input.goalId);
-          if (delegated && !goalId && next.activeGoalId) throw new Error("goalId is required for an unassigned delegate report");
-          if ((memberGoalId && memberGoalId !== goalId) || (taskGoalId && taskGoalId !== goalId)) throw new Error("Report goal conflicts with its delegated task or assignment");
+          if (delegated && !goalId && next.activeGoalId && !knownUnscoped) throw new Error("goalId is required for an unassigned delegate report");
+          if ((memberGoalId && memberGoalId !== goalId && !knownUnscoped) || (taskGoalId && taskGoalId !== goalId)) throw new Error("Report goal conflicts with its delegated task or assignment");
           const reportGoal = next.goals.find((goal) => goal.id === goalId);
           if (goalId && !reportGoal) throw new Error("Unknown report goal");
           if (taskId && (!reportGoal?.taskIds.includes(taskId) || !next.tasks.some((task) => task.id === taskId))) throw new Error("Unknown report goal task");
@@ -336,7 +355,7 @@ export async function createProgressService({ sessionId, readSources, store, onC
   }
   async function observe(event) {
     const data = event.data || {};
-    if (/^(permission|user_input|elicitation)\.(requested|completed)$/.test(event.type)) {
+    if (isOperatorEvent(event.type)) {
       if (!data.requestId || data.resolvedByHook) return;
       return queue(async () => {
         const next = clone(state);
@@ -344,7 +363,7 @@ export async function createProgressService({ sessionId, readSources, store, onC
         const id = `${kind}:${data.requestId}`;
         next.attention = next.attention.filter((request) => request.id !== id);
         if (event.type.endsWith(".requested")) next.attention.push({
-          id, kind, message: String(data.question || data.message || "Operator permission required").slice(0, 1000), at: event.timestamp || clock(),
+          id, kind, message: String(data.question || data.message || data.summary || (kind === "exit_plan_mode" ? "Plan approval required" : "Operator permission required")).slice(0, 1000), at: event.timestamp || clock(),
         });
         await commit(next);
       });

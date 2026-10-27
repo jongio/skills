@@ -26,6 +26,9 @@ sequence guards because many tasks exist. Only historical activity is bounded.
 Task reassignment marks previous-owner task reports `superseded` and retires
 their operator alerts. Their sequence guards remain, so delayed reports cannot
 resurrect old requests when ownership returns.
+Goal remapping applies the same retirement to removed task scopes and prunes
+agents' assignment IDs against the new membership. Historical reports and
+guards remain stored; they are not current operator requests.
 
 Pass the originating `goalId` from the delegation context with reports. Task
 membership and an established agent assignment also pin that origin; switching
@@ -34,6 +37,9 @@ identities are rejected before sequence reconciliation. A taskless unassigned
 delegate must specify `goalId` once a goal is active. Primary's own reports may
 default to the active goal. Before goal activation, session-level reports remain
 unscoped and explicit operator requests are still visible.
+After activation, `goalId: null` can continue an existing pre-goal taskless
+stream to resolve that request. It cannot create a new unscoped delegate stream
+or bypass a task's goal identity.
 
 Set `requiresOperator: true` only when an operator decision/action is required.
 It defaults to false. **Needs attention** contains only explicit operator
@@ -44,6 +50,8 @@ Send a newer report without the flag to clear an operator request after it is
 resolved. Completed canonical tasks no longer require report-based attention.
 Transient native prompts may not be reconstructable after reconnect; the host's
 native permission/input UI remains authoritative.
+Native plan-approval (`exit_plan_mode`) requests are also operator attention;
+their completion clears only the matching request, not unrelated permissions.
 
 Keep a monotonically increasing sequence per reporter/task/goal, starting at 1.
 Reuse an update ID only to retry the same logical update. For a revision

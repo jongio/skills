@@ -1,6 +1,6 @@
 import { createCanvas, joinSession, CanvasError } from "@github/copilot-sdk/extension";
 import { join } from "node:path";
-import { createProgressService } from "./progress.mjs";
+import { createProgressService, isOperatorEvent } from "./progress.mjs";
 import { createProgressCanvas } from "./canvas.mjs";
 import { createCanvasRuntime } from "./canvas-kit/server.mjs";
 import { workspaceStore, sessionStore } from "./canvas-kit/storage.mjs";
@@ -90,7 +90,7 @@ if (lease) {
   };
   const unsubscribe = session.on((event) => {
     if (!service) {
-      if (/^(subagent\.|(?:permission|user_input|elicitation)\.|session\.(?:plan_changed|todos_changed|resume))/.test(event.type)) pending.push(event);
+      if (isOperatorEvent(event.type) || /^(subagent\.|session\.(?:plan_changed|todos_changed|resume))/.test(event.type)) pending.push(event);
     } else handle(event);
   });
   const initializing = (async () => {

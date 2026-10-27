@@ -87,6 +87,8 @@ export function operatorRequests(model, activeTaskIds, taskMap) {
   return latestReports(model.reports).filter((report) => {
     if (report.superseded === true || report.requiresOperator !== true
       || taskMap.get(report.taskId)?.status === "done") return false;
+    if (report.taskId && !activeTaskIds.has(report.taskId)) return false;
+    if (!report.taskId && report.goalId === null) return true;
     if (report.goalId != null) return report.goalId === model.activeGoalId;
     if (!model.activeGoalId) return true;
     if (report.taskId) return activeTaskIds.has(report.taskId);

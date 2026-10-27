@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import {
   activeWorkView, blockerEntries, blockingReportLabel, ciSnapshot, latestReports, leafProgress,
@@ -37,6 +38,113 @@ test("the originating goal controls operator request visibility, not the actor's
     reports: [previous, current],
   };
   assert.deepEqual(operatorRequests(model, new Set(), new Map()), [current]);
+});
+
+test("reactivating a goal hides requests for removed tasks while preserving current and taskless requests", () => {
+  const moved = { id: "moved", status: "pending" };
+  const current = { id: "current", status: "pending" };
+  const taskMap = new Map([moved, current].map((task) => [task.id, task]));
+  const oldRequest = Object.freeze({
+    id: "old-A-request", goalId: "A", actorId: "worker", taskId: moved.id,
+    sequence: 5, status: "blocked", requiresOperator: true,
+  });
+  const emptyA = {
+    activeGoalId: "A",
+    goals: [{ id: "A", taskIds: [] }, { id: "B", taskIds: [moved.id] }],
+    reports: [oldRequest],
+  };
+  assert.deepEqual(operatorRequests(emptyA, new Set(), taskMap), []);
+
+  const currentRequest = Object.freeze({
+    id: "current-A-request", goalId: "A", actorId: "worker", taskId: current.id,
+    sequence: 1, status: "working", requiresOperator: true,
+  });
+  const tasklessRequest = Object.freeze({
+    id: "taskless-A-request", goalId: "A", actorId: "worker",
+    sequence: 1, status: "working", requiresOperator: true,
+  });
+  const sessionRequest = Object.freeze({
+    id: "session-request", goalId: null, actorId: "primary",
+    sequence: 1, status: "working", requiresOperator: true,
+  });
+  const reports = Object.freeze([oldRequest, currentRequest, tasklessRequest, sessionRequest]);
+  const model = {
+    activeGoalId: "A",
+    goals: [{ id: "A", taskIds: [current.id] }, { id: "B", taskIds: [moved.id] }],
+    agents: [{ id: "primary", goalId: "A" }],
+    reports,
+  };
+  const snapshot = structuredClone(model);
+  assert.deepEqual(operatorRequests(model, new Set([current.id]), taskMap), [
+    currentRequest, tasklessRequest, sessionRequest,
+  ]);
+  assert.deepEqual(latestReports(reports), [...reports]);
+  assert.deepEqual(model, snapshot);
+  assert.equal(oldRequest.requiresOperator, true);
+  assert.equal(oldRequest.goalId, "A");
+});
+
+test("explicit null-scope taskless requests survive goal activation and actor reassignment until cleared", () => {
+  const request = Object.freeze({
+    id: "pre-goal-request", goalId: null, actorId: "worker", taskId: null,
+    sequence: 1, status: "blocked", requiresOperator: true,
+  });
+  const otherGoal = Object.freeze({
+    id: "other-goal-request", goalId: "B", actorId: "worker", taskId: null,
+    sequence: 5, status: "blocked", requiresOperator: true,
+  });
+  const reports = [request, otherGoal];
+  assert.deepEqual(operatorRequests({ activeGoalId: null, reports }, new Set(), new Map()), [request]);
+  const active = { activeGoalId: "A", agents: [{ id: "worker", goalId: "B" }], reports };
+  assert.deepEqual(operatorRequests(active, new Set(), new Map()), [request]);
+  assert.deepEqual(operatorRequests({ ...active, agents: [] }, new Set(), new Map()), [request]);
+  const cleared = { ...request, id: "pre-goal-cleared", sequence: 2, status: "working", requiresOperator: false };
+  assert.deepEqual(operatorRequests({ ...active, reports: [...reports, cleared] }, new Set(), new Map()), []);
+  assert.deepEqual(latestReports([...reports, cleared]), [cleared, otherGoal]);
+  assert.equal(request.requiresOperator, true);
+});
+
+test("native plan approval attention is visible without task assignment and clears when removed", () => {
+  const appUrl = new URL("../runtime/web/app.mjs", import.meta.url).href;
+  // Load the existing browser-only helper with transport stubs, without copying its projection.
+  const result = spawnSync(process.execPath, ["--experimental-vm-modules", "--input-type=module", "-e", `
+    import { readFile } from "node:fs/promises";
+    import { SourceTextModule, SyntheticModule } from "node:vm";
+    const appUrl = ${JSON.stringify(appUrl)};
+    const kit = new SyntheticModule(["html", "mountCanvas", "useState", "Icon"], function () {
+      for (const name of ["html", "mountCanvas", "useState", "Icon"]) this.setExport(name, () => null);
+    });
+    const source = await readFile(new URL(appUrl), "utf8");
+    const app = new SourceTextModule(source + "\\nexport { operatorAttention };", { identifier: appUrl });
+    await app.link(async (specifier) => {
+      if (specifier === "/kit/core-client.mjs" || specifier === "/kit/icons.mjs") return kit;
+      if (specifier !== "./view-model.mjs") throw new Error("Unexpected UI dependency: " + specifier);
+      const url = new URL(specifier, appUrl);
+      return new SourceTextModule(await readFile(url, "utf8"), { identifier: url.href });
+    });
+    await app.evaluate();
+    const state = {
+      activeGoalId: "active",
+      goals: [{ id: "active", taskIds: [], tasks: [] }],
+      tasks: [], agents: [], reports: [],
+      attention: [{
+        id: "exit_plan_mode:plan", kind: "exit_plan_mode",
+        message: "Approve the plan", at: "2026-10-27T19:00:00Z",
+      }],
+    };
+    console.log(JSON.stringify({
+      pending: app.namespace.operatorAttention(state),
+      cleared: app.namespace.operatorAttention({ ...state, attention: [] }),
+    }));
+  `], { encoding: "utf8", timeout: 10000, windowsHide: true });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    pending: [{
+      id: "event:exit_plan_mode:plan", title: "Exit plan mode",
+      message: "Approve the plan", at: "2026-10-27T19:00:00Z",
+    }],
+    cleared: [],
+  });
 });
 
 test("newer reports clear operator requests, including null/undefined session scopes", () => {
