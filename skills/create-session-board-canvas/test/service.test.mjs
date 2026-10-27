@@ -205,3 +205,55 @@ test("slow source reads coalesce invalidations without starving live reports", a
   assert.ok(order.indexOf("report") < order.indexOf("read-2"));
   assert.equal(service.snapshot().reports[0].message, "Still making progress");
 });
+
+test("confirmed task removal clears the active goal without erasing archived history", async () => {
+  const { service, setSource } = await fixture([task("a", "done"), task("b"), task("c")]);
+  await goal(service, "archived", ["a"]);
+  await goal(service, "current", ["b", "c"]);
+  await service.update({ action: "subtasks", parentTaskId: "b", taskIds: ["c"] }, primary);
+  await service.observe({ id: "worker", type: "subagent.started", agentId: "worker", data: {} });
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["c"] }, primary);
+  await service.update({ action: "report", updateId: "old-blocker", taskId: "c", status: "blocked", message: "Old request", requiresOperator: true, sequence: 1 }, worker);
+  setSource({ plan: { exists: false }, rows: [], dependencies: [] });
+  await service.update({ action: "refresh", confirmEmpty: true }, primary);
+  const state = service.snapshot();
+  assert.deepEqual(state.goals.find((entry) => entry.id === "current").taskIds, []);
+  assert.deepEqual(state.goals.find((entry) => entry.id === "current").tasks, []);
+  assert.equal(state.goals.find((entry) => entry.id === "archived").tasks[0].status, "done");
+  assert.deepEqual(state.metrics, { done: 0, total: 0, percent: null });
+  assert.deepEqual(state.hierarchy, []);
+  assert.equal(state.reports.length, 0);
+  assert.deepEqual(state.agents.find((entry) => entry.id === "worker").taskIds, []);
+});
+
+test("goal remapping cannot split a hierarchy until primary explicitly detaches it", async () => {
+  const { service } = await fixture();
+  await goal(service, "first");
+  await service.update({ action: "subtasks", parentTaskId: "a", taskIds: ["b"] }, primary);
+  await assert.rejects(goal(service, "first", ["a"]), /hierarchy/i);
+  await assert.rejects(goal(service, "first", ["b"]), /hierarchy/i);
+  assert.deepEqual(service.snapshot().goals[0].taskIds, ["a", "b"]);
+  await service.update({ action: "subtasks", parentTaskId: "a", taskIds: [] }, primary);
+  await goal(service, "first", ["a"]);
+  await goal(service, "second", ["b"]);
+  assert.deepEqual(service.snapshot().hierarchy, []);
+});
+
+test("late delegate reports remain bound to their originating goal and reject mismatches", async () => {
+  const { service } = await fixture();
+  await goal(service, "first", ["a"]);
+  await service.observe({ id: "worker", type: "subagent.started", agentId: "worker", data: {} });
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["a"] }, primary);
+  await service.update({ action: "report", goalId: "first", updateId: "a-first", sequence: 5, status: "working", message: "First goal" }, worker);
+  await goal(service, "second", ["b"]);
+  await service.update({ action: "report", goalId: "first", updateId: "a-late", sequence: 6, status: "blocked", message: "Still first goal", requiresOperator: true }, worker);
+  assert.equal(service.snapshot().reports.at(-1).goalId, "first");
+  const revision = service.snapshot().revision;
+  await assert.rejects(service.update({ action: "report", goalId: "second", updateId: "wrong", sequence: 7, status: "working", message: "Wrong goal" }, worker), /goal/i);
+  assert.equal(service.snapshot().revision, revision);
+  await service.update({ action: "report", updateId: "a-bound", sequence: 7, status: "working", message: "Uses bound first goal" }, worker);
+  assert.equal(service.snapshot().reports.at(-1).goalId, "first");
+  await service.update({ action: "report", updateId: "primary-b", sequence: 1, status: "working", message: "Primary second goal" }, primary);
+  assert.equal(service.snapshot().reports.at(-1).goalId, "second");
+  await assert.rejects(service.update({ action: "report", updateId: "unbound", sequence: 1, status: "working", message: "Unknown origin" }, { id: "unassigned", primary: false }), /goal/i);
+});

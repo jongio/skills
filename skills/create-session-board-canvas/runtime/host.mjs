@@ -2,7 +2,7 @@ export const progressInputSchema = {
   type: "object",
   properties: {
     action: { type: "string", enum: ["status", "refresh", "goal", "draft", "assign", "subtasks", "report", "phase"] },
-    goalId: { type: "string" }, title: { type: "string" },
+    goalId: { type: "string", description: "Originating goal for reports; preserve the delegation's identity across active-goal changes." }, title: { type: "string" },
     taskIds: { type: "array", items: { type: "string" } },
     taskId: { type: "string" }, agentId: { type: "string" },
     parentTaskId: { type: "string" },

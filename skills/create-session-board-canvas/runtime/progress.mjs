@@ -124,6 +124,17 @@ export async function createProgressService({ sessionId, readSources, store, onC
       if (!Array.isArray(source?.rows) || !Array.isArray(source?.dependencies) || !source.plan) throw new Error("Session sources unavailable");
       if (!source.rows.length && state.tasks.length && !confirmEmpty) throw new Error("Empty task read is ambiguous; primary must confirm task removal");
       Object.assign(next, projectTasks(source.rows, source.dependencies), { plan: source.plan });
+      if (confirmEmpty) {
+        const active = next.goals.find((goal) => goal.id === next.activeGoalId);
+        const canonicalIds = new Set(next.tasks.map((task) => task.id));
+        const removed = new Set(active?.taskIds.filter((id) => !canonicalIds.has(id)) || []);
+        if (active) active.taskIds = active.taskIds.filter((id) => !removed.has(id));
+        next.hierarchy = next.hierarchy.filter((entry) => !removed.has(entry.parentId))
+          .map((entry) => ({ ...entry, childIds: entry.childIds.filter((id) => !removed.has(id)) }))
+          .filter((entry) => entry.childIds.length);
+        next.reports = next.reports.filter((report) => report.goalId !== active?.id || !removed.has(report.taskId));
+        for (const member of next.agents) member.taskIds = member.taskIds.filter((id) => !removed.has(id));
+      }
       for (const goal of next.goals) {
         const fresh = new Map(next.tasks.filter((task) => goal.taskIds.includes(task.id)).map((task) => [task.id, task]));
         goal.tasks = goal.taskIds.map((id) => fresh.get(id) || goal.tasks.find((task) => task.id === id)).filter(Boolean);
@@ -171,6 +182,10 @@ export async function createProgressService({ sessionId, readSources, store, onC
           const title = bounded(input.title, "goal title", 200);
           if (!Array.isArray(input.taskIds) || input.taskIds.length > 2000) throw new Error("taskIds are required");
           const taskIds = [...new Set(input.taskIds.map(identifier))];
+          const membership = new Set(taskIds);
+          if (next.hierarchy.some((entry) => entry.childIds.some((id) => membership.has(entry.parentId) !== membership.has(id)))) {
+            throw new Error("Goal mapping cannot split a task hierarchy; explicitly detach subtasks first");
+          }
           for (const taskId of taskIds) {
             if (!next.tasks.some((task) => task.id === taskId)) throw new Error(`Unknown canonical task: ${taskId}`);
             if (next.goals.some((goal) => goal.id !== id && goal.taskIds.includes(taskId))) throw new Error("Task belongs to another goal");
@@ -227,8 +242,6 @@ export async function createProgressService({ sessionId, readSources, store, onC
         }
         case "report": {
           const updateId = identifier(input.updateId);
-          const key = `${actor.id}:${updateId}`;
-          if (next.seen.includes(key)) return { duplicate: true, revision: state.revision };
           let actorId = actor.id;
           if (input.agentId !== undefined) {
             primaryOnly(actor);
@@ -238,20 +251,36 @@ export async function createProgressService({ sessionId, readSources, store, onC
           if (!reportStatuses.has(input.status)) throw new Error("Invalid report status; completion requires primary verification and a canonical task update");
           const message = bounded(input.message, "report");
           const taskId = input.taskId || null;
-          if (taskId && (!active?.taskIds.includes(taskId) || !next.tasks.some((task) => task.id === taskId))) throw new Error("Unknown active goal task");
-          const owner = next.agents.find((member) => member.taskIds.includes(taskId) && member.goalId === active?.id);
+          const delegated = !actor.primary || input.agentId !== undefined;
+          const memberGoalId = delegated ? next.agents.find((member) => member.id === actorId)?.goalId || null : null;
+          const taskGoalId = taskId ? next.goals.find((goal) => goal.taskIds.includes(taskId))?.id || null : null;
+          const goalId = input.goalId === undefined
+            ? taskGoalId || memberGoalId || (delegated ? null : next.activeGoalId)
+            : identifier(input.goalId);
+          if (delegated && !goalId && next.activeGoalId) throw new Error("goalId is required for an unassigned delegate report");
+          if ((memberGoalId && memberGoalId !== goalId) || (taskGoalId && taskGoalId !== goalId)) throw new Error("Report goal conflicts with its delegated task or assignment");
+          const reportGoal = next.goals.find((goal) => goal.id === goalId);
+          if (goalId && !reportGoal) throw new Error("Unknown report goal");
+          if (taskId && (!reportGoal?.taskIds.includes(taskId) || !next.tasks.some((task) => task.id === taskId))) throw new Error("Unknown report goal task");
+          const key = JSON.stringify([actorId, goalId, updateId]);
+          if (next.seen.includes(key) || next.reports.some((report) =>
+            report.actorId === actorId && (report.goalId || null) === goalId && report.id === updateId)) {
+            return { duplicate: true, revision: state.revision };
+          }
+          const owner = next.agents.find((member) => member.taskIds.includes(taskId) && member.goalId === goalId);
           if (owner && owner.id !== actorId) throw new Error("Task is assigned to another agent");
           if (!Number.isSafeInteger(input.sequence) || input.sequence < 1) throw new Error("Positive report sequence required");
-          const previous = next.reports.find((report) => report.actorId === actorId && report.taskId === taskId && report.goalId === active?.id);
+          const previous = next.reports.find((report) => report.actorId === actorId && report.taskId === taskId && report.goalId === goalId);
           if (previous && input.sequence <= previous.sequence) throw new Error("Stale report; reconcile the latest sequence");
           if (input.evidence !== undefined) bounded(input.evidence, "evidence", 4000);
-          const report = { id: updateId, actorId, taskId, goalId: active?.id || null, status: input.status, message,
+          const report = { id: updateId, actorId, taskId, goalId, status: input.status, message,
             sequence: input.sequence, evidence: input.evidence || null, requiresOperator: input.requiresOperator === true,
             relayed: actorId !== actor.id, at: clock() };
           next.reports = next.reports.filter((r) => r !== previous);
           next.reports.push(report);
           next.reports = next.reports.slice(-300);
           const member = agent(next, actorId);
+          if (delegated && !member.goalId) member.goalId = goalId;
           Object.assign(member, { state: report.status, report: message, updatedAt: report.at });
           next.seen.push(key);
           next.seen = next.seen.slice(-1000);

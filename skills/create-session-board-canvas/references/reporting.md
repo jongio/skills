@@ -20,6 +20,14 @@ The tool records that provenance. A subagent cannot report as another agent.
 Report states: `working`, `blocked`, `result_ready`, `failed`, `cancelled`.
 There is deliberately no report state named `done`.
 
+Pass the originating `goalId` from the delegation context with reports. Task
+membership and an established agent assignment also pin that origin; switching
+the active goal does not relabel late reports. Conflicting task/assignment/goal
+identities are rejected before sequence reconciliation. A taskless unassigned
+delegate must specify `goalId` once a goal is active. Primary's own reports may
+default to the active goal. Before goal activation, session-level reports remain
+unscoped and explicit operator requests are still visible.
+
 Set `requiresOperator: true` only when an operator decision/action is required.
 It defaults to false. **Needs attention** contains only explicit operator
 requests, observed pending permission/input prompts, and final merge-approval
@@ -48,10 +56,14 @@ normal session SQL tool. The extension only reads those canonical rows. Missing
 or failed source reads preserve the last-known snapshot and display stale state.
 The SDK may return empty rows on a read error; only use `confirmEmpty` after an
 independent canonical read proves tasks were actually removed.
+Confirmation removes deleted active-goal cards, assignments, related reports,
+and hierarchy edges; archived goal snapshots remain available.
 
 Split large milestones into small verifiable canonical tasks, and map explicit
 parent/child relationships with `subtasks`. Nested children are supported;
-cycles, multiple parents, and cross-goal children are rejected. Percentage is
+cycles, multiple parents, and cross-goal children are rejected.
+Goal remapping cannot split an existing hierarchy; explicitly detach child edges
+with `subtasks` before moving tasks between goals. Percentage is
 verified done leaf tasks / total leaf tasks; parent milestones show roll-ups
 without counting the work a second time. Accepting children does not
 automatically accept the parent or change its canonical status. Update each

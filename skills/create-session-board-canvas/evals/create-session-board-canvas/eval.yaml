@@ -125,3 +125,16 @@ stimuli:
       - Excludes the parent milestone from the completion denominator without changing its canonical acceptance.
       - Updates each canonical subtask promptly after primary verification and does not infer completion from reports, tool activity, or elapsed time.
     graders: *checks
+
+  - name: late-delegate-goal-identity
+    prompt: >-
+      Load create-session-board-canvas. A worker assigned to goal A returns a
+      taskless report after primary switches the active board to goal B.
+      Explain which goal the report belongs to and how conflicting goal IDs,
+      per-goal sequence numbers, and confirmed task removals are handled.
+      Explanation only: no commands, tools beyond skill loading, or writes.
+    rubric:
+      - Preserves the originating delegation goal and rejects conflicting task or assignment identities.
+      - Keeps report sequences independent per reporter, task, and goal instead of relabelling updates as the active goal.
+      - Honors confirmed removals in the active goal while retaining archived history.
+    graders: *checks

@@ -1,5 +1,9 @@
 import { html, mountCanvas, useState } from "/kit/core-client.mjs";
 import { Icon } from "/kit/icons.mjs";
+import {
+  blockerEntries, blockingReportLabel, dependencyIds, isBlockingReport, latestReports,
+  operatorRequests, sessionBlockerReports, timestamp, waitingFor,
+} from "./view-model.mjs";
 
 const COLUMNS = [
   { id: "pending", label: "To do", tone: "muted" },
@@ -73,11 +77,6 @@ function milestoneProgress(task, taskMap) {
   return { ...progress, percent: incomplete ? null : progress.percent, incomplete, fromBackend: false };
 }
 
-function timestamp(value) {
-  const parsed = new Date(value ?? "").getTime();
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function Time({ at }) {
   if (!timestamp(at)) return html`<span class="ck-muted">Time unavailable</span>`;
   const date = new Date(at);
@@ -103,21 +102,6 @@ function Evidence({ value }) {
   `)}${entries.length > 4 && html`<li class="ck-muted">${entries.length - 4} more evidence entries</li>`}</ul>`;
 }
 
-function latestReports(reports) {
-  const latest = new Map();
-  list(reports).forEach((report, index) => {
-    const key = JSON.stringify([report.actorId ?? "", report.taskId ?? ""]);
-    const previous = latest.get(key);
-    const order = previous && Number.isFinite(report.sequence) && Number.isFinite(previous.report.sequence)
-      ? report.sequence - previous.report.sequence
-      : timestamp(report.at) - timestamp(previous?.report.at);
-    if (!previous || order > 0 || (order === 0 && index > previous.index)) {
-      latest.set(key, { report, index });
-    }
-  });
-  return [...latest.values()].map(({ report }) => report);
-}
-
 function operatorAttention(model) {
   const activeGoal = list(model.goals).find((goal) => goal.id === model.activeGoalId);
   const canonicalTasks = list(model.tasks);
@@ -128,20 +112,13 @@ function operatorAttention(model) {
     ...(activeGoal ? activeTasks : canonicalTasks).map((task) => task.id),
   ]);
   const agents = list(model.agents);
-  const activeReports = list(model.reports).filter((report) => {
-    if (report.goalId) return report.goalId === model.activeGoalId;
-    if (report.taskId) return activeTaskIds.has(report.taskId);
-    return Boolean(model.activeGoalId
-      && agents.find((agent) => agent.id === report.actorId)?.goalId === model.activeGoalId);
-  });
   const attention = list(model.attention).map((entry, index) => ({
     id: `event:${entry.id || index}`,
     title: label(entry.kind || "operator action requested"),
     message: text(entry.message) || "Operator input is required in the primary session.",
     at: entry.at,
   }));
-  latestReports(activeReports).filter((report) => report.requiresOperator === true
-    && taskMap.get(report.taskId)?.status !== "done").forEach((report, index) => {
+  operatorRequests(model, activeTaskIds, taskMap).forEach((report, index) => {
     attention.push({
       id: `report:${report.id || JSON.stringify([report.actorId, report.taskId, index])}`,
       title: taskMap.get(report.taskId)?.title
@@ -160,17 +137,6 @@ function operatorAttention(model) {
   return attention;
 }
 
-function dependencyIds(task, dependencies) {
-  return [...new Set([
-    ...list(task.waitingOn),
-    ...dependencies.filter((dependency) => dependency.todoId === task.id).map((dependency) => dependency.dependsOn),
-  ])].filter((id) => id != null && id !== "");
-}
-
-function waitingFor(task, dependencies, taskMap) {
-  return dependencyIds(task, dependencies).filter((id) => taskMap.get(id)?.status !== "done");
-}
-
 function ownership(taskId, agents, relativeTaskId) {
   const owners = agents.filter((agent) => list(agent.taskIds).includes(taskId));
   const relatedOwners = agents.filter((agent) => list(agent.taskIds).includes(relativeTaskId));
@@ -179,14 +145,6 @@ function ownership(taskId, agents, relativeTaskId) {
       : relativeTaskId && !relatedOwners.some((owner) => owner.id === agent.id) ? "Other subagent" : "Subagent";
     return `${role} · ${agent.name || agent.id || "Unnamed agent"}`;
   }).join("; ") : "Unassigned";
-}
-
-function blockerEntries(tasks, dependencies, taskMap, reports) {
-  return tasks.map((task) => ({
-    task,
-    waiting: waitingFor(task, dependencies, taskMap),
-    reports: reports.filter((report) => report.taskId === task.id && report.status === "blocked"),
-  })).filter((entry) => entry.task.status === "blocked" || entry.waiting.length || entry.reports.length);
 }
 
 function DependencyLink({ id, taskMap, agents, goals, selectedTaskIds, sourceTaskId, reports }) {
@@ -205,10 +163,10 @@ function DependencyLink({ id, taskMap, agents, goals, selectedTaskIds, sourceTas
       ${goal && html`<span>Goal · ${goal.title || goal.id}</span>`}
       ${!selectedTaskIds.has(id) && html`<span class="cross-goal-label">Outside selected work</span>`}
     </div>
-    ${reports.filter((report) => report.taskId === id && report.status === "blocked").map((report, index) => html`
+    ${reports.filter((report) => report.taskId === id && isBlockingReport(report)).map((report, index) => html`
       <div class="blocker-report" key=${report.id || index}>
-        <strong>${agents.find((agent) => agent.id === report.actorId)?.name || report.actorId || "Agent"} · blocked report</strong>
-        <p>${text(report.message) || "This dependency has a reported blocker."}</p>
+        <strong>${agents.find((agent) => agent.id === report.actorId)?.name || report.actorId || "Agent"} · ${blockingReportLabel(report)}</strong>
+        <p>${text(report.message) || `Dependency report status: ${report.status}.`}</p>
         <span class="ck-caption"><${Time} at=${report.at} /></span>
       </div>
     `)}
@@ -217,12 +175,11 @@ function DependencyLink({ id, taskMap, agents, goals, selectedTaskIds, sourceTas
 
 function Blockers({ tasks, dependencies, taskMap, reports, agents, goals, selectedTaskIds, selectedGoal }) {
   const entries = blockerEntries(tasks, dependencies, taskMap, reports);
-  const sessionReports = reports.filter((report) => report.status === "blocked" && !report.taskId
-    && (!report.goalId || !selectedGoal || report.goalId === selectedGoal.id));
+  const sessionReports = sessionBlockerReports(reports, selectedGoal?.id);
   const count = entries.length + sessionReports.length;
   return html`<section class="ck-card section-card blockers-card" aria-labelledby="blockers-heading">
     <div class="section-heading"><h2 id="blockers-heading">Blockers & dependencies</h2><span class="count">${count}</span></div>
-    <p class="ck-caption section-intro">Work coordination · canonical blockers, unresolved dependencies, and latest blocked reports</p>
+    <p class="ck-caption section-intro">Work coordination · canonical blockers, unresolved dependencies, and latest blocked or failed reports</p>
     ${count ? html`<div class="blocker-list">
       ${entries.map(({ task, waiting, reports: taskReports }) => html`<article class="blocker-entry" key=${task.id}>
         <div class="blocker-heading"><h3>${task.title || task.id}</h3>
@@ -235,17 +192,17 @@ function Blockers({ tasks, dependencies, taskMap, reports, agents, goals, select
               selectedTaskIds=${selectedTaskIds} sourceTaskId=${task.id} reports=${reports} />
           `)}</ul>`}
         ${taskReports.map((report, index) => html`<div class="blocker-report" key=${report.id || index}>
-          <strong>${agents.find((agent) => agent.id === report.actorId)?.name || report.actorId || "Agent"} · blocked report</strong>
-          <p>${text(report.message) || "This agent reports a blocker."}</p>
+          <strong>${agents.find((agent) => agent.id === report.actorId)?.name || report.actorId || "Agent"} · ${blockingReportLabel(report)}</strong>
+          <p>${text(report.message) || `Agent report status: ${report.status}.`}</p>
           <span class="ck-caption"><${Time} at=${report.at} /></span>
         </div>`)}
       </article>`)}
       ${sessionReports.map((report, index) => html`<article class="blocker-entry" key=${`session:${report.id || index}`}>
         <div class="blocker-heading"><h3>${agents.find((agent) => agent.id === report.actorId)?.name || report.actorId || "Agent"}</h3>
-          <${Badge} tone="danger">Blocked report</${Badge}>
+          <${Badge} tone="danger">${blockingReportLabel(report)}</${Badge}>
         </div>
         <p class="ck-caption">Session-level report · no task assigned</p>
-        <p class="blocker-report-message">${text(report.message) || "This agent reports a blocker."}</p>
+        <p class="blocker-report-message">${text(report.message) || `Agent report status: ${report.status}.`}</p>
         <span class="ck-caption"><${Time} at=${report.at} /></span>
       </article>`)}
     </div>` : html`<${Empty}>No blockers or unresolved dependencies in the selected work.</${Empty}>`}
@@ -275,7 +232,7 @@ function TaskCard({ task, dependencies, taskMap, reports, agents, goals, selecte
   const parent = task.parentId ? taskMap.get(task.parentId) : null;
   const issues = list(task.issues);
   const taskReports = reports.filter((report) => report.taskId === task.id);
-  const liveBlockers = taskReports.filter((report) => report.status === "blocked");
+  const liveBlockers = taskReports.filter(isBlockingReport);
   const owners = agents.filter((agent) => list(agent.taskIds).includes(task.id));
   const actorName = (id) => agents.find((agent) => agent.id === id)?.name || id || "Agent";
   return html`
@@ -313,7 +270,7 @@ function TaskCard({ task, dependencies, taskMap, reports, agents, goals, selecte
           ${rollup.incomplete && html`<p class="ck-caption">${rollup.fromBackend ? "Backend rollup · some child details unavailable" : "Child snapshot incomplete · percentage unavailable"}</p>`}
         </div>`}
         ${liveBlockers.length > 0 && html`<p class="task-note tone-danger">
-          Reported blocker: ${text(liveBlockers[0].message) || "An agent reports this task is blocked."}
+          ${blockingReportLabel(liveBlockers[0])}: ${text(liveBlockers[0].message) || `Agent report status: ${liveBlockers[0].status}.`}
         </p>`}
         ${issues.length > 0 && html`<p class="task-note tone-attention">${text(issues[0])}</p>`}
       </summary>
@@ -371,7 +328,7 @@ function Team({ agents, reports }) {
     <div class="roster">${agents.map((agent) => {
       const primary = isPrimary(agent);
       const actorReports = reports.filter((report) => report.actorId === agent.id);
-      const blocked = actorReports.filter((report) => report.status === "blocked");
+      const blocked = actorReports.filter(isBlockingReport);
       const note = blocked[0]?.message || agent.report?.message || agent.report;
       return html`<details class="agent-row" key=${agent.id}>
         <summary>
@@ -379,7 +336,7 @@ function Team({ agents, reports }) {
           <span class="agent-identity"><strong>${agent.name || agent.id || "Unnamed agent"}</strong>
             <span class="ck-caption">${primary ? "Primary agent" : label(agent.role || "subagent")}</span>
           </span>
-          <${Badge} tone=${reportTone(blocked.length ? "blocked" : agent.state)}>${blocked.length ? "Blocked report" : label(agent.state || "unknown")}</${Badge}>
+          <${Badge} tone=${reportTone(blocked.length ? blocked[0].status : agent.state)}>${blocked.length ? blockingReportLabel(blocked[0]) : label(agent.state || "unknown")}</${Badge}>
         </summary>
         <div class="agent-detail">
           ${agent.state === "result_ready" && html`<p class="tone-attention">Result ready · awaiting primary acceptance.</p>`}
@@ -492,7 +449,7 @@ function App({ state, invoke, connected }) {
   const ready = leaves.filter((task) => task.status === "pending"
     && waitingFor(task, dependencies, taskMap).length === 0
     && list(task.issues).length === 0
-    && !reports.some((report) => report.taskId === task.id && report.status === "blocked"));
+    && !reports.some((report) => report.taskId === task.id && isBlockingReport(report)));
   const historical = selectedGoal && model.activeGoalId && selectedGoal.id !== model.activeGoalId;
   const history = goals.filter((goal) => goal.id !== model.activeGoalId);
   const loading = !state || source.status === "loading";
