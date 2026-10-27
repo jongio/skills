@@ -136,6 +136,19 @@ try {
     assert.equal(c2.connected, false);
     assert.equal(only.length, 1);
   });
+
+  await test("protected canvases carry the capability on state, SSE, and action requests", async () => {
+    const urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      return { json: async () => ({ ok: true, result: "accepted" }) };
+    };
+    const protectedClient = connectCanvas({ EventSourceImpl: FakeES, capability: "test-capability" });
+    await flush();
+    assert.equal(FakeES.last.url, "./events?capability=test-capability");
+    assert.equal(await protectedClient.invoke("refresh", {}), "accepted");
+    assert.deepEqual(urls, ["./state?capability=test-capability", "./action?capability=test-capability"]);
+  });
 } finally {
   globalThis.fetch = realFetch;
 }

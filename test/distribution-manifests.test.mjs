@@ -624,8 +624,8 @@ test("portable package cannot gain implicit executable components", async () => 
     .sort();
   assert.deepEqual(
     extEntries,
-    ["pr-statusline"],
-    "only the unified pr-statusline entry point may be exposed under com.github.copilot/extensions",
+    ["pr-statusline", "session-progress"],
+    "only the reviewed statusline and session-progress entry points may be exposed under com.github.copilot/extensions",
   );
   for (const extName of ["issue-statusline", "pr-statusline", "subagent-statusline", "worktree-statusline"]) {
     const testDir = path.join(root, "extensions", extName, "test");
@@ -807,6 +807,10 @@ test("skill CI detection selects lockfiles, site edits, shared changes, and both
     ["pull_request", ["skills/dns-doctor/.npmrc", "skills/dns-doctor/test/cache.test.mjs"], [all[0]]],
     ["pull_request", ["skills/dns-doctor/scripts/cache.mjs", "skills/git-tidy/references/cleanup.md"], all.slice(0, 2)],
     ["pull_request", ["skills/other/evals/other/nested/case.yml"], [all[2]]],
+    ["pull_request", ["skills/other/runtime/canvas.mjs"], [all[2]]],
+    ["pull_request", ["skills/other/com.github.copilot/extensions/session-progress/extension.mjs"], [all[2]]],
+    ["pull_request", ["com.github.copilot/extensions/session-progress/extension.mjs"], ["skills/create-session-board-canvas"]],
+    ["pull_request", ["skills/create-canvas-app/kit/server.mjs"], ["skills/create-canvas-app", "skills/create-session-board-canvas"]],
     ["pull_request", ["docs/specs/git-tidy/test-plan.md"], [all[1]]],
     ...["site/src/components/Card.astro", "site/src/styles/global.css", "site/scripts/check-performance.mjs",
       "site/astro.config.mjs", "site/package-lock.json", "docs/unrelated.md"]

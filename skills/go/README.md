@@ -5,7 +5,7 @@ Plan, test, and implement the current context, then hand verified changes to pr 
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill doc-doctor
+npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill doc-doctor --skill create-session-board-canvas
 ```
 
 Invoke `/go <context>` with an issue, conversation, code, or error.
@@ -14,6 +14,13 @@ cross-model `rubber-duck` sub-agent review using a different model family than
 the active model when sub-agent model selection is available); `pr` reuses
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
 Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
+
+Each invocation opens or reuses the session progress canvas: kanban, actual
+primary/subagent team, canonical task percentage, blockers, and delivery status.
+One shared runtime bundle keeps session data isolated and retains goal history.
+Agents report work and results; primary verifies before marking tasks done.
+Missing canvas support uses a disclosed text fallback and does not block `go`.
+The same board continues through the `pr` handoff, including approval waits.
 
 Scope follows affected user journeys and their shared behavior owner, not just
 edited files. Test Doctor checks equivalent entry points against one intended

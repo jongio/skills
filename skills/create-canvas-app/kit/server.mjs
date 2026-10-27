@@ -17,6 +17,7 @@
 //     actions and UI POST /action calls. One source of truth.
 
 import { createServer } from "node:http";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, normalize, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,6 +58,7 @@ export class CanvasKitError extends Error {
  * @param {number} [config.syncIntervalMs]  poll cadence for syncState; only polled while a domain has >=1 connected viewer
  * @param {Record<string,{description?:string,inputSchema?:object,handler:Function}>} config.actions
  * @param {object} [config.stateSchema]  optional JSON-Schema-subset for the durable state; when set, a mutation that violates it is rolled back and fails (500)
+ * @param {boolean} [config.requireCapability]  protect data endpoints with a per-instance capability and Host/Origin checks
  * @param {string} config.assetsDir  absolute path to the canvas web/ folder
  * @param {(ctx:object,state:any)=>string} [config.statusLine]
  */
@@ -346,6 +348,24 @@ export function createCanvasRuntime(config) {
       const path = url.pathname;
       const inst = instances.get(instanceId);
       const domainId = inst?.domainId ?? "default";
+      if (config.requireCapability) {
+        const expected = new URL(inst.url);
+        const supplied = url.searchParams.get("capability") || "";
+        const sensitive = ["/state", "/events", "/action"].includes(path);
+        const suppliedBytes = Buffer.from(supplied);
+        const expectedBytes = Buffer.from(inst.capability);
+        const tokenMatches = suppliedBytes.length === expectedBytes.length &&
+          timingSafeEqual(suppliedBytes, expectedBytes);
+        res.setHeader("Referrer-Policy", "no-referrer");
+        res.setHeader("Cache-Control", "no-store");
+        if (req.headers.host !== expected.host ||
+            (req.headers.origin && req.headers.origin !== expected.origin) ||
+            (sensitive && !tokenMatches)) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, code: "forbidden", message: "Canvas capability required" }));
+          return;
+        }
+      }
 
       // GET /state — current snapshot
       if (req.method === "GET" && path === "/state") {
@@ -450,11 +470,12 @@ export function createCanvasRuntime(config) {
       inst.domainId = domainId; // re-target if reopened with new input
     } else {
       const server = createServer();
-      inst = { server, url: "", domainId, clients: new Set() };
+      inst = { server, url: "", domainId, clients: new Set(), capability: config.requireCapability ? randomBytes(32).toString("hex") : null };
       instances.set(instanceId, inst);
       server.on("request", makeRequestHandler(instanceId));
       const port = await listen(server);
       inst.url = `http://127.0.0.1:${port}/`;
+      if (inst.capability) inst.url += `?capability=${inst.capability}`;
     }
 
     const d = await getDomain(domainId, ctx);

@@ -3,14 +3,14 @@ name: pr
 description: >-
   **WORKFLOW SKILL** - A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge. USE FOR: /pr, PR checklist, prepare a PR, submit a PR, monitor a PR, address PR feedback, merge a PR. DO NOT USE FOR: non-PR git cleanup (use git-tidy) or standalone test-only audits (use test-doctor).
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # PR Workflow
 
 Run this end-to-end checklist for the given context, current directory, or worktree:
 
-Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits.
+Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits. When `go` supplies board/goal identity, continue the optional [session progress reporting](references/session-progress.md) through delivery; missing canvas support never replaces or blocks the delivery gates.
 
 For long-running work, launch `scripts/pr-watch-daemon.mjs` in an async background shell (never a 1-minute recurring prompt schedule that bloats context) and report the stage, elapsed time, last meaningful result, and next event at least every 60 seconds while execution is active, using host notifications or scheduling rather than tight polling. Distinguish running commands, external review/CI waits, and blocked approval/input. When blocked, state the exact decision needed and that execution is paused; resume only after that decision. Do not describe wall-clock time as active execution or invent an ETA. If a stage exceeds its documented runtime budget or stalls without progress, inspect the bounded stage evidence and surface the blocker; do not restart expensive checks, weaken gates, or redesign the workflow without authorization.
 
