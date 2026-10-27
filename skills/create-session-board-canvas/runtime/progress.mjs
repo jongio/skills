@@ -143,9 +143,9 @@ export async function createProgressService({ sessionId, readSources, store, onC
       if (!Array.isArray(source?.rows) || !Array.isArray(source?.dependencies) || !source.plan) throw new Error("Session sources unavailable");
       if (!source.rows.length && state.tasks.length && !confirmEmpty) throw new Error("Empty task read is ambiguous; primary must confirm task removal");
       Object.assign(next, projectTasks(source.rows, source.dependencies), { plan: source.plan });
+      const active = next.goals.find((goal) => goal.id === next.activeGoalId);
+      const canonicalIds = new Set(next.tasks.map((task) => task.id));
       if (confirmEmpty) {
-        const active = next.goals.find((goal) => goal.id === next.activeGoalId);
-        const canonicalIds = new Set(next.tasks.map((task) => task.id));
         const removed = new Set(active?.taskIds.filter((id) => !canonicalIds.has(id)) || []);
         if (active) active.taskIds = active.taskIds.filter((id) => !removed.has(id));
         next.hierarchy = next.hierarchy.filter((entry) => !removed.has(entry.parentId))
@@ -158,7 +158,12 @@ export async function createProgressService({ sessionId, readSources, store, onC
         const fresh = new Map(next.tasks.filter((task) => goal.taskIds.includes(task.id)).map((task) => [task.id, task]));
         goal.tasks = goal.taskIds.map((id) => fresh.get(id) || goal.tasks.find((task) => task.id === id)).filter(Boolean);
       }
-      next.source = { status: "live", error: null, lastRefresh: clock() };
+      const missing = active?.taskIds.filter((id) => !canonicalIds.has(id)) || [];
+      next.source = {
+        status: missing.length ? "stale" : "live",
+        error: missing.length ? `Incomplete task read: ${missing.length} active-goal task${missing.length === 1 ? "" : "s"} missing; cached rows retained until primary confirms removal` : null,
+        lastRefresh: clock(),
+      };
     } catch (error) {
       next.source = { ...next.source, status: "stale", error: String(error.message).slice(0, 1000) };
     }

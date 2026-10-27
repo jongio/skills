@@ -79,8 +79,11 @@ test("goal history survives plan replacement without duplicating task ownership"
   await goal(service, "first", ["a"]);
   setSource({ plan: { exists: true, content: "Next goal" }, rows: [task("b")], dependencies: [] });
   await service.refresh();
+  assert.equal(service.snapshot().source.status, "stale");
   await goal(service, "second", ["b"]);
+  await service.refresh();
   const state = service.snapshot();
+  assert.equal(state.source.status, "live");
   assert.equal(state.goals[0].tasks[0].status, "done");
   assert.equal(state.goals[1].tasks[0].status, "pending");
   assert.equal(state.metrics.percent, 0);
@@ -100,6 +103,30 @@ test("unexplained empty reads and source failures preserve the last good tasks",
   setSource({ plan: { exists: false }, rows: [], dependencies: [] });
   await service.update({ action: "refresh", confirmEmpty: true }, primary);
   assert.equal(service.snapshot().tasks.length, 0);
+});
+
+test("partial active-goal reads warn until missing rows return or removal is confirmed", async () => {
+  const { service, setSource } = await fixture([task("a", "done"), task("b")]);
+  await goal(service);
+  const partial = { plan: { exists: true, content: "Approved plan" }, rows: [task("a", "done")], dependencies: [] };
+  setSource(partial);
+  await service.refresh();
+  const retained = service.snapshot();
+  assert.equal(retained.source.status, "stale");
+  assert.match(retained.source.error, /incomplete.*1.*task/i);
+  assert.deepEqual(retained.goals[0].tasks.map((entry) => entry.id), ["a", "b"]);
+  assert.deepEqual(retained.metrics, { done: 1, total: 2, percent: 50 });
+  setSource({ ...partial, rows: [task("a", "done"), task("b")] });
+  await service.refresh();
+  assert.equal(service.snapshot().source.status, "live");
+  assert.equal(service.snapshot().source.error, null);
+  setSource(partial);
+  await service.refresh();
+  await service.update({ action: "refresh", confirmEmpty: true }, primary);
+  const confirmed = service.snapshot();
+  assert.equal(confirmed.source.status, "live");
+  assert.deepEqual(confirmed.goals[0].taskIds, ["a"]);
+  assert.deepEqual(confirmed.metrics, { done: 1, total: 1, percent: 100 });
 });
 
 test("failed persistence rolls back updates and resume preserves isolated metadata", async () => {
