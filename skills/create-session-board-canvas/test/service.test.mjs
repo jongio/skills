@@ -129,6 +129,33 @@ test("partial active-goal reads warn until missing rows return or removal is con
   assert.deepEqual(confirmed.metrics, { done: 1, total: 1, percent: 100 });
 });
 
+test("retained active-goal tasks can clear operator reports during partial reads", async () => {
+  const { service, setSource } = await fixture([task("a", "done"), task("b")]);
+  await goal(service);
+  await service.observe({ type: "subagent.started", agentId: "worker", data: {} });
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["b"] }, primary);
+  await service.update({ action: "report", taskId: "b", updateId: "request",
+    sequence: 1, status: "blocked", message: "Need access", requiresOperator: true }, worker);
+  setSource({ plan: { exists: true }, rows: [task("a", "done")], dependencies: [] });
+  await service.refresh();
+  await service.update({ action: "report", taskId: "b", updateId: "resolved",
+    sequence: 2, status: "working", message: "Access restored" }, worker);
+  const state = service.snapshot();
+  assert.equal(state.source.status, "stale");
+  assert.ok(state.tasks.some((entry) => entry.id === "b"));
+  assert.equal(state.reports.find((report) => report.taskId === "b").requiresOperator, false);
+  assert.deepEqual(state.metrics, { done: 1, total: 2, percent: 50 });
+  await assert.rejects(service.update({ action: "report", taskId: "b", updateId: "old",
+    sequence: 1, status: "blocked", message: "Delayed old request" }, worker), /Stale/);
+  await assert.rejects(service.update({ action: "report", taskId: "b", updateId: "wrong-owner",
+    sequence: 1, status: "working", message: "Claim" }, { id: "other", primary: false }), /assigned/i);
+  await assert.rejects(service.update({ action: "report", taskId: "unknown", updateId: "unknown",
+    sequence: 1, status: "working", message: "Unknown task" }, worker), /Unknown/i);
+  await service.update({ action: "refresh", confirmEmpty: true }, primary);
+  await assert.rejects(service.update({ action: "report", taskId: "b", updateId: "removed",
+    sequence: 3, status: "working", message: "Confirmed removed task" }, worker), /Unknown/i);
+});
+
 test("failed persistence rolls back updates and resume preserves isolated metadata", async () => {
   let value;
   let fail = false;

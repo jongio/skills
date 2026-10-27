@@ -69,8 +69,9 @@ the reporting tool: primary relays their returned reports with provenance.
 
 Source failures/ambiguous empty reads retain the last snapshot and show stale
 state. Partial reads retain missing active-goal rows with a stale warning until
-the rows return or primary confirms removal. Archived-goal omissions do not
-make the current goal stale. Refresh or reconnect rehydrates canonical sources. Do not confirm an
+the rows return or primary confirms removal; retained tasks still accept reports
+that clear operator requests. Archived-goal omissions do not make the current
+goal stale. Refresh or reconnect rehydrates canonical sources. Do not confirm an
 empty read without independently verifying canonical task removal.
 
 The session provider uses a local OS-owned IPC lease so duplicate loaders do

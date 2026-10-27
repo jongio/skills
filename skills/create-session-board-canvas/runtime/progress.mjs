@@ -145,6 +145,10 @@ export async function createProgressService({ sessionId, readSources, store, onC
       Object.assign(next, projectTasks(source.rows, source.dependencies), { plan: source.plan });
       const active = next.goals.find((goal) => goal.id === next.activeGoalId);
       const canonicalIds = new Set(next.tasks.map((task) => task.id));
+      if (!confirmEmpty && active) {
+        // Retained tasks stay reportable without making the source read complete.
+        next.tasks.push(...active.tasks.filter((task) => active.taskIds.includes(task.id) && !canonicalIds.has(task.id)));
+      }
       if (confirmEmpty) {
         const removed = new Set(active?.taskIds.filter((id) => !canonicalIds.has(id)) || []);
         if (active) active.taskIds = active.taskIds.filter((id) => !removed.has(id));
