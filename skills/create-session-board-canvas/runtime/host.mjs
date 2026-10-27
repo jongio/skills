@@ -36,6 +36,25 @@ export function actorFor(invocation, sessionId) {
   return invocation.agentId ? { id: invocation.agentId, primary: false } : { id: "primary", primary: true };
 }
 
+export function createProgressEventGate(handle) {
+  const pending = [];
+  let live = false;
+  let draining;
+  return {
+    push(event) {
+      if (!live) pending.push(event);
+      else return handle(event);
+    },
+    start() {
+      draining ||= (async () => {
+        while (pending.length) await handle(pending.shift());
+        live = true;
+      })();
+      return draining;
+    },
+  };
+}
+
 export async function readSessionSources(session, timeoutMs = 10000) {
   let timer;
   try {

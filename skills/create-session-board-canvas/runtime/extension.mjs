@@ -5,7 +5,7 @@ import { createProgressCanvas } from "./canvas.mjs";
 import { createCanvasRuntime } from "./canvas-kit/server.mjs";
 import { workspaceStore, sessionStore } from "./canvas-kit/storage.mjs";
 import { validate } from "./canvas-kit/validate.mjs";
-import { actorFor, progressInputSchema, readSessionSources } from "./host.mjs";
+import { actorFor, createProgressEventGate, progressInputSchema, readSessionSources } from "./host.mjs";
 import { acquireProvider } from "./provider.mjs";
 import { trackingResult } from "./references.mjs";
 
@@ -76,7 +76,6 @@ if (lease) {
   });
   let stopped = false;
   let refreshTimer;
-  const pending = [];
   const handle = (event) => {
     if (stopped) return;
     if (event.type === "session.plan_changed" || event.type === "session.todos_changed" ||
@@ -85,13 +84,12 @@ if (lease) {
       refreshTimer = setTimeout(() => service.refresh().catch(() => {}), 100);
       refreshTimer.unref?.();
     } else {
-      service.observe(event).catch(() => {});
+      return service.observe(event).catch(() => {});
     }
   };
+  const events = createProgressEventGate(handle);
   const unsubscribe = session.on((event) => {
-    if (!service) {
-      if (isOperatorEvent(event.type) || /^(subagent\.|session\.(?:plan_changed|todos_changed|resume))/.test(event.type)) pending.push(event);
-    } else handle(event);
+    if (isOperatorEvent(event.type) || /^(subagent\.|session\.(?:plan_changed|todos_changed|resume|compaction_complete))/.test(event.type)) events.push(event);
   });
   const initializing = (async () => {
     const store = session.workspacePath
@@ -113,7 +111,7 @@ if (lease) {
     } catch (error) {
       await session.log(`Session progress team history unavailable: ${String(error.message).slice(0, 300)}`);
     }
-    for (const event of pending.splice(0)) handle(event);
+    await events.start();
   })();
   void initializing.then(resolveReady, rejectReady);
   try { await ready; }
