@@ -99,7 +99,7 @@ export function selectDeliverySkill({
 export function defaultMaxWaitSec(env = process.env) {
   const raw = Number.parseInt(String(env?.COPILOT_TASK_WAIT_TIMEOUT_SECONDS ?? ""), 10);
   const hostWaitSec = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 600) : 600;
-  return hostWaitSec > 60 ? hostWaitSec - 60 : Math.max(5, Math.floor(hostWaitSec / 2));
+  return hostWaitSec > 60 ? hostWaitSec - 60 : Math.max(0.5, hostWaitSec / 2);
 }
 
 export function parseArgs(argv, env = process.env) {
@@ -228,8 +228,9 @@ export function parseArgs(argv, env = process.env) {
     } else if (token === "--max-polls" && argv[i + 1]) {
       args.maxPolls = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
     } else if (token === "--max-wait-sec" && argv[i + 1]) {
-      const parsedWait = Number.parseInt(argv[++i], 10);
-      if (!Number.isSafeInteger(parsedWait) || parsedWait < 0) {
+      const rawWait = argv[++i];
+      const parsedWait = Number(rawWait);
+      if (!/^\d+$/.test(rawWait) || !Number.isSafeInteger(parsedWait)) {
         throw new Error(`Invalid --max-wait-sec "${parsedWait}". Expected a non-negative integer.`);
       }
       args.maxWaitSec = parsedWait;
@@ -384,15 +385,19 @@ export function applySetupConfig(args, existingConfig) {
 }
 
 function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
-  const results = [];
-  for (let page = 1; ; page += 1) {
+  state.metrics.discoveryProgress ??= {};
+  const progress = state.metrics.discoveryProgress[baseEndpoint] ??= { page: 1, results: [], complete: false };
+  const results = progress.results;
+  if (progress.complete) return results;
+  for (let page = progress.page; ; page += 1) {
     const res = ghApiWithEtag(`${baseEndpoint}&page=${page}`, state, execFn);
+    if (res.chunkTimedOut) {
+      state.chunkTimedOut = true;
+      return results;
+    }
     if (res.rateLimited) {
       if (state) {
         state.rateLimited = true;
-      }
-      if (Array.isArray(res.data)) {
-        results.push(...res.data);
       }
       break;
     }
@@ -400,10 +405,13 @@ function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultExecGh) {
       throw new Error(res.error || `Repository discovery failed for ${baseEndpoint}&page=${page}`);
     }
     if (res.data.length === 0) {
+      progress.complete = true;
       break;
     }
     results.push(...res.data);
+    progress.page = page + 1;
     if (res.data.length < 100) {
+      progress.complete = true;
       break;
     }
   }
@@ -442,7 +450,7 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
         byName.set(normalizeRepoSlug(r.full_name), r);
       }
     }
-    if (effectiveVisibility !== "private" && !state?.rateLimited) {
+    if (effectiveVisibility !== "private" && !state?.rateLimited && !state?.chunkTimedOut) {
       const publicOwnerRepos = fetchPaginatedRepos(
         `users/${encodeURIComponent(owner)}/repos?type=all&per_page=100`,
         state,
@@ -462,6 +470,7 @@ export function discoverOwnerRepos(owner, visibility = "all", state, execFn = de
     rawRepos = [...byName.values()];
   }
 
+  if (!state?.rateLimited && !state?.chunkTimedOut) delete state.metrics.discoveryProgress;
   return rawRepos
     .filter((r) => {
       if (!r || r.archived || r.disabled || !isValidRepoSlug(r.full_name)) {
@@ -897,6 +906,9 @@ export function ghApiWithEtag(endpoint, state, execFn = defaultExecGh) {
   }
   state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   const result = execFn(ghArgs);
+  if (result.chunkTimedOut) {
+    return { data: null, chunkTimedOut: true };
+  }
   const parsed = parseHttpResponse(result.stdout || "");
   if (parsed.rateLimitRemaining !== null) {
     state.metrics.rateLimitRemaining = parsed.rateLimitRemaining;
@@ -1040,6 +1052,20 @@ export function parseGhApiArgs(ghArgs) {
 
 let keepAliveWorkerState = null;
 let nextWorkerReqId = 0;
+let activeChunkDeadlineMs = Infinity;
+
+function chunkExec(execFn, deadlineMs) {
+  return (ghArgs) => {
+    if (Date.now() >= deadlineMs) return { ok: false, chunkTimedOut: true };
+    const previousDeadline = activeChunkDeadlineMs;
+    activeChunkDeadlineMs = Math.min(previousDeadline, deadlineMs);
+    try {
+      return execFn(ghArgs);
+    } finally {
+      activeChunkDeadlineMs = previousDeadline;
+    }
+  };
+}
 
 function resolveGhTokenOnce() {
   const envToken = (process.env.GH_TOKEN || process.env.GITHUB_TOKEN || "").trim();
@@ -1050,7 +1076,7 @@ function resolveGhTokenOnce() {
     return execFileSync("gh", ["auth", "token"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5000,
+      timeout: Math.max(1, Math.min(5000, activeChunkDeadlineMs - Date.now())),
     }).trim();
   } catch {
     return "";
@@ -1079,7 +1105,7 @@ function getKeepAliveWorker() {
           replyPort = msg.initPort;
           return;
         }
-        const { reqId, token, req, signalBuf } = msg;
+        const { reqId, token, req, signalBuf, timeoutMs } = msg;
         const signal = new Int32Array(signalBuf);
         try {
           const res = await fetch(req.url, {
@@ -1092,7 +1118,7 @@ function getKeepAliveWorker() {
               ...req.headers,
             },
             body: req.body,
-            signal: AbortSignal.timeout(28000),
+            signal: AbortSignal.timeout(Math.max(1, timeoutMs - 20)),
           });
           const bodyText = await res.text();
           let stdout = bodyText;
@@ -1136,6 +1162,7 @@ function getKeepAliveWorker() {
 }
 
 function defaultExecGh(ghArgs) {
+  if (Date.now() >= activeChunkDeadlineMs) return { ok: false, chunkTimedOut: true };
   const parsedReq = parseGhApiArgs(ghArgs);
   if (parsedReq) {
     const ka = getKeepAliveWorker();
@@ -1143,13 +1170,15 @@ function defaultExecGh(ghArgs) {
       const reqId = (nextWorkerReqId += 1);
       const signalBuf = new SharedArrayBuffer(4);
       const signal = new Int32Array(signalBuf);
+      const timeoutMs = Math.max(1, Math.min(30000, activeChunkDeadlineMs - Date.now()));
       ka.worker.postMessage({
         reqId,
         token: ka.token,
         req: parsedReq,
         signalBuf,
+        timeoutMs,
       });
-      const waitRes = Atomics.wait(signal, 0, 0, 30000);
+      const waitRes = Atomics.wait(signal, 0, 0, timeoutMs);
       while (true) {
         const msg = receiveMessageOnPort(ka.port1);
         if (!msg) break;
@@ -1168,20 +1197,22 @@ function defaultExecGh(ghArgs) {
       }
     }
   }
+  if (Date.now() >= activeChunkDeadlineMs) return { ok: false, chunkTimedOut: true };
   const res = spawnSync("gh", ghArgs, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
-    timeout: 30000,
+    timeout: Math.max(1, Math.min(30000, activeChunkDeadlineMs - Date.now())),
   });
   return {
     ok: res.status === 0,
     stdout: res.stdout || "",
     stderr: res.stderr || (res.error ? res.error.message : ""),
+    chunkTimedOut: Date.now() >= activeChunkDeadlineMs && res.status !== 0,
   };
 }
 
-export function sendFailureAlert(title, message) {
-  if (process.env.CI_HOUND_NO_ALERT === "1") {
+export function sendFailureAlert(title, message, deadlineMs = Infinity) {
+  if (process.env.CI_HOUND_NO_ALERT === "1" || Date.now() >= deadlineMs) {
     return;
   }
   if (process.platform === "win32") {
@@ -1205,17 +1236,17 @@ export function sendFailureAlert(title, message) {
     `;
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", psScript], {
       stdio: "ignore",
-      timeout: 6000,
+      timeout: Math.max(1, Math.min(6000, deadlineMs - Date.now())),
     });
   } else if (process.platform === "darwin") {
     spawnSync("osascript", ["-e", `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)} sound name "Basso"`], {
       stdio: "ignore",
-      timeout: 4000,
+      timeout: Math.max(1, Math.min(4000, deadlineMs - Date.now())),
     });
   } else {
     spawnSync("notify-send", ["-u", "critical", title, message], {
       stdio: "ignore",
-      timeout: 4000,
+      timeout: Math.max(1, Math.min(4000, deadlineMs - Date.now())),
     });
   }
 }
@@ -1476,6 +1507,7 @@ export function computeCiHoundPhase({
 }
 
 export function evaluatePollTick(args, state, execFn = defaultExecGh) {
+  execFn = chunkExec(execFn, args.chunkDeadlineMs ?? Infinity);
   state.repo = args.repo;
   state.branch = args.branch;
   const nowMs = Date.now();
@@ -1851,7 +1883,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         const firstFailed = failedJobs[0];
         sendFailureAlert(
           `${args.repo} ${args.branch} CI Failed`,
-          `${run.name} -> ${firstFailed.name} (${(run.head_sha || "").slice(0, 8)})`
+          `${run.name} -> ${firstFailed.name} (${(run.head_sha || "").slice(0, 8)})`,
+          args.chunkDeadlineMs
         );
         events.push({
           type: "JOB_FAILED",
@@ -1883,7 +1916,8 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
         }
         sendFailureAlert(
           `${args.repo} ${args.branch} Workflow Failed`,
-          `${run.name} (${(run.head_sha || "").slice(0, 8)}) failed: ${run.conclusion}`
+          `${run.name} (${(run.head_sha || "").slice(0, 8)}) failed: ${run.conclusion}`,
+          args.chunkDeadlineMs
         );
         events.push({
           type: "WORKFLOW_FAILED",
@@ -1969,7 +2003,7 @@ export function evaluatePollTick(args, state, execFn = defaultExecGh) {
     sha: displaySha,
     activeRuns: activeRunProgress,
   });
-  const statusPayload = tickRateLimited
+  const statusPayload = tickRateLimited || tickChunkTimedOut
     ? null
     : {
         timestamp: state.metrics.lastPollAt,
@@ -2005,9 +2039,22 @@ export function stateFileForRepo(repo, args) {
 }
 
 export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) {
+  execFn = chunkExec(execFn, args.chunkDeadlineMs ?? Infinity);
   const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
   const discoveryState = loadState(discoveryStateFile);
+  discoveryState.chunkTimedOut = false;
   const nowMs = Date.now();
+  if (discoveryState.metrics.repoCooldownUntilMs > nowMs) {
+    const remainingSec = Math.max(1, Math.ceil((discoveryState.metrics.repoCooldownUntilMs - nowMs) / 1000));
+    return {
+      repos: discoveryState.metrics.targetRepos || [],
+      events: [{ type: "RATE_LIMITED", retryAfterSec: remainingSec }],
+      statuses: [],
+      reports: [],
+      rateLimited: true,
+      nextIntervalSec: remainingSec,
+    };
+  }
   let targetRepos = [];
   if (
     Number.isFinite(discoveryState.metrics?.cooldownUntilMs) &&
@@ -2042,8 +2089,9 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       targetRepos.push(qualifiedRepo);
     }
   }
-  if (args.owner || config?.owner) {
+  if (discoveryState.chunkTimedOut) {
     saveState(discoveryStateFile, discoveryState);
+    return { repos: targetRepos, events: [], statuses: [], reports: [], chunkTimedOut: true, nextIntervalSec: args.idleIntervalSec };
   }
   if (args.explicitStateFile && targetRepos.length > 1) {
     throw new Error("Cannot use a single --state-file when monitoring multiple repositories.");
@@ -2066,6 +2114,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const statuses = [];
   let totalActiveMainRuns = 0;
   let anyRateLimited = Boolean(discoveryState.rateLimited);
+  let chunkTimedOut = false;
   let minRateLimitRemaining = Number.isFinite(discoveryState.metrics?.rateLimitRemaining)
     ? discoveryState.metrics.rateLimitRemaining
     : null;
@@ -2108,7 +2157,14 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     });
   } else {
     const pendingAllGreenEvents = [];
-    for (const repo of targetRepos) {
+    const startIndex = Math.max(0, targetRepos.indexOf(discoveryState.metrics.nextRepo));
+    const orderedRepos = [...targetRepos.slice(startIndex), ...targetRepos.slice(0, startIndex)];
+    for (const repo of orderedRepos) {
+      if (Date.now() >= (args.chunkDeadlineMs ?? Infinity)) {
+        discoveryState.metrics.nextRepo = repo;
+        chunkTimedOut = true;
+        break;
+      }
       const repoStateFile = stateFileForRepo(repo, args);
       const repoState = loadState(repoStateFile);
       const qualifiedIds = args.watchRunsByRepo?.[repo] || [];
@@ -2132,6 +2188,12 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
           : args.wakeOnAllGreen,
       };
       const tick = evaluatePollTick(repoArgs, repoState, execFn);
+      discoveryState.metrics.nextRepo = targetRepos[(targetRepos.indexOf(repo) + 1) % targetRepos.length];
+      if (tick.status) {
+        tick.status.previousPhase = repoState.metrics.lastPhase || "";
+        repoState.metrics.lastPhase = tick.status.phase;
+        repoState.metrics.lastStatus = tick.status;
+      }
       saveState(repoStateFile, repoState);
       for (const ev of tick.events) {
         if (ev.type === "ALL_GREEN" && targetRepos.length > 1) {
@@ -2142,6 +2204,8 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       }
       if (tick.status) {
         statuses.push(tick.status);
+      } else if (repoState.metrics.lastStatus) {
+        statuses.push({ ...repoState.metrics.lastStatus, previousPhase: repoState.metrics.lastPhase });
       }
       totalActiveMainRuns += Math.max(
         tick.activeMainRuns,
@@ -2150,6 +2214,10 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       );
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
+      if (tick.chunkTimedOut) {
+        chunkTimedOut = true;
+        break;
+      }
       if (tick.rateLimited) {
         anyRateLimited = true;
         break;
@@ -2158,6 +2226,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     if (
       targetRepos.length > 1 &&
       !anyRateLimited &&
+      !chunkTimedOut &&
       totalActiveMainRuns === 0 &&
       allEvents.length === 0 &&
       pendingAllGreenEvents.length === targetRepos.length
@@ -2171,6 +2240,9 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     rateLimitReset: maxRateLimitReset,
     retryAfterSec: maxRetryAfterSec,
   });
+  discoveryState.metrics.targetRepos = targetRepos;
+  if (anyRateLimited) discoveryState.metrics.repoCooldownUntilMs = Date.now() + nextIntervalSec * 1000;
+  saveState(discoveryStateFile, discoveryState);
 
   return {
     repos: targetRepos,
@@ -2180,6 +2252,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     nextIntervalSec,
     statuses,
     reports,
+    ...(chunkTimedOut ? { chunkTimedOut: true } : {}),
   };
 }
 
@@ -2187,8 +2260,14 @@ async function sleepSeconds(sec) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, sec * 1000));
 }
 
-export async function runCli(argv = process.argv.slice(2)) {
+export async function runCli(argv = process.argv.slice(2), services = {}) {
   const args = parseArgs(argv);
+  const execFn = services.execFn || defaultExecGh;
+  const sleep = services.sleep || sleepSeconds;
+  const watchStartedAtMs = Date.now();
+  if (args.mode === "watch" && args.maxWaitSec > 0) {
+    args.chunkDeadlineMs = watchStartedAtMs + args.maxWaitSec * 1000;
+  }
   const existingConfig = loadConfig(args.configFile);
 
   if (args.mode === "setup") {
@@ -2222,7 +2301,7 @@ export async function runCli(argv = process.argv.slice(2)) {
   const hasOwnerScope = Boolean(args.owner || existingConfig?.owner);
 
   if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
-    const multi = evaluateMultiRepoPollTick(args, existingConfig);
+    const multi = evaluateMultiRepoPollTick(args, existingConfig, execFn);
     if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
       console.error(
         "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
@@ -2252,13 +2331,12 @@ export async function runCli(argv = process.argv.slice(2)) {
 
   const lastPhaseByRepo = new Map();
   const lastSummaryByRepo = new Map();
-  const watchStartedAtMs = Date.now();
   let lastEmitMs = 0;
   let polls = 0;
   while (true) {
     polls += 1;
-    const multi = evaluateMultiRepoPollTick(args, existingConfig);
-    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
+    const multi = evaluateMultiRepoPollTick(args, existingConfig, execFn);
+    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited && !multi.chunkTimedOut) {
       console.error(
         "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
       );
@@ -2272,7 +2350,7 @@ export async function runCli(argv = process.argv.slice(2)) {
     const phaseChanges = [];
     let summaryChanged = false;
     for (const st of multi.statuses || []) {
-      const prevPhase = lastPhaseByRepo.get(st.repo);
+      const prevPhase = lastPhaseByRepo.get(st.repo) || st.previousPhase;
       if (prevPhase && prevPhase !== st.phase) {
         phaseChanges.push({
           type: "PHASE_CHANGED",
@@ -2319,10 +2397,10 @@ export async function runCli(argv = process.argv.slice(2)) {
     }
     if (args.maxWaitSec > 0) {
       const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
-      if (elapsedSec + multi.nextIntervalSec >= args.maxWaitSec) {
-        const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+      if (multi.chunkTimedOut || elapsedSec + multi.nextIntervalSec >= args.maxWaitSec) {
+        const remainingWaitSec = Math.max(0, (args.chunkDeadlineMs - Date.now()) / 1000);
         if (remainingWaitSec > 0) {
-          await sleepSeconds(remainingWaitSec);
+          await sleep(remainingWaitSec);
         }
         console.log(
           JSON.stringify(
@@ -2344,7 +2422,7 @@ export async function runCli(argv = process.argv.slice(2)) {
         return;
       }
     }
-    await sleepSeconds(multi.nextIntervalSec);
+    await sleep(multi.nextIntervalSec);
   }
 }
 

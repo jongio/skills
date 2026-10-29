@@ -140,6 +140,34 @@ replace resolving addressed bot threads or the existing review and merge gates.
 
 ## Review and merge gates
 
+### Bounded watch chunks
+
+Both direct `pr` and `go`-routed PR monitoring use the same watcher. `watch`
+budgets API requests and sleeps to 540 seconds by default. A shorter positive
+`COPILOT_TASK_WAIT_TIMEOUT_SECONDS` reduces that budget: subtract 60 seconds
+above 60, otherwise use half the host wait. `--max-wait-sec <non-negative integer>`
+overrides the budget; `0` disables chunking. `once` and `request-copilot` do not
+chunk. Local startup and state writes add small overhead; explicit overrides
+must leave room below the host's deadline.
+
+`WATCH_CHUNK_TIMEOUT` is a clean rotation, not readiness. Report the last status
+and re-arm the same watch with the same repository, head pins, reviewer policy
+and watchlist. Requests, including transport fallback and automatic review
+retries, cannot start beyond the chunk deadline. Interrupted multi-PR sweeps
+resume at the saved next PR. Persisted state under
+`$COPILOT_HOME/pr-watch` (default `~/.copilot/pr-watch`) retains phases,
+snapshots, comment cursors, ETags, retry counters and repository cooldowns.
+An active cooldown prevents API calls even in a newly launched chunk.
+
+After handling comments, use `--since-comment-id <id>` for the primary PR, or
+`--since-comment-id <pr>:<id>` for a specific PR in `--prs`; do not advance other
+PRs' cursors. Use one active watcher per PR. Writes for different PRs in a
+repository are serialized and atomically merged; persistence/lock failures
+stop the watcher rather than silently discarding state. A stale lock requires
+inspection of its recorded process ID before manual recovery.
+
+### Review completion
+
 Copilot review is expected by default. Request or re-request Copilot via
 `node scripts/pr-watch-daemon.mjs request-copilot --repo <owner/repo> --pr <number> --head <full-head-OID>`
 so superseded `Running Copilot Code Review` runs on the PR branch are cancelled

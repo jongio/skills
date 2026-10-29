@@ -49,6 +49,24 @@ node skills/ci-hound/scripts/ci-hound-daemon.mjs status
 node skills/ci-hound/scripts/ci-hound-daemon.mjs optimize
 ```
 
+## Bounded watch chunks
+
+`watch` budgets API requests and sleeps to 540 seconds by default, leaving
+60 seconds below the default 600-second host wait. A shorter positive
+`COPILOT_TASK_WAIT_TIMEOUT_SECONDS` reduces the budget: subtract 60 seconds
+above 60, otherwise use half the host wait. Override it with
+`--max-wait-sec <non-negative integer>`; `0` disables chunking. `setup`, `status`,
+`optimize` and `once` do not chunk. Local startup/state writes add overhead;
+explicit overrides must leave room below the host deadline.
+
+On `WATCH_CHUNK_TIMEOUT`, report the last status and immediately re-arm the
+same command, retaining the full repository watchlist and options. API requests,
+discovery and fallback are bounded by the remaining budget. Saved discovery
+pagination, next-repository cursor, phases, caches and shared rate-limit
+cooldowns continue across restarts. An incomplete poll never reports green.
+The normal interval or remaining cooldown is still respected, so re-arming
+does not become tight polling. Rotation does not change delivery or merge policy.
+
 ## Development
 
 ```sh

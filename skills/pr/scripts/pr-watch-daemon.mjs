@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { MessageChannel, Worker, receiveMessageOnPort } from "node:worker_threads";
@@ -38,7 +38,7 @@ export function detectRepoFromGit(cwd = process.cwd()) {
 export function defaultPrMaxWaitSec(env = process.env) {
   const raw = Number.parseInt(String(env?.COPILOT_TASK_WAIT_TIMEOUT_SECONDS ?? ""), 10);
   const hostWaitSec = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 600) : 600;
-  return hostWaitSec > 60 ? hostWaitSec - 60 : Math.max(5, Math.floor(hostWaitSec / 2));
+  return hostWaitSec > 60 ? hostWaitSec - 60 : Math.max(0.5, hostWaitSec / 2);
 }
 
 export function parsePrWatchArgs(argv, env = process.env) {
@@ -120,8 +120,9 @@ export function parsePrWatchArgs(argv, env = process.env) {
     } else if (token === "--max-polls" && argv[i + 1]) {
       args.maxPolls = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
     } else if (token === "--max-wait-sec" && argv[i + 1]) {
-      const parsedWait = Number.parseInt(argv[++i], 10);
-      if (!Number.isSafeInteger(parsedWait) || parsedWait < 0) {
+      const rawWait = argv[++i];
+      const parsedWait = Number(rawWait);
+      if (!/^\d+$/.test(rawWait) || !Number.isSafeInteger(parsedWait)) {
         throw new Error(`Invalid --max-wait-sec "${parsedWait}". Expected a non-negative integer.`);
       }
       args.maxWaitSec = parsedWait;
@@ -144,16 +145,16 @@ export function parsePrWatchArgs(argv, env = process.env) {
         args.prSinceCommentIds ??= {};
         for (const part of rawSince.split(",").map((s) => s.trim()).filter(Boolean)) {
           const [prPart, idPart] = part.split(":");
-          const prNum = Number.parseInt(prPart, 10);
-          const parsedId = Number.parseInt(idPart, 10);
-          if (!Number.isSafeInteger(prNum) || prNum <= 0 || !Number.isSafeInteger(parsedId) || parsedId < 0) {
+          const prNum = Number(prPart);
+          const parsedId = Number(idPart);
+          if (!/^[1-9]\d*:\d+$/.test(part) || !Number.isSafeInteger(prNum) || !Number.isSafeInteger(parsedId)) {
             throw new Error(`Invalid --since-comment-id "${rawSince}". Expected "<id>" or "<pr>:<id>".`);
           }
           args.prSinceCommentIds[prNum] = parsedId;
         }
       } else {
-        const parsedId = Number.parseInt(rawSince, 10);
-        if (!Number.isSafeInteger(parsedId) || parsedId < 0) {
+        const parsedId = Number(rawSince);
+        if (!/^\d+$/.test(rawSince) || !Number.isSafeInteger(parsedId)) {
           throw new Error(`Invalid --since-comment-id "${parsedId}". Expected a non-negative integer.`);
         }
         args.sinceCommentId = parsedId;
@@ -404,14 +405,14 @@ export function createPrWatchState() {
   };
 }
 
-const PR_WATCH_DIR = join(homedir(), ".copilot", "pr-watch");
+const PR_WATCH_DIR = join(process.env.COPILOT_HOME || join(homedir(), ".copilot"), "pr-watch");
 
-function prSessionFileForRepo(repo) {
+function prSessionFileForRepo(repo, stateDir = PR_WATCH_DIR) {
   const safeSlug = String(repo || "default")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "__");
-  return join(PR_WATCH_DIR, `${safeSlug}.json`);
+  return join(stateDir, `${safeSlug}.json`);
 }
 
 function hydrateWatchState(raw) {
@@ -442,8 +443,8 @@ function hydrateWatchState(raw) {
   return base;
 }
 
-function loadPersistedPrSession(repo) {
-  const filePath = prSessionFileForRepo(repo);
+export function loadPersistedPrSession(repo, stateDir = PR_WATCH_DIR) {
+  const filePath = prSessionFileForRepo(repo, stateDir);
   if (!repo || !existsSync(filePath)) {
     return { cooldownUntilMs: null, entries: {} };
   }
@@ -464,22 +465,37 @@ function loadPersistedPrSession(repo) {
         entries[prKey] = {
           watchState: ws,
           lastPhase: typeof entry.lastPhase === "string" ? entry.lastPhase : "",
+          lastStatus: entry.lastStatus || null,
           hasExplicitSinceCommentId: Boolean(entry.hasExplicitSinceCommentId),
           sinceCommentId: Number.isSafeInteger(entry.sinceCommentId) ? entry.sinceCommentId : 0,
         };
       }
     }
-    return { cooldownUntilMs, entries };
+    return { cooldownUntilMs, entries, nextPr: parsed.nextPr };
   } catch {
     return { cooldownUntilMs: null, entries: {} };
   }
 }
 
-function savePersistedPrSession(repo, { cooldownUntilMs = null, entries = {} } = {}) {
+export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries = {}, nextPr, deadlineMs = Infinity } = {}, stateDir = PR_WATCH_DIR) {
   if (!repo) return;
+  const filePath = prSessionFileForRepo(repo, stateDir);
+  const lockPath = `${filePath}.lock`;
+  const tempPath = `${filePath}.${process.pid}.pending`;
+  let lock;
   try {
-    const filePath = prSessionFileForRepo(repo);
     mkdirSync(dirname(filePath), { recursive: true });
+    const lockDeadline = Math.min(Date.now() + 1000, deadlineMs);
+    while (lock === undefined) {
+      try {
+        lock = openSync(lockPath, "wx");
+        writeFileSync(lock, String(process.pid), "utf8");
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        if (Date.now() >= lockDeadline) throw new Error("PR watch state is locked by another writer");
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+    }
     let existing = { cooldownUntilMs: null, entries: {} };
     if (existsSync(filePath)) {
       try {
@@ -489,16 +505,45 @@ function savePersistedPrSession(repo, { cooldownUntilMs = null, entries = {} } =
       }
     }
     const mergedEntries = { ...(existing.entries || {}), ...entries };
-    const validCooldown =
-      Number.isFinite(cooldownUntilMs) && cooldownUntilMs > Date.now() ? cooldownUntilMs : null;
+    const validCooldown = Math.max(
+      Number.isFinite(existing.cooldownUntilMs) ? existing.cooldownUntilMs : 0,
+      Number.isFinite(cooldownUntilMs) ? cooldownUntilMs : 0,
+      ...Object.values(mergedEntries).map((entry) => entry?.watchState?.cooldownUntilMs || 0)
+    );
     writeFileSync(
-      filePath,
-      `${JSON.stringify({ cooldownUntilMs: validCooldown, entries: mergedEntries }, null, 2)}\n`,
+      tempPath,
+      `${JSON.stringify({ cooldownUntilMs: validCooldown > Date.now() ? validCooldown : null, entries: mergedEntries, nextPr: nextPr ?? existing.nextPr }, null, 2)}\n`,
       "utf8"
     );
-  } catch {
-    // Best-effort persistence across chunk rotations
+    renameSync(tempPath, filePath);
+  } finally {
+    if (lock !== undefined) {
+      closeSync(lock);
+      rmSync(lockPath, { force: true });
+      rmSync(tempPath, { force: true });
+    }
   }
+}
+
+class WatchChunkDeadline extends Error {}
+
+let activeChunkDeadlineMs = Infinity;
+
+function chunkExec(execFn, deadlineMs) {
+  return (ghArgs) => {
+    if (Date.now() >= deadlineMs) throw new WatchChunkDeadline();
+    const previousDeadline = activeChunkDeadlineMs;
+    activeChunkDeadlineMs = Math.min(previousDeadline, deadlineMs);
+    try {
+      const result = execFn(ghArgs);
+      if (result?.chunkTimedOut || (result?.timedOut && Date.now() >= deadlineMs)) {
+        throw new WatchChunkDeadline();
+      }
+      return result;
+    } finally {
+      activeChunkDeadlineMs = previousDeadline;
+    }
+  };
 }
 
 function parseRetryAfterHeader(rawVal) {
@@ -700,7 +745,7 @@ function resolveGhTokenOnce() {
     return execFileSync("gh", ["auth", "token"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5000,
+      timeout: Math.max(1, Math.min(5000, activeChunkDeadlineMs - Date.now())),
     }).trim();
   } catch {
     return "";
@@ -729,7 +774,7 @@ function getKeepAliveWorker() {
           replyPort = msg.initPort;
           return;
         }
-        const { reqId, token, req, signalBuf } = msg;
+        const { reqId, token, req, signalBuf, timeoutMs } = msg;
         const signal = new Int32Array(signalBuf);
         try {
           const res = await fetch(req.url, {
@@ -742,7 +787,7 @@ function getKeepAliveWorker() {
               ...req.headers,
             },
             body: req.body,
-            signal: AbortSignal.timeout(28000),
+            signal: AbortSignal.timeout(Math.max(1, timeoutMs - 20)),
           });
           const bodyText = await res.text();
           const httpMeta = {
@@ -794,6 +839,7 @@ function getKeepAliveWorker() {
 }
 
 function defaultExecGh(ghArgs) {
+  if (Date.now() >= activeChunkDeadlineMs) return { ok: false, chunkTimedOut: true };
   const parsedReq = parseGhApiArgs(ghArgs);
   if (parsedReq) {
     const ka = getKeepAliveWorker();
@@ -801,13 +847,15 @@ function defaultExecGh(ghArgs) {
       const reqId = (nextWorkerReqId += 1);
       const signalBuf = new SharedArrayBuffer(4);
       const signal = new Int32Array(signalBuf);
+      const timeoutMs = Math.max(1, Math.min(30000, activeChunkDeadlineMs - Date.now()));
       ka.worker.postMessage({
         reqId,
         token: ka.token,
         req: parsedReq,
         signalBuf,
+        timeoutMs,
       });
-      const waitRes = Atomics.wait(signal, 0, 0, 30000);
+      const waitRes = Atomics.wait(signal, 0, 0, timeoutMs);
       while (true) {
         const msg = receiveMessageOnPort(ka.port1);
         if (!msg) break;
@@ -827,15 +875,17 @@ function defaultExecGh(ghArgs) {
       }
     }
   }
+  if (Date.now() >= activeChunkDeadlineMs) return { ok: false, chunkTimedOut: true };
   const res = spawnSync("gh", ghArgs, {
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
-    timeout: 30000,
+    timeout: Math.max(1, Math.min(30000, activeChunkDeadlineMs - Date.now())),
   });
   return {
     ok: res.status === 0,
     stdout: res.stdout || "",
     stderr: res.stderr || (res.error ? res.error.message : ""),
+    chunkTimedOut: Date.now() >= activeChunkDeadlineMs && res.status !== 0,
   };
 }
 
@@ -1211,6 +1261,15 @@ export function requestCopilotReview(args, execFn = defaultExecGh) {
 }
 
 export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
+  try {
+    return evaluatePrPollTickInner(args, chunkExec(execFn, args.chunkDeadlineMs ?? Infinity), state);
+  } catch (error) {
+    if (!(error instanceof WatchChunkDeadline)) throw error;
+    return { events: [], chunkTimedOut: true, nextIntervalSec: args.intervalSec };
+  }
+}
+
+function evaluatePrPollTickInner(args, execFn, state) {
   const nowMs = Date.now();
   if (Number.isFinite(state?.cooldownUntilMs) && state.cooldownUntilMs > nowMs) {
     const remainingSec = Math.max(1, Math.ceil((state.cooldownUntilMs - nowMs) / 1000));
@@ -1363,9 +1422,6 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
     return Math.max(parsedGqlHttp.retryAfterSec || 0, resetDelaySec || 0, 60);
   };
   if (!gqlRes || !gqlRes.ok) {
-    if (gqlRes?.timedOut) {
-      return { events: [], chunkTimedOut: true, nextIntervalSec: args.intervalSec };
-    }
     const errMsg = gqlRes?.stderr || "GraphQL query failed";
     const isHttpRateLimited =
       parsedGqlHttp.status === 429 ||
@@ -1638,9 +1694,6 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
       };
     }
     if (!runsRes || !runsRes.ok || !parsedRunsHttp.bodyText) {
-      if (runsRes?.timedOut) {
-        return { events: [], chunkTimedOut: true, nextIntervalSec: args.intervalSec };
-      }
       const errMsg = runsRes?.stderr || "Workflow runs inventory unavailable";
       return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
     }
@@ -2140,14 +2193,23 @@ export function evaluatePrPollTick(args, execFn = defaultExecGh, state = null) {
 
 export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState = {}) {
   const targetPrs = Array.isArray(args.prs) && args.prs.length > 0 ? args.prs : [args.pr];
+  const startIndex = Math.max(0, targetPrs.indexOf(args.nextPr));
+  const orderedPrs = [...targetPrs.slice(startIndex), ...targetPrs.slice(0, startIndex)];
   const allEvents = [];
   const statuses = [];
   let anyRateLimited = false;
   let maxRateLimitIntervalSec = 0;
   let minActiveIntervalSec = Infinity;
   let firstError = null;
+  let chunkTimedOut = false;
+  let nextPr = orderedPrs[0];
 
-  for (const prNumber of targetPrs) {
+  for (const prNumber of orderedPrs) {
+    if (Date.now() >= (args.chunkDeadlineMs ?? Infinity)) {
+      chunkTimedOut = true;
+      nextPr = prNumber;
+      break;
+    }
     if (!multiState[prNumber]) {
       const explicitPrCommentId = args.prSinceCommentIds?.[prNumber];
       const useSinglePrBaseline = targetPrs.length === 1 || prNumber === args.pr;
@@ -2186,6 +2248,11 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
       sinceCommentId: entry.sinceCommentId,
     };
     const tick = evaluatePrPollTick(prArgs, execFn, entry.watchState);
+    nextPr = targetPrs[(targetPrs.indexOf(prNumber) + 1) % targetPrs.length];
+    if (tick.chunkTimedOut) {
+      chunkTimedOut = true;
+      break;
+    }
     if (tick.error && !firstError) {
       firstError = tick.error;
     }
@@ -2193,6 +2260,7 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
       allEvents.push({ pr: prNumber, ...ev });
     }
     if (tick.status) {
+      entry.lastStatus = tick.status;
       entry.lastPhase = tick.status.phase || entry.lastPhase;
       if (
         !entry.hasExplicitSinceCommentId &&
@@ -2225,6 +2293,8 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
     statuses,
     rateLimited: anyRateLimited,
     nextIntervalSec,
+    nextPr,
+    ...(chunkTimedOut ? { chunkTimedOut: true } : {}),
   };
   if (firstError) {
     result.error = firstError;
@@ -2254,10 +2324,20 @@ export function shouldEmitPrWatchStatus({
   return nowMs - lastEmitMs >= heartbeatSec * 1000;
 }
 
-export async function runCli(argv = process.argv.slice(2)) {
+export async function runCli(argv = process.argv.slice(2), services = {}) {
   const args = parsePrWatchArgs(argv);
+  const execFn = services.execFn || defaultExecGh;
+  const sleep = services.sleep || sleepSeconds;
+  const stateDir = services.stateDir || PR_WATCH_DIR;
+  const watchStartedAtMs = Date.now();
+  if (args.mode === "watch" && args.maxWaitSec > 0) {
+    args.chunkDeadlineMs = watchStartedAtMs + args.maxWaitSec * 1000;
+  }
+  const saveSession = (session) => savePersistedPrSession(args.repo, {
+    ...session, nextPr: args.nextPr, deadlineMs: args.chunkDeadlineMs,
+  }, stateDir);
   if (args.mode === "request-copilot") {
-    const res = requestCopilotReview(args);
+    const res = requestCopilotReview(args, execFn);
     console.log(JSON.stringify(res, null, 2));
     if (!res.ok) {
       process.exit(1);
@@ -2266,14 +2346,14 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
   if (args.mode === "once") {
     if (args.prs.length > 1) {
-      const multi = evaluateMultiPrPollTick(args);
+      const multi = evaluateMultiPrPollTick(args, execFn);
       console.log(JSON.stringify(multi, null, 2));
       if (multi.error) {
         process.exit(1);
       }
       return;
     }
-    const tick = evaluatePrPollTick(args);
+    const tick = evaluatePrPollTick(args, execFn);
     console.log(JSON.stringify(tick, null, 2));
     if (tick.error) {
       process.exit(1);
@@ -2282,7 +2362,8 @@ export async function runCli(argv = process.argv.slice(2)) {
   }
 
   if (args.prs.length > 1) {
-    const persistedSession = loadPersistedPrSession(args.repo);
+    const persistedSession = loadPersistedPrSession(args.repo, stateDir);
+    args.nextPr = persistedSession.nextPr;
     const multiState = {};
     for (const prNum of args.prs) {
       const savedEntry = persistedSession.entries[String(prNum)];
@@ -2297,14 +2378,17 @@ export async function runCli(argv = process.argv.slice(2)) {
         multiState[prNum] = {
           watchState: savedEntry.watchState,
           lastPhase: savedEntry.lastPhase || "",
+          lastStatus: savedEntry.lastStatus || null,
           hasExplicitSinceCommentId: hasOverride ? true : savedEntry.hasExplicitSinceCommentId,
           sinceCommentId: hasOverride ? overrideId : savedEntry.sinceCommentId,
         };
       }
     }
-    const watchStartedAtMs = Date.now();
     const lastSummaryByPr = new Map();
-    let lastStatuses = [];
+    const statusByPr = new Map(Object.entries(multiState)
+      .filter(([, entry]) => entry.lastStatus)
+      .map(([pr, entry]) => [Number(pr), { pr: Number(pr), ...entry.lastStatus }]));
+    let lastStatuses = [...statusByPr.values()];
     let lastEmitMs = 0;
     let polls = 0;
     while (true) {
@@ -2316,11 +2400,13 @@ export async function runCli(argv = process.argv.slice(2)) {
             ? { initialCooldownMs: persistedSession.cooldownUntilMs }
             : {}),
         },
-        defaultExecGh,
+        execFn,
         multiState
       );
+      args.nextPr = multi.nextPr;
       if (multi.statuses && multi.statuses.length > 0) {
-        lastStatuses = multi.statuses;
+        for (const status of multi.statuses) statusByPr.set(status.pr, status);
+        lastStatuses = [...statusByPr.values()];
       }
       const entriesToSave = {};
       for (const [k, v] of Object.entries(multiState)) {
@@ -2344,7 +2430,7 @@ export async function runCli(argv = process.argv.slice(2)) {
         const terminalCooldownMs = multi.rateLimited
           ? Date.now() + (multi.nextIntervalSec || 60) * 1000
           : null;
-        savePersistedPrSession(args.repo, {
+        saveSession({
           cooldownUntilMs: terminalCooldownMs,
           entries: entriesToSave,
         });
@@ -2355,7 +2441,7 @@ export async function runCli(argv = process.argv.slice(2)) {
         const rateSleepSec = multi.nextIntervalSec || 60;
         const nextCooldownMs = Date.now() + rateSleepSec * 1000;
         persistedSession.cooldownUntilMs = nextCooldownMs;
-        savePersistedPrSession(args.repo, {
+        saveSession({
           cooldownUntilMs: nextCooldownMs,
           entries: entriesToSave,
         });
@@ -2367,9 +2453,9 @@ export async function runCli(argv = process.argv.slice(2)) {
         if (args.maxWaitSec > 0) {
           const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
           if (elapsedSec + rateSleepSec >= args.maxWaitSec) {
-            const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+            const remainingWaitSec = Math.max(0, (args.chunkDeadlineMs - Date.now()) / 1000);
             if (remainingWaitSec > 0) {
-              await sleepSeconds(remainingWaitSec);
+              await sleep(remainingWaitSec);
             }
             console.log(
               JSON.stringify(
@@ -2391,11 +2477,11 @@ export async function runCli(argv = process.argv.slice(2)) {
             return;
           }
         }
-        await sleepSeconds(rateSleepSec);
+        await sleep(rateSleepSec);
         continue;
       }
       persistedSession.cooldownUntilMs = null;
-      savePersistedPrSession(args.repo, { cooldownUntilMs: null, entries: entriesToSave });
+      saveSession({ cooldownUntilMs: null, entries: entriesToSave });
       let summaryChanged = false;
       for (const st of multi.statuses || []) {
         const prevSummary = lastSummaryByPr.get(st.pr);
@@ -2424,10 +2510,10 @@ export async function runCli(argv = process.argv.slice(2)) {
       const nextSleepSec = multi.nextIntervalSec || args.intervalSec;
       if (args.maxWaitSec > 0) {
         const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
-        if (elapsedSec + nextSleepSec >= args.maxWaitSec) {
-          const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+        if (multi.chunkTimedOut || elapsedSec + nextSleepSec >= args.maxWaitSec) {
+          const remainingWaitSec = Math.max(0, (args.chunkDeadlineMs - Date.now()) / 1000);
           if (remainingWaitSec > 0) {
-            await sleepSeconds(remainingWaitSec);
+            await sleep(remainingWaitSec);
           }
           console.log(
             JSON.stringify(
@@ -2449,20 +2535,19 @@ export async function runCli(argv = process.argv.slice(2)) {
           return;
         }
       }
-      await sleepSeconds(nextSleepSec);
+      await sleep(nextSleepSec);
     }
   }
 
-  const persistedSession = loadPersistedPrSession(args.repo);
+  const persistedSession = loadPersistedPrSession(args.repo, stateDir);
   const savedPrEntry = persistedSession.entries[String(args.pr)];
   const watchState = savedPrEntry?.watchState || createPrWatchState();
   if (persistedSession.cooldownUntilMs && (!watchState.cooldownUntilMs || watchState.cooldownUntilMs < persistedSession.cooldownUntilMs)) {
     watchState.cooldownUntilMs = persistedSession.cooldownUntilMs;
   }
-  const watchStartedAtMs = Date.now();
   let baselinePhase = args.lastPhase || savedPrEntry?.lastPhase || "";
   let lastSummary = "";
-  let lastStatus = null;
+  let lastStatus = savedPrEntry?.lastStatus || null;
   let lastEmitMs = 0;
   const explicitSinglePrCommentId = args.prSinceCommentIds?.[args.pr];
   let hasCommentBaseline =
@@ -2482,17 +2567,18 @@ export async function runCli(argv = process.argv.slice(2)) {
       {
         ...args,
         lastPhase: baselinePhase,
+        lastStatus,
         hasExplicitSinceCommentId: hasCommentBaseline,
         sinceCommentId: baselineCommentId,
       },
-      defaultExecGh,
+      execFn,
       watchState
     );
     if (tick.status) {
       lastStatus = tick.status;
     }
     if (tick.rateLimited) {
-      savePersistedPrSession(args.repo, {
+      saveSession({
         cooldownUntilMs: watchState.cooldownUntilMs,
         entries: {
           [String(args.pr)]: {
@@ -2512,9 +2598,9 @@ export async function runCli(argv = process.argv.slice(2)) {
       if (args.maxWaitSec > 0) {
         const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
         if (elapsedSec + rateSleepSec >= args.maxWaitSec) {
-          const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+          const remainingWaitSec = Math.max(0, (args.chunkDeadlineMs - Date.now()) / 1000);
           if (remainingWaitSec > 0) {
-            await sleepSeconds(remainingWaitSec);
+            await sleep(remainingWaitSec);
           }
           console.log(
             JSON.stringify(
@@ -2538,7 +2624,7 @@ export async function runCli(argv = process.argv.slice(2)) {
           return;
         }
       }
-      await sleepSeconds(rateSleepSec);
+      await sleep(rateSleepSec);
       continue;
     }
     if (tick.error) {
@@ -2560,12 +2646,13 @@ export async function runCli(argv = process.argv.slice(2)) {
           baselineCommentId = Math.max(baselineCommentId || 0, ev.latestCommentId);
         }
       }
-      savePersistedPrSession(args.repo, {
+      saveSession({
         cooldownUntilMs: null,
         entries: {
           [String(args.pr)]: {
             watchState,
             lastPhase: baselinePhase,
+            lastStatus,
             hasExplicitSinceCommentId: hasCommentBaseline,
             sinceCommentId: baselineCommentId,
           },
@@ -2574,12 +2661,13 @@ export async function runCli(argv = process.argv.slice(2)) {
       console.log(JSON.stringify(tick, null, 2));
       return;
     }
-    savePersistedPrSession(args.repo, {
+    saveSession({
       cooldownUntilMs: null,
       entries: {
         [String(args.pr)]: {
           watchState,
           lastPhase: baselinePhase,
+          lastStatus,
           hasExplicitSinceCommentId: hasCommentBaseline,
           sinceCommentId: baselineCommentId,
         },
@@ -2609,10 +2697,10 @@ export async function runCli(argv = process.argv.slice(2)) {
     const nextSleepSec = tick.nextIntervalSec || args.intervalSec;
     if (args.maxWaitSec > 0) {
       const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
-      if (elapsedSec + nextSleepSec >= args.maxWaitSec) {
-        const remainingWaitSec = Math.max(0, args.maxWaitSec - elapsedSec);
+      if (tick.chunkTimedOut || elapsedSec + nextSleepSec >= args.maxWaitSec) {
+        const remainingWaitSec = Math.max(0, (args.chunkDeadlineMs - Date.now()) / 1000);
         if (remainingWaitSec > 0) {
-          await sleepSeconds(remainingWaitSec);
+          await sleep(remainingWaitSec);
         }
         console.log(
           JSON.stringify(
@@ -2636,7 +2724,7 @@ export async function runCli(argv = process.argv.slice(2)) {
         return;
       }
     }
-    await sleepSeconds(nextSleepSec);
+    await sleep(nextSleepSec);
   }
 }
 

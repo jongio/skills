@@ -70,6 +70,23 @@ strategy and wait for confirmed merge, not just queue admission, before cleanup.
 Verify local and remote deletion separately; failed guards or unavailable safe
 cleanup are reported as pending rather than retried unconditionally or claimed done.
 
+## Bounded PR monitoring
+
+Direct `pr` and `go`-routed monitoring use the same watcher. `watch` budgets
+API calls and sleeps to 540 seconds by default, reduced for shorter positive
+`COPILOT_TASK_WAIT_TIMEOUT_SECONDS`. `--max-wait-sec <non-negative integer>`
+overrides that budget; `0` disables chunking. Local startup/state writes add
+overhead, so overrides must leave room below the host deadline.
+
+`WATCH_CHUNK_TIMEOUT` is a clean rotation, not readiness or merge authorization.
+Report status and re-arm with the same repository, head pins, reviewer policy
+and watchlist. Requests and fallback share the deadline. The next PR, phases,
+snapshots, ETags, retry counters, comment cursors and shared cooldown persist
+under `$COPILOT_HOME/pr-watch` (default `~/.copilot/pr-watch`). Active cooldowns
+prevent premature API calls after restart. After handling comments, use
+`--since-comment-id <pr>:<id>` for a specific watched PR; a scalar ID advances
+only the primary PR. Use one active watcher per PR.
+
 ## Related issues after merge
 
 Inventory related issues before merging, including closing links, PR references,
