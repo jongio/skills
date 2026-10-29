@@ -6,6 +6,7 @@ const GITHUB_ENV_KEYS = Object.freeze([
   "GH_ENTERPRISE_TOKEN",
   "GH_HOST",
   "GH_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
   "GITHUB_TOKEN",
   "HOME",
   "HTTP_PROXY",
@@ -23,6 +24,7 @@ const GITHUB_ENV_KEYS = Object.freeze([
   "TMPDIR",
   "USERPROFILE",
   "WINDIR",
+  "XDG_CONFIG_HOME",
 ]);
 
 export function createGitHubEnvironment(ghPath, gitPath, env = process.env) {

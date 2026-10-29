@@ -120,6 +120,15 @@ Analysis and revalidation are read-only in the target repository. After
 separate approval, `verify-remote.mjs` fetches the exact approved URL only into
 a disposable bare repository with `--no-prune`, isolated configuration, no
 hooks, no credential helper, and no repository-controlled Git configuration.
+Public repositories are verified anonymously. When HTTPS authentication is
+required, the verifier uses the existing GitHub CLI session for the exact
+approved host, including Windows, `GH_CONFIG_DIR`, XDG, and Enterprise sessions.
+Credentials stay in the Git child's URL-scoped environment, never command
+arguments, URLs, evidence, or configuration files. Redirects and executable
+transports are disabled; the verifier never logs in or changes credentials.
+Revalidation uses the same authentication boundary and rejects a different
+remote URL before contacting it. Authentication failures remain blocked and
+include safe guidance for checking CLI authentication and repository access.
 The resulting baseline expires after five minutes and is re-fetched immediately
 after each mutation-class approval. Unknown remote access never proves a remote
 dead. Dirty, conflicted,

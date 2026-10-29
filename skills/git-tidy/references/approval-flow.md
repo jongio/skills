@@ -12,7 +12,15 @@ effect; it does not carry across drift or action classes.
 3. For remote verification, request separate approval for the exact URL and run
    `verify-remote.mjs`. It uses a disposable bare repository, `--no-prune`,
    disabled hooks and credential helpers, and an isolated environment that
-   ignores repository-controlled Git configuration. Feed the closed baseline
+   ignores repository-controlled Git configuration. Anonymous access is tried
+   first; authentication-required HTTPS reads may use the existing GitHub CLI
+   session for the exact approved host. Credentials exist only in the Git
+   child's URL-scoped environment, never argv, URLs, logs, evidence, or persistent
+   configuration. Redirects remain disabled. No login or credential change is
+   performed. Revalidation uses the same boundary and rejects a changed URL
+   identity before contacting it. An authentication failure blocks cleanup and
+   reports safe guidance for checking existing CLI authentication and access.
+   Feed the closed baseline
    to `analyze-verified`. Optionally request separate approval
    for ignored-content review or isolated merge simulation.
 4. Present the Git Clean style categorized report inside the
