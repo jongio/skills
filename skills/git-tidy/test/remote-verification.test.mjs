@@ -259,6 +259,8 @@ test("credential lookup preserves Windows, explicit and XDG CLI configuration", 
   overrideEnvironment(t, {
     GH_CONFIG_DIR: path.join(tmpdir(), "explicit-gh-config"),
     XDG_CONFIG_HOME: path.join(tmpdir(), "xdg-gh-config"),
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/nondefault-gh-bus",
+    XDG_RUNTIME_DIR: path.join(tmpdir(), "keyring-runtime"),
     APPDATA: path.join(tmpdir(), "appdata"),
     LOCALAPPDATA: path.join(tmpdir(), "localappdata"),
     USERPROFILE: path.join(tmpdir(), "profile"),
@@ -277,7 +279,7 @@ test("credential lookup preserves Windows, explicit and XDG CLI configuration", 
   const baseline = await verifyRemoteBaseline(`https://${host}/owner/private.git`, mock);
   assert.equal(baseline.state, "verified");
   const auth = mock.calls.find(({ args }) => args[0] === "auth");
-  for (const key of ["GH_CONFIG_DIR", "XDG_CONFIG_HOME", "APPDATA", "LOCALAPPDATA", "USERPROFILE", "GITHUB_ENTERPRISE_TOKEN"]) {
+  for (const key of ["GH_CONFIG_DIR", "XDG_CONFIG_HOME", "DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "APPDATA", "LOCALAPPDATA", "USERPROFILE", "GITHUB_ENTERPRISE_TOKEN"]) {
     assert.equal(auth.options.env[key], process.env[key]);
   }
   assert.equal(auth.options.env.GH_PROMPT_DISABLED, "1");
@@ -289,6 +291,8 @@ test("credential lookup preserves Windows, explicit and XDG CLI configuration", 
     assert.equal(call.options.env.GITHUB_ENTERPRISE_TOKEN, undefined);
     assert.equal(call.options.env.GIT_EXEC_PATH, undefined);
     assert.equal(call.options.env.GIT_TRACE, undefined);
+    assert.equal(call.options.env.DBUS_SESSION_BUS_ADDRESS, undefined);
+    assert.equal(call.options.env.XDG_RUNTIME_DIR, undefined);
   }
 });
 

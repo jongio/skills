@@ -2,6 +2,7 @@ import path from "node:path";
 
 const GITHUB_ENV_KEYS = Object.freeze([
   "APPDATA",
+  "DBUS_SESSION_BUS_ADDRESS",
   "GH_CONFIG_DIR",
   "GH_ENTERPRISE_TOKEN",
   "GH_HOST",
@@ -24,6 +25,7 @@ const GITHUB_ENV_KEYS = Object.freeze([
   "USERPROFILE",
   "WINDIR",
   "XDG_CONFIG_HOME",
+  "XDG_RUNTIME_DIR",
 ]);
 
 export function createGitHubEnvironment(ghPath, gitPath, env = process.env) {
