@@ -93,6 +93,8 @@ may use `gh auth token --hostname <exact-approved-host> --no-refresh` from the e
 session. Resolve `gh` outside all untrusted repository roots, run it without a
 shell in the disposable directory, preserve trusted Windows/XDG credential
 locations and explicit `GH_CONFIG_DIR`, and bound its time and output.
+Preserve `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` for native Linux
+credential-store access; do not pass these session variables to isolated Git.
 Enterprise credentials must be selected for that exact host, never from a
 guessed host, remote alias, or `GH_HOST` fallback. Forward Enterprise/cloud
 environment tokens only when the caller's existing `GH_HOST` explicitly matches
