@@ -186,7 +186,10 @@ async function githubAuthentication(host, gitPath, root, options, untrustedRoots
   const ghEnvironment = { ...createGitHubEnvironment(ghPath, gitPath) };
   const explicitlyBoundHost = ghEnvironment.GH_HOST?.toLowerCase() === host;
   for (const key of ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) {
-    if (!explicitlyBoundHost || host === "github.com") delete ghEnvironment[key];
+    const value = ghEnvironment[key] ?? process.env[key];
+    if (explicitlyBoundHost && host !== "github.com" && value !== undefined) {
+      ghEnvironment[key] = value;
+    } else delete ghEnvironment[key];
   }
   for (const key of ["GH_TOKEN", "GITHUB_TOKEN"]) {
     if (host !== "github.com" && !explicitlyBoundHost) delete ghEnvironment[key];

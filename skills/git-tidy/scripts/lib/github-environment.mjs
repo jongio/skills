@@ -6,7 +6,6 @@ const GITHUB_ENV_KEYS = Object.freeze([
   "GH_ENTERPRISE_TOKEN",
   "GH_HOST",
   "GH_TOKEN",
-  "GITHUB_ENTERPRISE_TOKEN",
   "GITHUB_TOKEN",
   "HOME",
   "HTTP_PROXY",
