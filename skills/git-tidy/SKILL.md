@@ -68,7 +68,7 @@ For verified mode, obtain separate approval, pass the exact approved URL to
 It ignores repository-controlled Git configuration. Offline, failed, unknown,
 or expired verification remains advisory and cannot produce an action plan.
 
-Anonymous verification may use existing GitHub CLI authentication only for the exact approved HTTPS host.
+Try anonymous verification first; use existing GitHub CLI authentication only when required for the exact approved HTTPS host.
 Keep helpers, hooks, and executable transports disabled; credentials stay in the child's URL-scoped environment.
 Disable redirects. Never expose tokens, log in, change credentials, or persist authentication configuration.
 Use the same boundary on revalidation and report safe, actionable failures; see [command recipes](references/command-recipes.md).

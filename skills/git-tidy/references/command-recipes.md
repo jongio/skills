@@ -96,8 +96,8 @@ locations and explicit `GH_CONFIG_DIR`, and bound its time and output.
 Enterprise credentials must be selected for that exact host, never from a
 guessed host, remote alias, or `GH_HOST` fallback.
 
-Keep tokens out of argv, URLs, stdout/stderr, saved evidence, and persistent
-configuration. Pass the Authorization header only through the Git child's
+Keep tokens out of argv, URLs, user-visible stdout/stderr, saved evidence, and
+persistent configuration. Pass the Authorization header only through the Git child's
 `GIT_CONFIG_COUNT` environment, with `http.<exact-approved-url>.extraHeader`.
 Keep `credential.helper=` and `protocol.allow=never`, explicitly allow only
 HTTPS/file, and set `http.followRedirects=false`. Do not inherit Git tracing,
