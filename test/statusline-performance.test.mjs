@@ -178,7 +178,7 @@ test("NUL-delimited Git detection handles renames/removals/spaces and excludes b
 	const { directory, commit } = fixture(t);
 	mkdirSync(join(directory, "extensions", "pr-statusline"), { recursive: true });
 	writeFileSync(join(directory, "extensions", "pr-statusline", "a space.mjs"), "original");
-	commit();
+	const eventBaseSha = commit();
 	command(directory, "branch", "contributor");
 	mkdirSync(join(directory, "extensions", "issue-statusline"));
 	writeFileSync(join(directory, "extensions", "issue-statusline", "base-only.mjs"), "base");
@@ -192,6 +192,21 @@ test("NUL-delimited Git detection handles renames/removals/spaces and excludes b
 	const result = detectChanges({ root: directory, baseSha, headSha, candidateSha });
 	assert.equal(result.changed, true);
 	assert.deepEqual(result.relevant, ["extensions/pr-statusline/a space.mjs"]);
+	const drifted = detectChanges({ root: directory, baseSha: eventBaseSha, headSha, candidateSha });
+	assert.equal(drifted.baseSha, baseSha, "measure against the immutable merge's actual first parent");
+	assert.equal(drifted.eventBaseSha, eventBaseSha);
+	assert.deepEqual(drifted.relevant, result.relevant, "base-only drift is still excluded");
+	const output = join(directory, "drift-outputs.txt");
+	const cli = spawnSync(process.execPath, [join(root, "scripts", "compare-statusline-performance.mjs"), "--detect"], {
+		cwd: directory, encoding: "utf8", timeout: 30000, windowsHide: true,
+		env: { ...process.env, BASE_SHA: eventBaseSha, HEAD_SHA: headSha, CANDIDATE_SHA: candidateSha,
+			GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: "" },
+	});
+	assert.equal(cli.status, 0, cli.stderr);
+	assert.match(readFileSync(output, "utf8"), new RegExp(`\\nbase=${baseSha}\\nhead=${headSha}\\ncandidate=${candidateSha}\\n`));
+	assert.throws(() => detectChanges({ root: directory, baseSha, headSha: baseSha, candidateSha }), /test-merge/);
+	assert.throws(() => detectChanges({ root: directory, baseSha: headSha, headSha, candidateSha }), /ancestor/);
+	assert.throws(() => detectChanges({ root: directory, baseSha: candidateSha, headSha, candidateSha }), /ancestor/);
 	assert.throws(() => detectChanges({ root: directory, baseSha: "f".repeat(40), headSha, candidateSha }));
 	assert.throws(() => detectChanges({ root: directory, baseSha, headSha, candidateSha: headSha }), /test-merge/);
 });

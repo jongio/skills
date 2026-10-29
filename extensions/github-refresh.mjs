@@ -16,7 +16,7 @@ function retryDeadline(headers, now) {
 }
 
 export async function prefetchStatuses(kind, items, {
-  home, now = Date.now(), force = false, fetchStatus, signal,
+  home, now = Date.now(), force = false, fetchStatus, signal, clock = Date.now,
 } = {}) {
   const module = await import(kind === "pr" ? "./pr-statusline/github.mjs" : "./issue-statusline/github.mjs");
   const read = kind === "pr" ? module.readPrCache : module.readIssueCache;
@@ -69,6 +69,7 @@ export async function prefetchStatuses(kind, items, {
         try {
           signal?.throwIfAborted();
           const info = await query(item.url, { signal });
+          signal?.throwIfAborted();
           if (!info || typeof info !== "object") throw new Error("GitHub returned no status.");
           const state = String(info.state || "").toUpperCase();
           withStateLock(cacheFile, () => {
@@ -86,8 +87,13 @@ export async function prefetchStatuses(kind, items, {
           withStateLock(cacheFile, () => {
             const cache = read(home);
             if (cache[item.url]?.lease !== lease) return;
-            cache[item.url] = { ...cache[item.url], scope, refreshingUntil: 0, lastError: error.message,
-              retryAt: retryDeadline(error.response?.headers || {}, now) };
+            if (signal?.aborted) {
+              const { lease: _lease, refreshingUntil: _refreshing, ...previous } = cache[item.url];
+              cache[item.url] = previous;
+            } else {
+              cache[item.url] = { ...cache[item.url], scope, refreshingUntil: 0, lastError: error.message,
+                retryAt: retryDeadline(error.response?.headers || {}, clock()) };
+            }
             write(cache, home);
           });
           return error;

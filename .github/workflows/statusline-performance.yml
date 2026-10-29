@@ -32,6 +32,8 @@ jobs:
       - name: Detect relevant changes and validate test-merge parents
         id: scope
         env:
+          # The event base can lag the immutable test-merge's first parent.
+          # Detection validates its ancestry and emits that actual parent as base.
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CANDIDATE_SHA: ${{ github.sha }}

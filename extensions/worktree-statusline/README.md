@@ -124,9 +124,12 @@ explicit successful no-op. Maintainers can require the stable
 configure branch protection automatically.
 
 On both Windows and Linux, correctness tests finish before any measurement.
-The candidate's common harness runs against the PR event's exact base commit and
-GitHub test-merge commit, in separate processes on the same runner. The contributor
-head is recorded as provenance. The base does not need its own benchmark script.
+The candidate's common harness runs against the immutable GitHub test-merge's
+exact first parent and the test-merge commit, in separate processes on the same
+runner. Detection requires exactly two parents and the event's exact contributor
+head as the second parent. If the event base is stale, it must be an ancestor of
+the actual first parent; unrelated or newer event bases are rejected. The
+contributor head is recorded as provenance. The base does not need its own benchmark script.
 All four statuslines and the combined footer are measured, including warm caches,
 cold transcript replay, and Node CLI startup.
 

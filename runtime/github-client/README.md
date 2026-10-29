@@ -36,6 +36,9 @@ belong only to this package.
   same `target` to `request()` and `cacheScope()` to reuse the selected identity;
   replacing the primary credential invalidates those associations.
 - Rate-limit headers return to the scheduler without hidden SDK sleeping.
+- Statusline refresh cooldowns start when the failure is received, not when a
+  sequential poll started. Caller cancellation releases its shared refresh lease
+  without adding GitHub failure backoff for other sessions.
 - Failures cannot renew cached success evidence. Callers must check response
   validity and inventory completeness before reporting readiness.
 

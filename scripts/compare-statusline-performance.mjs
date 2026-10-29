@@ -36,14 +36,19 @@ export function detectChanges({ root, baseSha, headSha, candidateSha }) {
 		assert.equal(git(root, "rev-parse", "--verify", `${sha}^{commit}`).trim(), sha);
 	}
 	const parents = git(root, "rev-list", "--parents", "-n", "1", candidateSha).trim().split(/\s+/);
-	assert.deepEqual(parents, [candidateSha, baseSha, headSha], "Candidate must be the PR test-merge commit");
+	const actualBaseSha = parents[1];
+	assert.deepEqual(parents, [candidateSha, actualBaseSha, headSha], "Candidate must be the PR test-merge commit");
+	assert.equal(git(root, "merge-base", baseSha, actualBaseSha).trim(), baseSha,
+		"Event base must be an ancestor of the PR test-merge base");
+	const eventBaseSha = baseSha;
+	baseSha = actualBaseSha;
 	const ancestor = git(root, "merge-base", baseSha, headSha).trim();
 	const paths = new Set([
 		...git(root, "diff", "--name-only", "-z", "--no-renames", baseSha, candidateSha, "--").split("\0"),
 		...git(root, "diff", "--name-only", "-z", "--no-renames", ancestor, headSha, "--").split("\0"),
 	].filter(Boolean));
 	const relevant = [...paths].filter(isRelevantPath).sort();
-	return { changed: relevant.length > 0, baseSha, headSha, candidateSha, relevant };
+	return { changed: relevant.length > 0, baseSha, eventBaseSha, headSha, candidateSha, relevant };
 }
 
 export function validateReport(report, { revision, cases = CASE_IDS, harnessId = harnessIdentity() }) {

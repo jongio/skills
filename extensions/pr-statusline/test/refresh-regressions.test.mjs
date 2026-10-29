@@ -245,7 +245,7 @@ test("refresh backoff honors numeric and HTTP-date Retry-After with bounded malf
       return { ok: false, status: 429, error: "Server backoff", headers: { "retry-after": header,
         ...(reset === undefined ? {} : { "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset }) } };
     });
-    const first = await prefetchStatuses("pr", [{ url: refs.pr }], { home, now });
+    const first = await prefetchStatuses("pr", [{ url: refs.pr }], { home, now, clock: () => now });
     assert.throws(() => first(refs.pr), /Server backoff/);
     assert.equal(readPrCache(home)[refs.pr].retryAt, now + delay);
     const second = await prefetchStatuses("pr", [{ url: refs.pr }], { home, now: now + delay - 1 });
@@ -253,6 +253,61 @@ test("refresh backoff honors numeric and HTTP-date Retry-After with bounded malf
     assert.equal(calls, 1, "no retry before the server's deadline");
   }
 });
+
+for (const kind of ["pr", "issue"]) {
+  test(`${kind} cancelled refresh releases its shared lease without backoff for another session`, async (t) => {
+    const home = fixture(t);
+    const controller = new AbortController();
+    let calls = 0;
+    t.mock.method(statuslineGitHub, "cacheScope", async () => "fixture");
+    t.mock.method(statuslineGitHub, "request", async () => {
+      if (++calls === 1) {
+        controller.abort();
+        return { ok: false, error: "Request cancelled", headers: {} };
+      }
+      return { ok: true, cacheScope: "fixture", data: { data: { repository: {
+        [kind === "pr" ? "pullRequest" : "issue"]: { state: "OPEN", title: "Other session" },
+      } } } };
+    });
+    const cancelled = await prefetchStatuses(kind, [{ url: refs[kind] }], {
+      home, now: 1000, signal: controller.signal,
+    });
+    assert.throws(() => cancelled(refs[kind]), /cancel|abort/i);
+    const active = await prefetchStatuses(kind, [{ url: refs[kind] }], { home, now: 1001 });
+    assert.equal(active(refs[kind]).title, "Other session");
+    assert.equal(calls, 2, "cancellation cannot impose shared GitHub failure backoff");
+  });
+}
+
+for (const format of ["seconds", "date"]) {
+  test(`refresh backoff uses response time after sequential delays (${format})`, async (t) => {
+    const home = fixture(t);
+    const start = Date.UTC(2026, 0, 1);
+    let responseTime = start;
+    let calls = 0;
+    const urls = [refs.pr, "https://github.com/acme/project/pull/3"];
+    t.mock.method(statuslineGitHub, "cacheScope", async () => "fixture");
+    t.mock.method(statuslineGitHub, "request", async () => {
+      calls++;
+      responseTime += 90000;
+      return { ok: false, status: 429, error: "Delayed backoff", headers: {
+        "retry-after": format === "seconds" ? "120" : new Date(responseTime + 30000).toUTCString(),
+      } };
+    });
+    await prefetchStatuses("pr", urls.map((url) => ({ url })), {
+      home, now: start, clock: () => responseTime,
+    });
+    const cache = readPrCache(home);
+    const cooldown = format === "seconds" ? 120000 : 60000;
+    assert.equal(cache[urls[0]].retryAt, start + 90000 + cooldown);
+    assert.equal(cache[urls[1]].retryAt, start + 180000 + cooldown);
+    const beforeDeadline = await prefetchStatuses("pr", [{ url: urls[1] }], {
+      home, now: start + 180000 + cooldown - 1, clock: () => responseTime,
+    });
+    assert.throws(() => beforeDeadline(urls[1]), /Delayed backoff/);
+    assert.equal(calls, 2, "later items retain their full cooldown after response receipt");
+  });
+}
 
 for (const kind of ["pr", "issue"]) {
   test(`${kind} invalidated metadata is stale even when checkedAt is zero`, (t) => {
