@@ -296,6 +296,10 @@ Vally tooling roots and generated skills also override only Copilot SDK's exact
 pinned SDK supplies Zod 4.6.6 or newer. The override does not change Vally or SDK
 versions.
 
+The tooling locks resolve `body-parser` 2.4.0 for GHSA-27r3-jxmh-p828 through
+Express's existing supported range. This patch passed the seven-day release-age
+gate on October 29, 2026; no override or age exception is needed.
+
 ## Layout
 
 ```text
