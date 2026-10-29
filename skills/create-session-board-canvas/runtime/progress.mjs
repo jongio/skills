@@ -17,6 +17,8 @@ const primaryOnly = (actor) => {
 };
 const initialDelivery = () => ({ phase: "planning", status: "running", evidence: null });
 export const isOperatorEvent = (type) => /^(permission|user_input|elicitation|exit_plan_mode)\.(requested|completed)$/.test(type);
+export const isRootCancellation = (event) => ["abort", "session.shutdown"].includes(event.type) &&
+  !event.agentId && !event.data?.agentId;
 
 function constrainGoalMembership(state, goal) {
   const membership = new Set(goal.taskIds);
@@ -340,7 +342,7 @@ export async function createProgressService({ sessionId, readSources, store, onC
           next.reports.push(report);
           const member = agent(next, actorId);
           if (delegated && !member.goalId) member.goalId = goalId;
-          if (!member.goalId || member.goalId === goalId) {
+          if (delegated ? !member.goalId || member.goalId === goalId : goalId === next.activeGoalId) {
             Object.assign(member, { state: report.status, report: message, updatedAt: report.at });
           }
           next.seen.push(key);
@@ -366,6 +368,14 @@ export async function createProgressService({ sessionId, readSources, store, onC
   }
   async function observe(event) {
     const data = event.data || {};
+    if (isRootCancellation(event)) {
+      return queue(async () => {
+        if (!state.attention.length) return;
+        const next = clone(state);
+        next.attention = [];
+        await commit(next);
+      });
+    }
     if (isOperatorEvent(event.type)) {
       if (!data.requestId || data.resolvedByHook) return;
       return queue(async () => {

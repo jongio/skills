@@ -37,7 +37,8 @@ task/assignment/goal identities are rejected before sequence reconciliation.
 After reassignment, an existing actor/task/goal stream can still resolve its
 request using the original `goalId`, subject to current task ownership and
 sequence checks. Prior-goal reports do not replace the agent's current-goal
-team status. A taskless unassigned
+team status. Direct primary reports update team status for the active goal
+without moving earlier task assignments. A taskless unassigned
 delegate must specify `goalId` once a goal is active. Primary's own reports may
 default to the active goal. Before goal activation, session-level reports remain
 unscoped and explicit operator requests are still visible.
@@ -56,6 +57,9 @@ Transient native prompts may not be reconstructable after reconnect; the host's
 native permission/input UI remains authoritative.
 Native plan-approval (`exit_plan_mode`) requests are also operator attention;
 their completion clears only the matching request, not unrelated permissions.
+Root turn cancellation or session shutdown clears pending native prompts, but
+not report-based operator requests. A delegate's cancellation cannot clear the
+root session's prompts.
 
 Keep a monotonically increasing sequence per reporter/task/goal, starting at 1.
 Reuse an update ID only to retry the same logical update. For a revision

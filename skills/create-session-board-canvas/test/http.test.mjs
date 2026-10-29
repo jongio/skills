@@ -4,6 +4,22 @@ import { createProgressService } from "../runtime/progress.mjs";
 import { createProgressCanvas } from "../runtime/canvas.mjs";
 import { createCanvasRuntime } from "../runtime/canvas-kit/server.mjs";
 
+async function* snapshots(reader) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) return;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary;
+    while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      if (frame.startsWith("data: ")) yield JSON.parse(frame.slice(6));
+    }
+  }
+}
+
 test("real HTTP/SSE publishes reports to multiple panels without exposing task writes", async (t) => {
   let runtime;
   const service = await createProgressService({
@@ -25,13 +41,20 @@ test("real HTTP/SSE publishes reports to multiple panels without exposing task w
   };
   assert.equal((await fetch(new URL("state", one.url))).status, 403);
   const controller = new AbortController();
-  const stream = await fetch(endpoint("events", one.url), { signal: controller.signal });
+  const stream = await fetch(endpoint("events", one.url), {
+    signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
+  });
   const reader = stream.body.getReader();
   t.after(async () => { controller.abort(); await reader.cancel().catch(() => {}); });
-  await reader.read();
+  const updates = snapshots(reader);
+  assert.equal((await updates.next()).value.sessionId, "http-session");
   await service.update({ action: "report", updateId: "r", taskId: "a", status: "blocked", message: "Need access", sequence: 1 }, { id: "worker", primary: false });
-  const pushed = new TextDecoder().decode((await reader.read()).value);
-  assert.match(pushed, /Need access/);
+  let pushed;
+  for await (const next of updates) {
+    if (next.reports.some((report) => report.id === "r")) { pushed = next; break; }
+  }
+  assert.equal(pushed?.reports.find((report) => report.id === "r").message, "Need access");
+  assert.equal(pushed.tasks[0].status, "pending");
   const state = await fetch(endpoint("state", two.url)).then((r) => r.json());
   assert.equal(state.tasks[0].status, "pending");
   assert.equal(state.reports[0].status, "blocked");

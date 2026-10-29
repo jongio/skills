@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { actorFor, createProgressEventGate, readSessionSources, progressInputSchema } from "../runtime/host.mjs";
+import { actorFor, createProgressEventGate, isProgressEvent, readSessionSources, progressInputSchema } from "../runtime/host.mjs";
 import { acquireProvider } from "../runtime/provider.mjs";
 import { validate } from "../runtime/canvas-kit/validate.mjs";
 import { createProgressService } from "../runtime/progress.mjs";
@@ -78,4 +78,29 @@ test("events arriving during an asynchronous startup drain remain FIFO", async (
   await started;
   await events.push("live");
   assert.deepEqual(order, ["request", "completion", "live"]);
+});
+
+test("the host routes root cancellation through startup buffering but ignores delegate cancellation", async () => {
+  const service = await createProgressService({
+    sessionId: "startup-cancel",
+    store: { load: async () => null, save: async () => {} },
+    readSources: async () => ({ plan: {}, rows: [], dependencies: [] }),
+  });
+  const events = createProgressEventGate((event) => service.observe(event));
+  const route = (event) => isProgressEvent(event) ? events.push(event) : undefined;
+  route({ type: "user_input.requested", data: { requestId: "pending" } });
+  route({ type: "abort", data: {} });
+  await events.start();
+  assert.deepEqual(service.snapshot().attention, []);
+  await route({ type: "permission.requested", data: { requestId: "next" } });
+  for (const event of [
+    { type: "abort", agentId: "worker", data: {} },
+    { type: "session.shutdown", data: { agentId: "worker" } },
+  ]) {
+    assert.equal(isProgressEvent(event), false);
+    await route(event);
+    assert.equal(service.snapshot().attention.length, 1);
+  }
+  await route({ type: "abort", data: {} });
+  assert.deepEqual(service.snapshot().attention, []);
 });

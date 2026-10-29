@@ -390,6 +390,54 @@ test("native plan approval requests are shown and completed independently of per
   assert.deepEqual(service.snapshot().attention.map((request) => request.kind), ["permission"]);
 });
 
+test("root cancellation clears native prompts without clearing report requests or other agents' work", async () => {
+  const { service } = await fixture([task("a")]);
+  await goal(service, "g", ["a"]);
+  await service.update({ action: "report", taskId: "a", updateId: "request",
+    sequence: 1, status: "blocked", message: "Persistent operator request", requiresOperator: true }, worker);
+  for (const kind of ["user_input", "permission", "exit_plan_mode"]) {
+    await service.observe({ type: `${kind}.requested`, data: { requestId: kind } });
+  }
+  const reports = service.snapshot().reports;
+  for (const event of [
+    { type: "abort", agentId: "worker", data: {} },
+    { type: "abort", data: { agentId: "worker" } },
+  ]) {
+    await service.observe(event);
+    assert.equal(service.snapshot().attention.length, 3);
+  }
+  await service.observe({ type: "abort", data: {} });
+  assert.deepEqual(service.snapshot().attention, []);
+  assert.deepEqual(service.snapshot().reports, reports);
+  assert.equal(service.snapshot().tasks[0].status, "pending");
+  await service.observe({ type: "permission.requested", data: { requestId: "next-turn" } });
+  assert.equal(service.snapshot().attention.length, 1);
+  await service.observe({ type: "session.shutdown", data: {} });
+  assert.deepEqual(service.snapshot().attention, []);
+});
+
+test("direct primary reports follow the active goal without rewriting prior assignments", async () => {
+  const { service } = await fixture();
+  await goal(service, "first", ["a"]);
+  await service.update({ action: "assign", agentId: "primary", taskIds: ["a"] }, primary);
+  await service.update({ action: "report", updateId: "first-report", sequence: 1,
+    status: "blocked", message: "Earlier goal" }, primary);
+  const assignment = service.snapshot().agents.find((member) => member.id === "primary");
+  await goal(service, "second", ["b"]);
+  await service.update({ action: "report", updateId: "second-report", sequence: 1,
+    status: "working", message: "Current goal" }, primary);
+  let member = service.snapshot().agents.find((entry) => entry.id === "primary");
+  assert.equal(member.state, "working");
+  assert.equal(member.report, "Current goal");
+  assert.equal(member.goalId, assignment.goalId);
+  assert.deepEqual(member.taskIds, assignment.taskIds);
+  const current = structuredClone(member);
+  await service.update({ action: "report", goalId: "first", updateId: "late-primary", sequence: 2,
+    status: "result_ready", message: "Earlier result" }, primary);
+  member = service.snapshot().agents.find((entry) => entry.id === "primary");
+  assert.deepEqual(member, current);
+});
+
 test("known pre-goal request streams remain resolvable after goal activation", async () => {
   const { service } = await fixture([task("a")]);
   await service.update({ action: "report", updateId: "global-primary", sequence: 1, status: "blocked", message: "Planning choice", requiresOperator: true }, primary);

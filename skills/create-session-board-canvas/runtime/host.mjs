@@ -1,3 +1,8 @@
+import { isOperatorEvent, isRootCancellation } from "./progress.mjs";
+
+export const isProgressEvent = (event) => isOperatorEvent(event.type) || isRootCancellation(event) ||
+  /^(subagent\.|session\.(?:plan_changed|todos_changed|resume|compaction_complete))/.test(event.type);
+
 const trackedTargetSchema = {
   type: "object", properties: {
     reference: { type: "string" }, url: { type: "string" }, owned: { type: "boolean" },
