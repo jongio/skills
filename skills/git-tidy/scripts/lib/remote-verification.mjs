@@ -168,6 +168,7 @@ export function remoteVerificationFailureMessage(code) {
     "github-credentials-invalid": "GitHub CLI returned an invalid credential for the approved host. Check gh auth status --hostname <approved-host> and GH_CONFIG_DIR, then retry.",
     "github-authentication-failed": "The approved repository rejected GitHub CLI authentication. Check repository read permission, token expiration, and organization SSO authorization, then retry.",
     "github-auth-timeout": "GitHub CLI credential lookup timed out. Check the existing CLI session and credential store for the approved host, then retry.",
+    "github-read-only-auth-unsupported": "This GitHub CLI does not support read-only token lookup. Use a trusted CLI supporting gh auth token --no-refresh, then retry. Verification never retries without the flag or changes credentials.",
     "remote-url-unsafe": "Use the exact approved credential-free HTTPS owner/repository URL or an absolute local repository path. Executable transports and ambiguous URLs are not supported.",
     "remote-url-mismatch": "The URL differs from the previously approved remote identity. Return to fresh analysis and separate remote-verification approval.",
     "remote-response-unsafe": "The remote response contained credential material and was discarded. No evidence or action plan was accepted.",
@@ -182,17 +183,22 @@ async function githubAuthentication(host, gitPath, root, options, untrustedRoots
   } catch {
     throw new GitBoundaryError("GITHUB_CLI_UNAVAILABLE", "trusted gh unavailable");
   }
-  const ghEnvironment = {
-    ...createGitHubEnvironment(ghPath, gitPath),
-    GH_HOST: host,
-  };
+  const ghEnvironment = { ...createGitHubEnvironment(ghPath, gitPath) };
+  const explicitlyBoundHost = ghEnvironment.GH_HOST?.toLowerCase() === host;
+  for (const key of ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) {
+    if (!explicitlyBoundHost || host === "github.com") delete ghEnvironment[key];
+  }
+  for (const key of ["GH_TOKEN", "GITHUB_TOKEN"]) {
+    if (host !== "github.com" && !explicitlyBoundHost) delete ghEnvironment[key];
+  }
+  ghEnvironment.GH_HOST = host;
   if (ghEnvironment.GH_CONFIG_DIR) {
     ghEnvironment.GH_CONFIG_DIR = path.resolve(ghEnvironment.GH_CONFIG_DIR);
   }
   let result;
   try {
     result = await (options.runner ?? runBoundedProcess)(ghPath, [
-      "auth", "token", "--hostname", host,
+      "auth", "token", "--hostname", host, "--no-refresh",
     ], {
       cwd: root,
       env: ghEnvironment,
@@ -202,7 +208,12 @@ async function githubAuthentication(host, gitPath, root, options, untrustedRoots
       maxStderrBytes: 16 * 1024,
     });
   } catch (error) {
-    const code = error?.code === "TIMEOUT" ? "GITHUB_AUTH_TIMEOUT"
+    const unsupported = error?.code === "COMMAND_FAILED" &&
+      /unknown flag: --no-refresh/iu.test(
+        error.details?.stderr?.toString("utf8") ?? "",
+      );
+    const code = unsupported ? "GITHUB_READ_ONLY_AUTH_UNSUPPORTED"
+      : error?.code === "TIMEOUT" ? "GITHUB_AUTH_TIMEOUT"
       : error?.code === "CANCELLED" ? "CANCELLED"
       : "GITHUB_CREDENTIALS_UNAVAILABLE";
     throw new GitBoundaryError(code, "GitHub credential lookup failed");

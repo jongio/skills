@@ -89,12 +89,19 @@ Pass its closed result as `{"remoteBaseline":<result>}` to `analyze-verified`.
 The verifier uses a disposable bare repository, explicit `--no-prune`, disabled
 hooks and credential helpers, and no target-repository configuration.
 It first attempts anonymous access. Only an authentication-required HTTPS read
-may use `gh auth token --hostname <exact-approved-host>` from the existing CLI
+may use `gh auth token --hostname <exact-approved-host> --no-refresh` from the existing CLI
 session. Resolve `gh` outside all untrusted repository roots, run it without a
 shell in the disposable directory, preserve trusted Windows/XDG credential
 locations and explicit `GH_CONFIG_DIR`, and bound its time and output.
 Enterprise credentials must be selected for that exact host, never from a
-guessed host, remote alias, or `GH_HOST` fallback.
+guessed host, remote alias, or `GH_HOST` fallback. Forward Enterprise/cloud
+environment tokens only when the caller's existing `GH_HOST` explicitly matches
+that exact host; never treat the verifier's own `GH_HOST` override as evidence
+of this association. Normal `GH_TOKEN`/`GITHUB_TOKEN` use for `github.com` remains
+available. Otherwise read only stored host-specific credentials.
+Never retry token lookup without `--no-refresh`, even for an older CLI. Report
+`github-read-only-auth-unsupported` and have the user select a supporting trusted
+CLI; do not upgrade automatically or refresh stored credentials.
 
 Keep tokens out of argv, URLs, user-visible stdout/stderr, saved evidence, and
 persistent configuration. Pass the Authorization header only through the Git child's

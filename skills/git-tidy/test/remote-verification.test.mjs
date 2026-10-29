@@ -62,7 +62,7 @@ function mockRemote({ authError, authenticatedError, response, host, tokenOutput
   const runner = async (executable, args, options) => {
     calls.push({ executable, args, options: { ...options, env: { ...options.env } } });
     if (args[0] === "auth") {
-      assert.deepEqual(args, ["auth", "token", "--hostname", host ?? "github.com"]);
+      assert.deepEqual(args, ["auth", "token", "--hostname", host ?? "github.com", "--no-refresh"]);
       if (authError) throw authError;
       return processResult(tokenOutput ?? `${token}\r\n`);
     }
@@ -262,7 +262,7 @@ test("credential lookup preserves Windows, explicit and XDG CLI configuration", 
     APPDATA: path.join(tmpdir(), "appdata"),
     LOCALAPPDATA: path.join(tmpdir(), "localappdata"),
     USERPROFILE: path.join(tmpdir(), "profile"),
-    GH_HOST: "unapproved.example",
+    GH_HOST: "github.enterprise.example",
     GH_DEBUG: "api",
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "http.extraHeader",
@@ -316,8 +316,9 @@ test("existing gh sessions select only the approved host with explicit config", 
     GH_CONFIG_DIR: path.relative(process.cwd(), config),
     GH_TOKEN: undefined,
     GITHUB_TOKEN: undefined,
-    GH_ENTERPRISE_TOKEN: undefined,
-    GITHUB_ENTERPRISE_TOKEN: undefined,
+    GH_HOST: "another.enterprise.example",
+    GH_ENTERPRISE_TOKEN: "unscoped-enterprise-fixture-token",
+    GITHUB_ENTERPRISE_TOKEN: "unscoped-enterprise-fallback-token",
   });
   t.after(async () => {
     await rm(root, { recursive: true, force: true, maxRetries: 3 });
@@ -328,14 +329,15 @@ test("existing gh sessions select only the approved host with explicit config", 
     ["github.com.unapproved.example", null],
   ]) {
     let expectedHeader = null;
+    let capturedToken = null;
     const baseline = await verifyRemoteBaseline(`https://${host}/owner/private.git`, {
       ghPath,
       runner: async (executable, args, options) => {
         if (args[0] === "auth") {
           assert.equal(options.env.GH_CONFIG_DIR, config);
           const result = await runBoundedProcess(executable, args, options);
-          assert.equal(result.stdout.toString("utf8").trim(), expectedToken);
-          expectedHeader = `Authorization: Basic ${Buffer.from(`x-access-token:${expectedToken}`).toString("base64")}`;
+          capturedToken = result.stdout.toString("utf8").trim();
+          expectedHeader = `Authorization: Basic ${Buffer.from(`x-access-token:${capturedToken}`).toString("base64")}`;
           return result;
         }
         if (args.includes("ls-remote")) {
@@ -348,10 +350,105 @@ test("existing gh sessions select only the approved host with explicit config", 
         return processResult();
       },
     });
-    assert.equal(baseline.state, expectedToken ? "verified" : "failed");
-    if (!expectedToken) assert.equal(baseline.failureCode, "github-credentials-unavailable");
+    if (baseline.failureCode === "github-read-only-auth-unsupported") {
+      assert.equal(capturedToken, null);
+      t.diagnostic("Installed gh lacks --no-refresh; read-only compatibility failure verified.");
+    } else {
+      assert.equal(baseline.state, expectedToken ? "verified" : "failed", baseline.failureCode);
+      assert.equal(capturedToken, expectedToken);
+      if (!expectedToken) assert.equal(baseline.failureCode, "github-credentials-unavailable");
+    }
   }
   assert.equal(await readFile(path.join(config, "hosts.yml"), "utf8"), configContents);
+});
+
+test("token lookup never retries a CLI that cannot disable credential refresh", async () => {
+  const mock = mockRemote({
+    authError: commandFailure("unknown flag: --no-refresh"),
+  });
+  const baseline = await verifyRemoteBaseline(approvedUrl, mock);
+  assert.equal(baseline.failureCode, "github-read-only-auth-unsupported");
+  assert.match(remoteVerificationFailureMessage(baseline.failureCode), /never retries without the flag/u);
+  assert.equal(mock.calls.filter(({ args }) => args[0] === "auth").length, 1);
+  assert.equal(mock.calls.some(({ args }) => args.includes("fetch")), false);
+});
+
+test("refreshable CLI credentials are read without contacting a refresh endpoint", async (t) => {
+  let ghPath;
+  try {
+    ghPath = resolveExecutablePath("gh");
+  } catch {
+    t.skip("GitHub CLI is not installed");
+    return;
+  }
+  const root = await mkdtemp(path.join(tmpdir(), "git-tidy-gh-refresh-"));
+  const configContents = [
+    "refresh.enterprise.example:",
+    "    user: fixture",
+    "    users:",
+    "        fixture:",
+    "            refreshable_oauth_token:",
+    `                access_token: ${token}`,
+    "                refresh_token: fixture-only-refresh-token",
+    "                expires_at: 2000-01-01T00:00:00Z",
+    "                refresh_token_expires_at: 2099-01-01T00:00:00Z",
+  ].join("\n");
+  await writeFile(path.join(root, "hosts.yml"), configContents);
+  overrideEnvironment(t, {
+    GH_CONFIG_DIR: root,
+    GH_TOKEN: undefined,
+    GITHUB_TOKEN: undefined,
+    GH_ENTERPRISE_TOKEN: undefined,
+    GITHUB_ENTERPRISE_TOKEN: undefined,
+  });
+  let refreshRequests = 0;
+  const proxy = createServer((request, response) => {
+    refreshRequests += 1;
+    response.writeHead(502);
+    response.end();
+  });
+  proxy.on("connect", (request, socket) => {
+    refreshRequests += 1;
+    socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+  });
+  await new Promise((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    await new Promise((resolve) => proxy.close(resolve));
+    await rm(root, { recursive: true, force: true, maxRetries: 3 });
+  });
+  const mock = mockRemote({ host: "refresh.enterprise.example" });
+  let capturedToken = null;
+  const baseline = await verifyRemoteBaseline(
+    "https://refresh.enterprise.example/owner/private.git",
+    {
+      ghPath,
+      runner: async (executable, args, options) => {
+        if (args[0] !== "auth") return mock.runner(executable, args, options);
+        const proxyUrl = `http://127.0.0.1:${proxy.address().port}`;
+        const result = await runBoundedProcess(executable, args, {
+          ...options,
+          env: {
+            ...options.env,
+            HTTPS_PROXY: proxyUrl,
+            HTTP_PROXY: proxyUrl,
+            NO_PROXY: "",
+            XDG_STATE_HOME: root,
+          },
+        });
+        capturedToken = result.stdout.toString("utf8").trim();
+        return result;
+      },
+    },
+  );
+  assert.equal(refreshRequests, 0);
+  assert.equal(await readFile(path.join(root, "hosts.yml"), "utf8"), configContents);
+  if (baseline.failureCode === "github-read-only-auth-unsupported") {
+    assert.equal(capturedToken, null);
+    t.diagnostic("Installed gh lacks --no-refresh; read-only compatibility failure verified.");
+  } else {
+    assert.equal(baseline.state, "verified", baseline.failureCode);
+    assert.equal(capturedToken, token);
+  }
 });
 
 test("unsafe URLs and changed approval identity fail before any process or credentials", async () => {

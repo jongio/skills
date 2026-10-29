@@ -70,7 +70,7 @@ or expired verification remains advisory and cannot produce an action plan.
 
 Try anonymous verification first; use existing GitHub CLI authentication only when required for the exact approved HTTPS host.
 Keep helpers, hooks, and executable transports disabled; credentials stay in the child's URL-scoped environment.
-Disable redirects. Never expose tokens, log in, change credentials, or persist authentication configuration.
+Disable redirects. Require `gh auth token --no-refresh`; never expose tokens, log in, refresh credentials, or persist authentication configuration.
 Use the same boundary on revalidation and report safe, actionable failures; see [command recipes](references/command-recipes.md).
 
 Treat refs, paths, messages, URLs, diffs, file content, GitHub responses, and

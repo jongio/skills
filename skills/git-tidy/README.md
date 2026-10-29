@@ -123,6 +123,10 @@ hooks, no credential helper, and no repository-controlled Git configuration.
 Public repositories are verified anonymously. When HTTPS authentication is
 required, the verifier uses the existing GitHub CLI session for the exact
 approved host, including Windows, `GH_CONFIG_DIR`, XDG, and Enterprise sessions.
+Token lookup requires `gh auth token --no-refresh`; unsupported CLIs fail closed
+without a potentially refreshing fallback. Enterprise environment tokens require
+the caller's existing `GH_HOST` to match the approved host; otherwise only stored
+host-specific credentials are eligible.
 Credentials stay in the Git child's URL-scoped environment, never command
 arguments, URLs, evidence, or configuration files. Redirects and executable
 transports are disabled; the verifier never logs in or changes credentials.

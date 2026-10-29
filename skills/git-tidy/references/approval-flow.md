@@ -14,7 +14,10 @@ effect; it does not carry across drift or action classes.
    disabled hooks and credential helpers, and an isolated environment that
    ignores repository-controlled Git configuration. Anonymous access is tried
    first; authentication-required HTTPS reads may use the existing GitHub CLI
-   session for the exact approved host. Credentials exist only in the Git
+   session for the exact approved host with `--no-refresh`; unsupported CLIs fail
+   closed without retrying a potentially refreshing lookup. Enterprise environment
+   tokens require the caller's existing `GH_HOST` to match the approved host.
+   Credentials exist only in the Git
    child's URL-scoped environment, never argv, URLs, logs, evidence, or persistent
    configuration. Redirects remain disabled. No login or credential change is
    performed. Revalidation uses the same boundary and rejects a changed URL
