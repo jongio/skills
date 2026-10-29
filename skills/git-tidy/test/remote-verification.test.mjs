@@ -41,6 +41,22 @@ function advertisement(oid, ref = "main") {
   return `ref: refs/heads/${ref}\tHEAD\n${oid}\tHEAD\n${oid}\trefs/heads/${ref}\n`;
 }
 
+function overrideEnvironment(t, values) {
+  const previous = Object.fromEntries(
+    Object.keys(values).map((key) => [key, process.env[key]]),
+  );
+  t.after(() => {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
 function mockRemote({ authError, authenticatedError, response, host, tokenOutput } = {}) {
   const calls = [];
   const runner = async (executable, args, options) => {
@@ -240,9 +256,7 @@ test("authenticated verification refuses redirects to another host", async (t) =
 });
 
 test("credential lookup preserves Windows, explicit and XDG CLI configuration", async (t) => {
-  const previous = process.env;
-  process.env = {
-    ...previous,
+  overrideEnvironment(t, {
     GH_CONFIG_DIR: path.join(tmpdir(), "explicit-gh-config"),
     XDG_CONFIG_HOME: path.join(tmpdir(), "xdg-gh-config"),
     APPDATA: path.join(tmpdir(), "appdata"),
@@ -257,8 +271,7 @@ test("credential lookup preserves Windows, explicit and XDG CLI configuration", 
     GIT_EXEC_PATH: "hostile",
     GIT_TRACE: "1",
     GITHUB_ENTERPRISE_TOKEN: token,
-  };
-  t.after(() => { process.env = previous; });
+  });
   const host = "github.enterprise.example";
   const mock = mockRemote({ host });
   const baseline = await verifyRemoteBaseline(`https://${host}/owner/private.git`, mock);
@@ -299,13 +312,14 @@ test("existing gh sessions select only the approved host with explicit config", 
     "    user: fixture",
   ].join("\n");
   await writeFile(path.join(config, "hosts.yml"), configContents);
-  const previous = process.env;
-  process.env = { ...previous, GH_CONFIG_DIR: path.relative(process.cwd(), config) };
-  for (const key of ["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) {
-    delete process.env[key];
-  }
+  overrideEnvironment(t, {
+    GH_CONFIG_DIR: path.relative(process.cwd(), config),
+    GH_TOKEN: undefined,
+    GITHUB_TOKEN: undefined,
+    GH_ENTERPRISE_TOKEN: undefined,
+    GITHUB_ENTERPRISE_TOKEN: undefined,
+  });
   t.after(async () => {
-    process.env = previous;
     await rm(root, { recursive: true, force: true, maxRetries: 3 });
   });
   for (const [host, expectedToken] of [
@@ -455,14 +469,12 @@ test("hostile repository and inherited Git configuration stay ignored", async (t
     "[protocol \"https\"]", "allow = never",
     "[url \"ext::hostile\"]", "insteadOf = https://github.com/",
   ].join("\n"));
-  const previous = process.env;
-  process.env = {
-    ...previous, GIT_CONFIG_GLOBAL: global, GIT_CONFIG_SYSTEM: global,
+  overrideEnvironment(t, {
+    GIT_CONFIG_GLOBAL: global, GIT_CONFIG_SYSTEM: global,
     GIT_CONFIG: global, GIT_DIR: path.join(remote.fixture.root, ".git"),
     GIT_WORK_TREE: remote.fixture.root, GIT_EXEC_PATH: remote.fixture.root,
     GIT_ASKPASS: hostile, GIT_TRACE: "1",
-  };
-  t.after(() => { process.env = previous; });
+  });
   const baseline = await verifyRemoteBaseline(approvedUrl, remote.options);
   assert.equal(baseline.state, "verified", baseline.failureCode);
   assert.equal(existsSync(marker), false);
