@@ -10,8 +10,9 @@ import {
   evaluatePrPollTick as native_evaluatePrPollTick,
   extractBodyOnlyFindings,
   isErroredCopilotReview,
-    parsePrWatchArgs,
+  parsePrWatchArgs,
   requestCopilotReview as native_requestCopilotReview,
+  shouldEmitPrWatchStatus,
 } from "../scripts/pr-watch-daemon.mjs";
 
 const requestCopilotReview = (...args) => { args[1] = fixtureRequest(args[1]); return native_requestCopilotReview(...args); };
@@ -861,6 +862,131 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
   assert.equal(phaseChangedTick.events[0].summary, "CI passed (1/1) | Copilot is reviewing");
 });
 
+test("Copilot reviewer aliases match without weakening review gates", async (t) => {
+  const head = "a".repeat(40);
+  const aliases = [
+    "copilot",
+    "copilot-pull-request-reviewer",
+    "copilot-pull-request-reviewer[bot]",
+    "github-copilot",
+    "github-copilot[bot]",
+  ];
+  function poll({
+    expected = "copilot",
+    author = "copilot-pull-request-reviewer",
+    review = {},
+    pr = {},
+    workflowRuns = [],
+    noCopilot = false,
+  } = {}) {
+    const args = parsePrWatchArgs([
+      "once", "--repo", "example/skills", "--pr", "7", "--head", head,
+      "--expected-reviewers", expected, "--max-copilot-retries", "0",
+      ...(noCopilot ? ["--no-copilot"] : []),
+    ]);
+    const pullRequest = {
+      state: "OPEN",
+      headRefOid: head,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: "APPROVED",
+      reviewRequests: { nodes: [] },
+      reviews: { nodes: [{
+        databaseId: 1,
+        state: "APPROVED",
+        submittedAt: "2026-01-01T00:00:00Z",
+        commit: { oid: head },
+        author: { login: author },
+        body: "Looks good.",
+        ...review,
+      }] },
+      reviewThreads: { nodes: [] },
+      comments: { nodes: [] },
+      commits: { nodes: [{ commit: { statusCheckRollup: {
+        state: "SUCCESS",
+        contexts: { nodes: [{
+          __typename: "CheckRun", name: "tests", status: "COMPLETED", conclusion: "SUCCESS",
+        }] },
+      } } }] },
+      ...pr,
+    };
+    return evaluatePrPollTick(args, (ghArgs) => {
+      assert.equal(ghArgs[0], "api");
+      if (ghArgs[1] === "graphql") {
+        return {
+          ok: true,
+          stdout: JSON.stringify({ data: { repository: { pullRequest } } }),
+          stderr: "",
+        };
+      }
+      assert.ok(ghArgs[1].startsWith("repos/example/skills/actions/runs?"));
+      return { ok: true, stdout: JSON.stringify({ workflow_runs: workflowRuns }), stderr: "" };
+    });
+  }
+
+  await t.test("matches all supported expected and returned Copilot names", async () => {
+    for (const expected of [...aliases, " CoPiLoT "]) {
+      for (const author of [...aliases, "CoPiLoT-Pull-Request-Reviewer[BoT]"]) {
+        const result = await poll({ expected, author });
+        assert.equal(result.events[0]?.type, "PR_READY_TO_MERGE", `${expected} / ${author}`);
+        assert.equal(result.events[0].headRefOid, head);
+      }
+    }
+    assert.equal((await poll({ expected: aliases.join(",") })).events[0]?.type, "PR_READY_TO_MERGE");
+  });
+
+  await t.test("COMMENTED completes review without claiming approval", async () => {
+    const result = await poll({
+      review: { state: "COMMENTED", body: "### 🟢 Approval recommended\n\n**No open issues**" },
+      pr: { reviewDecision: null },
+    });
+    assert.equal(result.events[0]?.type, "PR_READY_TO_MERGE");
+    assert.equal(result.events[0].reviewDecision, null);
+  });
+
+  await t.test("requires a submitted current-head review and separate approval gates", async () => {
+    for (const [name, options, count] of [
+      ["missing", { pr: { reviews: { nodes: [] } } }, 0],
+      ["stale", { review: { commit: { oid: "b".repeat(40) } } }, 0],
+      ["dismissed", { review: { state: "DISMISSED" } }, 0],
+      ["draft", { review: { state: "PENDING" } }, 0],
+      ["unsubmitted", { review: { submittedAt: null } }, 0],
+      ["requested", { pr: { reviewRequests: { nodes: [{
+        requestedReviewer: { __typename: "Bot", login: "copilot-pull-request-reviewer" },
+      }] } } }, 1],
+      ["running", { workflowRuns: [{
+        id: 2, name: "Running Copilot Code Review", status: "in_progress",
+      }] }, 1],
+      ["approval required", { pr: { reviewDecision: "REVIEW_REQUIRED" } }, 1],
+      ["changes requested", { pr: { reviewDecision: "CHANGES_REQUESTED" } }, 1],
+    ]) {
+      const result = await poll(options);
+      assert.ok(!result.events.some((event) => event.type === "PR_READY_TO_MERGE"), name);
+      assert.equal(result.status?.validHeadCopilotReviewsCount, count, name);
+    }
+    assert.equal(
+      (await poll({ review: {
+        state: "COMMENTED",
+        body: "Copilot encountered an error and was unable to review this pull request.",
+      } })).events[0]?.type,
+      "COPILOT_REVIEW_ERROR",
+    );
+    assert.equal((await poll({ pr: { headRefOid: "b".repeat(40) } })).events[0]?.type, "HEAD_CHANGED");
+    assert.equal((await poll({ review: { state: "COMMENTED" } })).events[0]?.type, "FEEDBACK_ACTION_NEEDED");
+  });
+
+  await t.test("keeps unrelated reviewers and lookalike names distinct", async () => {
+    const missingHuman = await poll({ expected: "copilot,alice" });
+    assert.deepEqual(missingHuman.status?.pendingReviewers, ["alice"]);
+    const lookalike = await poll({ expected: "copilot-helper" });
+    assert.deepEqual(lookalike.status?.pendingReviewers, ["copilot-helper"]);
+    assert.equal(
+      (await poll({ author: "ALICE", expected: "alice", noCopilot: true })).events[0]?.type,
+      "PR_READY_TO_MERGE",
+    );
+  });
+});
+
 test("requestCopilotReview cancels superseded branch runs, toggles existing requests, and guards head/state", async () => {
   assert.match(skill, /--body-file.*@'\.\.\.'@/i);
   assert.match(skill, /pr-watch-daemon\.mjs request-copilot/);
@@ -1518,6 +1644,63 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   assert.equal(unrelatedNoiseRes.ok, true);
   assert.equal(unrelatedNoiseRes.status, "requested");
   assert.deepEqual(unrelatedNoiseRes.cancelledRunIds, []);
+
+  // 13. Transient total_count drift on pass 1 (when a run finishes mid-query) retries on pass 2 & 3 instead of failing immediately
+  let driftInProgressPage1Calls = 0;
+  const driftRes = await requestCopilotReview(reqArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "head_new",
+                headRefName: "feat/x",
+                reviewRequests: { nodes: [] },
+              },
+            },
+          },
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[1] === "repos/jongio/skills/actions/runs?status=in_progress&per_page=100") {
+      driftInProgressPage1Calls += 1;
+      if (driftInProgressPage1Calls === 1) {
+        return {
+          ok: true,
+          stdout: JSON.stringify({
+            total_count: 2,
+            workflow_runs: [{ id: 9401, name: "Skill Lint", status: "in_progress" }],
+          }),
+          stderr: "",
+        };
+      }
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          total_count: 1,
+          workflow_runs: [{ id: 9401, name: "Skill Lint", status: "in_progress" }],
+        }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[1] === "repos/jongio/skills/actions/runs?status=in_progress&per_page=100&page=2") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({ total_count: 2, workflow_runs: [] }),
+        stderr: "",
+      };
+    }
+    if (ghArgs[0] === "api" && ghArgs[1]?.startsWith("repos/jongio/skills/actions/runs?status=")) {
+      return { ok: true, stdout: JSON.stringify({ total_count: 0, workflow_runs: [] }), stderr: "" };
+    }
+    return { ok: true, stdout: "{}", stderr: "" };
+  });
+  assert.equal(driftRes.ok, true);
+  assert.equal(driftRes.status, "requested");
 });
 
 test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate-limit backoff", async () => {
@@ -1892,4 +2075,105 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(multiTick.statuses.length, 2);
   assert.equal(multiTick.statuses[0].pr, 178);
   assert.equal(multiTick.statuses[1].pr, 179);
+
+  // action_required workflow runs surface actionRequiredRuns with approval/rerun remediation,
+  // and shouldEmitPrWatchStatus suppresses unchanged ticks until 60s heartbeat
+  const actionReqTick = await evaluatePrPollTick(watchArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+    }
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        total_count: 1,
+        workflow_runs: [
+          {
+            id: 40110872292,
+            workflow_id: 1,
+            name: "CI",
+            event: "pull_request",
+            head_branch: "update-marketplace",
+            status: "completed",
+            conclusion: "action_required",
+            html_url: "https://github.com/github/evals/actions/runs/40110872292",
+          },
+        ],
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(actionReqTick.events[0].type, "CI_FAILED");
+  assert.equal(actionReqTick.events[0].actionRequiredRuns.length, 1);
+  assert.equal(actionReqTick.events[0].actionRequiredRuns[0].runId, 40110872292);
+  assert.match(actionReqTick.events[0].remediation, /actions\/runs\/40110872292\/approve/);
+  assert.match(actionReqTick.events[0].remediation, /^Approve and rerun action_required workflow runs/);
+
+  // When both action_required and genuine failures coexist, remediation includes both instructions
+  const mixedActionReqTick = await evaluatePrPollTick(watchArgs, (ghArgs) => {
+    if (ghArgs[1] === "graphql") {
+      return { ok: true, stdout: gqlRunningPayload, stderr: "" };
+    }
+    return {
+      ok: true,
+      stdout: JSON.stringify({
+        total_count: 2,
+        workflow_runs: [
+          {
+            id: 40110872292,
+            workflow_id: 1,
+            name: "CI",
+            event: "pull_request",
+            head_branch: "update-marketplace",
+            status: "completed",
+            conclusion: "action_required",
+            html_url: "https://github.com/github/evals/actions/runs/40110872292",
+          },
+          {
+            id: 40110872293,
+            workflow_id: 2,
+            name: "Lint",
+            event: "pull_request",
+            head_branch: "update-marketplace",
+            status: "completed",
+            conclusion: "failure",
+            html_url: "https://github.com/github/evals/actions/runs/40110872293",
+          },
+        ],
+      }),
+      stderr: "",
+    };
+  });
+  assert.equal(mixedActionReqTick.events[0].type, "CI_FAILED");
+  assert.match(mixedActionReqTick.events[0].remediation, /also inspect the other failed job logs/);
+
+  assert.equal(
+    shouldEmitPrWatchStatus({
+      polls: 1,
+      eventsCount: 0,
+      summaryChanged: false,
+      nowMs: 1000,
+      lastEmitMs: 0,
+    }),
+    true
+  );
+  assert.equal(
+    shouldEmitPrWatchStatus({
+      polls: 2,
+      eventsCount: 0,
+      summaryChanged: false,
+      nowMs: 16_000,
+      lastEmitMs: 1000,
+    }),
+    false
+  );
+  assert.equal(
+    shouldEmitPrWatchStatus({
+      polls: 5,
+      eventsCount: 0,
+      summaryChanged: false,
+      nowMs: 62_000,
+      lastEmitMs: 1000,
+    }),
+    true
+  );
 });

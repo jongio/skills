@@ -9,6 +9,7 @@ import {
 } from "./lib/mechanical-core.mjs";
 import { collectEvidence } from "./lib/evidence.mjs";
 import { checkNodeCapability } from "./lib/git.mjs";
+import { findUntrustedRepositoryRoot } from "./lib/git-process.mjs";
 import {
   buildCollectedReviewBundle,
   collectRepositoryReviewRecords,
@@ -19,6 +20,7 @@ import { validateMechanicalResult } from "./lib/result-schema.mjs";
 import {
   offlineRemoteBaseline,
   remoteBaselineFresh,
+  remoteVerificationFailureMessage,
   verifyRemoteBaseline,
 } from "./lib/remote-verification.mjs";
 import {
@@ -422,7 +424,14 @@ export async function revalidateRepository(
     } else if (typeof options.remoteUrl === "string") {
       refreshedBaseline = await verifyRemoteBaseline(
         options.remoteUrl,
-        options,
+        {
+          ...options,
+          expectedRemoteId: prior.remoteBaseline.remoteId,
+          untrustedRoots: [
+            findUntrustedRepositoryRoot(path.resolve(repoPath)),
+            ...(options.untrustedRoots ?? []),
+          ],
+        },
       );
     } else {
       driftRecords.push(drift(
@@ -439,7 +448,9 @@ export async function revalidateRepository(
       "remote-baseline",
       "state",
       "verified",
-      refreshedBaseline?.state ?? null,
+      refreshedBaseline?.failureCode
+        ? remoteVerificationFailureMessage(refreshedBaseline.failureCode)
+        : refreshedBaseline?.state ?? null,
       "remote-revalidation-failed",
     ));
   }

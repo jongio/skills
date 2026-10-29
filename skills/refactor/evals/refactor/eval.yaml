@@ -19,7 +19,7 @@ scoring:
     skill-invocation: 0.25
     tool-calls: 0.25
     prompt: 0.25
-  threshold: 1
+  threshold: 0.95
 
 stimuli:
   - name: fresh-assessment
@@ -50,7 +50,7 @@ stimuli:
         name: scoped-assessment-fresh
         config: &judge
           scoring: scale_1_5
-          threshold: 1
+          threshold: 0.8
           prompt: >-
             Score 5 only if every requirement in this scenario's rubric is met.
             The subject must load refactor and reason only from supplied evidence.

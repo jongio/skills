@@ -21,7 +21,7 @@ export const FLAKE_PATTERNS = [
   {
     id: "wall-clock-timeout",
     label: "Tight subprocess/test wall-clock timeout under runner contention",
-    regex: /(timed out after \d+ms|ETIMEDOUT)/i,
+    regex: /(timed out after \d+ms|ETIMEDOUT|\btimed_out\b)/i,
     remediation: "Increase tight wall-clock timeouts on shared CI runners or bound retries with exponential backoff.",
   },
   {
@@ -37,10 +37,28 @@ export const FLAKE_PATTERNS = [
     remediation: "Capture pnpm store path into a variable with retries and non-empty validation before writing $GITHUB_OUTPUT.",
   },
   {
+    id: "vscode-extension-host-timeout",
+    label: "VS Code extension host activation or notification timeout",
+    regex: /(Verify installed bytes and retained archives|Test installed desktop artifact|Health errors waited for notification dismissal)/i,
+    remediation: "Bound extension host activation and notification dismissal waits under shared macOS/Windows runner contention.",
+  },
+  {
     id: "ci-admission-lag",
     label: "GitHub Actions job/step or search-index eventual consistency lag",
-    regex: /(Required source CI (job|step) did not succeed|No trusted exact-SHA default-branch CI run exists)/i,
+    regex: /(Required source CI (job|step) did not succeed|No trusted exact-SHA default-branch CI run exists|Admit Main CI and prepare or resume the exact release candidate|Locate the original source packet for a full rerun)/i,
     remediation: "Treat incomplete job/step metadata and transient empty filtered run queries as retryable pending state.",
+  },
+  {
+    id: "canvas-browser-fixture-timeout",
+    label: "Canvas browser fixture teardown or Playwright timeout",
+    regex: /(Exercise Canvas browser workflows|Owned Canvas fixture required forced termination)/i,
+    remediation: "Close active SSE/HTTP connections before server.close() during fixture shutdown and rerun the failed integration job.",
+  },
+  {
+    id: "skill-eval-trial-variance",
+    label: "Vally skill-eval trial grader failure",
+    regex: /(Assert eval passed)/i,
+    remediation: "Inspect Vally results.jsonl trial graders (skill-invocation, diff-empty, tool-calls, prompt score) for stimulus ambiguity.",
   },
 ];
 
@@ -523,7 +541,128 @@ export function saveState(stateFile, state) {
   writeJsonAtomically(stateFile, state);
 }
 
-export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunIds = [] } = {}) {
+export function normalizeWorkflowTelemetryName(name) {
+  const raw = String(name || "unknown").trim() || "unknown";
+  if (/^npm_and_yarn in .* - Update #\d+$/i.test(raw) || / - Update #\d+$/i.test(raw)) {
+    return "Dependabot Updates";
+  }
+  return raw;
+}
+
+function slimWorkflowRunRecord(run) {
+  if (!run || typeof run !== "object") return run;
+  const slim = {
+    id: run.id,
+    name: run.name,
+    event: run.event,
+    head_branch: run.head_branch,
+    head_sha: run.head_sha,
+    status: run.status,
+    conclusion: run.conclusion,
+    updated_at: run.updated_at,
+    html_url: run.html_url,
+  };
+  if (run.workflow_id !== undefined) slim.workflow_id = run.workflow_id;
+  if (run.path !== undefined) slim.path = run.path;
+  if (run.run_attempt !== undefined) slim.run_attempt = run.run_attempt;
+  if (run.head_repository && typeof run.head_repository === "object") {
+    slim.head_repository = {
+      ...(run.head_repository.id !== undefined ? { id: run.head_repository.id } : {}),
+      ...(run.head_repository.full_name !== undefined ? { full_name: run.head_repository.full_name } : {}),
+    };
+  }
+  if (Array.isArray(run.pull_requests)) {
+    slim.pull_requests = run.pull_requests.map((pr) => ({
+      ...(pr?.number !== undefined ? { number: pr.number } : {}),
+      ...(pr?.head
+        ? {
+            head: {
+              ...(pr.head.ref !== undefined ? { ref: pr.head.ref } : {}),
+              ...(pr.head.repo?.id !== undefined ? { repo: { id: pr.head.repo.id } } : {}),
+            },
+          }
+        : {}),
+      ...(pr?.base
+        ? {
+            base: {
+              ...(pr.base.ref !== undefined ? { ref: pr.base.ref } : {}),
+              ...(pr.base.repo?.id !== undefined ? { repo: { id: pr.base.repo.id } } : {}),
+            },
+          }
+        : {}),
+    }));
+  }
+  return slim;
+}
+
+function slimJobRecord(job) {
+  if (!job || typeof job !== "object") return job;
+  return {
+    id: job.id,
+    name: job.name,
+    status: job.status,
+    conclusion: job.conclusion,
+    created_at: job.created_at,
+    started_at: job.started_at,
+    completed_at: job.completed_at,
+    html_url: job.html_url,
+    steps: Array.isArray(job.steps)
+      ? job.steps.map((s) => ({
+          name: s?.name,
+          status: s?.status,
+          conclusion: s?.conclusion,
+          started_at: s?.started_at,
+          completed_at: s?.completed_at,
+        }))
+      : [],
+  };
+}
+
+export function slimEtagData(endpoint, data) {
+  if (!data || typeof data !== "object") {
+    return data;
+  }
+  const ep = String(endpoint || "");
+  if (/^repos\/[^/]+\/[^/]+\/commits\//i.test(ep)) {
+    return typeof data.sha === "string" ? { sha: data.sha } : data;
+  }
+  if (/\/actions\/runs\/\d+\/jobs\b/i.test(ep) && Array.isArray(data.jobs)) {
+    return {
+      ...(typeof data.total_count === "number" ? { total_count: data.total_count } : {}),
+      jobs: data.jobs.map(slimJobRecord),
+    };
+  }
+  if (/\/actions\/runs(?:\?|$)/i.test(ep) && Array.isArray(data.workflow_runs)) {
+    return {
+      ...(typeof data.total_count === "number" ? { total_count: data.total_count } : {}),
+      workflow_runs: data.workflow_runs.map(slimWorkflowRunRecord),
+    };
+  }
+  if (/\/actions\/runs\/\d+$/i.test(ep) && data.id !== undefined) {
+    return slimWorkflowRunRecord(data);
+  }
+  if (/^(?:user\/repos|users\/[^/]+\/repos)\?/i.test(ep) && Array.isArray(data)) {
+    return data.map((r) => ({
+      full_name: r?.full_name,
+      ...(r?.owner ? { owner: { login: r.owner.login } } : {}),
+      private: Boolean(r?.private),
+      archived: Boolean(r?.archived),
+      disabled: Boolean(r?.disabled),
+    }));
+  }
+  return data;
+}
+
+export function pruneState(
+  state,
+  {
+    maxRuns = 100,
+    maxEtags = 100,
+    maxJobTelemetry = 200,
+    maxStepTelemetry = 500,
+    protectedRunIds = [],
+  } = {}
+) {
   if (!state || typeof state !== "object") {
     return state;
   }
@@ -554,13 +693,33 @@ export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunI
     }
   }
   if (state.etags && typeof state.etags === "object") {
+    const targetBranch = state.branch || "main";
     for (const endpoint of Object.keys(state.etags)) {
       const jobsMatch = endpoint.match(/\/actions\/runs\/(\d+)\/jobs\b/);
       if (jobsMatch) {
-        const runRecord = state.runs?.[jobsMatch[1]];
-        if (!runRecord || (runRecord.status === "completed" && runRecord.telemetryRecorded)) {
+        const runIdStr = jobsMatch[1];
+        const runRecord = state.runs?.[runIdStr];
+        const isWatchedOrActiveMain = Boolean(
+          runRecord &&
+            runRecord.status !== "completed" &&
+            (protectedSet.has(runIdStr) ||
+              (runRecord.head_branch === targetBranch && !isPullRequestRunEvent(runRecord.event)))
+        );
+        const isPendingEmptyJobsRecheck = Boolean(
+          runRecord &&
+            runRecord.status === "completed" &&
+            !runRecord.telemetryRecorded &&
+            (runRecord.emptyJobsPolls || 0) > 0 &&
+            (runRecord.emptyJobsPolls || 0) < 2
+        );
+        if (!isWatchedOrActiveMain && !isPendingEmptyJobsRecheck) {
           delete state.etags[endpoint];
+          continue;
         }
+      }
+      const entry = state.etags[endpoint];
+      if (entry && entry.data !== undefined) {
+        entry.data = slimEtagData(endpoint, entry.data);
       }
     }
     const etagEntries = Object.entries(state.etags);
@@ -574,6 +733,78 @@ export function pruneState(state, { maxRuns = 100, maxEtags = 100, protectedRunI
         delete state.etags[oldEndpoint];
       }
     }
+  }
+  if (state.jobTelemetry && typeof state.jobTelemetry === "object") {
+    const mergedJobs = {};
+    for (const entry of Object.values(state.jobTelemetry)) {
+      if (!entry || typeof entry !== "object") continue;
+      const wf = normalizeWorkflowTelemetryName(entry.workflow);
+      const key = `${wf} :: ${entry.job}`;
+      const existing = mergedJobs[key];
+      if (!existing) {
+        mergedJobs[key] = { ...entry, workflow: wf };
+      } else {
+        existing.samples = (existing.samples || 0) + (entry.samples || 0);
+        existing.failures = (existing.failures || 0) + (entry.failures || 0);
+        existing.totalDurationSec = (existing.totalDurationSec || 0) + (entry.totalDurationSec || 0);
+        existing.maxDurationSec = Math.max(existing.maxDurationSec || 0, entry.maxDurationSec || 0);
+        existing.totalQueueSec = (existing.totalQueueSec || 0) + (entry.totalQueueSec || 0);
+        existing.maxQueueSec = Math.max(existing.maxQueueSec || 0, entry.maxQueueSec || 0);
+      }
+    }
+    const jobEntries = Object.entries(mergedJobs);
+    if (jobEntries.length > maxJobTelemetry) {
+      jobEntries.sort(
+        (a, b) =>
+          (b[1].failures || 0) - (a[1].failures || 0) ||
+          (b[1].totalDurationSec || 0) - (a[1].totalDurationSec || 0) ||
+          (b[1].samples || 0) - (a[1].samples || 0)
+      );
+    }
+    state.jobTelemetry = Object.fromEntries(jobEntries.slice(0, maxJobTelemetry));
+  }
+  if (state.stepTelemetry && typeof state.stepTelemetry === "object") {
+    const mergedSteps = {};
+    for (const entry of Object.values(state.stepTelemetry)) {
+      if (!entry || typeof entry !== "object") continue;
+      const wf = normalizeWorkflowTelemetryName(entry.workflow);
+      const key = `${wf} :: ${entry.job} :: ${entry.step}`;
+      const existing = mergedSteps[key];
+      if (!existing) {
+        mergedSteps[key] = { ...entry, workflow: wf };
+      } else {
+        existing.samples = (existing.samples || 0) + (entry.samples || 0);
+        existing.failures = (existing.failures || 0) + (entry.failures || 0);
+        existing.totalDurationSec = (existing.totalDurationSec || 0) + (entry.totalDurationSec || 0);
+        existing.maxDurationSec = Math.max(existing.maxDurationSec || 0, entry.maxDurationSec || 0);
+      }
+    }
+    const stepEntries = Object.entries(mergedSteps);
+    if (stepEntries.length > maxStepTelemetry) {
+      stepEntries.sort(
+        (a, b) =>
+          (b[1].failures || 0) - (a[1].failures || 0) ||
+          (b[1].totalDurationSec || 0) - (a[1].totalDurationSec || 0) ||
+          (b[1].samples || 0) - (a[1].samples || 0)
+      );
+    }
+    state.stepTelemetry = Object.fromEntries(stepEntries.slice(0, maxStepTelemetry));
+  }
+  if (Array.isArray(state.flakeSightings)) {
+    state.flakeSightings = state.flakeSightings.filter(
+      (entry) =>
+        entry &&
+        entry.conclusion !== "cancelled" &&
+        !/^Require every .* to succeed$/i.test(entry.step || "")
+    );
+    for (const entry of state.flakeSightings) {
+      if (!entry.matchedPattern) {
+        entry.matchedPattern = matchFlakePattern(
+          `${entry.workflow || ""} ${entry.job || ""} ${entry.step || ""} ${entry.conclusion || ""}`
+        );
+      }
+    }
+    state.flakeSightings = state.flakeSightings.slice(0, 50);
   }
   return state;
 }
@@ -670,7 +901,7 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
     return { fromCache: false, data: cached?.data ?? null, error: result.error || `HTTP ${parsed.status}` };
   }
   try {
-    const data = result.data;
+    const data = slimEtagData(endpoint, result.data);
     if (parsed.etag) {
       state.etags[endpoint] = { etag: parsed.etag, data, updatedAt: new Date().toISOString() };
     }
@@ -743,9 +974,13 @@ export function matchFlakePattern(text) {
 }
 
 export function recordTelemetryForRun(run, jobs, state) {
-  const workflowName = run.name || "unknown";
+  const workflowName = normalizeWorkflowTelemetryName(run.name || "unknown");
   for (const job of jobs) {
-    if (job.status !== "completed" || job.conclusion === "skipped") {
+    if (
+      job.status !== "completed" ||
+      job.conclusion === "skipped" ||
+      job.conclusion === "cancelled"
+    ) {
       continue;
     }
     const jobKey = `${workflowName} :: ${job.name}`;
@@ -780,7 +1015,11 @@ export function recordTelemetryForRun(run, jobs, state) {
     state.jobTelemetry[jobKey] = existingJob;
 
     for (const step of job.steps || []) {
-      if (step.status !== "completed" || step.conclusion === "skipped") {
+      if (
+        step.status !== "completed" ||
+        step.conclusion === "skipped" ||
+        step.conclusion === "cancelled"
+      ) {
         continue;
       }
       const sStart = step.started_at ? Date.parse(step.started_at) : NaN;
@@ -806,8 +1045,10 @@ export function recordTelemetryForRun(run, jobs, state) {
       existingStep.maxDurationSec = Math.max(existingStep.maxDurationSec, stepSec);
       state.stepTelemetry[stepKey] = existingStep;
 
-      if (step.conclusion !== "success") {
-        const matched = matchFlakePattern(`${job.name} ${step.name}`);
+      if (step.conclusion !== "success" && !/^Require every .* to succeed$/i.test(step.name || "")) {
+        const matched = matchFlakePattern(
+          `${workflowName} ${job.name} ${step.name} ${step.conclusion || ""} ${job.conclusion || ""}`
+        );
         state.flakeSightings.unshift({
           timestamp: new Date().toISOString(),
           runId: run.id,
@@ -865,6 +1106,84 @@ export function buildOptimizationReport(state, mergeMode = "approval") {
 
 function isPullRequestRunEvent(event) {
   return event === "pull_request" || event === "pull_request_target";
+}
+
+function selectActiveBranchWorkflowRuns(runs, branch, lastMainSha) {
+  const resolveKey = buildWorkflowIdentityResolver(runs);
+  const latestOnBranch = new Map();
+  for (const r of runs || []) {
+    if (!r || typeof r !== "object") continue;
+    if (r.head_branch !== branch || isPullRequestRunEvent(r.event)) continue;
+    const wfKey = resolveKey(r);
+    const prev = latestOnBranch.get(wfKey);
+    if (!prev || (Number(r.id) || 0) > (Number(prev.id) || 0)) {
+      latestOnBranch.set(wfKey, r);
+    }
+  }
+  const eligibleByWorkflow = new Map();
+  for (const [wfKey, latestRun] of latestOnBranch.entries()) {
+    if (!lastMainSha || latestRun.head_sha === lastMainSha || latestRun.event === "schedule") {
+      eligibleByWorkflow.set(wfKey, latestRun);
+    }
+  }
+  return { resolveKey, eligibleByWorkflow };
+}
+
+function workflowKeyForRun(run) {
+  if (!run || typeof run !== "object") return "unknown";
+  return String(run.workflow_id || run.path || run.name || run.id || "unknown");
+}
+
+function buildWorkflowIdentityResolver(runs) {
+  const explicitKeysByName = new Map();
+  for (const r of runs || []) {
+    if (!r || typeof r !== "object") continue;
+    const explicitKey = r.workflow_id || r.path;
+    if (explicitKey && r.name) {
+      const nameKey = String(r.name).trim();
+      if (!explicitKeysByName.has(nameKey)) {
+        explicitKeysByName.set(nameKey, new Set());
+      }
+      explicitKeysByName.get(nameKey).add(String(explicitKey));
+    }
+  }
+  return (run) => {
+    if (!run || typeof run !== "object") return "unknown";
+    if (run.workflow_id || run.path) {
+      return String(run.workflow_id || run.path);
+    }
+    const nameKey = String(run.name || "").trim();
+    const matchedExplicit = nameKey ? explicitKeysByName.get(nameKey) : null;
+    if (matchedExplicit && matchedExplicit.size === 1) {
+      return [...matchedExplicit][0];
+    }
+    return workflowKeyForRun(run);
+  };
+}
+
+function latestRunsByWorkflow(runs, resolveKey = buildWorkflowIdentityResolver(runs)) {
+  const byWorkflow = new Map();
+  for (const r of runs || []) {
+    if (!r || typeof r !== "object") continue;
+    const wfKey = resolveKey(r);
+    const prev = byWorkflow.get(wfKey);
+    if (!prev || (Number(r.id) || 0) > (Number(prev.id) || 0)) {
+      byWorkflow.set(wfKey, r);
+    }
+  }
+  return [...byWorkflow.values()];
+}
+
+export function shouldEmitWatchStatus({
+  polls = 1,
+  phaseChangesCount = 0,
+  summaryChanged = false,
+  nowMs = Date.now(),
+  lastEmitMs = 0,
+  heartbeatSec = 60,
+} = {}) {
+  if (polls <= 1 || phaseChangesCount > 0 || summaryChanged) return true;
+  return nowMs - lastEmitMs >= heartbeatSec * 1000;
 }
 
 export function computeCiHoundPhase({
@@ -1003,8 +1322,17 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   }
   if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
   const workflowRuns = [...runMap.values()];
+  const { resolveKey: resolveWorkflowKey, eligibleByWorkflow } = selectActiveBranchWorkflowRuns(
+    [...Object.values(state.runs || {}), ...workflowRuns],
+    args.branch,
+    state.lastMainSha
+  );
+  const latestMainRunIdByWorkflow = new Map(
+    [...eligibleByWorkflow.entries()].map(([wfKey, r]) => [wfKey, Number(r.id)])
+  );
 
   let activeMainRuns = 0;
+  let activeTargetRuns = 0;
   const activeRunProgress = [];
 
   for (const run of workflowRuns) {
@@ -1013,28 +1341,62 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
     const isPullRequestEvent = isPullRequestRunEvent(run.event);
     const isMainBranch = run.head_branch === args.branch && !isPullRequestEvent;
     const isWatchedRun = args.watchRunIds.includes(run.id);
-    const isCurrentHeadMainRun = isMainBranch && run.head_sha === state.lastMainSha;
+    const isLatestWorkflowRunOnHead =
+      isMainBranch &&
+      latestMainRunIdByWorkflow.get(resolveWorkflowKey(run)) === Number(run.id);
+    const isCurrentHeadMainRun =
+      isLatestWorkflowRunOnHead || (isMainBranch && run.head_sha === state.lastMainSha);
 
     if (isMainBranch && run.status !== "completed") {
       activeMainRuns += 1;
     }
 
-    const needsJobsInspection =
-      !prevRun ||
-      prevRun.updated_at !== run.updated_at ||
-      (isMainBranch && run.status !== "completed") ||
-      (isWatchedRun && run.status !== "completed");
+    const isActiveTargetRun = (isMainBranch || isWatchedRun) && run.status !== "completed";
+    if (isActiveTargetRun) {
+      activeTargetRuns += 1;
+    }
+    const prevJobsSettled = Boolean(
+      prevRun?.telemetryRecorded || (prevRun?.emptyJobsPolls || 0) >= 2
+    );
+    const isCompletedNeedsInspection =
+      run.status === "completed" &&
+      (!prevJobsSettled ||
+        ((isCurrentHeadMainRun || isWatchedRun) &&
+          (!prevRun || prevRun.updated_at !== run.updated_at)));
+    const needsJobsInspection = isActiveTargetRun || isCompletedNeedsInspection;
 
     let jobs = prevRun?.jobs || [];
     let jobsComplete = true;
     if (needsJobsInspection) {
       if (tickRateLimited) {
+        if (isActiveTargetRun) {
+          activeRunProgress.push({
+            id: run.id,
+            name: run.name,
+            headSha: run.head_sha,
+            totalJobsCount: jobs.length,
+            completedJobsCount: 0,
+            inProgressJobsCount: 0,
+            inProgressJobs: [],
+          });
+        }
         continue;
       }
       const jobsRes = await ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
       if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
       if (jobsRes.rateLimited) {
         tickRateLimited = true;
+        if (isActiveTargetRun) {
+          activeRunProgress.push({
+            id: run.id,
+            name: run.name,
+            headSha: run.head_sha,
+            totalJobsCount: jobs.length,
+            completedJobsCount: 0,
+            inProgressJobsCount: 0,
+            inProgressJobs: [],
+          });
+        }
         continue;
       }
       if (!jobsRes.error && Array.isArray(jobsRes.data?.jobs)) {
@@ -1079,7 +1441,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
       }
     }
 
-    if ((isMainBranch || isWatchedRun) && run.status !== "completed" && jobsComplete) {
+    if (isActiveTargetRun) {
       const completedJobsCount = jobs.filter(
         (j) => j.status === "completed" && (j.conclusion === "success" || j.conclusion === "skipped")
       ).length;
@@ -1100,8 +1462,49 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
       });
     }
 
+    const telemetryRecorded = Boolean(
+      prevRun?.telemetryRecorded || (run.status === "completed" && jobsComplete && jobs.length > 0)
+    );
+    const prevEmptyPolls =
+      prevRun && prevRun.updated_at === run.updated_at ? prevRun.emptyJobsPolls || 0 : 0;
+    const emptyJobsPolls =
+      run.status === "completed" && !telemetryRecorded
+        ? needsJobsInspection && jobsComplete && jobs.length === 0
+          ? prevEmptyPolls + 1
+          : prevEmptyPolls
+        : 0;
+
+    const currentAttempt = run.run_attempt ?? prevRun?.run_attempt;
+    const prevAlertedAttempt = prevRun?.alertedAttempt;
+    const prevAlertedAt = prevRun?.alertedAt || prevRun?.updated_at || "";
+    const hasNewAttempt =
+      currentAttempt !== undefined && prevAlertedAttempt !== undefined
+        ? Number(currentAttempt) > Number(prevAlertedAttempt)
+        : Boolean(
+            prevRun?.status === "completed" &&
+              prevAlertedAt &&
+              run.updated_at &&
+              prevAlertedAt !== run.updated_at
+          );
+    const resetAlertedFailure = Boolean(
+      prevRun?.alertedFailure &&
+        (hasNewAttempt || (prevRun?.status === "completed" && run.status !== "completed"))
+    );
+    const initialAlertedFailure = resetAlertedFailure ? false : Boolean(prevRun?.alertedFailure);
+
     state.runs[runKey] = {
       id: run.id,
+      ...(run.workflow_id !== undefined
+        ? { workflow_id: run.workflow_id }
+        : prevRun?.workflow_id !== undefined
+          ? { workflow_id: prevRun.workflow_id }
+          : {}),
+      ...(run.path !== undefined
+        ? { path: run.path }
+        : prevRun?.path !== undefined
+          ? { path: prevRun.path }
+          : {}),
+      ...(currentAttempt !== undefined ? { run_attempt: currentAttempt } : {}),
       name: run.name,
       event: run.event,
       head_branch: run.head_branch,
@@ -1110,13 +1513,21 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
       conclusion: run.conclusion,
       updated_at: jobsComplete ? run.updated_at : prevRun?.updated_at || "",
       html_url: run.html_url,
-      telemetryRecorded: Boolean(
-        prevRun?.telemetryRecorded || (run.status === "completed" && jobsComplete && jobs.length > 0)
-      ),
-      alertedFailure: Boolean(prevRun?.alertedFailure),
+      telemetryRecorded,
+      ...(emptyJobsPolls > 0 ? { emptyJobsPolls } : {}),
+      alertedFailure: initialAlertedFailure,
+      ...(initialAlertedFailure && (run.updated_at || prevAlertedAt)
+        ? { alertedAt: run.updated_at || prevAlertedAt }
+        : {}),
+      ...(initialAlertedFailure && (currentAttempt !== undefined || prevAlertedAttempt !== undefined)
+        ? { alertedAttempt: currentAttempt ?? prevAlertedAttempt }
+        : {}),
     };
 
-    if ((isCurrentHeadMainRun || isWatchedRun) && !state.runs[runKey].alertedFailure) {
+    const shouldAlertRunFailure =
+      args.watchRunIds.length > 0 ? isWatchedRun : isLatestWorkflowRunOnHead;
+
+    if (shouldAlertRunFailure && !state.runs[runKey].alertedFailure) {
       const explicitExistingFix =
         args.watchRunIds.length === 0 || isWatchedRun
           ? {
@@ -1159,6 +1570,12 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
 
       if (failedJobs.length > 0) {
         state.runs[runKey].alertedFailure = true;
+        if (run.updated_at) {
+          state.runs[runKey].alertedAt = run.updated_at;
+        }
+        if (currentAttempt !== undefined) {
+          state.runs[runKey].alertedAttempt = currentAttempt;
+        }
         const firstFailed = failedJobs[0];
         sendFailureAlert(
           `${args.repo} ${args.branch} CI Failed`,
@@ -1186,6 +1603,12 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
         run.conclusion !== "neutral"
       ) {
         state.runs[runKey].alertedFailure = true;
+        if (run.updated_at) {
+          state.runs[runKey].alertedAt = run.updated_at;
+        }
+        if (currentAttempt !== undefined) {
+          state.runs[runKey].alertedAttempt = currentAttempt;
+        }
         sendFailureAlert(
           `${args.repo} ${args.branch} Workflow Failed`,
           `${run.name} (${(run.head_sha || "").slice(0, 8)}) failed: ${run.conclusion}`
@@ -1209,7 +1632,8 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   pruneState(state, { protectedRunIds: args.watchRunIds || [] });
   state.rateLimited = tickRateLimited;
 
-  const nextIntervalSec = computeNextPollIntervalSec(args, activeMainRuns, state.metrics);
+  const effectiveActiveRuns = Math.max(activeMainRuns, activeTargetRuns, activeRunProgress.length);
+  const nextIntervalSec = computeNextPollIntervalSec(args, effectiveActiveRuns, state.metrics);
 
   if (tickRateLimited) {
     events.push({
@@ -1235,15 +1659,16 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
           runs: watchedRecords,
         });
       }
-    } else if (state.lastMainSha) {
-      const headMainRuns = Object.values(state.runs).filter(
-        (r) =>
-          r.head_branch === args.branch &&
-          !isPullRequestRunEvent(r.event) &&
-          r.head_sha === state.lastMainSha
+    } else if (state.lastMainSha && activeMainRuns === 0) {
+      const { eligibleByWorkflow: headEligibleByWorkflow } = selectActiveBranchWorkflowRuns(
+        Object.values(state.runs),
+        args.branch,
+        state.lastMainSha
       );
+      const headMainRuns = [...headEligibleByWorkflow.values()];
+      const hasCurrentShaRun = headMainRuns.some((r) => r.head_sha === state.lastMainSha);
       const allCompletedGreen =
-        headMainRuns.length > 0 &&
+        hasCurrentShaRun &&
         headMainRuns.every((r) => r.status === "completed" && (r.conclusion === "success" || r.conclusion === "skipped"));
       if (allCompletedGreen) {
         events.push({
@@ -1256,10 +1681,19 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
     }
   }
 
+  const activeWatchedRun =
+    args.watchRunIds.length > 0
+      ? activeRunProgress.find((r) => args.watchRunIds.includes(r.id) && r.headSha)
+      : null;
+  const watchedRecordSha =
+    args.watchRunIds.length > 0
+      ? args.watchRunIds.map((id) => state.runs[String(id)]?.head_sha).find(Boolean)
+      : "";
+  const displaySha = activeWatchedRun?.headSha || watchedRecordSha || state.lastMainSha;
   const phaseInfo = computeCiHoundPhase({
     repo: args.repo,
     branch: args.branch,
-    sha: state.lastMainSha,
+    sha: displaySha,
     activeRuns: activeRunProgress,
   });
   const statusPayload = tickRateLimited
@@ -1268,7 +1702,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
         timestamp: state.metrics.lastPollAt,
         repo: args.repo,
         branch: args.branch,
-        sha: state.lastMainSha,
+        sha: displaySha,
         phase: phaseInfo.phase,
         summary: phaseInfo.summary,
         activeMainRuns,
@@ -1281,6 +1715,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   return {
     events,
     activeMainRuns,
+    activeTargetRuns: effectiveActiveRuns,
     rateLimited: tickRateLimited,
     nextIntervalSec,
     ...(statusPayload ? { status: statusPayload } : {}),
@@ -1380,6 +1815,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       rateLimitRemaining: discoveryState.metrics?.rateLimitRemaining ?? null,
     });
   } else {
+    const pendingAllGreenEvents = [];
     for (const repo of targetRepos) {
       const repoStateFile = stateFileForRepo(repo, args);
       const repoState = loadState(repoStateFile);
@@ -1405,17 +1841,36 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       };
       const tick = await evaluatePollTick(repoArgs, repoState, execFn);
       saveState(repoStateFile, repoState);
-      allEvents.push(...tick.events);
+      for (const ev of tick.events) {
+        if (ev.type === "ALL_GREEN" && targetRepos.length > 1) {
+          pendingAllGreenEvents.push(ev);
+        } else {
+          allEvents.push(ev);
+        }
+      }
       if (tick.status) {
         statuses.push(tick.status);
       }
-      totalActiveMainRuns += tick.activeMainRuns;
+      totalActiveMainRuns += Math.max(
+        tick.activeMainRuns,
+        tick.activeTargetRuns || 0,
+        tick.status?.activeRuns?.length || 0
+      );
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
       if (tick.rateLimited) {
         anyRateLimited = true;
         break;
       }
+    }
+    if (
+      targetRepos.length > 1 &&
+      !anyRateLimited &&
+      totalActiveMainRuns === 0 &&
+      allEvents.length === 0 &&
+      pendingAllGreenEvents.length === targetRepos.length
+    ) {
+      allEvents.push(...pendingAllGreenEvents);
     }
   }
 
@@ -1511,6 +1966,8 @@ export async function runCli(argv = process.argv.slice(2)) {
     }
 
     const lastPhaseByRepo = new Map();
+    const lastSummaryByRepo = new Map();
+    let lastEmitMs = 0;
     let polls = 0;
     while (true) {
       polls += 1;
@@ -1528,6 +1985,7 @@ export async function runCli(argv = process.argv.slice(2)) {
         return;
       }
       const phaseChanges = [];
+      let summaryChanged = false;
       for (const st of multi.statuses || []) {
         const prevPhase = lastPhaseByRepo.get(st.repo);
         if (prevPhase && prevPhase !== st.phase) {
@@ -1540,12 +1998,20 @@ export async function runCli(argv = process.argv.slice(2)) {
             summary: st.summary,
           });
         }
+        const prevSummary = lastSummaryByRepo.get(st.repo);
+        if (prevSummary && prevSummary !== st.summary) summaryChanged = true;
         lastPhaseByRepo.set(st.repo, st.phase);
+        lastSummaryByRepo.set(st.repo, st.summary);
       }
-      const hasActiveRuns =
-        multi.activeMainRuns > 0 ||
-        (multi.statuses || []).some((st) => (st.activeRuns?.length || 0) > 0);
-      if (phaseChanges.length > 0 || hasActiveRuns) {
+      const nowMs = Date.now();
+      if (shouldEmitWatchStatus({
+        polls,
+        phaseChangesCount: phaseChanges.length,
+        summaryChanged,
+        nowMs,
+        lastEmitMs,
+      })) {
+        lastEmitMs = nowMs;
         console.log(
           JSON.stringify(
             {

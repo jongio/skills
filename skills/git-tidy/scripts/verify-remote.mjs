@@ -2,7 +2,10 @@
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { verifyRemoteBaseline } from "./lib/remote-verification.mjs";
+import {
+  remoteVerificationFailureMessage,
+  verifyRemoteBaseline,
+} from "./lib/remote-verification.mjs";
 
 const MAX_INPUT_BYTES = 16 * 1024;
 
@@ -36,10 +39,16 @@ async function readInput(stream) {
 export async function main({
   input = process.stdin,
   output = process.stdout,
+  errorOutput = process.stderr,
 } = {}) {
   const { remoteUrl } = await readInput(input);
   const baseline = await verifyRemoteBaseline(remoteUrl);
   output.write(`${JSON.stringify(baseline)}\n`);
+  if (baseline.state === "failed") {
+    errorOutput.write(
+      `git-tidy verify-remote: ${remoteVerificationFailureMessage(baseline.failureCode)}\n`,
+    );
+  }
   return baseline;
 }
 

@@ -16,7 +16,8 @@ results, delegated prompts/results, or other sessions' work alone. Remove a targ
 when this session stops working on it. Honor manual clear/remove: do not re-add
 an entry without new work or an explicit request.
 
-Use the `session-statusline` skill for manual list/add/remove/clear/refresh requests.
+Use the `session-statusline` skill for custom session names and manual
+list/add/remove/clear/refresh requests.
 Clearing pills must not close work, stop agents, delete transcripts or worktrees,
 or change enabled components. Do not scan other sessions or edit raw tracking
 files. If the extension tools are unavailable, do not claim tracking changed.

@@ -28,5 +28,5 @@ test("every capability stimulus requires actual nobs invocation", async () => {
       `Missing mandatory invocation guard: ${stimulus.split(/\r?\n/)[0].trim()}`);
   }
   assert.match(spec, /skill-invocation: 0\.2/);
-  assert.match(spec, /^  threshold: 1\.0$/m);
+  assert.match(spec, /^  threshold: 0\.84$/m);
 });

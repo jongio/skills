@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  findUntrustedRepositoryRoot,
   GitBoundaryError,
   resolveExecutablePath,
   runBoundedProcess,
 } from "./git-process.mjs";
+import { createGitHubEnvironment } from "./github-environment.mjs";
 
 export const REMOTE_BASELINE_MAX_AGE_MS = 5 * 60 * 1000;
 
@@ -125,6 +127,113 @@ function requireRemoteUrl(remoteUrl) {
   }
 }
 
+function approvedHttpsHost(remoteUrl) {
+  if (path.isAbsolute(remoteUrl)) return null;
+  let url;
+  try {
+    url = new URL(remoteUrl);
+  } catch {
+    throw new GitBoundaryError("REMOTE_URL_UNSAFE", "unsupported remote URL");
+  }
+  if (url.protocol === "file:" && !url.host && !url.search && !url.hash &&
+      !url.username && !url.password) return null;
+  if (
+    url.protocol !== "https:" || url.username || url.password ||
+    url.port || url.search || url.hash ||
+    !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/u.test(url.hostname) ||
+    url.hostname.split(".").some((label) =>
+      label.length > 63 || label.startsWith("-") || label.endsWith("-") ||
+      label.length === 0) ||
+    url.hostname.length > 253 ||
+    !/^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/?$/u.test(url.pathname) ||
+    url.pathname.split("/").some((part) => part === "." || part === "..") ||
+    // Reject URL normalization, encoded paths, and ambiguous authority syntax.
+    remoteUrl !== url.href
+  ) {
+    throw new GitBoundaryError("REMOTE_URL_UNSAFE", "unsupported remote URL");
+  }
+  return url.hostname;
+}
+
+function authenticationRequired(error) {
+  return error?.code === "COMMAND_FAILED" &&
+    /could not read (?:Username|Password)|authentication failed|invalid username or (?:password|token)|repository not found|requested URL returned error: (?:401|403|404)\b/iu
+      .test(error.details?.stderr?.toString("utf8") ?? "");
+}
+
+export function remoteVerificationFailureMessage(code) {
+  const messages = {
+    "github-cli-unavailable": "GitHub CLI is unavailable or untrusted. Install or select a trusted gh executable outside the target repository, then retry.",
+    "github-credentials-unavailable": "No GitHub CLI credentials are available for the approved host. Check gh auth status --hostname <approved-host>, GH_CONFIG_DIR, and repository read access, then retry. No login or credential change was performed.",
+    "github-credentials-invalid": "GitHub CLI returned an invalid credential for the approved host. Check gh auth status --hostname <approved-host> and GH_CONFIG_DIR, then retry.",
+    "github-authentication-failed": "The approved repository rejected GitHub CLI authentication. Check repository read permission, token expiration, and organization SSO authorization, then retry.",
+    "github-auth-timeout": "GitHub CLI credential lookup timed out. Check the existing CLI session and credential store for the approved host, then retry.",
+    "github-read-only-auth-unsupported": "This GitHub CLI does not support read-only token lookup. Use a trusted CLI supporting gh auth token --no-refresh, then retry. Verification never retries without the flag or changes credentials.",
+    "remote-url-unsafe": "Use the exact approved credential-free HTTPS owner/repository URL or an absolute local repository path. Executable transports and ambiguous URLs are not supported.",
+    "remote-url-mismatch": "The URL differs from the previously approved remote identity. Return to fresh analysis and separate remote-verification approval.",
+    "remote-response-unsafe": "The remote response contained credential material and was discarded. No evidence or action plan was accepted.",
+  };
+  return messages[code] ?? "Remote verification failed; no cleanup is authorized. Check connectivity and access to the exact approved repository, then retry.";
+}
+
+async function githubAuthentication(host, gitPath, root, options, untrustedRoots) {
+  let ghPath;
+  try {
+    ghPath = resolveExecutablePath(options.ghPath ?? "gh", { untrustedRoots });
+  } catch {
+    throw new GitBoundaryError("GITHUB_CLI_UNAVAILABLE", "trusted gh unavailable");
+  }
+  const ghEnvironment = { ...createGitHubEnvironment(ghPath, gitPath) };
+  const explicitlyBoundHost = ghEnvironment.GH_HOST?.toLowerCase() === host;
+  for (const key of ["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]) {
+    const value = ghEnvironment[key] ?? process.env[key];
+    if (explicitlyBoundHost && host !== "github.com" && value !== undefined) {
+      ghEnvironment[key] = value;
+    } else delete ghEnvironment[key];
+  }
+  for (const key of ["GH_TOKEN", "GITHUB_TOKEN"]) {
+    if (host !== "github.com" && !explicitlyBoundHost) delete ghEnvironment[key];
+  }
+  ghEnvironment.GH_HOST = host;
+  if (ghEnvironment.GH_CONFIG_DIR) {
+    ghEnvironment.GH_CONFIG_DIR = path.resolve(ghEnvironment.GH_CONFIG_DIR);
+  }
+  let result;
+  try {
+    result = await (options.runner ?? runBoundedProcess)(ghPath, [
+      "auth", "token", "--hostname", host, "--no-refresh",
+    ], {
+      cwd: root,
+      env: ghEnvironment,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs ?? options.commandTimeoutMs,
+      maxStdoutBytes: 16 * 1024,
+      maxStderrBytes: 16 * 1024,
+    });
+  } catch (error) {
+    const unsupported = error?.code === "COMMAND_FAILED" &&
+      /unknown flag: --no-refresh/iu.test(
+        error.details?.stderr?.toString("utf8") ?? "",
+      );
+    const code = unsupported ? "GITHUB_READ_ONLY_AUTH_UNSUPPORTED"
+      : error?.code === "TIMEOUT" ? "GITHUB_AUTH_TIMEOUT"
+      : error?.code === "CANCELLED" ? "CANCELLED"
+      : "GITHUB_CREDENTIALS_UNAVAILABLE";
+    throw new GitBoundaryError(code, "GitHub credential lookup failed");
+  }
+  const token = result.stdout.toString("utf8").replace(/\r?\n$/u, "");
+  result.stdout.fill(0);
+  result.stderr.fill(0);
+  if (result.exitCode !== 0 || !/^[\x21-\x7e]{1,16384}$/u.test(token)) {
+    throw new GitBoundaryError("GITHUB_CREDENTIALS_INVALID", "invalid credential");
+  }
+  const encoded = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
+  return {
+    header: `Authorization: Basic ${encoded}`,
+    secrets: [token, encoded, Buffer.from(token).toString("base64")],
+  };
+}
+
 export function remoteBaselineFresh(
   baseline,
   now = new Date(),
@@ -140,19 +249,49 @@ export async function verifyRemoteBaseline(remoteUrl, options = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "git-tidy-remote-"));
   const repository = path.join(root, "repository.git");
   const hooks = path.join(root, "hooks");
-  const gitPath = resolveExecutablePath(options.gitPath ?? "git", {
-    untrustedRoots: options.untrustedRoots ?? [],
-  });
-  const env = inheritedEnvironment(root);
-  const run = (args) => runBoundedProcess(gitPath, args, {
-    cwd: root,
-    env,
-    signal: options.signal,
-    timeoutMs: options.timeoutMs,
-    maxStdoutBytes: options.maxStdoutBytes,
-    maxStderrBytes: options.maxStderrBytes,
-  });
+  let auth = null;
+  let env;
   try {
+    const host = approvedHttpsHost(remoteUrl);
+    if (options.expectedRemoteId !== undefined &&
+        options.expectedRemoteId !== remoteId(remoteUrl)) {
+      throw new GitBoundaryError("REMOTE_URL_MISMATCH", "remote URL changed");
+    }
+    const untrustedRoots = [
+      findUntrustedRepositoryRoot(process.cwd()),
+      ...(options.untrustedRoots ?? []),
+    ];
+    const gitPath = resolveExecutablePath(options.gitPath ?? "git", {
+      untrustedRoots,
+    });
+    env = inheritedEnvironment(root);
+    env.PATH = path.dirname(gitPath);
+    delete env.Path;
+    env.GIT_TEMPLATE_DIR = hooks;
+    const run = async (args) => {
+      try {
+        const result = await (options.runner ?? runBoundedProcess)(gitPath, args, {
+          cwd: root,
+          env,
+          signal: options.signal,
+          timeoutMs: options.timeoutMs ?? options.commandTimeoutMs,
+          maxStdoutBytes: options.maxStdoutBytes,
+          maxStderrBytes: options.maxStderrBytes,
+        });
+        if (auth?.secrets.some((secret) => result.stdout.includes(secret))) {
+          throw new GitBoundaryError("REMOTE_RESPONSE_UNSAFE", "unsafe response");
+        }
+        return result;
+      } catch (error) {
+        if (auth && authenticationRequired(error)) {
+          throw new GitBoundaryError(
+            "GITHUB_AUTHENTICATION_FAILED",
+            "approved repository rejected authentication",
+          );
+        }
+        throw error;
+      }
+    };
     await mkdir(hooks);
     await run(["init", "--bare", "--quiet", repository]);
     const configured = [
@@ -160,10 +299,12 @@ export async function verifyRemoteBaseline(remoteUrl, options = {}) {
       "-c", `core.hooksPath=${hooks}`,
       "-c", "core.fsmonitor=false",
       "-c", "credential.helper=",
-      "-c", "protocol.ext.allow=never",
+      "-c", "protocol.allow=never",
+      "-c", "protocol.https.allow=always",
       "-c", "protocol.file.allow=always",
+      "-c", "http.followRedirects=false",
     ];
-    const advertisement = await run([
+    const advertise = () => run([
       ...configured,
       "ls-remote",
       "--symref",
@@ -171,6 +312,20 @@ export async function verifyRemoteBaseline(remoteUrl, options = {}) {
       "HEAD",
       "refs/heads/*",
     ]);
+    let advertisement;
+    try {
+      advertisement = await advertise();
+    } catch (error) {
+      if (host === null || !authenticationRequired(error)) throw error;
+      auth = await githubAuthentication(
+        host, gitPath, root, options, untrustedRoots,
+      );
+      // The secret exists only in this child's environment, never argv or disk.
+      env.GIT_CONFIG_COUNT = "1";
+      env.GIT_CONFIG_KEY_0 = `http.${remoteUrl}.extraHeader`;
+      env.GIT_CONFIG_VALUE_0 = auth.header;
+      advertisement = await advertise();
+    }
     const parsed = parseRemoteAdvertisement(advertisement.stdout);
     await run([
       ...configured,
@@ -221,6 +376,12 @@ export async function verifyRemoteBaseline(remoteUrl, options = {}) {
         : "remote-verification-failed",
     );
   } finally {
+    if (env) {
+      delete env.GIT_CONFIG_VALUE_0;
+      delete env.GIT_CONFIG_KEY_0;
+      delete env.GIT_CONFIG_COUNT;
+    }
+    auth = null;
     await rm(root, { recursive: true, force: true, maxRetries: 3 });
   }
 }

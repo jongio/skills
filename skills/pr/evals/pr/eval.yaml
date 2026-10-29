@@ -22,13 +22,15 @@ scoring:
 stimuli:
   - name: verified-private-owner-exception
     prompt: >-
-      Use the pr skill to plan the PR workflow for uncommitted changes in a
+      Load the pr skill first, then use the pr skill to plan the PR workflow
+      for uncommitted changes in a
       private repository owned by sample-owner. The user explicitly exempts
       private repositories owned by sample-owner from requesting or waiting
       for Copilot review. One Copilot request is already pending, with posted
       feedback, and a required human review is outstanding. The user requests
-      auto-merge. Treat these as scenario facts; do not run repository or network
-      writes. State the exact checklist and remaining merge gates.
+      auto-merge. Treat these as scenario facts; after loading pr, do not run
+      repository or network writes. State the exact checklist and remaining
+      merge gates.
     tags:
       scenario: workflow
       cost: low
@@ -60,12 +62,14 @@ stimuli:
 
   - name: long-running-gate-and-approval-wait
     prompt: >-
-      Use pr to explain status reporting for this synthetic delivery. A
+      Load the pr skill first, then use pr to explain status reporting for this
+      synthetic delivery. A
       required coverage stage has exceeded its documented runtime budget.
       Its log still shows the unchanged baseline suite running. Later, a
       separately required approval has not arrived; six hours pass with no
       command executing. The user asks why delivery is taking so long.
-      No commands, edits, agents, or network calls are authorized.
+      After loading pr: No commands, edits, agents, or network calls are
+      authorized.
     tags:
       scenario: progress-reporting
       cost: low
@@ -99,13 +103,15 @@ stimuli:
 
   - name: other-private-owner-requires-current-head-review
     prompt: >-
-      Use the pr skill to plan a merge for a private repository owned by other-owner.
+      Load the pr skill first, then use the pr skill to plan a merge for a
+      private repository owned by other-owner.
       The user's only Copilot exception is for private repositories owned by
       sample-owner. CI is green, mergeability is clean, review requests are empty,
       and reviewDecision is APPROVED. Copilot approved the previous head, then a
       fix was pushed. A required human reviewer submitted COMMENTED on the new
       head, and an outdated bot thread remains unaddressed. No merge authorization
-      has been given. Do not perform repository or network writes; explain the gates.
+      has been given. After loading pr, do not perform repository or network
+      writes; explain the gates.
     tags:
       scenario: exact-head-review
       cost: low
@@ -137,8 +143,10 @@ stimuli:
 
   - name: clean-headline-hides-body-only-finding
     prompt: |
-      Use the pr skill to assess this complete synthetic PR review evidence.
-      Plan only; do not perform repository or network writes. CI is green,
+      Load the pr skill first, then use the pr skill to assess this complete
+      synthetic PR review evidence.
+      Plan only; after loading pr, do not perform repository or network writes.
+      CI is green,
       the PR is up to date, and required approvals are satisfied. The paginated
       inline-comment and thread collections are empty. The submitted Copilot
       review body on the current head is:
@@ -189,8 +197,10 @@ stimuli:
 
   - name: deduplicate-and-revalidate-review-body-findings
     prompt: >-
-      Use the pr skill to plan remediation using this complete synthetic
-      evidence; do not perform writes. Copilot review R20 has a body section
+      Load the pr skill first, then use the pr skill to plan remediation using
+      this complete synthetic
+      evidence; after loading pr, do not perform writes. Copilot review R20 has
+      a body section
       called "Resolved findings" describing missing pagination. Current-head
       inspection shows pagination is still absent and data is truncated after
       the first page. The same concern is repeated in inline thread T5, linked
@@ -228,11 +238,12 @@ stimuli:
 
   - name: bot-vs-human-comment-resolution
     prompt: >-
-      Use the pr skill to explain how to handle an open PR that is behind the
+      Load the pr skill first, then use the pr skill to explain how to handle an
+      open PR that is behind the
       base branch but has no merge conflicts or enforced up-to-date requirement,
       has one failing CI check, one Copilot review comment pointing
       out a bug, and one human reviewer comment asking an open design question.
-      Do not perform network or repository writes.
+      After loading pr, do not perform network or repository writes.
     tags:
       scenario: remediation
       cost: low
@@ -259,13 +270,15 @@ stimuli:
 
   - name: behind-base-preserves-head
     prompt: >-
-      Use pr to explain what to do before submission, during monitoring, and
+      Load the pr skill first, then use pr to explain what to do before
+      submission, during monitoring, and
       immediately before merge when the branch is behind base by four commits.
       There are no merge conflicts, no enforced up-to-date requirement, and no
       source changes needed. During monitoring CI is initially pending, then
       passing; all expected reviews are complete on the current head. Base
       advances again without introducing conflicts or a freshness requirement.
-      No commands, edits, agents, or network calls are authorized.
+      After loading pr: No commands, edits, agents, or network calls are
+      authorized.
     tags:
       scenario: base-update-gate
       cost: low
@@ -294,14 +307,16 @@ stimuli:
 
   - name: verified-base-update-blockers
     prompt: >-
-      Use pr to plan two independent submitted PRs. PR A has confirmed merge
+      Load the pr skill first, then use pr to plan two independent submitted
+      PRs. PR A has confirmed merge
       conflicts after base advances. PR B has no conflicts, but a verified
       enforced strict up-to-date requirement blocks merging its stale head.
       Both have known review fixes ready and CI passing on the old head.
       Explain the minimum justified updates, what to record and recheck,
       how to handle another base advance, and which evidence must be renewed.
       One branch is shared and has no force-push authorization.
-      No commands, edits, agents, or network calls are authorized.
+      After loading pr: No commands, edits, agents, or network calls are
+      authorized.
     tags:
       scenario: base-update-gate
       cost: low
@@ -333,13 +348,15 @@ stimuli:
 
   - name: unknown-mergeability-and-queue
     prompt: >-
-      Use pr to explain two independent cases. In case A the PR is behind,
+      Load the pr skill first, then use pr to explain two independent cases. In
+      case A the PR is behind,
       mergeability is UNKNOWN, and branch policy evidence is unavailable.
       In case B a conflict-free PR is behind and requires a merge queue with
       a verified authorized strategy; queue admission does not require a
       branch update. Explain whether either case warrants a speculative
       rebase and what evidence or gates remain necessary.
-      No commands, edits, agents, or network calls are authorized.
+      After loading pr: No commands, edits, agents, or network calls are
+      authorized.
     tags:
       scenario: base-update-gate
       cost: low
@@ -368,8 +385,10 @@ stimuli:
 
   - name: terse-fix-replies-with-commit-links
     prompt: |
-      Use pr to draft the replies for this complete synthetic review evidence,
-      then state which threads to resolve. No commands, edits, agents, or network calls.
+      Load the pr skill first, then use pr to draft the replies for this
+      complete synthetic review evidence,
+      then state which threads to resolve. After loading pr: No commands, edits,
+      agents, or network calls.
       Copilot inline thread T8 reports dropped saved criteria, fixed and verified in
       https://github.com/sample-owner/sample-repo/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.
       Two body-only findings in Copilot review R30, headings "Timeout" and "Pagination",
@@ -418,12 +437,14 @@ stimuli:
 
   - name: documentation-preflight-reuse
     prompt: >-
-      Use pr to explain documentation preflight after go hands off completed
+      Load the pr skill first, then use pr to explain documentation preflight
+      after go hands off completed
       implementation, tests, and code review. First doc-doctor has not run;
       then consider passing doc-doctor evidence for the same worktree, base,
       changeset, and scope; finally consider a later CLI behavior edit.
       Also explain what happens if doc-doctor is unavailable.
-      Do not execute commands or perform repository or network writes.
+      After loading pr, do not run shell commands or perform repository or
+      network writes.
     rubric:
       - pr owns doc-doctor and runs it once for the diff and affected docs when no valid evidence exists.
       - Does not ask go to run a second documentation pass.
@@ -451,10 +472,12 @@ stimuli:
 
   - name: default-merge-approval
     prompt: >-
-      Use pr to explain the next step for a ready PR with green CI, complete
+      Load the pr skill first, then use pr to explain the next step for a ready
+      PR with green CI, complete
       current-head reviews, required approvals, and settled feedback. No merge
       mode was supplied, but an older standing policy allows merging on Copilot
-      approval. No commands, edits, agents, or network calls are authorized.
+      approval. After loading pr, no shell commands, edits, agents, or network
+      calls are authorized.
     rubric:
       - Defaults to approval mode despite the standing policy and reviewer approval.
       - Presents PR, repository, full head OID, and strategy for final user confirmation.
@@ -480,10 +503,12 @@ stimuli:
 
   - name: explicit-auto-merge
     prompt: >-
-      Use pr --merge=auto to explain delivery for a ready PR, then for one with
+      Load the pr skill first, then use pr --merge=auto to explain delivery for
+      a ready PR, then for one with
       a pending expected current-head review. Also explain a validated go handoff
       carrying auto mode and its explicit user-authorization source.
-      No commands, edits, agents, or network calls are authorized.
+      After loading pr, no shell commands, edits, agents, or network calls are
+      authorized.
     rubric:
       - Accepts direct and validated handoff auto mode as invocation-only merge authorization.
       - Skips only the final merge prompt when all gates pass, never other approval boundaries.
@@ -507,10 +532,12 @@ stimuli:
 
   - name: explicit-approval-overrides-standing-policy
     prompt: >-
-      Use pr --merge=approval. A prior standing policy and an earlier go handoff
+      Load the pr skill first, then use pr --merge=approval. A prior standing
+      policy and an earlier go handoff
       allowed auto mode, but this is the user's later explicit choice. All
       readiness gates pass; final confirmation is declined or unavailable.
-      No commands, edits, agents, or network calls are authorized.
+      After loading pr, no shell commands, edits, agents, or network calls are
+      authorized.
     rubric:
       - Honors the later explicit approval choice rather than standing policy or old handoff.
       - Pauses without merging when confirmation is declined or unavailable.
@@ -532,10 +559,12 @@ stimuli:
 
   - name: changed-head-needs-fresh-approval
     prompt: >-
-      Use pr in approval mode. The user confirmed squash merging head A, but
-      a review fix was pushed as head B. All checks and reviews now pass for B.
-      Separately consider changing the merge strategy after confirmation.
-      No commands, edits, agents, or network calls are authorized.
+      Load the pr skill first, then use pr in approval mode to state the exact
+      confirmation and revalidation rules when the user confirmed squash merging
+      head A, a review fix was pushed as head B, and all checks and reviews now
+      pass for B (also considering changing the merge strategy after
+      confirmation). After loading pr, no shell commands, edits, agents, or
+      network calls are authorized.
     rubric:
       - Invalidates confirmation after a new head or changed strategy.
       - Requests fresh confirmation identifying the actual full head and strategy.
@@ -557,8 +586,10 @@ stimuli:
 
   - name: conflicting-merge-modes
     prompt: >-
-      Use pr --merge=auto --merge=approval for a ready PR.
-      No commands, edits, agents, or network calls are authorized.
+      Load the pr skill first, then use pr --merge=auto --merge=approval for a
+      ready PR to state the exact merge-choice conflict rule from the pr skill.
+      After loading pr, no shell commands, edits, agents, or network calls are
+      authorized.
     rubric:
       - Asks the user to resolve contradictory choices before merging.
       - Does not infer auto authorization or use last-flag-wins.
@@ -578,12 +609,13 @@ stimuli:
 
   - name: squash-and-cleanup-defaults
     prompt: >-
-      Use pr --merge=auto to explain a ready PR with all gates passing and no
+      Load the pr skill first, then use pr --merge=auto to explain a ready PR
+      with all gates passing and no
       strategy or cleanup override. After merge, its local branch remains
       checked out in another worktree. Separately consider an explicit user
       request to rebase merge and keep the branch, and a repository where squash
-      is disabled with no strategy override. No commands, edits, agents, or
-      network calls are authorized.
+      is disabled with no strategy override. After loading pr, no shell
+      commands, edits, agents, or network calls are authorized.
     rubric:
       - Defaults to squash merging and deleting the PR branch after merge.
       - Honors the explicit rebase and keep-branch choices instead of those defaults.
@@ -609,12 +641,13 @@ stimuli:
 
   - name: merge-queue-deferred-cleanup
     prompt: >-
-      Use pr --merge=auto for a ready PR whose base requires a merge queue,
+      Load the pr skill first, then use pr --merge=auto for a ready PR whose
+      base requires a merge queue,
       configured for squash. All current-head CI and reviews pass. The user
       wants the default branch cleanup. GitHub CLI accepts queue admission but
       the PR is not yet merged. Also consider a queue configured for merge
-      commits instead of the authorized squash. No commands, edits, agents,
-      or network calls are authorized.
+      commits instead of the authorized squash. After loading pr, no shell
+      commands, edits, agents, or network calls are authorized.
     rubric:
       - Omits bundled --delete-branch without treating deferred cleanup as a request to keep the branch.
       - Verifies the queue strategy matches the authorized squash strategy; blocks on mismatch rather than bypassing the queue.
@@ -639,11 +672,13 @@ stimuli:
 
   - name: post-merge-branch-advanced
     prompt: >-
-      Use pr to explain cleanup after GitHub confirms PR head A was squash
+      Load the pr skill first, then use pr to explain cleanup after GitHub
+      confirms PR head A was squash
       merged as commit S. The remote PR branch was then advanced or recreated at
       B, and a local branch also points to B. Separately consider refs still at
       A and already-absent refs. A deletion guard rejects A because the current
-      value is B. No commands, edits, agents, or network calls are authorized.
+      value is B. After loading pr, no shell commands, edits, agents, or network
+      calls are authorized.
     rubric:
       - Uses original PR head A as expected OID, not squash commit S or new head B.
       - Uses atomic expected-OID guards for both remote and local deletion after verifying identity and worktree safety.
@@ -669,14 +704,15 @@ stimuli:
 
   - name: post-merge-complete-and-partial-issues
     prompt: >-
-      Use pr to plan follow-through after GitHub confirms the intended PR head
+      Load the pr skill first, then use pr to plan follow-through after GitHub
+      confirms the intended PR head
       merged. A complete paginated inventory identifies sample/app#11, whose
       acceptance criteria all pass but which remains open; sample/app#12, which
       is already auto-closed and fully complete; and sample/app#13, where this
       PR delivered only one of three requirements and the issue is still open.
       The PR also mentions sample/app#14 as background only. Explain required
-      actions and verification. No commands, edits, agents, or network calls
-      are authorized.
+      actions and verification. After loading pr, no shell commands, edits,
+      agents, or network calls are authorized.
     rubric:
       - Closes fully resolved issue 11 with completed reason, merged PR link, and evidence, then verifies persisted closed state.
       - Verifies already-closed complete issue 12 without redundant writes.
@@ -702,7 +738,8 @@ stimuli:
 
   - name: post-merge-issue-retry-and-permission-failure
     prompt: >-
-      Use pr for a synthetic already-merged PR resumed after interruption.
+      Load the pr skill first, then use pr for a synthetic already-merged PR
+      resumed after interruption.
       The intended head's merge is verified. Issue sample/app#21 appeared only
       in the original task, but its identity and scope rationale were persisted
       in a neutral PR inventory comment before merge. It is partial
@@ -710,8 +747,8 @@ stimuli:
       completed work, remaining work, and next steps, but the response timed
       out. Fully resolved sample/app#22 is open and closing it returns a
       permission failure. Local branch cleanup is also blocked by a checked-out
-      worktree. Explain recovery and the final status. No commands, edits,
-      agents, or network calls are authorized.
+      worktree. Explain recovery and the final status. After loading pr, no
+      shell commands, edits, agents, or network calls are authorized.
     rubric:
       - Reconstructs task-only associations from the verified durable PR inventory and re-reads current issue state/comments before retrying writes.
       - Reuses issue 21's persisted update without duplicating it after the timeout.
@@ -738,14 +775,16 @@ stimuli:
 
   - name: post-merge-unknown-and-cross-repository-issues
     prompt: >-
-      Use pr to assess a verified merge into a non-default branch. The task
+      Load the pr skill first, then use pr to assess a verified merge into a
+      non-default branch. The task
       explicitly delivers work for sample/other#31, not sample/app#31, but the
       automatic closing-link list is empty. Only two of its three requirements
       have evidence and the third requires an unverified rollout. One page of
       related discussion could not be retrieved. Another partial issue was
       accidentally auto-closed by this PR; a different issue was intentionally
       closed by a maintainer for unrelated reasons. Explain safe follow-through.
-      No commands, edits, agents, or network calls are authorized.
+      After loading pr, no shell commands, edits, agents, or network calls are
+      authorized.
     rubric:
       - Preserves sample/other#31 identity and does not infer no related issues from missing closing links or the non-default base.
       - Does not close unknown or incomplete work; records known progress, missing rollout evidence, remaining work, and the inventory gap.
@@ -773,14 +812,16 @@ stimuli:
 
   - name: pre-merge-partial-closing-link
     prompt: >-
-      Use pr to plan a PR whose body says Fixes sample/app#41, although the
+      Load the pr skill first, then use pr to plan a PR whose body says Fixes
+      sample/app#41, although the
       change delivers only one of three acceptance criteria. The proposed
       squash commit message repeats the same closing keyword. The PR is ready
       for approval but has not merged. A stale Closes sample/app#42 targets a
       reference-only background issue. Another delivery issue, sample/app#43,
       appears only in the task/handoff. Explain prevention and post-merge work,
       including what happens if automatic closure cannot safely be prevented.
-      No commands, edits, agents, or network calls are authorized.
+      After loading pr, no shell commands, edits, agents, or network calls are
+      authorized.
     rubric:
       - Inventories acceptance criteria and evidence before merging, treating issue 41 as partial.
       - Plans removal of misleading closing keywords/links for partial and reference-only issues in the PR and merge message while preserving neutral references and template shape.

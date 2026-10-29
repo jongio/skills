@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 
 export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");
 
@@ -673,6 +674,39 @@ function atomicWriteText(filePath, content) {
 	}
 }
 
+function sessionNamePath(sessionId, home) {
+	return typeof sessionId === "string" && /^[a-zA-Z0-9_-]+$/.test(sessionId)
+		? join(home, "session-statusline", `${sessionId}.json`) : null;
+}
+
+function cleanSessionName(name) {
+	return stripVTControlCharacters(name).replace(/[\x00-\x1f\x7f-\x9f]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+export function readSessionName(sessionId, { home = configHome() } = {}) {
+	const path = sessionNamePath(sessionId, home);
+	if (!path) return "";
+	try {
+		const state = JSON.parse(readFileSync(path, "utf8"));
+		return typeof state?.name === "string" ? cleanSessionName(state.name) : "";
+	} catch {
+		return "";
+	}
+}
+
+export function setSessionName(sessionId, name, { home = configHome() } = {}) {
+	const path = sessionNamePath(sessionId, home);
+	if (!path) throw new Error("A valid session ID is required.");
+	if (name === null) {
+		rmSync(path, { force: true });
+		return "";
+	}
+	if (typeof name !== "string" || !cleanSessionName(name)) throw new Error("A non-empty session name is required.");
+	const normalized = cleanSessionName(name);
+	atomicWriteText(path, `${JSON.stringify({ name: normalized })}\n`);
+	return normalized;
+}
+
 export function getEnabledStatuslines(home = configHome()) {
 	const enabled = readEnabledConfig(home);
 	if (!enabled) return [...PREFERRED_ORDER];
@@ -1018,8 +1052,10 @@ export async function composeStatusLine(payload, {
 	selfPath = null,
 	selfRender = null,
 } = {}) {
+	const name = readSessionName(payload?.session_id, { home });
+	const label = name && (color ? `\x1b[1;38;2;219;234;254;48;2;30;64;120m ${name} \x1b[0m` : name);
 	const renderers = discoverRenderers(home);
-	if (!renderers.length) return "";
+	if (!renderers.length && (!label || typeof selfRender !== "function")) return label;
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: true });
 	const options = {
 		home, now, links, color, nerdFont: useNerdFont,
@@ -1071,7 +1107,10 @@ export async function composeStatusLine(payload, {
 		: joinOutputsHorizontally(blocks.map((block) => block.renderGroup
 			? block.renderGroup(block.entries, options)
 			: block.entries.filter((entry) => !entry.compact).map((entry) => entry.text).join(color ? " " : " · ")), { color });
-	return useNerdFont ? joined : toUnicodeIcons(joined);
+	const rendered = joined || (label && typeof selfRender === "function"
+		? await selfRender(payload, { home, now, links, color, nerdFont: useNerdFont }) : "");
+	const output = useNerdFont ? rendered : toUnicodeIcons(rendered);
+	return label ? `${label}${output ? `${color ? " " : " · "}${output}` : ""}` : output;
 }
 
 async function main() {

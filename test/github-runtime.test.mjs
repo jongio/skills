@@ -300,7 +300,7 @@ test("both plugin notification entry points register opt-in tools without model 
     `;
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
       cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,
-      env: { ...process.env, COPILOT_HOME: home },
+      env: { ...process.env, COPILOT_HOME: home, LOCALAPPDATA: join(home, "localappdata") },
     });
     assert.equal(result.status, 0, result.stderr);
   }
@@ -379,7 +379,7 @@ test("plugin notification handover retires the manual provider and preserves sin
     `;
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
       cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,
-      env: { ...process.env, COPILOT_HOME: home },
+      env: { ...process.env, COPILOT_HOME: home, LOCALAPPDATA: join(home, "localappdata") },
     });
     assert.equal(result.status, 0, result.stderr);
   }
@@ -407,14 +407,15 @@ test("plugin notification handover retires the manual provider and preserves sin
         `;
         const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
           cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,
-          env: { ...process.env, COPILOT_HOME: home, COPILOT_STATUSLINE_TOKEN_ENV: "GH_TOKEN",
+          env: { ...process.env, COPILOT_HOME: home, LOCALAPPDATA: join(home, "localappdata"), COPILOT_STATUSLINE_TOKEN_ENV: "GH_TOKEN",
             GH_TOKEN: "", GITHUB_TOKEN: "", GH_ENTERPRISE_TOKEN: "", GITHUB_ENTERPRISE_TOKEN: "" },
         });
         assert.equal(result.status, 0, result.stderr);
       }
     });
 
-    test("the real statusline adapter never forwards an environment token to an unrelated host", () => {
+    test("the real statusline adapter never forwards an environment token to an unrelated host", (t) => {
+      const home = fixture(t);
       for (const profile of [
         { host: "enterprise.example", variable: "GH_ENTERPRISE_TOKEN", denied: ["unrelated.example"] },
         { host: "one.ghe.com", variable: "GH_TOKEN", denied: ["two.ghe.com", "github.com"] },
@@ -459,7 +460,8 @@ test("plugin notification handover retires the manual provider and preserves sin
       `;
       const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
         cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,
-        env: { ...process.env, GH_HOST: profile.host, GH_ENTERPRISE_TOKEN: "",
+        env: { ...process.env, COPILOT_HOME: home, LOCALAPPDATA: join(home, "localappdata"),
+          GH_HOST: profile.host, GH_ENTERPRISE_TOKEN: "",
           GITHUB_ENTERPRISE_TOKEN: "", GH_TOKEN: "", GITHUB_TOKEN: "", [profile.variable]: "fixture-host" },
       });
       assert.equal(result.status, 0, result.stderr);

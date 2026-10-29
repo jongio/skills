@@ -14,6 +14,11 @@ export function isCopilotBotLogin(login) {
   );
 }
 
+function normalizeReviewerLogin(login) {
+  const normalized = String(login || "").trim().toLowerCase();
+  return isCopilotBotLogin(normalized) ? "copilot-pull-request-reviewer" : normalized;
+}
+
 export function detectRepoFromGit(cwd = process.cwd()) {
   try {
     const remote = execFileSync("git", ["remote", "get-url", "origin"], {
@@ -430,6 +435,24 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
       error: 'Missing or invalid --head "<oid>" for request-copilot.',
     };
   }
+  let credentialScope;
+  const scopedRequest = async (input) => {
+    try {
+      const currentScope = await execFn.cacheScope?.();
+      if (credentialScope && currentScope && currentScope !== credentialScope) {
+        return { ok: false, error: "GitHub credential scope changed during Copilot request" };
+      }
+      credentialScope ||= currentScope;
+      const result = await execFn(input);
+      if (credentialScope && result?.cacheScope && result.cacheScope !== credentialScope) {
+        return { ok: false, error: "GitHub credential scope changed during Copilot request" };
+      }
+      credentialScope ||= result?.cacheScope;
+      return result;
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  };
   const [owner, name] = args.repo.split("/");
   const query = `query($owner: String!, $name: String!, $pr: Int!) {
     repository(owner: $owner, name: $name) {
@@ -457,7 +480,7 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
   }`;
 
   const fetchValidatedPr = async () => {
-    const gqlRes = await execFn({ kind: "graphql", query, variables: { owner, name, pr: args.pr } });
+    const gqlRes = await scopedRequest({ kind: "graphql", query, variables: { owner, name, pr: args.pr } });
     if (!gqlRes || !gqlRes.ok) {
       return {
         ok: false,
@@ -581,10 +604,12 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
   let allWorkflowRuns = [];
   let previousPassSignature = null;
   let inventoryStabilized = false;
+  let lastTruncationError = "";
 
   for (let pass = 1; pass <= maxInventoryPasses; pass += 1) {
     const passRuns = [];
     const seenPassRunIds = new Set();
+    let passTruncated = false;
 
     for (const runStatus of activeRunStatuses) {
       const statusRuns = [];
@@ -594,7 +619,7 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
           page === 1
             ? `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100`
             : `repos/${args.repo}/actions/runs?status=${runStatus}&per_page=100&page=${page}`;
-        const runsRes = await execFn({ endpoint });
+        const runsRes = await scopedRequest({ endpoint });
         if (!runsRes || !runsRes.ok || !runsRes.data) {
           return {
             ok: false,
@@ -637,15 +662,20 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
           break;
         }
         if (pageRuns.length === 0) {
-          return {
-            ok: false,
-            status: "collection_truncated",
-            collections: ["workflow_runs"],
-            error: `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`,
-          };
+          passTruncated = true;
+          lastTruncationError = `Workflow runs inventory for status=${runStatus} truncated at ${statusRuns.length}/${totalCount}`;
+          break;
         }
         page += 1;
       }
+      if (passTruncated) {
+        break;
+      }
+    }
+
+    if (passTruncated) {
+      previousPassSignature = null;
+      continue;
     }
 
     const passSignature = passRuns
@@ -663,6 +693,14 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
   }
 
   if (!inventoryStabilized) {
+    if (lastTruncationError) {
+      return {
+        ok: false,
+        status: "collection_truncated",
+        collections: ["workflow_runs"],
+        error: lastTruncationError,
+      };
+    }
     return {
       ok: false,
       status: "inventory_unstable",
@@ -684,7 +722,7 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
   const cancelledRunIds = [];
   for (const run of matchingActiveRuns) {
     if (run.head_sha !== pr.headRefOid && run.id) {
-      const cancelRes = await execFn({ method: "POST", endpoint: `repos/${args.repo}/actions/runs/${run.id}/cancel` });
+      const cancelRes = await scopedRequest({ method: "POST", endpoint: `repos/${args.repo}/actions/runs/${run.id}/cancel` });
       if (!cancelRes || !cancelRes.ok) {
         return {
           ok: false,
@@ -714,7 +752,7 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
   );
   const toggledExistingRequest = Boolean(copilotCurrentlyRequested || cancelledRunIds.length > 0);
   if (toggledExistingRequest) {
-    const removeRes = await execFn({ kind: "reviewer", repo: args.repo, pr: args.pr, remove: true });
+    const removeRes = await scopedRequest({ kind: "reviewer", repo: args.repo, pr: args.pr, remove: true });
     if (!removeRes || !removeRes.ok) {
       return {
         ok: false,
@@ -726,7 +764,7 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
     }
   }
 
-  const addRes = await execFn({ kind: "reviewer", repo: args.repo, pr: args.pr, remove: false });
+  const addRes = await scopedRequest({ kind: "reviewer", repo: args.repo, pr: args.pr, remove: false });
   if (!addRes.ok) {
     return {
       ok: false,
@@ -1139,9 +1177,24 @@ export async function evaluatePrPollTick(args, execFn = defaultRequest, state = 
       return { events: [{ type: "POLL_ERROR", error: errMsg }], error: errMsg };
     }
     if (state && parsedRunsHttp.etag && Array.isArray(runsData?.workflow_runs)) {
+      const slimRunsData = {
+        ...(typeof runsData.total_count === "number" ? { total_count: runsData.total_count } : {}),
+        workflow_runs: runsData.workflow_runs.map((r) => ({
+          id: r?.id,
+          workflow_id: r?.workflow_id,
+          path: r?.path,
+          name: r?.name,
+          event: r?.event,
+          head_branch: r?.head_branch,
+          head_sha: r?.head_sha,
+          status: r?.status,
+          conclusion: r?.conclusion,
+          html_url: r?.html_url,
+        })),
+      };
       state.etags[runsEndpoint] = {
         etag: parsedRunsHttp.etag,
-        data: runsData,
+        data: slimRunsData,
         updatedAt: new Date().toISOString(),
       };
       const etagKeys = Object.keys(state.etags);
@@ -1185,6 +1238,7 @@ export async function evaluatePrPollTick(args, execFn = defaultRequest, state = 
     }
   }
 
+  const actionRequiredRuns = [];
   for (const run of latestByWorkflowKey.values()) {
     if (run.status !== "completed") {
       activeWorkflowRuns.push(run.name || "workflow");
@@ -1192,6 +1246,13 @@ export async function evaluatePrPollTick(args, execFn = defaultRequest, state = 
       run.conclusion &&
       !["success", "skipped", "neutral"].includes(run.conclusion.toLowerCase())
     ) {
+      if (run.conclusion.toLowerCase() === "action_required" && run.id) {
+        actionRequiredRuns.push({
+          runId: run.id,
+          name: run.name || "workflow",
+          url: run.html_url,
+        });
+      }
       const runIdMarker = run.id ? `/runs/${run.id}` : "";
       const alreadyRecorded = failedChecks.some(
         (fc) =>
@@ -1210,6 +1271,17 @@ export async function evaluatePrPollTick(args, execFn = defaultRequest, state = 
   }
 
   if (failedChecks.length > 0) {
+    const actionReqCommands = actionRequiredRuns
+      .map(
+        (r) =>
+          `gh api -X POST repos/${args.repo}/actions/runs/${r.runId}/approve && gh run rerun ${r.runId} -R ${args.repo}`
+      )
+      .join("; ");
+    const hasNonActionRequiredFailures = failedChecks.some(
+      (fc) => String(fc?.conclusion || "").toUpperCase() !== "ACTION_REQUIRED"
+    );
+    const defaultFailureRemediation =
+      "Inspect the failed job logs via `gh api repos/<owner>/<repo>/actions/jobs/<jobId>/logs`, fix the root cause (or rebase if base SHA drifted during push), commit, push, and restart pr-watch-daemon.mjs.";
     return {
       events: [
         {
@@ -1217,8 +1289,13 @@ export async function evaluatePrPollTick(args, execFn = defaultRequest, state = 
           timestamp: new Date().toISOString(),
           headRefOid: headOid,
           failedChecks,
+          ...(actionRequiredRuns.length > 0 ? { actionRequiredRuns } : {}),
           remediation:
-            "Inspect the failed job logs via `gh api repos/<owner>/<repo>/actions/jobs/<jobId>/logs`, fix the root cause (or rebase if base SHA drifted during push), commit, push, and restart pr-watch-daemon.mjs.",
+            actionRequiredRuns.length > 0 && hasNonActionRequiredFailures
+              ? `Approve and rerun action_required workflow runs (${actionReqCommands}); also inspect the other failed job logs and fix the root cause, then restart pr-watch-daemon.mjs.`
+              : actionRequiredRuns.length > 0
+                ? `Approve and rerun action_required workflow runs (${actionReqCommands}), then restart pr-watch-daemon.mjs.`
+                : defaultFailureRemediation,
         },
       ],
     };
@@ -1429,13 +1506,13 @@ export async function evaluatePrPollTick(args, execFn = defaultRequest, state = 
 
   // Verify every non-exempt expected reviewer has a non-dismissed, non-errored submitted review on headOid
   const headReviewerLogins = new Set(
-    headReviews.map((r) => (r.author?.login || "").toLowerCase()).filter(Boolean)
+    headReviews.map((r) => normalizeReviewerLogin(r.author?.login)).filter(Boolean)
   );
   const nonExemptExpectedReviewers = (args.expectedReviewers || []).filter(
     (login) => args.expectCopilot || !isCopilotBotLogin(login)
   );
   const missingExpectedReviewers = nonExemptExpectedReviewers.filter(
-    (login) => !headReviewerLogins.has(login)
+    (login) => !headReviewerLogins.has(normalizeReviewerLogin(login))
   );
 
   const copilotReviewPending = args.expectCopilot && (copilotWorkflowActive || copilotRequested);
@@ -1678,6 +1755,18 @@ const NON_TERMINAL_PR_EVENTS = new Set([
   "RATE_LIMITED",
 ]);
 
+export function shouldEmitPrWatchStatus({
+  polls = 1,
+  eventsCount = 0,
+  summaryChanged = false,
+  nowMs = Date.now(),
+  lastEmitMs = 0,
+  heartbeatSec = 60,
+} = {}) {
+  if (polls <= 1 || eventsCount > 0 || summaryChanged) return true;
+  return nowMs - lastEmitMs >= heartbeatSec * 1000;
+}
+
 export async function runCli(argv = process.argv.slice(2)) {
   const args = parsePrWatchArgs(argv);
   const emit = createEventWriter(args.eventsFile, "pr-watch", { repo: args.repo, pr: args.pr });
@@ -1715,6 +1804,8 @@ export async function runCli(argv = process.argv.slice(2)) {
 
     if (args.prs.length > 1) {
       const multiState = {};
+      const lastSummaryByPr = new Map();
+      let lastEmitMs = 0;
       let polls = 0;
       while (true) {
         polls += 1;
@@ -1738,7 +1829,19 @@ export async function runCli(argv = process.argv.slice(2)) {
           await sleepSeconds(multi.nextIntervalSec || 60);
           continue;
         }
-        console.log(JSON.stringify({ prs: multi.prs, events: multi.events, statuses: multi.statuses }, null, 2));
+        let summaryChanged = false;
+        for (const st of multi.statuses || []) {
+          const previous = lastSummaryByPr.get(st.pr);
+          if (previous && previous !== st.summary) summaryChanged = true;
+          lastSummaryByPr.set(st.pr, st.summary);
+        }
+        const nowMs = Date.now();
+        if (shouldEmitPrWatchStatus({
+          polls, eventsCount: multi.events.length, summaryChanged, nowMs, lastEmitMs,
+        })) {
+          lastEmitMs = nowMs;
+          console.log(JSON.stringify({ prs: multi.prs, events: multi.events, statuses: multi.statuses }, null, 2));
+        }
         if (args.maxPolls > 0 && polls >= args.maxPolls) {
           console.log(JSON.stringify({ prs: args.prs, events: [{ type: "MAX_POLLS_REACHED" }], statuses: multi.statuses }, null, 2));
           return;
@@ -1749,6 +1852,8 @@ export async function runCli(argv = process.argv.slice(2)) {
 
     const watchState = createPrWatchState();
     let baselinePhase = args.lastPhase;
+    let lastSummary = "";
+    let lastEmitMs = 0;
     let hasCommentBaseline = args.hasExplicitSinceCommentId;
     let baselineCommentId = args.sinceCommentId;
     let polls = 0;
@@ -1783,8 +1888,16 @@ export async function runCli(argv = process.argv.slice(2)) {
         console.log(JSON.stringify(tick, null, 2));
         return;
       }
-      // Emit live status and nonterminal phase changes / auto-retries to stdout while continuing to watch
-      console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
+      const currentSummary = tick.status?.summary || "";
+      const summaryChanged = Boolean(lastSummary && currentSummary && currentSummary !== lastSummary);
+      lastSummary = currentSummary || lastSummary;
+      const nowMs = Date.now();
+      if (shouldEmitPrWatchStatus({
+        polls, eventsCount: tick.events.length, summaryChanged, nowMs, lastEmitMs,
+      })) {
+        lastEmitMs = nowMs;
+        console.log(JSON.stringify({ events: tick.events, status: tick.status }, null, 2));
+      }
       if (tick.status?.phase) {
         baselinePhase = tick.status.phase;
       }

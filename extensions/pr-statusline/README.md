@@ -295,16 +295,28 @@ The unified SDK extension provides a separate command from Copilot's built-in
 
 | Command | Effect |
 | --- | --- |
+| `/session-statusline name API migration` | Show a custom name first in this session's footer. Spaces are supported; quotes are not needed. |
+| `/session-statusline name` | Show the current custom session name. |
+| `/session-statusline clear-name` | Remove only this session's custom name, leaving tracked entries unchanged. |
 | `/session-statusline refresh` | Immediately re-query tracked PRs, issues, agent-linked PRs, and Git checkout/worktree data, bypassing status TTLs and applicable shared/in-flight caches. Keeps tracking and component selections; reports incomplete refreshes and individual failures explicitly. |
 | `/session-statusline clear` | Dismiss this session's current PR, issue, subagent, and worktree entries. Does not delete transcripts, affect other sessions, or change component selections. |
 | `/session-statusline setup` | Open the component picker. Optional selections such as `all`, `none`, or `prs issues` also work. `/statusline-setup` remains a compatibility alias. |
 
 The `session-statusline` skill in the `jongio-skills` plugin maps natural-language
-requests such as "clear the footer pills" to the session-bound `session_statusline`,
-`session_prs`, `session_issues`, and `session_subagents` tools. Per-component clear
+requests such as "name this session API migration" or "clear the footer pills"
+to the session-bound `session_statusline`, `session_prs`, `session_issues`, and
+`session_subagents` tools. Per-component clear
 is available through `/session-prs clear`, `/session-issues clear`, and
 `/session-subagents clear`; `/session-subagents remove <agent-id>` dismisses one
 agent without stopping it. Use `/session-subagents list` to find tracked IDs.
+
+Custom names are single-line text stored separately in
+`$COPILOT_HOME/session-statusline/<session-id>.json`. They persist on resume and
+through clear/refresh, never affect other sessions or terminal tab/window titles,
+and appear even when no tracked pills are present. Naming does not enable a
+disabled custom footer or change component selections. Only `clear-name` removes
+the label. The `session_statusline` tool accepts `{"action":"name","name":"API migration"}`
+to set it, `{"action":"name"}` to read it, and `{"action":"clear-name"}` to remove it.
 
 **Clear is not refresh or hide.** Clear saves a session-specific replay boundary,
 so old transcript events, unchanged workspace metadata, and collector saves do

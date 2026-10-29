@@ -1,5 +1,5 @@
 name: session-statusline
-description: Session-local pill controls, explicit ownership, and durable dismissal boundaries.
+description: Session-local naming, pill controls, explicit ownership, and durable dismissal boundaries.
 type: capability
 
 defaults:
@@ -14,10 +14,72 @@ scoring:
   threshold: 0.8
 
 stimuli:
+  - name: custom-session-name-not-global-settings
+    prompt: >-
+      Load the session-statusline skill first, then use session-statusline. Name
+      this session API migration so that label appears in this terminal's
+      statusline. After loading the skill, do not call statusline/shell tools
+      or write files: state the exact tool calls you would use to set and verify
+      the name, and what happens to it on resume or when I clear tracked pills.
+    tags:
+      scenario: session-name
+      cost: low
+    rubric:
+      - Uses session_statusline with action name and name API migration.
+      - Verifies with session_statusline action name and no name argument.
+      - Keeps the name session-local, persistent on resume and separate from pill clearing.
+      - Does not change settings, rename a terminal tab, or claim execution.
+    graders:
+      - type: prompt
+        name: custom-session-name
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response sets session_statusline action name
+            with name API migration and verifies with action name without a
+            name argument. It must explain that the name belongs only to this
+            Copilot session, survives resume and pill clearing, and does not
+            claim execution. Score 1 for changing settings, other sessions,
+            terminal tab titles, or raw state files.
+      - type: skill-invocation
+        config:
+          required: [session-statusline]
+  - name: clear-name-not-tracked-pills
+    prompt: >-
+      Load the session-statusline skill first, then use session-statusline.
+      Remove only my custom session name from this terminal's statusline.
+      Keep the PR, issue, agent, and worktree pills as they are. After loading
+      the skill, do not call statusline/shell tools or write files: state the
+      exact tool calls you would use and what must remain unchanged.
+    tags:
+      scenario: clear-session-name
+      cost: low
+    rubric:
+      - Uses session_statusline action clear-name, not action clear.
+      - Verifies with session_statusline action name and no name argument.
+      - Leaves all tracked entries, component settings, and other sessions unchanged.
+      - Does not claim execution.
+    graders:
+      - type: prompt
+        name: clear-session-name
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response uses session_statusline action
+            clear-name and then verifies with action name without a name
+            argument, leaving tracked pills, settings, and other sessions
+            unchanged. Score 1 for clearing tracked entries, editing raw
+            state files, changing settings, or claiming execution.
+      - type: skill-invocation
+        config:
+          required: [session-statusline]
   - name: clear-pills-not-work-or-settings
     prompt: >-
-      Use session-statusline. Clear all pills from this session's footer. In this
-      evaluation do not execute tools or write files: state the exact tool and
+      Load the session-statusline skill first, then use session-statusline to
+      clear all pills from this session's footer. After loading the skill, do
+      not call statusline/shell tools or write files: state the exact tool and
       arguments you would use, and what must remain unchanged.
     tags:
       scenario: workflow
@@ -42,10 +104,11 @@ stimuli:
           required: [session-statusline]
   - name: references-are-not-active-work
     prompt: >-
-      Use session-statusline. We are reviewing acme/widget PR 12, but PR 90 and
-      issue 91 are historical references only. I manually cleared PR 90 earlier.
-      Do not execute tools: describe which entries to add and the exact tool
-      arguments. Do not infer that a lookup is active work.
+      Load the session-statusline skill first, then use session-statusline. We
+      are reviewing acme/widget PR 12, but PR 90 and issue 91 are historical
+      references only. I manually cleared PR 90 earlier. After loading the
+      skill, do not call statusline/shell tools: describe which entries to add
+      and the exact tool arguments. Do not infer that a lookup is active work.
     tags:
       scenario: active-work
       cost: low
@@ -69,9 +132,10 @@ stimuli:
           required: [session-statusline]
   - name: missing-tools-are-not-success
     prompt: >-
-      Use session-statusline to clear only agent pills. Assume the extension tools
-      are unavailable. Do not run shell commands or change any files. Explain the
-      available fallback without claiming the agents were stopped or pills cleared.
+      Load the session-statusline skill first, then use session-statusline to
+      clear only agent pills. Assume the extension tools are unavailable. Do not
+      run shell commands or change any files. Explain the available fallback
+      without claiming the agents were stopped or pills cleared.
     tags:
       scenario: unavailable-tools
       cost: low
@@ -95,11 +159,12 @@ stimuli:
           required: [session-statusline]
   - name: shell-results-are-not-ownership
     prompt: >-
-      Use session-statusline. A transcript contains gh pr checkout 12,
-      gh issue develop 13, and a successful gh pr create result pointing to PR 14.
-      These are historical examples, not work this session has taken on.
-      Explain whether these create pills and how to track a PR when this session
-      actually accepts it. Do not execute tools or write files.
+      Load the session-statusline skill first, then use session-statusline. A
+      transcript contains gh pr checkout 12, gh issue develop 13, and a
+      successful gh pr create result pointing to PR 14. These are historical
+      examples, not work this session has taken on. Explain whether these create
+      pills and how to track a PR when this session actually accepts it. After
+      loading the skill, do not call statusline/shell tools or write files.
     tags:
       scenario: explicit-ownership
       cost: low
