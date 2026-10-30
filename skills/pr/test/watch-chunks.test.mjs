@@ -1072,3 +1072,22 @@ test("host-scoped CI setup retains validated discovery cache for the following w
   assert.equal(revalidated, 1);
   assert.deepEqual(result.repos, ["fixture/repo"]);
 });
+
+test("single-item once lists honor scoped comment cursors before merge readiness", async (t) => {
+  const dir = fixture(t);
+  const output = capture(t);
+  const reviewed = { databaseId: 321, state: "COMMENTED", submittedAt: "2026-01-01T00:00:00Z",
+    author: { login: "copilot" }, commit: { oid: "head" }, body: "" };
+  for (const scalar of [[], ["--since-comment-id", "900"]]) {
+    output.length = 0;
+    await runPr(["once", "--repo", "fixture/repo", "--prs", "1:head", ...scalar,
+      "--since-comment-id", "1:10"], {
+      stateDir: dir,
+      execFn: (args) => args[1] === "graphql"
+        ? graph(prNode({ checks: "COMPLETED", reviews: [reviewed], comments: [{ databaseId: 11, body: "Hold this head" }] }))
+        : json({ workflow_runs: [], total_count: 0 }),
+    });
+    assert.equal(output.at(-1).events[0].type, "NEW_PR_COMMENTS");
+    assert.equal(output.at(-1).events.some((event) => event.type === "PR_READY_TO_MERGE"), false);
+  }
+});

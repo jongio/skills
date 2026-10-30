@@ -185,6 +185,10 @@ export function parsePrWatchArgs(argv, env = process.env) {
   if (args.prs.length === 1 && !args.head && args.prHeads[args.prs[0]]) {
     args.head = args.prHeads[args.prs[0]];
   }
+  if (args.prs.length === 1 && args.prSinceCommentIds?.[args.pr] !== undefined) {
+    args.sinceCommentId = args.prSinceCommentIds[args.pr];
+    args.hasExplicitSinceCommentId = true;
+  }
 
   if (!args.repo) {
     args.repo = detectRepoFromGit();
@@ -528,8 +532,8 @@ export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries =
         lock = openSync(lockPath, "wx");
         writeFileSync(lock, String(process.pid), "utf8");
       } catch (error) {
-        if (error.code !== "EEXIST") throw error;
-        if (Date.now() >= lockDeadline) throw new Error("PR watch state is locked by another writer");
+        if (!["EEXIST", "EPERM"].includes(error.code)) throw error;
+        if (Date.now() >= lockDeadline) throw new Error("PR watch state lock unavailable", { cause: error });
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       }
     }

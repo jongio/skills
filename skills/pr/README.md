@@ -174,10 +174,14 @@ review attempt.
 
 After handling comments, use `--since-comment-id <id>` for the primary PR, or
 `--since-comment-id <pr>:<id>` for a specific PR in `--prs`; do not advance other
-PRs' cursors. Use one active watcher per PR. Writes for different PRs in a
+PRs' cursors. Single-item `--prs` lists honor their scoped cursor in `once` as well as `watch`,
+with the scoped value taking precedence over a scalar primary-PR cursor.
+Use one active watcher per PR. Writes for different PRs in a
 repository are serialized and atomically merged; persistence/lock failures
 stop the watcher rather than silently discarding state. A stale lock requires
 inspection of its recorded process ID before manual recovery.
+Transient lock-open contention is retried only within the existing acquisition
+budget; permanent denial still stops with its original cause.
 
 ### Review completion
 
