@@ -356,7 +356,7 @@ test("a second identical create is idempotent", async (t) => {
   assert.equal(after, before);
 });
 
-test("bundled authoring creates a functional repository with aligned Vally 0.19 locks", async (t) => {
+test("bundled authoring creates a functional repository with aligned Vally 0.20 locks", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "create-skills-repo-vally-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const target = path.join(root, "generated");
