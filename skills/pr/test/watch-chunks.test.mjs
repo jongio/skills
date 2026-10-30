@@ -1212,6 +1212,29 @@ test("review 5708185900: an idle peer ordinary interval cannot suppress another 
   assert.deepEqual(activePolls, [0, 5000, 10000], "completed-sweep bookkeeping cannot hide another target after it becomes due");
 });
 
+test("review 5708286540: due completed peers cannot interrupt the final member of a passing logical sweep", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const output = capture(t);
+  const repos = ["fixture/one", "fixture/two", "fixture/three", "fixture/four"];
+  const argv = ["watch", "--repos", repos.join(","), "--config-file", path.join(dir, "config.json"),
+    "--idle-interval", "15", "--max-wait-sec", "70"];
+  let green = [];
+  for (let chunk = 0; chunk < 8; chunk += 1) {
+    await runCi(argv, {
+      sleep: time.sleep,
+      execFn(args) {
+        time.advance(10000);
+        return greenCiExec(args);
+      },
+    });
+    green = output.at(-1).events.filter((event) => event.type === "ALL_GREEN").map((event) => event.repo);
+    if (green.length > 0) break;
+  }
+  assert.deepEqual(green.sort(), [...repos].sort(),
+    "finish all outstanding members and evaluate aggregate green before an optional due-peer refresh consumes the chunk");
+});
+
 for (const boundary of ["before-request", "during-request"]) {
   test(`review 5708185900: observed ${boundary} credential change cannot carry an old snapshot into error or quota output`, async (t) => {
     const dir = fixture(t);

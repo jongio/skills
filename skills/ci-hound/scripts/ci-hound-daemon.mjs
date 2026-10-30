@@ -2138,9 +2138,12 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     const startIndex = resumable ? Math.max(0, targetRepos.indexOf(discoveryState.metrics.nextRepo)) : 0;
     const orderedRepos = [...targetRepos.slice(startIndex), ...targetRepos.slice(0, startIndex)]
       .filter((repo) => !sweep.completed[repo] || args.respectPollInterval &&
-        (loadState(stateFileForRepo(repo, args)).metrics.nextPollAtMs || 0) <= Date.now());
+        (loadState(stateFileForRepo(repo, args)).metrics.nextPollAtMs || 0) <= Date.now())
+      .sort((left, right) => Number(Boolean(sweep.completed[left])) - Number(Boolean(sweep.completed[right])));
     let completedThisTick = 0;
     for (const repo of orderedRepos) {
+      if (targetRepos.length > 1 &&
+          targetRepos.every((target) => sweep.completed[target] && sweep.greenEvents[target])) break;
       if (Date.now() >= (args.chunkDeadlineMs ?? Infinity)) {
         discoveryState.metrics.nextRepo = repo;
         chunkTimedOut = true;
