@@ -925,22 +925,28 @@ export function computeNextPollIntervalSec(args, activeMainRuns, metrics = {}) {
   return intervalSec;
 }
 
+function resetCiObservations(state, scope) {
+  state.etags = {};
+  state.runs = {};
+  state.lastMainSha = "";
+  delete state.metrics.lastStatus;
+  delete state.metrics.lastPhase;
+  delete state.metrics.nextPollAtMs;
+  state.cacheScope = scope;
+}
+
 export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
   let scope;
   try {
     scope = await execFn.cacheScope?.();
   } catch (error) {
     if (error instanceof WatchChunkDeadline) return { data: null, chunkTimedOut: true };
+    resetCiObservations(state, "");
     return { data: null, error: error.message };
   }
-  if (scope && state.cacheScope !== scope) {
-    state.etags = {};
-    state.runs = {};
-    state.lastMainSha = "";
-    delete state.metrics.lastStatus;
-    delete state.metrics.lastPhase;
-    delete state.metrics.nextPollAtMs;
-    state.cacheScope = scope;
+  const observedScope = typeof scope === "string" ? scope : "";
+  if (state.cacheScope !== observedScope && (state.cacheScope || observedScope)) {
+    resetCiObservations(state, observedScope);
   }
   const cached = state.etags[endpoint];
   const requestedScope = state.cacheScope;
@@ -956,15 +962,12 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
   if (result.chunkTimedOut) {
     return { data: null, chunkTimedOut: true };
   }
-  if (result.cacheScope && state.cacheScope !== result.cacheScope) {
-    state.etags = {};
-    state.runs = {};
-    state.lastMainSha = "";
-    delete state.metrics.lastStatus;
-    delete state.metrics.lastPhase;
-    delete state.metrics.nextPollAtMs;
-    state.cacheScope = result.cacheScope;
+  if (typeof result.cacheScope === "string" && state.cacheScope !== result.cacheScope) {
+    resetCiObservations(state, result.cacheScope);
   }
+  const cacheMatchesResponse = typeof result.cacheScope === "string"
+    ? Boolean(result.cacheScope) && result.cacheScope === requestedScope
+    : !requestedScope;
   const parsed = httpDetails(result);
   if (parsed.rateLimitRemaining !== null) {
     state.metrics.rateLimitRemaining = parsed.rateLimitRemaining;
@@ -978,7 +981,7 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
 
   if (parsed.status === 304) {
     if (result.ok && cached?.etag && cached.data !== undefined &&
-        (!result.cacheScope || result.cacheScope === requestedScope)) {
+        cacheMatchesResponse) {
       state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
       return { fromCache: true, data: cached.data };
     }
@@ -1000,14 +1003,15 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
       60
     );
     return {
-      fromCache: Boolean(cached?.data !== undefined),
-      data: cached?.data ?? null,
+      fromCache: Boolean(cacheMatchesResponse && cached?.data !== undefined),
+      data: cacheMatchesResponse ? cached?.data ?? null : null,
       rateLimited: true,
       error: result.error || `HTTP ${parsed.status} rate limited`,
     };
   }
   if (!result.ok && parsed.status !== 304) {
-    return { fromCache: false, data: cached?.data ?? null, error: result.error || `HTTP ${parsed.status}` };
+    return { fromCache: false, data: cacheMatchesResponse ? cached?.data ?? null : null,
+      error: result.error || `HTTP ${parsed.status}` };
   }
   try {
     const data = slimEtagData(endpoint, result.data);
@@ -2239,12 +2243,23 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
       if (changedScope) {
+        credentialScope = repoState.cacheScope || "";
+        discoveryState.cacheScope = credentialScope;
+        discoveryState.metrics.watchScope = currentScopeKey();
+        sweep.completed = {};
+        sweep.greenEvents = {};
+        statuses.length = 0;
+        reports.length = 0;
+        allEvents.length = 0;
+        totalActiveMainRuns = 0;
         for (const key of ["discoveryProgress", "watchSweep", "targetRepos", "nextRepo"]) delete discoveryState.metrics[key];
         inventoryScopeInvalidated = true;
         anyRateLimited ||= Boolean(tick.rateLimited);
+        if (tick.rateLimited) allEvents.push(...tick.events.filter((event) => event.type === "RATE_LIMITED"));
         if (tick.chunkTimedOut) chunkTimedOut = true;
         else if (!tick.rateLimited) {
-          allEvents.push({ type: "POLL_ERROR", repo, error: "GitHub credentials changed during the watch sweep; refresh repository discovery" });
+          allEvents.push({ type: "POLL_ERROR", repo,
+            error: tick.error || "GitHub credentials changed during the watch sweep; refresh repository discovery" });
         }
         break;
       }
@@ -2291,7 +2306,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     }
   }
 
-  for (const snapshot of savedSnapshots(targetRepos)) {
+  for (const snapshot of inventoryScopeInvalidated ? [] : savedSnapshots(targetRepos)) {
     if (!statuses.some((status) => status.repo === snapshot.repo)) statuses.push(snapshot);
   }
   totalActiveMainRuns = Math.max(totalActiveMainRuns, statuses.reduce((total, status) =>

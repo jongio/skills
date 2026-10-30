@@ -19,6 +19,7 @@ import {
   defaultMaxWaitSec,
   evaluateMultiRepoPollTick as nativeEvaluateMultiRepoPollTick,
   evaluatePollTick as nativeEvaluatePollTick,
+  ghApiWithEtag,
   loadState,
   parseArgs,
   runCli as nativeRunCi,
@@ -1678,6 +1679,113 @@ test("review 5708899427: CI refresh during a quota response cannot restore the o
   const start = output.length;
   await nativeRunCi(argv, { execFn: request, sleep: time.sleep });
   assert.doesNotMatch(JSON.stringify(output.slice(start)), /first-account-only/);
+});
+
+for (const status of [429, 503, 304]) {
+  test(`review 5709153540: refreshed CI scope cannot reuse a ${status} conditional body`, async () => {
+    const state = loadState("");
+    const endpoint = "repos/fixture/repo/commits/main";
+    let response = { ok: true, status: 200, cacheScope: "first",
+      headers: { etag: '"first"' }, data: { sha: "first-account-only-head" } };
+    const request = async () => response;
+    request.cacheScope = async () => "first";
+    assert.equal((await ghApiWithEtag(endpoint, state, request)).data.sha, "first-account-only-head");
+    response = { ok: status === 304, status, cacheScope: "first",
+      headers: status === 429 ? { "retry-after": "900" } : {}, error: "fixture response" };
+    assert.equal((await ghApiWithEtag(endpoint, state, request)).data.sha, "first-account-only-head",
+      "unchanged identity retains its legitimate conditional body");
+    response = { ...response, cacheScope: "second" };
+    const changed = await ghApiWithEtag(endpoint, state, request);
+    assert.equal(changed.data, null, "an older cached representation is not the refreshed account's response");
+    assert.equal(changed.fromCache, false);
+  });
+}
+
+test("review 5709153540: a scope lookup lost during a CI sweep cannot restore peer metadata", async (t) => {
+  const dir = fixture(t);
+  clock(t);
+  const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
+    "--config-file", path.join(dir, "config.json")]);
+  let unavailable = false, lookups = 0, calls = 0;
+  const adapter = fixtureRequest((ghArgs) =>
+    ghArgs[2].includes("/commits/") ? json({ sha: "first-account-only-head" }) : json({ workflow_runs: [] }));
+  const request = async (input, options) => {
+    calls += 1;
+    return { ...await adapter(input, options), cacheScope: "first" };
+  };
+  request.cacheScope = async () => {
+    if (unavailable && ++lookups > 1) throw new Error("credential identity unavailable during sweep");
+    return "first";
+  };
+  const seeded = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+  assert.match(JSON.stringify(seeded.statuses), /first-account-only/);
+  unavailable = true;
+  const before = calls;
+  const failed = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+  assert.equal(calls, before);
+  assert.equal(failed.events.some((event) => /GREEN$/.test(event.type)), false);
+  assert.doesNotMatch(JSON.stringify(failed), /first-account-only/);
+});
+
+test("review 5709153540: cross-repository refresh quota discards old success metadata and rechecks peers", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
+    "--config-file", path.join(dir, "config.json")]);
+  args.respectPollInterval = true;
+  let scope = "first", refresh = false, refreshedOneReads = 0;
+  const adapter = fixtureRequest((ghArgs) => {
+    const endpoint = ghArgs[2];
+    const repo = endpoint.match(/^repos\/([^/]+\/[^/]+)/)[1];
+    const sha = `${scope}-account-only-${repo}-head`;
+    if (endpoint.includes("/commits/")) return json({ sha });
+    if (endpoint.includes("/jobs")) return json({ total_count: 1, jobs: [{
+      id: 1, name: "test", status: "completed", conclusion: "success", steps: [],
+    }] });
+    return json({ workflow_runs: [{
+      id: 1, workflow_id: 1, name: "CI", event: "push", head_branch: "main",
+      head_sha: sha, status: "completed", conclusion: "success",
+    }] });
+  });
+  const request = async (input, options) => {
+    time.advance(40);
+    if (refresh && input.endpoint.includes("fixture/two/commits/")) {
+      scope = "second";
+      return { ok: false, status: 429, rateLimited: true, cacheScope: scope,
+        headers: { "retry-after": "900" }, error: "quota after credential refresh" };
+    }
+    if (scope === "second" && input.endpoint.includes("fixture/one/")) refreshedOneReads += 1;
+    const result = await adapter(input, options);
+    return { ...result, cacheScope: scope, headers: { etag: `"${scope}-${input.endpoint}"` } };
+  };
+  request.cacheScope = async () => scope;
+  args.chunkDeadlineMs = time.now + 200;
+  const first = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+  assert.equal(first.chunkTimedOut, true);
+  const discoveryFile = path.join(dir, "_discovery.json");
+  assert.ok(loadState(discoveryFile).metrics.watchSweep.greenEvents["fixture/one"]);
+  refresh = true;
+  args.chunkDeadlineMs = time.now + 200;
+  const changed = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+  assert.equal(scope, "second");
+  assert.equal(changed.events.some((event) => /GREEN$/.test(event.type)), false);
+  const until = loadState(discoveryFile).metrics.repoCooldownUntilMs;
+  assert.ok(until > time.now);
+  refresh = false;
+  time.advance(until - time.now + 1);
+  args.chunkDeadlineMs = time.now + 1000;
+  const recovered = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+  t.diagnostic(JSON.stringify({
+    changedEvents: changed.events.map((event) => event.type),
+    changedStatuses: changed.statuses.map((status) => ({ repo: status.repo, sha: status.sha })),
+    recoveredGreen: recovered.events.filter((event) => /GREEN$/.test(event.type)).length,
+    refreshedOneReads,
+  }));
+  assert.ok(refreshedOneReads > 0, "a previously passing peer must be observed under the current identity");
+  assert.equal(recovered.events.filter((event) => /GREEN$/.test(event.type)).length, 2);
+  assert.doesNotMatch(JSON.stringify(changed), /first-account-only/,
+    "rate limiting must not relabel an older peer or conditional body as current success metadata");
+  assert.doesNotMatch(JSON.stringify(recovered), /first-account-only/);
 });
 
 for (const boundary of ["before-request", "during-request"]) {
