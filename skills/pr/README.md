@@ -157,7 +157,12 @@ retries cannot start beyond the chunk deadline. Interrupted multi-PR sweeps
 resume at the saved next PR. Persisted state under
 `$COPILOT_HOME/pr-watch` (default `~/.copilot/pr-watch`) retains phases,
 snapshots, comment cursors, ETags, retry counters and repository cooldowns.
+Disjoint watchlists keep independent continuation cursors, keyed to their ordered
+PRs and head pins, so another list cannot restart an interrupted target.
 An active cooldown prevents API calls even in a newly launched chunk.
+Cached status is reused only after verifying the current credential identity.
+Changed or unavailable identities discard cached observations, not retry budgets
+or an unexpired shared cooldown.
 An interrupted reviewer request still consumes its persisted retry attempt,
 preventing uncertain submission outcomes from bypassing the retry limit.
 Running watchers also reload the shared deadline before each poll, so another

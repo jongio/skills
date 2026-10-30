@@ -3,7 +3,6 @@ import { spawn, spawnSync } from "node:child_process";
 import fs, { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { fixtureRequest } from "./github-fixtures.mjs";
 import {
@@ -966,7 +965,10 @@ test("body review 5707347169: malformed session data cannot silently reset retry
   for (const text of ['{"entries":', JSON.stringify({
     ...valid, entries: { 1: { watchState: { copilotErrorRetriesByHead: { head: -1 } } } },
   }), JSON.stringify({ ...valid, cooldownUntilMs: "unverified" }),
-  JSON.stringify({ ...valid, entries: { 1: { watchState: { nextPollAtMs: "unverified" } } } })]) {
+  JSON.stringify({ ...valid, entries: { 1: { watchState: { nextPollAtMs: "unverified" } } } }),
+  JSON.stringify({ ...valid, nextPrByWatchlist: [] }),
+  JSON.stringify({ ...valid, nextPrByWatchlist: { unverified: 1 } }),
+  JSON.stringify({ ...valid, nextPrByWatchlist: { ["a".repeat(64)]: -1 } })]) {
     writeFileSync(file, text);
     assert.throws(() => loadPersistedPrSession("fixture/repo", dir), /Invalid PR watch state/);
     assert.throws(() => savePersistedPrSession("fixture/repo", {}, dir), /Invalid PR watch state/);
@@ -1282,7 +1284,7 @@ test("CI quota merge excludes a different OS writer between latest read and atom
   original.metrics.lastStatus = { summary: "first identity only" };
   saveState(file, original);
   const script = path.join(dir, "writer.mjs");
-  const daemon = pathToFileURL(path.resolve("skills", "ci-hound", "scripts", "ci-hound-daemon.mjs")).href;
+  const daemon = new URL("../../ci-hound/scripts/ci-hound-daemon.mjs", import.meta.url).href;
   writeFileSync(script, `
     import { loadState, saveState } from ${JSON.stringify(daemon)};
     const file = ${JSON.stringify(file)};
@@ -1357,6 +1359,26 @@ test("CI atomic state failure retains the original IO cause when lock cleanup al
   remove(`${file}.lock`);
 });
 
+test("CI atomic quota merge cannot silently replace a state whose protected read fails", (t) => {
+  const dir = fixture(t);
+  const file = path.join(dir, "state.json");
+  const state = loadState(file);
+  state.metrics.repoCooldownUntilMs = Date.now() + 900000;
+  saveState(file, state);
+  const read = fs.readFileSync;
+  const before = read(file, "utf8");
+  const original = Object.assign(new Error("protected state read failure"), { code: "EIO" });
+  t.mock.method(fs, "readFileSync", (target, ...args) => {
+    if (target === file) throw original;
+    return read(target, ...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  assert.throws(() => saveState(file, loadState("")), (error) => error === original && error.code === "EIO");
+  assert.equal(read(file, "utf8"), before, "an unreadable published quota must not be overwritten as empty state");
+  assert.equal(fs.existsSync(`${file}.lock`), false);
+});
+
 for (const boundary of ["changed-identity", "unresolved-identity"]) {
   test(`review 5708365127: inherited quota cannot return cached status with ${boundary}`, async (t) => {
     const dir = fixture(t);
@@ -1398,6 +1420,92 @@ for (const boundary of ["changed-identity", "unresolved-identity"]) {
     assert.ok(calls > before, "an expired preserved deadline must allow fresh polling again");
     assert.ok(resumed.statuses.some((status) => status.repo === "fixture/repo"));
   });
+}
+
+test("review 5708545727: disjoint same-repository watchlists retain their own interrupted PR cursor", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  capture(t);
+  const visited = [];
+  const services = {
+    stateDir: dir, sleep: time.sleep,
+    execFn(args) {
+      time.advance(400);
+      if (args[1] === "graphql") visited.push(args.find((arg) => /^pr=\d+$/.test(arg)));
+      return args[1] === "graphql" ? graph(prNode()) : json({ workflow_runs: [], total_count: 0 });
+    },
+  };
+  await runPr(["watch", "--repo", "fixture/repo", "--prs", "1:head,2:head",
+    "--interval", "5", "--max-wait-sec", "1"], services);
+  const interrupted = loadPersistedPrSession("fixture/repo", dir);
+  assert.equal(interrupted.nextPr, 2);
+  assert.equal(interrupted.entries[2].lastStatus, null, "PR 2 must genuinely be interrupted before its status is observed");
+  for (let chunk = 0; chunk < 4; chunk += 1) {
+    await runPr(["watch", "--repo", "fixture/repo", "--prs", "3:head,4:head",
+      "--interval", "5", "--max-wait-sec", "1"], services);
+    time.advance(6000);
+    await runPr(["watch", "--repo", "fixture/repo", "--prs", "1:head,2:head",
+      "--interval", "5", "--max-wait-sec", "1"], services);
+    time.advance(6000);
+  }
+  const entries = loadPersistedPrSession("fixture/repo", dir).entries;
+  assert.equal(entries[2].lastStatus?.headRefOid, "head", "the other disjoint list cannot reset this list to its completed prefix");
+  assert.equal(entries[4].lastStatus?.headRefOid, "head", "both supported lists must eventually complete their interrupted PR");
+  visited.length = 0;
+  await runPr(["watch", "--repo", "fixture/repo", "--prs", "1:new-head,2:head",
+    "--interval", "5", "--max-wait-sec", "1"], services);
+  assert.equal(visited[0], "pr=1", "a changed head pin must not inherit an older watchlist's continuation");
+});
+
+for (const surface of ["single-pr", "multi-pr"]) {
+  for (const boundary of ["ordinary-changed", "quota-changed", "quota-unavailable"]) {
+    test(`review 5708545727: ${surface} cached status is verified for ${boundary}`, async (t) => {
+      const dir = fixture(t);
+      const time = clock(t);
+      const output = capture(t);
+      let scope = "first", unavailable = false, calls = 0;
+      const adapter = fixtureRequest((args) => {
+        const node = prNode();
+        node.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].name = `${scope}-account-only-check`;
+        return args[1] === "graphql" ? graph(node) : json({ workflow_runs: [], total_count: 0 });
+      });
+      const request = async (input, options) => {
+        calls += 1;
+        return { ...await adapter(input, options), cacheScope: scope };
+      };
+      request.cacheScope = async () => {
+        if (unavailable) throw new Error("credential resolver unavailable");
+        return scope;
+      };
+      const argv = ["watch", "--repo", "fixture/repo", "--interval", "10", "--max-wait-sec", "1",
+        ...(surface === "single-pr" ? ["--pr", "1", "--head", "head"] : ["--prs", "1:head,2:head"])];
+      const services = { execFn: request, stateDir: dir, sleep: time.sleep };
+      await nativeRunPr(argv, services);
+      const saved = loadPersistedPrSession("fixture/repo", dir);
+      saved.entries[1].watchState.copilotErrorRetriesByHead.head = 2;
+      saved.entries[1].watchState.retriedCopilotReviewIds = [99];
+      const until = boundary.startsWith("quota") ? time.now + 900000 : null;
+      savePersistedPrSession("fixture/repo", { ...saved, cooldownUntilMs: until }, dir);
+      let start = output.length;
+      await nativeRunPr(argv, services);
+      assert.match(JSON.stringify(output.slice(start)), /first-account-only-check/,
+        "unchanged known identity must keep its legitimate cached status");
+      if (boundary.endsWith("unavailable")) unavailable = true;
+      else scope = "second";
+      start = output.length;
+      const before = calls;
+      await nativeRunPr(argv, services);
+      assert.doesNotMatch(JSON.stringify(output.slice(start)), /first-account-only-check/,
+        "a new or unavailable identity cannot emit the previous account's cached metadata");
+      if (until) {
+        assert.equal(calls, before, "identity verification cannot bypass the shared API deadline");
+        assert.equal(loadPersistedPrSession("fixture/repo", dir).cooldownUntilMs, until);
+      }
+      const after = loadPersistedPrSession("fixture/repo", dir).entries[1].watchState;
+      assert.equal(after.copilotErrorRetriesByHead.head, 2, "snapshot invalidation cannot reset retry budget");
+      assert.deepEqual(after.retriedCopilotReviewIds, [99]);
+    });
+  }
 }
 
 for (const boundary of ["before-request", "during-request"]) {

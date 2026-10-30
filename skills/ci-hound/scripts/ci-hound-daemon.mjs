@@ -613,10 +613,12 @@ export function saveState(stateFile, state, { deadlineMs = Infinity } = {}) {
   let failure;
   try {
     writeFileSync(lock, String(process.pid));
-    const saved = loadState(stateFile);
-    if (githubHost(saved.host) === githubHost(state.host)) {
+    let saved;
+    try { saved = JSON.parse(readFileSync(stateFile, "utf8")); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (saved && githubHost(saved.host || "github.com") === githubHost(state.host)) {
       for (const key of ["cooldownUntilMs", "repoCooldownUntilMs"]) {
-        const until = saved.metrics[key];
+        const until = saved.metrics?.[key];
         if (Number.isFinite(until) && until > Date.now()) {
           state.metrics[key] = Math.max(state.metrics[key] || 0, until);
         }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createGitHubClient, createEventWriter, githubHost, httpDetails, runGh } from "./lib/github-client.mjs";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -434,6 +435,13 @@ function readPrSession(filePath, host) {
         (host !== "github.com" && parsed.host === undefined)) throw new Error("Unverified session schema or host");
     const validDeadline = (value) => value == null || Number.isFinite(value) && value >= 0;
     if (!validDeadline(parsed.cooldownUntilMs)) throw new Error("Invalid shared cooldown");
+    if (parsed.nextPrByWatchlist !== undefined &&
+        (!parsed.nextPrByWatchlist || typeof parsed.nextPrByWatchlist !== "object" ||
+          Array.isArray(parsed.nextPrByWatchlist) ||
+          Object.entries(parsed.nextPrByWatchlist).some(([key, pr]) =>
+            !/^[a-f0-9]{64}$/.test(key) || !Number.isSafeInteger(pr) || pr < 1))) {
+      throw new Error("Invalid watchlist continuation");
+    }
     for (const entry of Object.values(parsed.entries)) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry) ||
           !entry.watchState || typeof entry.watchState !== "object" || Array.isArray(entry.watchState)) {
@@ -512,14 +520,17 @@ export function loadPersistedPrSession(repo, stateDir = PR_WATCH_DIR, host = git
         };
       }
     }
-    return { cooldownUntilMs, entries, nextPr: parsed.nextPr };
+    return {
+      cooldownUntilMs, entries, nextPr: parsed.nextPr,
+      ...(parsed.nextPrByWatchlist ? { nextPrByWatchlist: parsed.nextPrByWatchlist } : {}),
+    };
   } catch (error) {
     if (error.cause?.code === "ENOENT") return { cooldownUntilMs: null, entries: {} };
     throw error;
   }
 }
 
-export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries = {}, nextPr, deadlineMs = Infinity } = {}, stateDir = PR_WATCH_DIR, host = githubHost()) {
+export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries = {}, nextPr, watchlistKey, deadlineMs = Infinity } = {}, stateDir = PR_WATCH_DIR, host = githubHost()) {
   if (!repo) return;
   host = githubHost(host);
   const filePath = prSessionFileForRepo(repo, stateDir, host);
@@ -549,9 +560,21 @@ export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries =
       Number.isFinite(cooldownUntilMs) ? cooldownUntilMs : 0,
       ...Object.values(mergedEntries).map((entry) => entry?.watchState?.cooldownUntilMs || 0)
     );
+    const nextPrByWatchlist = { ...existing.nextPrByWatchlist };
+    if (watchlistKey !== undefined) {
+      if (!/^[a-f0-9]{64}$/.test(watchlistKey) ||
+          (nextPr !== undefined && (!Number.isSafeInteger(nextPr) || nextPr < 1))) {
+        throw new Error("Invalid watchlist continuation");
+      }
+      if (nextPr !== undefined) nextPrByWatchlist[watchlistKey] = nextPr;
+    }
     writeFileSync(
       tempPath,
-      `${JSON.stringify({ host, cooldownUntilMs: validCooldown > Date.now() ? validCooldown : null, entries: mergedEntries, nextPr: nextPr ?? existing.nextPr }, null, 2)}\n`,
+      `${JSON.stringify({
+        host, cooldownUntilMs: validCooldown > Date.now() ? validCooldown : null,
+        entries: mergedEntries, nextPr: nextPr ?? existing.nextPr,
+        ...(Object.keys(nextPrByWatchlist).length ? { nextPrByWatchlist } : {}),
+      }, null, 2)}\n`,
       "utf8"
     );
     renameSync(tempPath, filePath);
@@ -590,6 +613,31 @@ function chunkExec(execFn, deadlineMs) {
   if (execFn.cacheScope) request.cacheScope = (options) =>
     invoke((_, requestOptions) => execFn.cacheScope(requestOptions), undefined, options);
   return request;
+}
+
+async function verifyCachedPrStatuses(entries, execFn, args) {
+  const cached = entries.filter(Boolean);
+  if (!cached.some((entry) => entry.lastStatus || entry.lastPhase ||
+      entry.watchState.cacheScope || entry.watchState.nextPollAtMs ||
+      Object.keys(entry.watchState.etags || {}).length)) return;
+  let scope;
+  try {
+    scope = await chunkExec(execFn, args.chunkDeadlineMs ?? Infinity).cacheScope?.({ target: args.repo });
+  } catch {
+    scope = "";
+  }
+  if (typeof scope !== "string") scope = "";
+  for (const entry of cached) {
+    if (scope && entry.watchState.cacheScope === scope) continue;
+    const state = entry.watchState;
+    state.etags = {};
+    state.cacheScope = scope;
+    state.nextPollAtMs = null;
+    state.consecutiveUnchangedPolls = 0;
+    state.metrics = createPrWatchState().metrics;
+    entry.lastStatus = null;
+    entry.lastPhase = "";
+  }
 }
 
 function parseRetryAfterHeader(rawVal) {
@@ -2099,6 +2147,12 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
   const sleep = services.sleep || sleepSeconds;
   const stateDir = services.stateDir || PR_WATCH_DIR;
   const sessionHost = githubHost();
+  const watchlistKey = args.prs.length > 1
+    ? createHash("sha256").update(JSON.stringify({
+        host: sessionHost, repo: args.repo.toLowerCase(),
+        prs: args.prs.map((pr) => [pr, args.prHeads?.[pr] ?? (pr === args.pr ? args.head : "")]),
+      })).digest("hex")
+    : undefined;
   const loadSession = () => loadPersistedPrSession(args.repo, stateDir, sessionHost);
   const refreshSharedCooldown = (states) => {
     const until = loadSession().cooldownUntilMs;
@@ -2110,7 +2164,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
     args.chunkDeadlineMs = watchStartedAtMs + args.maxWaitSec * 1000;
   }
   const saveSession = (session) => savePersistedPrSession(args.repo, {
-    ...session, nextPr: args.nextPr, deadlineMs: args.chunkDeadlineMs,
+    ...session, nextPr: args.nextPr, watchlistKey, deadlineMs: args.chunkDeadlineMs,
   }, stateDir, sessionHost);
   const emit = createEventWriter(args.eventsFile, "pr-watch", { repo: args.repo, pr: args.pr });
   const heartbeat = args.eventsFile ? setInterval(() => emit({
@@ -2147,7 +2201,13 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
 
   if (args.prs.length > 1) {
     const persistedSession = loadSession();
-    args.nextPr = persistedSession.nextPr;
+    const savedNextPr = persistedSession.nextPrByWatchlist?.[watchlistKey];
+    if (savedNextPr !== undefined && !args.prs.includes(savedNextPr)) {
+      throw new Error("Invalid continuation for the current PR watchlist");
+    }
+    args.nextPr = savedNextPr ??
+      (persistedSession.nextPrByWatchlist ? undefined : persistedSession.nextPr);
+    await verifyCachedPrStatuses(args.prs.map((pr) => persistedSession.entries[String(pr)]), execFn, args);
     const multiState = {};
     for (const prNum of args.prs) {
       const savedEntry = persistedSession.entries[String(prNum)];
@@ -2177,6 +2237,14 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
     let polls = 0;
     while (true) {
       polls += 1;
+      await verifyCachedPrStatuses(Object.values(multiState), execFn, args);
+      for (const [pr, entry] of Object.entries(multiState)) {
+        if (!entry.lastStatus) {
+          statusByPr.delete(Number(pr));
+          lastSummaryByPr.delete(Number(pr));
+        }
+      }
+      lastStatuses = [...statusByPr.values()];
       const sharedCooldown = refreshSharedCooldown(Object.values(multiState).map((entry) => entry.watchState));
       if (sharedCooldown) persistedSession.cooldownUntilMs = Math.max(persistedSession.cooldownUntilMs || 0, sharedCooldown);
       const multi = await evaluateMultiPrPollTick(
@@ -2335,6 +2403,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
 
   const persistedSession = loadSession();
   const savedPrEntry = persistedSession.entries[String(args.pr)];
+  await verifyCachedPrStatuses([savedPrEntry], execFn, args);
   const watchState = savedPrEntry?.watchState || createPrWatchState();
   if (persistedSession.cooldownUntilMs && (!watchState.cooldownUntilMs || watchState.cooldownUntilMs < persistedSession.cooldownUntilMs)) {
     watchState.cooldownUntilMs = persistedSession.cooldownUntilMs;
@@ -2357,6 +2426,10 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
   let polls = 0;
   while (true) {
     polls += 1;
+    const cachedEntry = { watchState, lastStatus, lastPhase: baselinePhase };
+    await verifyCachedPrStatuses([cachedEntry], execFn, args);
+    lastStatus = cachedEntry.lastStatus;
+    baselinePhase = cachedEntry.lastPhase;
     refreshSharedCooldown([watchState]);
     const tick = await evaluatePrPollTick(
       {
