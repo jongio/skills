@@ -82,6 +82,22 @@ const ciExec = (args) => {
   return json({ workflow_runs: [] });
 };
 
+function greenCiExec(args) {
+  const endpoint = args[2];
+  const repo = endpoint.match(/^repos\/([^/]+\/[^/]+)/)[1];
+  const sha = `${repo}-head`;
+  if (endpoint.includes("/commits/")) return json({ sha });
+  if (endpoint.includes("/jobs")) {
+    return json({ total_count: 1, jobs: [{
+      id: 10, name: "test", status: "completed", conclusion: "success", steps: [],
+    }] });
+  }
+  return json({ workflow_runs: [{
+    id: 1, workflow_id: 1, name: "CI", event: "push", head_branch: "main",
+    head_sha: sha, status: "completed", conclusion: "success", updated_at: "2026-10-29T00:00:00Z",
+  }] });
+}
+
 test("both direct entrypoints derive chunks strictly below even very short host waits", () => {
   for (const host of [1, 2, 4, 10, 30, 60, 61, 600, 900]) {
     const env = { COPILOT_TASK_WAIT_TIMEOUT_SECONDS: String(host) };
@@ -344,4 +360,214 @@ test("concurrent session writers retain different PR entries and the longest sha
   assert.equal(session.entries[2].sinceCommentId, 19);
   assert.equal(session.cooldownUntilMs, cooldown);
   assert.deepEqual(readdirSync(dir), ["fixture__repo.json"]);
+});
+
+test("review regression: completed owner inventory survives until repository polling resumes", (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const args = parseArgs(["watch", "--owner", "@me", "--visibility", "private",
+    "--config-file", path.join(dir, "config.json")]);
+  args.chunkDeadlineMs = time.now + 200;
+  const first = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+    time.advance(100);
+    if (ghArgs[2].endsWith("page=1")) {
+      return json([{ full_name: "fixture/target", private: true },
+        ...Array.from({ length: 99 }, (_, i) => ({ full_name: `fixture/archived-${i}`, archived: true }))]);
+    }
+    assert.match(ghArgs[2], /page=2$/);
+    return json([]);
+  });
+  assert.equal(first.chunkTimedOut, true);
+  assert.deepEqual(first.repos, ["fixture/target"]);
+  args.chunkDeadlineMs = time.now + 200;
+  const visited = [];
+  evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+    visited.push(ghArgs[2]);
+    assert.match(ghArgs[2], /^repos\/fixture\/target\//, "completed discovery must not consume the next chunk again");
+    return ciExec(ghArgs);
+  });
+  assert.ok(visited.some((endpoint) => endpoint.includes("/commits/")));
+  const refreshed = [];
+  evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+    refreshed.push(ghArgs[2]);
+    return json([]);
+  });
+  assert.match(refreshed[0], /^user\/repos.*page=1$/, "discovery refreshes after the logical repository sweep finishes");
+});
+
+test("review regression: an interrupted repository gets the next full chunk after a completed prefix", (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
+    "--config-file", path.join(dir, "config.json")]);
+  const execFn = (ghArgs) => {
+    time.advance(40);
+    return greenCiExec(ghArgs);
+  };
+  args.chunkDeadlineMs = time.now + 200;
+  const first = evaluateMultiRepoPollTick(args, {}, execFn);
+  assert.equal(first.chunkTimedOut, true);
+  assert.ok(first.statuses.some((status) => status.repo === "fixture/one"));
+  assert.equal(loadState(path.join(dir, "_discovery.json")).metrics.nextRepo, "fixture/two");
+  args.chunkDeadlineMs = time.now + 200;
+  const visited = [];
+  const second = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+    visited.push(ghArgs[2]);
+    return execFn(ghArgs);
+  });
+  assert.match(visited[0], /^repos\/fixture\/two\//);
+  assert.ok(second.statuses.some((status) => status.repo === "fixture/two"));
+});
+
+test("review regression: logical repository sweeps retain completed green results across chunks", (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
+    "--config-file", path.join(dir, "config.json")]);
+  const execFn = (ghArgs) => {
+    time.advance(40);
+    return greenCiExec(ghArgs);
+  };
+  args.chunkDeadlineMs = time.now + 200;
+  const first = evaluateMultiRepoPollTick(args, {}, execFn);
+  assert.equal(first.chunkTimedOut, true);
+  assert.equal(first.events.some((event) => event.type === "ALL_GREEN"), false);
+  args.chunkDeadlineMs = time.now + 200;
+  const second = evaluateMultiRepoPollTick(args, {}, execFn);
+  assert.deepEqual(second.events.filter((event) => event.type === "ALL_GREEN").map((event) => event.repo).sort(),
+    ["fixture/one", "fixture/two"]);
+  args.chunkDeadlineMs = time.now + 200;
+  const refreshed = [];
+  const third = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+    refreshed.push(ghArgs[2]);
+    return execFn(ghArgs);
+  });
+  assert.ok(refreshed.length > 0, "a completed logical sweep must not replay old green without polling");
+  assert.equal(third.events.some((event) => event.type === "ALL_GREEN"), false);
+});
+
+test("logical sweep evidence fails closed when another poll changes its head or observation", (t) => {
+  const time = clock(t);
+  for (const change of ["head", "observation"]) {
+    const dir = fixture(t);
+    const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
+      "--config-file", path.join(dir, "config.json")]);
+    const execFn = (ghArgs) => {
+      time.advance(40);
+      return greenCiExec(ghArgs);
+    };
+    args.chunkDeadlineMs = time.now + 200;
+    assert.equal(evaluateMultiRepoPollTick(args, {}, execFn).chunkTimedOut, true);
+    const file = stateFileForRepo("fixture/one", args);
+    const observed = loadState(file);
+    if (change === "head") observed.lastMainSha = "new-head";
+    else observed.metrics.lastPollAt = "2026-10-29T00:00:00Z";
+    saveState(file, observed);
+    args.chunkDeadlineMs = time.now + 200;
+    const visited = [];
+    const resumed = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+      visited.push(ghArgs[2]);
+      return execFn(ghArgs);
+    });
+    assert.ok(visited.some((endpoint) => endpoint.includes("fixture/one/commits/")), change);
+    assert.equal(resumed.events.some((event) => event.type === "ALL_GREEN"), false, change);
+  }
+});
+
+test("diagnostic entrypoints poll fresh and changed watch scope cannot reuse a partial green sweep", (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
+    "--config-file", path.join(dir, "config.json")]);
+  const execFn = (ghArgs) => {
+    time.advance(40);
+    return greenCiExec(ghArgs);
+  };
+  args.chunkDeadlineMs = time.now + 200;
+  assert.equal(evaluateMultiRepoPollTick(args, {}, execFn).chunkTimedOut, true);
+  for (const mode of ["once", "status", "optimize"]) {
+    const visited = [];
+    evaluateMultiRepoPollTick({ ...args, mode, chunkDeadlineMs: undefined }, {}, (ghArgs) => {
+      visited.push(ghArgs[2]);
+      return execFn(ghArgs);
+    });
+    assert.ok(visited.some((endpoint) => endpoint.includes("fixture/one/commits/")), mode);
+    assert.ok(visited.some((endpoint) => endpoint.includes("fixture/two/commits/")), mode);
+  }
+  const visited = [];
+  const changed = evaluateMultiRepoPollTick({
+    ...args, branch: "release", explicitBranch: true, chunkDeadlineMs: time.now + 500,
+  }, {}, (ghArgs) => {
+    visited.push(ghArgs[2]);
+    return execFn(ghArgs);
+  });
+  assert.match(visited[0], /^repos\/fixture\/one\/commits\/release$/);
+  assert.ok(visited.some((endpoint) => endpoint.includes("fixture/two/commits/release")));
+  assert.equal(changed.events.some((event) => event.type === "ALL_GREEN"), false);
+});
+
+test("review regression: an interrupted PR gets the next full chunk after a completed prefix", (t) => {
+  const time = clock(t);
+  const args = parsePrWatchArgs(["watch", "--repo", "fixture/repo", "--prs", "1:head,2:head"]);
+  const multiState = {};
+  const execFn = (ghArgs) => {
+    time.advance(40);
+    return ghArgs[1] === "graphql" ? graph(prNode()) : json({ workflow_runs: [] });
+  };
+  args.chunkDeadlineMs = time.now + 120;
+  const first = evaluateMultiPrPollTick(args, execFn, multiState);
+  assert.equal(first.chunkTimedOut, true);
+  assert.equal(first.statuses[0].pr, 1);
+  assert.equal(first.nextPr, 2);
+  args.nextPr = first.nextPr;
+  args.chunkDeadlineMs = time.now + 120;
+  const visited = [];
+  const second = evaluateMultiPrPollTick(args, (ghArgs) => {
+    visited.push(ghArgs);
+    return execFn(ghArgs);
+  }, multiState);
+  assert.ok(visited[0].includes("pr=2"));
+  assert.ok(second.statuses.some((status) => status.pr === 2));
+});
+
+test("review regression: CI cooldown restores saved snapshots without making API calls", (t) => {
+  const dir = fixture(t);
+  clock(t);
+  const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
+    "--config-file", path.join(dir, "config.json")]);
+  const first = evaluateMultiRepoPollTick(args, {}, (ghArgs) =>
+    ghArgs[2].includes("fixture/two") ? throttled() : ciExec(ghArgs));
+  assert.equal(first.rateLimited, true);
+  assert.equal(first.statuses[0].repo, "fixture/one");
+  const second = evaluateMultiRepoPollTick(args, {}, () => assert.fail("cooldown must not poll GitHub"));
+  assert.equal(second.statuses[0]?.repo, "fixture/one");
+  assert.equal(second.statuses[0].phase, first.statuses[0].phase);
+});
+
+test("review regression: single-PR cooldown saves its last completed snapshot for later chunks", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const output = capture(t);
+  const argv = ["watch", "--repo", "fixture/repo", "--pr", "1", "--head", "head",
+    "--interval", "5", "--max-wait-sec", "10"];
+  let calls = 0;
+  await runPr(argv, {
+    stateDir: dir, sleep: time.sleep,
+    execFn(ghArgs) {
+      calls += 1;
+      if (calls > 2) return throttled();
+      return ghArgs[1] === "graphql" ? graph(prNode()) : json({ workflow_runs: [] });
+    },
+  });
+  assert.equal(calls, 3);
+  const snapshot = output.at(-1).status;
+  assert.ok(snapshot?.phase);
+  const saved = loadPersistedPrSession("fixture/repo", dir).entries[1];
+  assert.deepEqual(saved.lastStatus, snapshot);
+  await runPr(argv, {
+    stateDir: dir, sleep: time.sleep,
+    execFn() { assert.fail("restored cooldown must not poll GitHub"); },
+  });
+  assert.equal(output.at(-1).events[0].type, "WATCH_CHUNK_TIMEOUT");
+  assert.deepEqual(output.at(-1).status, snapshot);
 });

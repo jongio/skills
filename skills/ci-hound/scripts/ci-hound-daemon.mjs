@@ -2044,12 +2044,45 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
   const discoveryState = loadState(discoveryStateFile);
   discoveryState.chunkTimedOut = false;
   const nowMs = Date.now();
+  const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
+  const effectiveMergeMode = args.explicitMergeMode
+    ? args.mergeMode
+    : config?.mergeMode || args.mergeMode || "approval";
+  const resumable = args.mode === "watch";
+  const scopeKey = JSON.stringify({
+    repos: args.explicitRepos.length > 0 ? args.explicitRepos : config?.repos || [],
+    fallbackRepo: args.explicitRepos.length > 0 || args.owner || config?.owner || config?.repos?.length ? "" : args.repo,
+    owner: args.owner || config?.owner || "",
+    visibility: args.visibility || config?.visibility || "all",
+    branch: effectiveBranch,
+    watchRunIds: args.watchRunIds,
+    watchRunsByRepo: args.watchRunsByRepo,
+    wakeOnAllGreen: args.wakeOnAllGreen,
+    wakeOnNewCommit: args.wakeOnNewCommit,
+  });
+  if (resumable && discoveryState.metrics.watchScope !== scopeKey) {
+    if (discoveryState.metrics.watchScope !== undefined) {
+      delete discoveryState.metrics.discoveryProgress;
+      delete discoveryState.metrics.nextRepo;
+      delete discoveryState.metrics.targetRepos;
+    }
+    discoveryState.metrics.watchScope = scopeKey;
+    delete discoveryState.metrics.watchSweep;
+  }
+  const sweep = resumable
+    ? discoveryState.metrics.watchSweep ??= { repos: null, completed: {}, greenEvents: {} }
+    : { repos: null, completed: {}, greenEvents: {} };
+  const savedSnapshots = (repos) => repos
+    .map((repo) => loadState(stateFileForRepo(repo, args)).metrics.lastStatus)
+    .filter(Boolean)
+    .map((status) => ({ ...status, previousPhase: status.phase }));
   if (discoveryState.metrics.repoCooldownUntilMs > nowMs) {
     const remainingSec = Math.max(1, Math.ceil((discoveryState.metrics.repoCooldownUntilMs - nowMs) / 1000));
+    const repos = discoveryState.metrics.targetRepos || args.explicitRepos || [];
     return {
-      repos: discoveryState.metrics.targetRepos || [],
+      repos,
       events: [{ type: "RATE_LIMITED", retryAfterSec: remainingSec }],
-      statuses: [],
+      statuses: savedSnapshots(repos),
       reports: [],
       rateLimited: true,
       nextIntervalSec: remainingSec,
@@ -2065,6 +2098,9 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     const remainingSec = Math.max(1, Math.ceil((discoveryState.metrics.cooldownUntilMs - nowMs) / 1000));
     discoveryState.rateLimited = true;
     discoveryState.metrics.retryAfterSec = remainingSec;
+  } else if (Array.isArray(sweep.repos)) {
+    discoveryState.rateLimited = false;
+    targetRepos = [...sweep.repos];
   } else {
     discoveryState.rateLimited = false;
     if (discoveryState.metrics) {
@@ -2093,6 +2129,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     saveState(discoveryStateFile, discoveryState);
     return { repos: targetRepos, events: [], statuses: [], reports: [], chunkTimedOut: true, nextIntervalSec: args.idleIntervalSec };
   }
+  if (!discoveryState.rateLimited) sweep.repos = [...targetRepos];
   if (args.explicitStateFile && targetRepos.length > 1) {
     throw new Error("Cannot use a single --state-file when monitoring multiple repositories.");
   }
@@ -2102,10 +2139,6 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     );
   }
 
-  const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
-  const effectiveMergeMode = args.explicitMergeMode
-    ? args.mergeMode
-    : config?.mergeMode || args.mergeMode || "approval";
   const hasAnyWatchedRuns =
     args.watchRunIds.length > 0 || Object.keys(args.watchRunsByRepo || {}).length > 0;
 
@@ -2156,9 +2189,22 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       rateLimitRemaining: discoveryState.metrics?.rateLimitRemaining ?? null,
     });
   } else {
-    const pendingAllGreenEvents = [];
-    const startIndex = Math.max(0, targetRepos.indexOf(discoveryState.metrics.nextRepo));
-    const orderedRepos = [...targetRepos.slice(startIndex), ...targetRepos.slice(0, startIndex)];
+    const invalidateChangedResults = () => {
+      // Another watcher or diagnostic poll can supersede a completed chunk's evidence.
+      for (const [repo, proof] of Object.entries(sweep.completed)) {
+        const current = loadState(stateFileForRepo(repo, args));
+        if (proof.sha !== current.lastMainSha || proof.branch !== current.branch ||
+            proof.lastPollAt !== current.metrics.lastPollAt) {
+          delete sweep.completed[repo];
+          delete sweep.greenEvents[repo];
+        }
+      }
+    };
+    invalidateChangedResults();
+    const startIndex = resumable ? Math.max(0, targetRepos.indexOf(discoveryState.metrics.nextRepo)) : 0;
+    const orderedRepos = [...targetRepos.slice(startIndex), ...targetRepos.slice(0, startIndex)]
+      .filter((repo) => !sweep.completed[repo]);
+    let completedThisTick = 0;
     for (const repo of orderedRepos) {
       if (Date.now() >= (args.chunkDeadlineMs ?? Infinity)) {
         discoveryState.metrics.nextRepo = repo;
@@ -2195,9 +2241,10 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
         repoState.metrics.lastStatus = tick.status;
       }
       saveState(repoStateFile, repoState);
+      delete sweep.greenEvents[repo];
       for (const ev of tick.events) {
         if (ev.type === "ALL_GREEN" && targetRepos.length > 1) {
-          pendingAllGreenEvents.push(ev);
+          if (!tick.chunkTimedOut && !tick.rateLimited) sweep.greenEvents[repo] = ev;
         } else {
           allEvents.push(ev);
         }
@@ -2215,6 +2262,7 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
       if (tick.chunkTimedOut) {
+        if (completedThisTick > 0) discoveryState.metrics.nextRepo = repo;
         chunkTimedOut = true;
         break;
       }
@@ -2222,9 +2270,19 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
         anyRateLimited = true;
         break;
       }
+      sweep.completed[repo] = {
+        sha: repoState.lastMainSha,
+        branch: repoState.branch,
+        lastPollAt: repoState.metrics.lastPollAt,
+      };
+      completedThisTick += 1;
     }
+    invalidateChangedResults();
+    const sweepComplete = targetRepos.every((repo) => sweep.completed[repo]);
+    const pendingAllGreenEvents = targetRepos.map((repo) => sweep.greenEvents[repo]).filter(Boolean);
     if (
       targetRepos.length > 1 &&
+      sweepComplete &&
       !anyRateLimited &&
       !chunkTimedOut &&
       totalActiveMainRuns === 0 &&
@@ -2233,8 +2291,16 @@ export function evaluateMultiRepoPollTick(args, config, execFn = defaultExecGh) 
     ) {
       allEvents.push(...pendingAllGreenEvents);
     }
+    if (sweepComplete && !chunkTimedOut && !anyRateLimited && resumable) {
+      delete discoveryState.metrics.watchSweep;
+    }
   }
 
+  for (const snapshot of savedSnapshots(targetRepos)) {
+    if (!statuses.some((status) => status.repo === snapshot.repo)) statuses.push(snapshot);
+  }
+  totalActiveMainRuns = Math.max(totalActiveMainRuns, statuses.reduce((total, status) =>
+    total + Math.max(status.activeMainRuns || 0, status.activeRuns?.length || 0), 0));
   const nextIntervalSec = computeNextPollIntervalSec(args, totalActiveMainRuns, {
     rateLimitRemaining: minRateLimitRemaining,
     rateLimitReset: maxRateLimitReset,

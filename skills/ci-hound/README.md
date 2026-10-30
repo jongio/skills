@@ -67,6 +67,14 @@ cooldowns continue across restarts. An incomplete poll never reports green.
 The normal interval or remaining cooldown is still respected, so re-arming
 does not become tight polling. Rotation does not change delivery or merge policy.
 
+Owner discovery inventory is retained until its logical repository sweep finishes,
+then refreshed for the next sweep. Completed repositories are not repeatedly
+polled ahead of an interrupted target. Multi-repository `ALL_GREEN` requires a
+completed green result for every target in that same logical sweep; changed
+watch scope or superseding saved head/poll identities invalidate carried results.
+`once`, `status` and `optimize` still poll fresh rather than reusing a partial
+watch sweep. Cooldown chunks report saved status snapshots without API calls.
+
 ## Development
 
 ```sh

@@ -2203,6 +2203,7 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
   let firstError = null;
   let chunkTimedOut = false;
   let nextPr = orderedPrs[0];
+  let completedThisTick = 0;
 
   for (const prNumber of orderedPrs) {
     if (Date.now() >= (args.chunkDeadlineMs ?? Infinity)) {
@@ -2250,6 +2251,7 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
     const tick = evaluatePrPollTick(prArgs, execFn, entry.watchState);
     nextPr = targetPrs[(targetPrs.indexOf(prNumber) + 1) % targetPrs.length];
     if (tick.chunkTimedOut) {
+      if (completedThisTick > 0) nextPr = prNumber;
       chunkTimedOut = true;
       break;
     }
@@ -2279,6 +2281,7 @@ export function evaluateMultiPrPollTick(args, execFn = defaultExecGh, multiState
     if (Number.isFinite(tick.nextIntervalSec) && tick.nextIntervalSec > 0) {
       minActiveIntervalSec = Math.min(minActiveIntervalSec, tick.nextIntervalSec);
     }
+    completedThisTick += 1;
   }
 
   const nextIntervalSec = anyRateLimited
@@ -2584,6 +2587,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
           [String(args.pr)]: {
             watchState,
             lastPhase: baselinePhase,
+            lastStatus,
             hasExplicitSinceCommentId: hasCommentBaseline,
             sinceCommentId: baselineCommentId,
           },

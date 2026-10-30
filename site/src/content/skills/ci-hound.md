@@ -32,3 +32,7 @@ report status and re-arm the same full watchlist and options. Requests and
 fallback share the remaining deadline; discovery progress, next-repository
 cursor, phases and cooldowns persist. Incomplete polls cannot report green,
 and rotation neither changes delivery policy nor authorizes a merge.
+Owner inventory and completed repository results survive until the logical
+sweep finishes. Aggregate green requires every target in that sweep; changed
+scope or superseding saved head/poll identities invalidate carried results.
+Cooldown rotations retain the last completed status snapshots without API calls.
