@@ -624,10 +624,10 @@ test("portable package cannot gain implicit executable components", async () => 
     .sort();
   assert.deepEqual(
     extEntries,
-    ["pr-statusline", "session-progress"],
-    "only the reviewed statusline and session-progress entry points may be exposed under com.github.copilot/extensions",
+    ["daemon-notifications", "pr-statusline", "session-progress"],
+    "only the reviewed statusline, session-progress, and opt-in logging-only notifications may be exposed",
   );
-  for (const extName of ["issue-statusline", "pr-statusline", "subagent-statusline", "worktree-statusline"]) {
+  for (const extName of ["daemon-notifications", "issue-statusline", "pr-statusline", "subagent-statusline", "worktree-statusline"]) {
     const testDir = path.join(root, "extensions", extName, "test");
     const tests = (await readdir(testDir)).filter((name) => name.endsWith(".test.mjs"));
     const { NODE_TEST_CONTEXT: _parentTestContext, ...env } = process.env;

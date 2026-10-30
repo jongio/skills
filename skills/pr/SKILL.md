@@ -3,12 +3,12 @@ name: pr
 description: >-
   **WORKFLOW SKILL** - A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge. USE FOR: /pr, PR checklist, prepare a PR, submit a PR, monitor a PR, address PR feedback, merge a PR. DO NOT USE FOR: non-PR git cleanup (use git-tidy) or standalone test-only audits (use test-doctor).
 metadata:
-  version: "1.0.1"
+  version: "1.1.0"
 ---
 
 # PR Workflow
 
-Run this end-to-end checklist for the given context, current directory, or worktree:
+Run this end-to-end checklist for the given context, current directory, or worktree. The bundled watcher uses async Octokit; failed/stale reads never satisfy head-pinned gates. Optional `--events-file <session-subscription-file>` adds progress notifications only, never model turns, repairs, or merge consent.
 
 Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits. When `go` supplies board/goal identity, continue the optional [session progress reporting](references/session-progress.md) through delivery; missing canvas support never replaces or blocks the delivery gates.
 

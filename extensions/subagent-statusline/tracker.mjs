@@ -379,6 +379,10 @@ export class SubagentTracker {
 			for (const prUrl of agent.prs) {
 				const cached = prCache[prUrl];
 				const stateName = String(cached?.info?.state ?? "").toUpperCase();
+				const age = now - cached?.checkedAt;
+				const ttl = cached?.ttlMs ?? (stateName === "MERGED" ? 120000 : 45000);
+				if (cached?.lastError || !Number.isFinite(age) || cached.checkedAt <= 0 ||
+					!Number.isFinite(ttl) || ttl <= 0 || age < 0 || age >= ttl) continue;
 				if (stateName === "MERGED" && !agent.mergedPrs.includes(prUrl)) {
 					agent.mergedPrs.push(prUrl);
 					changed = true;

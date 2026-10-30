@@ -19,8 +19,9 @@ For every Git invocation:
   `-c core.pager=cat`, `-c pager.<command>=false`,
   `-c diff.external=`, `-c diff.trustExitCode=false`,
   and `-c filter.<name>.required=false` as applicable;
-- allow only `file` for analyzer object reads; a separately approved external
-  acquisition workflow may allow `https` or `ssh`. Reject `ext::`, local
+- allow only `file` for analyzer object reads; the separately approved verifier
+  allows only canonical credential-free HTTPS repository URLs and absolute local
+  repository paths or local `file` URLs. Reject SSH, `ext::`, local
   executable transports, unknown schemes, and arbitrary remote helpers;
 - pass `--no-ext-diff`, `--no-textconv`, `-z`, and machine formats where the
   command supports them;
@@ -87,6 +88,41 @@ Pass `{"remoteUrl":"<exact-approved-url>"}` to `verify-remote` over stdin.
 Pass its closed result as `{"remoteBaseline":<result>}` to `analyze-verified`.
 The verifier uses a disposable bare repository, explicit `--no-prune`, disabled
 hooks and credential helpers, and no target-repository configuration.
+It first attempts anonymous access. Only an authentication-required HTTPS read
+may use `gh auth token --hostname <exact-approved-host> --no-refresh` from the existing CLI
+session. Resolve `gh` outside all untrusted repository roots, run it without a
+shell in the disposable directory, preserve trusted Windows/XDG credential
+locations and explicit `GH_CONFIG_DIR`, and bound its time and output.
+Preserve `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` for native Linux
+credential-store access; do not pass these session variables to isolated Git.
+Enterprise credentials must be selected for that exact host, never from a
+guessed host, remote alias, or `GH_HOST` fallback. Forward Enterprise/cloud
+environment tokens only when the caller's existing `GH_HOST` explicitly matches
+that exact host; never treat the verifier's own `GH_HOST` override as evidence
+of this association. Normal `GH_TOKEN`/`GITHUB_TOKEN` use for `github.com` remains
+available. Otherwise read only stored host-specific credentials.
+Never retry token lookup without `--no-refresh`, even for an older CLI. Report
+`github-read-only-auth-unsupported` and have the user select a supporting trusted
+CLI; do not upgrade automatically or refresh stored credentials.
+
+Keep tokens out of argv, URLs, user-visible stdout/stderr, saved evidence, and
+persistent configuration. Pass the Authorization header only through the Git child's
+`GIT_CONFIG_COUNT` environment, with `http.<exact-approved-url>.extraHeader`.
+Keep `credential.helper=` and `protocol.allow=never`, explicitly allow only
+HTTPS/file, and set `http.followRedirects=false`. Do not inherit Git tracing,
+askpass, executable paths, or configuration overrides. Dispose of the entire
+temporary repository on every outcome. The same verifier must be used during
+revalidation; reject a URL whose hash differs from the prior approved identity
+before contacting any host.
+
+On `github-cli-unavailable`, select an installed trusted `gh`. On
+`github-credentials-unavailable`, `github-credentials-invalid`, or
+`github-auth-timeout`, have the user check
+`gh auth status --hostname <approved-host>` and `GH_CONFIG_DIR`. On
+`github-authentication-failed`, check read permission, expiration, and
+organization SSO authorization. Report only safe diagnostics, never raw
+credential-command output. Do not automatically log in, change credentials, or
+weaken the boundary. All failures remain unknown and block cleanup.
 
 For `revalidate`, pass exactly one bounded UTF-8 JSON object over stdin:
 

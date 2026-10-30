@@ -23,6 +23,8 @@ on:
       - "skills/**/runtime/**"
       - "skills/**/com.github.copilot/**"
       - "skills/create-canvas-app/kit/**"
+      - "runtime/**"
+      - "extensions/**"
       - "docs/specs/git-tidy/**"
       - "site/**"
       - ".github/tools/vally/**"
@@ -103,7 +105,7 @@ jobs:
             # nothing while still reporting success.
             CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
             if grep -Eq '^(README\.md|marketplace\.json|plugin\.json)$' <<< "$CHANGED" ||
-               grep -Eq '^(\.github/(tools/vally/|workflows/|dependabot\.yml$)|test/)' <<< "$CHANGED"; then
+               grep -Eq '^(\.github/(tools/vally/|workflows/|dependabot\.yml$)|test/|runtime/)' <<< "$CHANGED"; then
               DIRS=$(all_skill_dirs)
             else
               DIRS=$(printf '%s\n' "$CHANGED" \
@@ -184,6 +186,13 @@ jobs:
 
       - name: Validate distribution manifests
         run: node --test --test-concurrency=1 test/*.test.mjs
+
+      - name: Verify portable GitHub runtime
+        run: |
+          npm ci --prefix runtime/github-client --ignore-scripts
+          npm run check --prefix runtime/github-client
+          npm test --prefix runtime/github-client
+          node --test --test-concurrency=1 extensions/daemon-notifications/test/*.test.mjs
 
       - name: Lint skills (spec-compliance)
         if: needs.detect.outputs.dirs != ''

@@ -5,7 +5,7 @@ Continuously monitor GitHub Actions workflows with a zero-token ETag-cached back
 ## Features
 
 - **Zero-Token Background Daemon (`scripts/ci-hound-daemon.mjs`)**: Runs in an async background shell, streams live job-progress `PHASE_CHANGED` updates (`N/M jobs passed; active: ...`) on step transitions and 60s heartbeats, and wakes the agent session when an actionable event occurs (`JOB_FAILED`, `WORKFLOW_FAILED`, `NEW_MAIN_COMMIT`, `WATCHED_RUNS_GREEN`, `ALL_GREEN` deduplicated by latest run per workflow).
-- **ETag (`If-None-Match`) + `updated_at` Delta Caching**: Reuses `304 Not Modified` responses at zero GitHub API rate-limit cost, projects cached payloads to consumed fields only, skips `/jobs` queries for in-progress unwatched PR runs, normalizes dynamic Dependabot workflow telemetry, and bounds persisted state atomically.
+- **ETag (`If-None-Match`) + `updated_at` Delta Caching**: Reuses authenticated `304 Not Modified` responses at zero GitHub API rate-limit cost, projects cached payloads to consumed fields only, skips `/jobs` queries for in-progress unwatched PR runs, normalizes dynamic Dependabot workflow telemetry, and persists state atomically with orphaned job ETag eviction. Credential changes invalidate cached observations.
 - **Adaptive Polling**: Polls every `15s` while `main` runs are active and backs off to `60s` when idle.
 - **Two-Tier Monitoring**:
   1. **Tier 1 (`main` branch — `push`, `workflow_dispatch`, `schedule`)**: Instant job-level failure detection, cross-platform desktop + audio alert, and isolated worktree auto-repair.
@@ -48,6 +48,32 @@ node skills/ci-hound/scripts/ci-hound-daemon.mjs status
 # Print ranked bottleneck & flake optimization report
 node skills/ci-hound/scripts/ci-hound-daemon.mjs optimize
 ```
+
+## GitHub transport and degraded state
+
+The daemon ships a locked, self-contained Octokit runtime. End users do not need
+to install npm dependencies. Normal polling uses asynchronous GitHub REST/GraphQL
+requests, not a `gh api` subprocess for every request. `gh` remains necessary for
+credential discovery when no suitable environment token is configured.
+
+Requests have an overall deadline, safe reads have a bounded retry, and rejected
+gh-derived credentials are re-resolved once. Explicit environment credentials are
+never silently replaced with another account. `GH_HOST` and enterprise tokens
+select the corresponding API host; HTTP proxies and `NO_PROXY` are supported.
+Cached responses are scoped to the host and credentials. Authentication, network,
+JSON, or incomplete inventory failures cannot establish `ALL_GREEN` or
+`WATCHED_RUNS_GREEN`; last-known history remains diagnostic evidence only.
+
+For optional Copilot timeline notifications, subscribe with
+`/daemon-notifications subscribe ci`, then pass the returned file:
+
+```powershell
+node skills\ci-hound\scripts\ci-hound-daemon.mjs watch --events-file "<returned-file>"
+```
+
+This opt-in channel does not start watchers, prompt a model, trigger repairs, or
+change merge consent. Normal stdout and host completion wake-ups still work
+without it. Disable with `/daemon-notifications unsubscribe ci`.
 
 ## Development
 
