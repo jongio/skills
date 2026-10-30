@@ -1091,3 +1091,58 @@ test("single-item once lists honor scoped comment cursors before merge readiness
     assert.equal(output.at(-1).events.some((event) => event.type === "PR_READY_TO_MERGE"), false);
   }
 });
+
+test("inherited CI cooldown cannot report a different repository from an explicit state file", async (t) => {
+  const dir = fixture(t);
+  clock(t);
+  const configFile = path.join(dir, "config.json");
+  const stateFile = path.join(dir, "explicit.json");
+  const oldArgs = parseArgs(["watch", "--repo", "fixture/old", "--config-file", configFile, "--state-file", stateFile]);
+  const state = loadState(stateFile);
+  state.repo = "fixture/old";
+  state.cacheScope = "fixture";
+  state.metrics.lastStatus = { repo: "fixture/old", branch: "main", phase: "cached-green", summary: "Old target passed" };
+  saveState(stateFile, state);
+  const request = async () => ({ ok: false, status: 429, rateLimited: true, cacheScope: "fixture",
+    headers: { "retry-after": "900" }, error: "quota" });
+  request.cacheScope = async () => "fixture";
+  assert.equal((await nativeEvaluateMultiRepoPollTick(oldArgs, {}, request)).rateLimited, true);
+  const args = parseArgs(["watch", "--repo", "fixture/new", "--config-file", configFile, "--state-file", stateFile]);
+  const result = await nativeEvaluateMultiRepoPollTick(args, {}, () => assert.fail("unexpired quota must prevent requests"));
+  assert.deepEqual(result.repos, ["fixture/new"]);
+  assert.deepEqual(result.statuses, [], "a current target cannot inherit another repository's cached snapshot");
+  const perRepo = parseArgs(["watch", "--repo", "fixture/new", "--config-file", path.join(dir, "fresh", "config.json"),
+    "--state-file", stateFile]);
+  const inherited = await nativeEvaluateMultiRepoPollTick(perRepo, {},
+    () => assert.fail("a per-repository unexpired quota must also prevent requests"));
+  assert.deepEqual(inherited.repos, ["fixture/new"]);
+  assert.deepEqual(inherited.statuses, [], "the post-tick fallback must enforce the same snapshot identity");
+});
+
+test("short multi-PR chunks preserve an absolute shared cooldown and resume after expiry", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  capture(t);
+  const previous = process.env.COPILOT_TASK_WAIT_TIMEOUT_SECONDS;
+  t.after(() => previous === undefined ? delete process.env.COPILOT_TASK_WAIT_TIMEOUT_SECONDS
+    : process.env.COPILOT_TASK_WAIT_TIMEOUT_SECONDS = previous);
+  process.env.COPILOT_TASK_WAIT_TIMEOUT_SECONDS = "1";
+  const until = time.now + 2000;
+  savePersistedPrSession("fixture/repo", { cooldownUntilMs: until, entries: {
+    1: { watchState: {}, sinceCommentId: 0 }, 2: { watchState: {}, sinceCommentId: 0 },
+  } }, dir);
+  let calls = 0;
+  for (let chunk = 0; chunk < 5; chunk += 1) {
+    await runPr(["watch", "--repo", "fixture/repo", "--prs", "1:head,2:head"], {
+      stateDir: dir, sleep: time.sleep,
+      execFn(args) {
+        assert.ok(time.now >= until, "legitimate unexpired quota must not be bypassed");
+        calls += 1;
+        return args[1] === "graphql" ? graph(prNode()) : json({ workflow_runs: [], total_count: 0 });
+      },
+    });
+    if (time.now < until) assert.equal(loadPersistedPrSession("fixture/repo", dir).cooldownUntilMs, until);
+  }
+  assert.ok(calls > 0, "an expired absolute deadline must not slide forward forever on chunk re-arm");
+  assert.equal(loadPersistedPrSession("fixture/repo", dir).cooldownUntilMs, null);
+});

@@ -2180,9 +2180,13 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
       for (const [k, v] of Object.entries(multiState)) {
         entriesToSave[String(k)] = v;
       }
+      const observedCooldownMs = Math.max(persistedSession.cooldownUntilMs || 0,
+        ...Object.values(multiState).map((entry) => entry.watchState?.cooldownUntilMs || 0));
+      const rateCooldownMs = multi.rateLimited
+        ? observedCooldownMs || Date.now() + (multi.nextIntervalSec || 60) * 1000 : null;
       if (multi.error) {
         saveSession({
-          cooldownUntilMs: multi.rateLimited ? Date.now() + (multi.nextIntervalSec || 60) * 1000 : null,
+          cooldownUntilMs: rateCooldownMs,
           entries: entriesToSave,
         });
         console.error(JSON.stringify(multi, null, 2));
@@ -2199,11 +2203,8 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
             );
           }
         }
-        const terminalCooldownMs = multi.rateLimited
-          ? Date.now() + (multi.nextIntervalSec || 60) * 1000
-          : null;
         saveSession({
-          cooldownUntilMs: terminalCooldownMs,
+          cooldownUntilMs: rateCooldownMs,
           entries: entriesToSave,
         });
         console.log(JSON.stringify(multi, null, 2));
@@ -2211,7 +2212,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
       }
       if (multi.rateLimited) {
         const rateSleepSec = multi.nextIntervalSec || 60;
-        const nextCooldownMs = Date.now() + rateSleepSec * 1000;
+        const nextCooldownMs = rateCooldownMs;
         persistedSession.cooldownUntilMs = nextCooldownMs;
         saveSession({
           cooldownUntilMs: nextCooldownMs,

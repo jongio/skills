@@ -162,6 +162,9 @@ An interrupted reviewer request still consumes its persisted retry attempt,
 preventing uncertain submission outcomes from bypassing the retry limit.
 Running watchers also reload the shared deadline before each poll, so another
 PR's newly observed backoff is honored without restarting.
+Rounded remaining seconds control waiting only; repeated short chunks preserve
+the original absolute deadline and resume once it expires, without bypassing
+legitimate unexpired quota.
 
 Session state is scoped to the validated GitHub host. Public `github.com` keeps
 the legacy repository filename; other hosts use `pr-watch/hosts/<host>/` and do

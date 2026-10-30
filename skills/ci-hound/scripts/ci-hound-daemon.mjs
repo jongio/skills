@@ -1920,10 +1920,15 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   }
   const reportingRepos = savedSelectionKey === selectionKey
     ? discoveryState.metrics.targetRepos || knownRepos : knownRepos;
+  const snapshotForRepo = (repo, saved) => {
+    const status = saved.metrics.lastStatus;
+    return saved.host === host && saved.repo === repo && saved.branch === effectiveBranch &&
+      status?.repo === repo && status.branch === effectiveBranch
+      ? { ...status, previousPhase: status.phase } : null;
+  };
   const savedSnapshots = (repos) => repos
-    .map((repo) => loadState(stateFileForRepo(repo, args)).metrics.lastStatus)
-    .filter(Boolean)
-    .map((status) => ({ ...status, previousPhase: status.phase }));
+    .map((repo) => snapshotForRepo(repo, loadState(stateFileForRepo(repo, args))))
+    .filter(Boolean);
   if (discoveryState.metrics.repoCooldownUntilMs > nowMs) {
     const remainingSec = Math.max(1, Math.ceil((discoveryState.metrics.repoCooldownUntilMs - nowMs) / 1000));
     const repos = reportingRepos;
@@ -2150,8 +2155,9 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       }
       if (tick.status) {
         statuses.push(tick.status);
-      } else if (repoState.metrics.lastStatus) {
-        statuses.push({ ...repoState.metrics.lastStatus, previousPhase: repoState.metrics.lastPhase });
+      } else {
+        const snapshot = snapshotForRepo(repo, repoState);
+        if (snapshot) statuses.push(snapshot);
       }
       totalActiveMainRuns += Math.max(
         tick.activeMainRuns,

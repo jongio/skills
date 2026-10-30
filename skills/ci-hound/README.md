@@ -87,6 +87,8 @@ CI observations and backoff are host-scoped, including an explicit state file:
 switching its validated host discards the previous host's observations before
 applying cooldown. Shared-backoff output reports the current requested targets,
 not an unrelated earlier watchlist.
+Cached snapshots also must match the requested host, repository and branch,
+including inherited cooldowns when an explicit state file is reused.
 If one target consumes a whole fresh chunk without completing, held completion
 proof is discarded before rotating to its peers. A stalled target therefore
 cannot freeze their observations or later promote their old green snapshots.
