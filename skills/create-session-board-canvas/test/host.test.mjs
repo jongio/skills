@@ -121,7 +121,9 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
       import { registerHooks } from "node:module";
       import { join } from "node:path";
       import { setTimeout as delay } from "node:timers/promises";
-      let configuration, observer, reads = 0, readBarrier = null, releaseRead;
+      import * as storageFs from "node:fs/promises";
+      let configuration, observer, reads = 0, readBarrier = null, releaseRead, failPendingWrites = 0;
+      const logs = [];
       const ownedPr = { url: "https://github.com/fixture/repo/pull/1", owned: true, headRefOid: "a".repeat(40) };
       const ownedIssue = { url: "https://github.com/fixture/repo/issues/9", owned: true };
       let prs = [ownedPr], issues = [];
@@ -129,13 +131,13 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
       const session = {
         sessionId, workspacePath: join(process.env.COPILOT_HOME, "session-state", sessionId),
         on: (handler) => { observer = handler; return () => {}; }, getEvents: async () => [],
-        log: async () => {}, disconnect: async () => {},
+        log: async (message) => { logs.push(message); }, disconnect: async () => {},
         rpc: {
           plan: { read: async () => ({ exists: true }), readSqlTodosWithDependencies: async () => ({
             rows: [{ id: "task", title: "Canonical task", status: "pending" }], dependencies: [],
           }) },
           tools: { execute: async ({ name, arguments: args }) => {
-            assert.ok(++reads <= 14, "recursive native tracking read");
+            assert.ok(++reads <= 20, "recursive native tracking read");
             assert.ok(["session_prs", "session_issues"].includes(name));
             assert.deepEqual(args, { action: "list" });
             if (readBarrier) await readBarrier;
@@ -147,8 +149,21 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
       };
       globalThis.boardSdk = { createCanvas: (value) => value, CanvasError: class extends Error {},
         joinSession: async (value) => { configuration = value; return session; } };
+      globalThis.boardStorageFs = { ...storageFs, writeFile: async (file, data, ...args) => {
+        if (failPendingWrites && String(data).includes("Session tracking refresh pending")) {
+          failPendingWrites--;
+          throw Object.assign(new Error("Fixture pending-state ENOSPC"), { code: "ENOSPC" });
+        }
+        return storageFs.writeFile(file, data, ...args);
+      } };
       const sdk = "data:text/javascript," + encodeURIComponent("export const {createCanvas,CanvasError,joinSession}=globalThis.boardSdk;");
+      const storage = "data:text/javascript," + encodeURIComponent(
+        "export const {readFile,writeFile,mkdir,rename,unlink}=globalThis.boardStorageFs;");
       registerHooks({ resolve(specifier, context, next) {
+        if (specifier === "node:fs/promises" && context.parentURL ===
+            ${JSON.stringify(new URL("../runtime/canvas-kit/storage.mjs", import.meta.url).href)}) {
+          return { url: storage, shortCircuit: true };
+        }
         return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
       } });
       await import(${JSON.stringify(new URL("../runtime/extension.mjs", import.meta.url).href)});
@@ -223,6 +238,40 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
         await until((value) => reads === expectedReads && value.references.source.status === "verified"
           && value.references.prs.length === 0 && value.references.issues.length === 0);
       }
+      let expectedFaultReads = 12;
+      for (const surface of ["signal", "progress", "canvas"]) {
+        await tool({ action: "references", prs: [ownedPr], issues: [ownedIssue] }, { sessionId, agentId: undefined });
+        readBarrier = new Promise((resolve) => { releaseRead = resolve; });
+        failPendingWrites = 1;
+        if (surface === "signal") {
+          observer({ type: "session.info", data: { infoType: "notification", message: "Session tracking changed: all" } });
+        } else if (surface === "progress") {
+          const failure = await tool({ action: "refresh" }, { sessionId, agentId: undefined });
+          assert.equal(failure.resultType, "failure", "Awaited refresh must expose its persistence failure");
+          assert.match(failure.textResultForLlm, /ENOSPC/);
+        } else {
+          const failure = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ actionName: "refresh", input: {} }), signal: AbortSignal.timeout(5000) });
+          assert.equal(failure.status, 500, "Awaited canvas refresh must not claim success");
+          assert.match((await failure.json()).message, /ENOSPC/);
+        }
+        const uncertain = await until((value) => value.references.source.known.prs === false);
+        assert.equal(uncertain.references.prs.length, 1, "Failed invalidation must retain history");
+        assert.deepEqual(uncertain.goals, currentGoal);
+        const ci = await tool({ action: "ci", reference: "fixture/repo#1", headRefOid: ownedPr.headRefOid,
+          status: "passed", passed: 1, total: 1, observedAt: new Date().toISOString() }, { sessionId, agentId: undefined });
+        assert.equal(ci.resultType, "failure", "Transient save recovery must not authorize stale CI");
+        assert.match(ci.textResultForLlm, /ownership.*not verified/i);
+        const stateUrl = new URL("state", panel.url);
+        stateUrl.search = new URL(panel.url).search;
+        const livePanel = await fetch(stateUrl).then((response) => response.json());
+        assert.equal(livePanel.references.source.known.prs, false, "Existing panels must remain responsive and unverified");
+        releaseRead(); readBarrier = null;
+        expectedFaultReads += 2;
+        await until((value) => reads === expectedFaultReads && value.references.source.status === "verified"
+          && value.references.prs.length === 0 && value.references.issues.length === 0);
+      }
+      assert.ok(logs.some((message) => /Session board tracking sync unavailable:.*ENOSPC/.test(message)));
       console.log("native adapter boundaries passed");
       process.emit("SIGTERM");
     `], { encoding: "utf8", timeout: 15000, windowsHide: true, env: process.env });

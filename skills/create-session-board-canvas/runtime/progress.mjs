@@ -431,7 +431,14 @@ export async function createProgressService({ sessionId, readSources, store, onC
         next.references.source.updatedAt = clock();
         next.references.source.error = null;
       }
-      await commit(next);
+      try { await commit(next); }
+      catch (error) {
+        if (delta.error && state !== next) {
+          state.references.source = clone(next.references.source);
+          try { await onChange(snapshot()); } catch {}
+        }
+        throw error;
+      }
       return snapshot();
     });
   }

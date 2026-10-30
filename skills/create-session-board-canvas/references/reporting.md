@@ -145,6 +145,11 @@ Every refresh surface commits that unverified ownership barrier before it
 returns, without waiting on nested native tools. CI updates for a PR whose
 ownership read is pending are rejected. A superseded in-flight inventory
 cannot temporarily restore known ownership before the fresh read completes.
+If persisting a source invalidation fails, the live provider still marks its
+cached ownership unverified and retains history. Background observers log the
+failure without disconnecting panels; awaited refresh actions report the
+original error rather than claiming success. Canonical data writes retain
+their normal persistence rollback behavior.
 
 When tracking controls are unavailable, disclose that source limitation; do not
 claim an empty verified list. Primary may supply only explicitly owned current

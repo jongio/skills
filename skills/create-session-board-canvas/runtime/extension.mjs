@@ -57,7 +57,7 @@ if (lease) {
           const pending = refreshTracking(delta.kind || "all");
           await Promise.all([snapshot, pending]);
         } catch (error) {
-          await session.log(`Session board tracking sync unavailable: ${String(error.message).slice(0, 300)}`).catch(() => {});
+          await logTrackingError(error);
         }
       },
     },
@@ -85,17 +85,20 @@ if (lease) {
   });
   let stopped = false;
   let refreshTimer;
+  async function logTrackingError(error) {
+    try { await session.log(`Session board tracking sync unavailable: ${String(error.message).slice(0, 300)}`); }
+    catch {}
+  }
   function refreshTracking(kind = "all") {
     // Native callbacks wait only for the local barrier, never for a nested tool to finish.
     const pending = service.syncTracking({ ...(kind === "all" ? {} : { kind }), error: "Session tracking refresh pending" });
-    void tracking.refresh(kind).catch((error) =>
-      session.log(`Session board tracking sync unavailable: ${String(error.message).slice(0, 300)}`).catch(() => {}));
+    void tracking.refresh(kind).catch(logTrackingError);
     return pending;
   }
   const handle = (event) => {
     if (stopped) return;
     const trackingKind = trackingChangeKind(event);
-    if (trackingKind) { refreshTracking(trackingKind); return; }
+    if (trackingKind) return refreshTracking(trackingKind).catch(logTrackingError);
     if (event.type === "session.plan_changed" || event.type === "session.todos_changed" ||
         event.type === "session.resume" || event.type === "session.compaction_complete") {
       clearTimeout(refreshTimer);
