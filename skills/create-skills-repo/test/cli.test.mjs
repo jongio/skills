@@ -277,9 +277,9 @@ test("create builds a complete managed repository and an inert GitHub plan", asy
   const vallyLock = JSON.parse(
     await readFile(path.join(fx.target, ".github", "tools", "vally", "package-lock.json"), "utf8"),
   );
-  assert.equal(vallyPackage.devDependencies["@microsoft/vally-cli"], "0.19.0");
-  assert.equal(vallyLock.packages[""].devDependencies["@microsoft/vally-cli"], "0.19.0");
-  assert.equal(vallyLock.packages["node_modules/@microsoft/vally-cli"].version, "0.19.0");
+  assert.equal(vallyPackage.devDependencies["@microsoft/vally-cli"], "0.20.0");
+  assert.equal(vallyLock.packages[""].devDependencies["@microsoft/vally-cli"], "0.20.0");
+  assert.equal(vallyLock.packages["node_modules/@microsoft/vally-cli"].version, "0.20.0");
   assert.equal(
     existsSync(
       path.join(
@@ -356,7 +356,7 @@ test("a second identical create is idempotent", async (t) => {
   assert.equal(after, before);
 });
 
-test("bundled authoring creates a functional repository with aligned Vally 0.19 locks", async (t) => {
+test("bundled authoring creates a functional repository with aligned Vally 0.20 locks", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "create-skills-repo-vally-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const target = path.join(root, "generated");
@@ -369,10 +369,10 @@ test("bundled authoring creates a functional repository with aligned Vally 0.19 
     const directory = path.join(target, relative);
     const manifest = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8"));
     const lock = JSON.parse(await readFile(path.join(directory, "package-lock.json"), "utf8"));
-    assert.equal(manifest.devDependencies["@microsoft/vally-cli"], "0.19.0", relative);
-    assert.equal(lock.packages[""].devDependencies["@microsoft/vally-cli"], "0.19.0", relative);
-    assert.equal(lock.packages["node_modules/@microsoft/vally-cli"].version, "0.19.0", relative);
-    assert.equal(lock.packages["node_modules/@microsoft/vally"].version, "0.19.0", relative);
+    assert.equal(manifest.devDependencies["@microsoft/vally-cli"], "0.20.0", relative);
+    assert.equal(lock.packages[""].devDependencies["@microsoft/vally-cli"], "0.20.0", relative);
+    assert.equal(lock.packages["node_modules/@microsoft/vally-cli"].version, "0.20.0", relative);
+    assert.equal(lock.packages["node_modules/@microsoft/vally"].version, "0.20.0", relative);
   }
 
   const example = path.join(target, "skills", "example-skill");
