@@ -87,6 +87,10 @@ CI observations and backoff are host-scoped, including an explicit state file:
 switching its validated host discards the previous host's observations before
 applying cooldown. Shared-backoff output reports the current requested targets,
 not an unrelated earlier watchlist.
+State saves serialize read/merge/rename within the caller's remaining budget,
+preserving validated same-host unexpired cooldowns, never another identity's
+cached payload. Current SDK identity is verified before cached status is
+returned, including during quota; verification does not make an API poll.
 Cached snapshots also must match the requested host, repository and branch,
 including inherited cooldowns when an explicit state file is reused.
 Ordinary next-poll times also survive re-arming, scoped to the same host,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createGitHubClient, createEventWriter, githubHost, httpDetails } from "./lib/github-client.mjs";
@@ -595,8 +595,41 @@ export function loadState(stateFile) {
   };
 }
 
-export function saveState(stateFile, state) {
-  writeJsonAtomically(stateFile, state);
+export function saveState(stateFile, state, { deadlineMs = Infinity } = {}) {
+  mkdirSync(dirname(stateFile), { recursive: true });
+  const lockFile = `${stateFile}.lock`;
+  const stopAt = performance.now() + Math.max(0, Math.min(2000, deadlineMs - Date.now()));
+  let lock;
+  while (lock === undefined) {
+    try {
+      lock = openSync(lockFile, "wx");
+    } catch (cause) {
+      if (!["EEXIST", "EPERM"].includes(cause.code) || performance.now() >= stopAt) {
+        throw new Error(`Cannot acquire CI watch state lock: ${stateFile}`, { cause });
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(20, stopAt - performance.now()));
+    }
+  }
+  let failure;
+  try {
+    writeFileSync(lock, String(process.pid));
+    const saved = loadState(stateFile);
+    if (githubHost(saved.host) === githubHost(state.host)) {
+      for (const key of ["cooldownUntilMs", "repoCooldownUntilMs"]) {
+        const until = saved.metrics[key];
+        if (Number.isFinite(until) && until > Date.now()) {
+          state.metrics[key] = Math.max(state.metrics[key] || 0, until);
+        }
+      }
+    }
+    writeJsonAtomically(stateFile, state);
+  } catch (error) {
+    failure = error;
+  } finally {
+    try { closeSync(lock); } catch (error) { failure ??= error; }
+    try { rmSync(lockFile); } catch (error) { failure ??= error; }
+  }
+  if (failure) throw failure;
 }
 
 export function normalizeWorkflowTelemetryName(name) {
@@ -1914,7 +1947,6 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   discoveryState.host = host;
   discoveryState.chunkTimedOut = false;
   discoveryState.discoveryScopeChanged = false;
-  const nowMs = Date.now();
   const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
   const selection = {
     repos: args.explicitRepos.length > 0 ? args.explicitRepos : config?.repos || [],
@@ -1945,7 +1977,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   }
   const reportingRepos = savedSelectionKey === selectionKey
     ? discoveryState.metrics.targetRepos || knownRepos : knownRepos;
-  let credentialScope = discoveryState.cacheScope;
+  let credentialScope;
   const snapshotForRepo = (repo, saved) => {
     const status = saved.metrics.lastStatus;
     return credentialScope && saved.cacheScope === credentialScope &&
@@ -1956,6 +1988,22 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   const savedSnapshots = (repos) => repos
     .map((repo) => snapshotForRepo(repo, loadState(stateFileForRepo(repo, args))))
     .filter(Boolean);
+  try {
+    credentialScope = await execFn.cacheScope?.();
+  } catch (error) {
+    if (!(error instanceof WatchChunkDeadline)) {
+      discardGreenProof();
+      saveState(discoveryStateFile, discoveryState, { deadlineMs: args.chunkDeadlineMs });
+    }
+    const repos = reportingRepos;
+    return {
+      repos, reports: [], statuses: savedSnapshots(repos), nextIntervalSec: args.idleIntervalSec,
+      ...(error instanceof WatchChunkDeadline
+        ? { events: [], chunkTimedOut: true }
+        : { events: [{ type: "POLL_ERROR", error: error.message }], error: error.message }),
+    };
+  }
+  const nowMs = Date.now();
   if (discoveryState.metrics.repoCooldownUntilMs > nowMs) {
     const remainingSec = Math.max(1, Math.ceil((discoveryState.metrics.repoCooldownUntilMs - nowMs) / 1000));
     const repos = reportingRepos;
@@ -1966,22 +2014,6 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       reports: [],
       rateLimited: true,
       nextIntervalSec: remainingSec,
-    };
-  }
-  try {
-    credentialScope = undefined;
-    credentialScope = await execFn.cacheScope?.();
-  } catch (error) {
-    if (!(error instanceof WatchChunkDeadline)) {
-      discardGreenProof();
-      saveState(discoveryStateFile, discoveryState);
-    }
-    const repos = reportingRepos;
-    return {
-      repos, reports: [], statuses: savedSnapshots(repos), nextIntervalSec: args.idleIntervalSec,
-      ...(error instanceof WatchChunkDeadline
-        ? { events: [], chunkTimedOut: true }
-        : { events: [{ type: "POLL_ERROR", error: error.message }], error: error.message }),
     };
   }
   if (credentialScope && discoveryState.cacheScope !== credentialScope) {
@@ -2056,7 +2088,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     }
   }
   if (discoveryState.chunkTimedOut) {
-    saveState(discoveryStateFile, discoveryState);
+    saveState(discoveryStateFile, discoveryState, { deadlineMs: args.chunkDeadlineMs });
     return { repos: targetRepos, events: [], statuses: [], reports: [], chunkTimedOut: true, nextIntervalSec: args.idleIntervalSec };
   }
   if (!discoveryState.rateLimited) sweep.repos = [...targetRepos];
@@ -2181,7 +2213,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
         repoState.metrics.lastPhase = tick.status.phase;
         repoState.metrics.lastStatus = tick.status;
       }
-      saveState(repoStateFile, repoState);
+      saveState(repoStateFile, repoState, { deadlineMs: args.chunkDeadlineMs });
       delete sweep.greenEvents[repo];
       for (const ev of tick.events) {
         if (changedScope && /GREEN$/.test(ev.type)) continue;
@@ -2273,7 +2305,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     discoveryState.metrics.targetSelectionKey = selectionKey;
   }
   if (anyRateLimited) discoveryState.metrics.repoCooldownUntilMs = Date.now() + nextIntervalSec * 1000;
-  saveState(discoveryStateFile, discoveryState);
+  saveState(discoveryStateFile, discoveryState, { deadlineMs: args.chunkDeadlineMs });
 
   return {
     repos: targetRepos,

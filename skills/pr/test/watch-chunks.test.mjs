@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import fs, { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { fixtureRequest } from "./github-fixtures.mjs";
 import {
@@ -1234,6 +1236,169 @@ test("review 5708286540: due completed peers cannot interrupt the final member o
   assert.deepEqual(green.sort(), [...repos].sort(),
     "finish all outstanding members and evaluate aggregate green before an optional due-peer refresh consumes the chunk");
 });
+
+test("review 5708365127: an overlapping diagnostic cannot erase already published shared quota", async (t) => {
+  const dir = fixture(t);
+  clock(t);
+  const configFile = path.join(dir, "config.json");
+  let release, entered;
+  const ready = new Promise((resolve) => { entered = resolve; });
+  const pendingRequest = new Promise((resolve) => { release = resolve; });
+  let first = true;
+  const diagnostic = authenticatedFixture(async (args) => {
+    if (first) {
+      first = false;
+      entered();
+      await pendingRequest;
+    }
+    return ciExec(args);
+  });
+  const inFlight = nativeEvaluateMultiRepoPollTick(
+    parseArgs(["status", "--repo", "fixture/diagnostic", "--config-file", configFile]), {}, diagnostic);
+  await ready;
+  const watch = parseArgs(["watch", "--repo", "fixture/watched", "--config-file", configFile]);
+  let until;
+  try {
+    assert.equal((await evaluateMultiRepoPollTick(watch, {}, throttled)).rateLimited, true);
+    until = loadState(path.join(dir, "_discovery.json")).metrics.repoCooldownUntilMs;
+    assert.ok(until > Date.now());
+  } finally {
+    release();
+    await inFlight;
+  }
+  assert.equal(loadState(path.join(dir, "_discovery.json")).metrics.repoCooldownUntilMs, until,
+    "finishing an older successful poll cannot shorten another command's published backoff");
+  assert.equal((await evaluateMultiRepoPollTick(watch, {}, () => assert.fail("published quota must prevent the next API poll"))).rateLimited, true);
+});
+
+test("CI quota merge excludes a different OS writer between latest read and atomic rename", (t) => {
+  const dir = fixture(t);
+  const file = path.join(dir, "shared.json");
+  const until = Date.now() + 900000;
+  const original = loadState(file);
+  original.host = "github.com";
+  original.cacheScope = "first";
+  original.metrics.repoCooldownUntilMs = until;
+  original.metrics.lastStatus = { summary: "first identity only" };
+  saveState(file, original);
+  const script = path.join(dir, "writer.mjs");
+  const daemon = pathToFileURL(path.resolve("skills", "ci-hound", "scripts", "ci-hound-daemon.mjs")).href;
+  writeFileSync(script, `
+    import { loadState, saveState } from ${JSON.stringify(daemon)};
+    const file = ${JSON.stringify(file)};
+    const state = loadState(file);
+    state.metrics.repoCooldownUntilMs = ${until + 900000};
+    try {
+      saveState(file, state, { deadlineMs: Date.now() - 1 });
+      console.log(JSON.stringify({ published: true }));
+    } catch (error) {
+      console.log(JSON.stringify({ published: false, code: error.cause?.code }));
+    }
+  `);
+  const rename = fs.renameSync;
+  let contender;
+  t.mock.method(fs, "renameSync", (from, to) => {
+    if (to === file) {
+      contender = spawnSync(process.execPath, [script], {
+        encoding: "utf8", windowsHide: true, timeout: 5000,
+        env: { ...process.env, COPILOT_HOME: path.join(dir, "copilot"), LOCALAPPDATA: path.join(dir, "localappdata"),
+          TEMP: dir, TMP: dir },
+      });
+    }
+    return rename(from, to);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  const replacement = loadState("");
+  replacement.host = "github.com";
+  replacement.cacheScope = "second";
+  replacement.metrics.lastStatus = { summary: "second identity only" };
+  saveState(file, replacement);
+  assert.equal(contender.status, 0, contender.stderr || contender.error?.message);
+  const blocked = JSON.parse(contender.stdout);
+  assert.equal(blocked.published, false, "another process cannot publish inside the protected read/merge/write window");
+  assert.match(blocked.code, /^(EEXIST|EPERM)$/, "retain the original OS lock contention cause");
+  assert.equal(loadState(file).metrics.repoCooldownUntilMs, until);
+  assert.deepEqual(loadState(file).metrics.lastStatus, replacement.metrics.lastStatus,
+    "merge only the same-host deadline, never another credential's cached payload");
+  assert.equal(fs.existsSync(`${file}.lock`), false);
+  const afterRelease = spawnSync(process.execPath, [script], {
+    encoding: "utf8", windowsHide: true, timeout: 5000,
+    env: { ...process.env, COPILOT_HOME: path.join(dir, "copilot"), LOCALAPPDATA: path.join(dir, "localappdata"),
+      TEMP: dir, TMP: dir },
+  });
+  assert.equal(afterRelease.status, 0, afterRelease.stderr);
+  assert.equal(JSON.parse(afterRelease.stdout).published, true, "the lock is released for the next legitimate writer");
+  assert.equal(loadState(file).metrics.repoCooldownUntilMs, until + 900000);
+});
+
+test("CI atomic state failure retains the original IO cause when lock cleanup also fails", (t) => {
+  const dir = fixture(t);
+  const file = path.join(dir, "state.json");
+  const state = loadState(file);
+  saveState(file, state);
+  const before = readFileSync(file, "utf8");
+  const original = Object.assign(new Error("original state write failure"), { code: "EIO" });
+  const cleanup = Object.assign(new Error("lock cleanup failure"), { code: "EPERM" });
+  const write = fs.writeFileSync;
+  const remove = fs.rmSync;
+  t.mock.method(fs, "writeFileSync", (target, ...args) => {
+    if (typeof target === "string" && target.startsWith(`${file}.`) && target.endsWith(".tmp")) throw original;
+    return write(target, ...args);
+  });
+  t.mock.method(fs, "rmSync", (target, ...args) => {
+    if (target === `${file}.lock`) throw cleanup;
+    return remove(target, ...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  assert.throws(() => saveState(file, state), (error) => error === original && error.code === "EIO");
+  assert.equal(readFileSync(file, "utf8"), before, "failed writes must not replace the previously durable state");
+  remove(`${file}.lock`);
+});
+
+for (const boundary of ["changed-identity", "unresolved-identity"]) {
+  test(`review 5708365127: inherited quota cannot return cached status with ${boundary}`, async (t) => {
+    const dir = fixture(t);
+    const time = clock(t);
+    capture(t);
+    let scope = "first", unavailable = false, calls = 0, resolutionDelay = 0;
+    const adapter = fixtureRequest(ciExec);
+    const request = async (input, options) => {
+      calls += 1;
+      return { ...await adapter(input, options), cacheScope: scope };
+    };
+    request.cacheScope = async () => {
+      time.advance(resolutionDelay);
+      resolutionDelay = 0;
+      if (unavailable) throw new Error("credential resolver unavailable");
+      return scope;
+    };
+    const argv = ["watch", "--repo", "fixture/repo", "--config-file", path.join(dir, "config.json"), "--max-wait-sec", "1"];
+    await nativeRunCi(argv, { execFn: request, sleep: time.sleep });
+    const args = parseArgs(argv);
+    const discoveryFile = path.join(dir, "_discovery.json");
+    const discovery = loadState(discoveryFile);
+    const until = time.now + 900000;
+    discovery.metrics.repoCooldownUntilMs = until;
+    saveState(discoveryFile, discovery);
+    assert.equal((await nativeEvaluateMultiRepoPollTick(args, {}, request)).statuses.length, 1,
+      "the same verified identity keeps its legitimate quota snapshot");
+    if (boundary === "changed-identity") scope = "second";
+    else unavailable = true;
+    const before = calls;
+    const result = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+    assert.equal(calls, before, "identity verification does not bypass shared API quota");
+    assert.deepEqual(result.statuses, [], "a new or unresolved identity cannot inherit the old account's cached status");
+    assert.equal(loadState(discoveryFile).metrics.repoCooldownUntilMs, until);
+    unavailable = false;
+    time.advance(899900);
+    resolutionDelay = 200;
+    const resumed = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+    assert.ok(calls > before, "an expired preserved deadline must allow fresh polling again");
+    assert.ok(resumed.statuses.some((status) => status.repo === "fixture/repo"));
+  });
+}
 
 for (const boundary of ["before-request", "during-request"]) {
   test(`review 5708185900: observed ${boundary} credential change cannot carry an old snapshot into error or quota output`, async (t) => {
