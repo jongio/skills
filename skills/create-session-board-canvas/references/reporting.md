@@ -42,6 +42,11 @@ without moving earlier task assignments. A taskless unassigned
 delegate must specify `goalId` once a goal is active. Primary's own reports may
 default to the active goal. Before goal activation, session-level reports remain
 unscoped and explicit operator requests are still visible.
+If a later goal's source read omits an earlier task, its retained goal snapshot
+still accepts origin-bound reports under the same membership, ownership, and
+sequence checks. These reports amend history without restoring canonical rows,
+accepting completion, or replacing current-goal team status. Explicitly removed
+or remapped task scopes remain invalid.
 After activation, `goalId: null` can continue an existing pre-goal taskless
 stream to resolve that request. It cannot create a new unscoped delegate stream
 or bypass a task's goal identity.

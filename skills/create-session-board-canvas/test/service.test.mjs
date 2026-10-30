@@ -312,6 +312,68 @@ test("late delegate reports remain bound to their originating goal and reject mi
   await assert.rejects(service.update({ action: "report", updateId: "unbound", sequence: 1, status: "working", message: "Unknown origin" }, { id: "unassigned", primary: false }), /goal/i);
 });
 
+test("late task results reach retained goal history without restoring absent canonical rows", async () => {
+  const { service, setSource } = await fixture();
+  await goal(service, "first", ["a"]);
+  await service.observe({ type: "subagent.started", agentId: "worker", data: {} });
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["a"] }, primary);
+  await goal(service, "second", ["b"]);
+  setSource({ plan: { exists: true }, rows: [task("b")], dependencies: [] });
+  await service.refresh();
+  const before = service.snapshot();
+  assert.deepEqual(before.tasks.map((entry) => entry.id), ["b"]);
+  const report = { action: "report", goalId: "first", taskId: "a", updateId: "late-result",
+    sequence: 1, status: "result_ready", message: "Verify the earlier result", evidence: "Earlier task tests passed" };
+  await service.update(report, worker);
+  const after = service.snapshot();
+  assert.equal(after.reports.at(-1).goalId, "first");
+  assert.equal(after.reports.at(-1).evidence, report.evidence);
+  assert.deepEqual(after.tasks, before.tasks);
+  assert.deepEqual(after.goals, before.goals);
+  assert.deepEqual(after.metrics, before.metrics);
+  assert.equal(after.source.status, "live");
+  await assert.rejects(service.update({ ...report, updateId: "wrong-owner" }, { id: "other", primary: false }), /assigned/i);
+  await assert.rejects(service.update({ ...report, goalId: "second", updateId: "wrong-goal" }, worker), /goal/i);
+  await assert.rejects(service.update({ ...report, updateId: "stale" }, worker), /Stale/i);
+  await assert.rejects(service.update({ ...report, taskId: "missing", updateId: "missing" }, worker), /Unknown/i);
+});
+
+test("retained task requests remain resolvable after reassignment and reconnect without replacing current team status", async () => {
+  const { service, setSource, saved } = await fixture();
+  await goal(service, "first", ["a"]);
+  await service.observe({ type: "subagent.started", agentId: "worker", data: {} });
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["a"] }, primary);
+  await service.update({ action: "report", goalId: "first", taskId: "a", updateId: "request",
+    sequence: 5, status: "blocked", message: "Earlier decision needed", requiresOperator: true }, worker);
+  await goal(service, "second", ["b"]);
+  const source = { plan: { exists: true }, rows: [task("b")], dependencies: [] };
+  setSource(source);
+  await service.refresh();
+  await service.update({ action: "assign", agentId: "worker", taskIds: ["b"] }, primary);
+  await service.update({ action: "report", goalId: "second", taskId: "b", updateId: "current",
+    sequence: 1, status: "working", message: "Current goal work" }, worker);
+  const member = service.snapshot().agents.find((entry) => entry.id === "worker");
+  const clear = { action: "report", goalId: "first", taskId: "a", updateId: "resolved",
+    sequence: 6, status: "result_ready", message: "Earlier decision resolved" };
+  await service.update(clear, worker);
+  const restored = await createProgressService({
+    sessionId: saved().sessionId,
+    store: { load: async () => saved(), save: async () => {} },
+    readSources: async () => source,
+  });
+  await restored.refresh();
+  await restored.update({ ...clear, agentId: "worker", updateId: "relayed", sequence: 7 }, primary);
+  const after = restored.snapshot();
+  assert.equal(after.reports.find((report) => report.goalId === "first").requiresOperator, false);
+  assert.equal(after.reports.find((report) => report.goalId === "first").relayed, true);
+  assert.deepEqual(after.agents.find((entry) => entry.id === "worker"), member);
+  assert.deepEqual(after.tasks.map((entry) => entry.id), ["b"]);
+  await assert.rejects(restored.update({ ...clear, updateId: "delayed", sequence: 5 }, worker), /Stale/i);
+  await assert.rejects(restored.update({ ...clear, updateId: "new-conflict", taskId: undefined, sequence: 1 }, worker), /goal/i);
+  await goal(restored, "first", []);
+  await assert.rejects(restored.update({ ...clear, updateId: "remapped", sequence: 8 }, worker), /goal|Unknown/i);
+});
+
 test("exact whole percentages do not lose a point to binary rounding", async () => {
   const rows = [task("parent"), ...Array.from({ length: 100 }, (_, i) => task(`leaf-${i}`, i < 29 ? "done" : "pending"))];
   const { service } = await fixture(rows);

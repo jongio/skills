@@ -324,7 +324,8 @@ export async function createProgressService({ sessionId, readSources, store, onC
           if ((memberGoalId && memberGoalId !== goalId && !knownUnscoped && !previous) || (taskGoalId && taskGoalId !== goalId)) throw new Error("Report goal conflicts with its delegated task or assignment");
           const reportGoal = next.goals.find((goal) => goal.id === goalId);
           if (goalId && !reportGoal) throw new Error("Unknown report goal");
-          if (taskId && (!reportGoal?.taskIds.includes(taskId) || !next.tasks.some((task) => task.id === taskId))) throw new Error("Unknown report goal task");
+          const reportTasks = reportGoal?.id === next.activeGoalId ? next.tasks : reportGoal?.tasks;
+          if (taskId && (!reportGoal?.taskIds.includes(taskId) || !reportTasks?.some((task) => task.id === taskId))) throw new Error("Unknown report goal task");
           const key = JSON.stringify([actorId, goalId, updateId]);
           if (next.seen.includes(key) || next.reports.some((report) =>
             report.actorId === actorId && (report.goalId || null) === goalId && report.id === updateId)) {
