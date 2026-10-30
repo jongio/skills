@@ -160,6 +160,14 @@ snapshots, comment cursors, ETags, retry counters and repository cooldowns.
 An active cooldown prevents API calls even in a newly launched chunk.
 An interrupted reviewer request still consumes its persisted retry attempt,
 preventing uncertain submission outcomes from bypassing the retry limit.
+Running watchers also reload the shared deadline before each poll, so another
+PR's newly observed backoff is honored without restarting.
+
+Session state is scoped to the validated GitHub host. Public `github.com` keeps
+the legacy repository filename; other hosts use `pr-watch/hosts/<host>/` and do
+not import unqualified public-GitHub cursors or cooldowns. Malformed session
+data, host mismatches, invalid cooldowns and invalid retry counters stop the
+watcher rather than silently resetting its feedback/retry proof.
 
 After handling comments, use `--since-comment-id <id>` for the primary PR, or
 `--since-comment-id <pr>:<id>` for a specific PR in `--prs`; do not advance other

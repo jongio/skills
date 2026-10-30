@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { createGitHubClient, createEventWriter, httpDetails, runGh } from "./lib/github-client.mjs";
+import { createGitHubClient, createEventWriter, githubHost, httpDetails, runGh } from "./lib/github-client.mjs";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -412,12 +412,40 @@ export function createPrWatchState() {
 
 const PR_WATCH_DIR = join(process.env.COPILOT_HOME || join(homedir(), ".copilot"), "pr-watch");
 
-function prSessionFileForRepo(repo, stateDir = PR_WATCH_DIR) {
+function prSessionFileForRepo(repo, stateDir, host) {
   const safeSlug = String(repo || "default")
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "__");
-  return join(stateDir, `${safeSlug}.json`);
+  const directory = host === "github.com" ? stateDir : join(stateDir, "hosts", host.replace(/:/g, "__"));
+  return join(directory, `${safeSlug}.json`);
+}
+
+function readPrSession(filePath, host) {
+  try {
+    const parsed = JSON.parse(readFileSync(filePath, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
+        !parsed.entries || typeof parsed.entries !== "object" || Array.isArray(parsed.entries) ||
+        (parsed.host !== undefined && parsed.host !== host) ||
+        (host !== "github.com" && parsed.host === undefined)) throw new Error("Unverified session schema or host");
+    const validDeadline = (value) => value == null || Number.isFinite(value) && value >= 0;
+    if (!validDeadline(parsed.cooldownUntilMs)) throw new Error("Invalid shared cooldown");
+    for (const entry of Object.values(parsed.entries)) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry) ||
+          !entry.watchState || typeof entry.watchState !== "object" || Array.isArray(entry.watchState)) {
+        throw new Error("Invalid watch state entry");
+      }
+      if (!validDeadline(entry.watchState.cooldownUntilMs)) throw new Error("Invalid watch cooldown");
+      const retries = entry?.watchState?.copilotErrorRetriesByHead;
+      if (retries !== undefined && (!retries || typeof retries !== "object" || Array.isArray(retries) ||
+          Object.values(retries).some((count) => !Number.isSafeInteger(count) || count < 0))) {
+        throw new Error("Invalid retry counters");
+      }
+    }
+    return parsed;
+  } catch (cause) {
+    throw new Error(`Invalid PR watch state: ${filePath}`, { cause });
+  }
 }
 
 function hydrateWatchState(raw) {
@@ -449,13 +477,14 @@ function hydrateWatchState(raw) {
   return base;
 }
 
-export function loadPersistedPrSession(repo, stateDir = PR_WATCH_DIR) {
-  const filePath = prSessionFileForRepo(repo, stateDir);
-  if (!repo || !existsSync(filePath)) {
+export function loadPersistedPrSession(repo, stateDir = PR_WATCH_DIR, host = githubHost()) {
+  if (!repo) {
     return { cooldownUntilMs: null, entries: {} };
   }
+  host = githubHost(host);
+  const filePath = prSessionFileForRepo(repo, stateDir, host);
   try {
-    const parsed = JSON.parse(readFileSync(filePath, "utf8")) || {};
+    const parsed = readPrSession(filePath, host);
     const cooldownUntilMs =
       Number.isFinite(parsed.cooldownUntilMs) && parsed.cooldownUntilMs > Date.now()
         ? parsed.cooldownUntilMs
@@ -478,14 +507,16 @@ export function loadPersistedPrSession(repo, stateDir = PR_WATCH_DIR) {
       }
     }
     return { cooldownUntilMs, entries, nextPr: parsed.nextPr };
-  } catch {
-    return { cooldownUntilMs: null, entries: {} };
+  } catch (error) {
+    if (error.cause?.code === "ENOENT") return { cooldownUntilMs: null, entries: {} };
+    throw error;
   }
 }
 
-export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries = {}, nextPr, deadlineMs = Infinity } = {}, stateDir = PR_WATCH_DIR) {
+export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries = {}, nextPr, deadlineMs = Infinity } = {}, stateDir = PR_WATCH_DIR, host = githubHost()) {
   if (!repo) return;
-  const filePath = prSessionFileForRepo(repo, stateDir);
+  host = githubHost(host);
+  const filePath = prSessionFileForRepo(repo, stateDir, host);
   const lockPath = `${filePath}.lock`;
   const tempPath = `${filePath}.${process.pid}.pending`;
   let lock;
@@ -504,11 +535,7 @@ export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries =
     }
     let existing = { cooldownUntilMs: null, entries: {} };
     if (existsSync(filePath)) {
-      try {
-        existing = JSON.parse(readFileSync(filePath, "utf8")) || existing;
-      } catch {
-        existing = { cooldownUntilMs: null, entries: {} };
-      }
+      existing = readPrSession(filePath, host);
     }
     const mergedEntries = { ...(existing.entries || {}), ...entries };
     const validCooldown = Math.max(
@@ -518,7 +545,7 @@ export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries =
     );
     writeFileSync(
       tempPath,
-      `${JSON.stringify({ cooldownUntilMs: validCooldown > Date.now() ? validCooldown : null, entries: mergedEntries, nextPr: nextPr ?? existing.nextPr }, null, 2)}\n`,
+      `${JSON.stringify({ host, cooldownUntilMs: validCooldown > Date.now() ? validCooldown : null, entries: mergedEntries, nextPr: nextPr ?? existing.nextPr }, null, 2)}\n`,
       "utf8"
     );
     renameSync(tempPath, filePath);
@@ -2048,13 +2075,20 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
   const execFn = services.execFn || defaultRequest;
   const sleep = services.sleep || sleepSeconds;
   const stateDir = services.stateDir || PR_WATCH_DIR;
+  const sessionHost = githubHost();
+  const loadSession = () => loadPersistedPrSession(args.repo, stateDir, sessionHost);
+  const refreshSharedCooldown = (states) => {
+    const until = loadSession().cooldownUntilMs;
+    if (until) for (const state of states) state.cooldownUntilMs = Math.max(state.cooldownUntilMs || 0, until);
+    return until;
+  };
   const watchStartedAtMs = Date.now();
   if (args.mode === "watch" && args.maxWaitSec > 0) {
     args.chunkDeadlineMs = watchStartedAtMs + args.maxWaitSec * 1000;
   }
   const saveSession = (session) => savePersistedPrSession(args.repo, {
     ...session, nextPr: args.nextPr, deadlineMs: args.chunkDeadlineMs,
-  }, stateDir);
+  }, stateDir, sessionHost);
   const emit = createEventWriter(args.eventsFile, "pr-watch", { repo: args.repo, pr: args.pr });
   const heartbeat = args.eventsFile ? setInterval(() => emit({
     status: { repo: args.repo, phase: "polling", summary: "Watcher active; awaiting GitHub observations" },
@@ -2089,7 +2123,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
   }
 
   if (args.prs.length > 1) {
-    const persistedSession = loadPersistedPrSession(args.repo, stateDir);
+    const persistedSession = loadSession();
     args.nextPr = persistedSession.nextPr;
     const multiState = {};
     for (const prNum of args.prs) {
@@ -2120,6 +2154,8 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
     let polls = 0;
     while (true) {
       polls += 1;
+      const sharedCooldown = refreshSharedCooldown(Object.values(multiState).map((entry) => entry.watchState));
+      if (sharedCooldown) persistedSession.cooldownUntilMs = Math.max(persistedSession.cooldownUntilMs || 0, sharedCooldown);
       const multi = await evaluateMultiPrPollTick(
         {
           ...args,
@@ -2269,7 +2305,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
     }
   }
 
-  const persistedSession = loadPersistedPrSession(args.repo, stateDir);
+  const persistedSession = loadSession();
   const savedPrEntry = persistedSession.entries[String(args.pr)];
   const watchState = savedPrEntry?.watchState || createPrWatchState();
   if (persistedSession.cooldownUntilMs && (!watchState.cooldownUntilMs || watchState.cooldownUntilMs < persistedSession.cooldownUntilMs)) {
@@ -2293,6 +2329,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
   let polls = 0;
   while (true) {
     polls += 1;
+    refreshSharedCooldown([watchState]);
     const tick = await evaluatePrPollTick(
       {
         ...args,

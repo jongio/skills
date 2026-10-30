@@ -41,7 +41,7 @@ for (const skill of ["pr", "ci-hound"]) {
           skill === "pr" ? "pr-watch-daemon.mjs" : "ci-hound-daemon.mjs");
         const shim = path.join(home, "sdk.mjs");
         writeFileSync(shim, `
-          export { createEventWriter, httpDetails, runGh } from ${JSON.stringify(bundle)};
+          export { createEventWriter, githubHost, httpDetails, runGh } from ${JSON.stringify(bundle)};
           import { createGitHubClient as actual } from ${JSON.stringify(bundle)};
           import { writeFileSync } from "node:fs";
           export const createGitHubClient = () => {

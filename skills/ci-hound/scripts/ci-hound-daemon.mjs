@@ -1916,6 +1916,9 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     ? args.mergeMode
     : config?.mergeMode || args.mergeMode || "approval";
   const resumable = args.mode === "watch";
+  if (!resumable) {
+    for (const key of ["discoveryProgress", "watchSweep", "nextRepo"]) delete discoveryState.metrics[key];
+  }
   const currentScopeKey = () => JSON.stringify({
     repos: args.explicitRepos.length > 0 ? args.explicitRepos : config?.repos || [],
     fallbackRepo: args.explicitRepos.length > 0 || args.owner || config?.owner || config?.repos?.length ? "" : args.repo,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fixtureRequest } from "./github-fixtures.mjs";
@@ -876,5 +876,96 @@ test("discovery scope reset preserves Retry-After and genuine API errors", async
       assert.equal(resumed.rateLimited, true);
     }
     assert.equal(calls, 2);
+  }
+});
+
+test("body review 5707347169: running single and multi PR watches observe newly shared cooldown", async (t) => {
+  const time = clock(t);
+  capture(t);
+  for (const multi of [false, true]) {
+    const dir = fixture(t);
+    let injected = false;
+    let calls = 0;
+    await runPr(["watch", "--repo", "fixture/repo", ...(multi ? ["--prs", "1:head,2:head"] : ["--pr", "1", "--head", "head"]),
+      "--interval", "5", "--max-wait-sec", "20"], {
+      stateDir: dir,
+      execFn(args) {
+        assert.equal(injected, false, "an already running watcher must honor another PR's newly shared backoff");
+        calls += 1;
+        return args[1] === "graphql" ? graph(prNode()) : json({ workflow_runs: [] });
+      },
+      async sleep(sec) {
+        if (!injected) {
+          injected = true;
+          savePersistedPrSession("fixture/repo", { cooldownUntilMs: time.now + 900_000,
+            entries: { 99: { watchState: {}, sinceCommentId: 1 } } }, dir);
+        }
+        await time.sleep(sec);
+      },
+    });
+    assert.equal(calls, multi ? 4 : 2);
+  }
+});
+
+test("body review 5707347169: comment cursors and cooldowns cannot cross GitHub hosts", (t) => {
+  const dir = fixture(t);
+  const previous = process.env.GH_HOST;
+  t.after(() => previous === undefined ? delete process.env.GH_HOST : process.env.GH_HOST = previous);
+  process.env.GH_HOST = "github.com";
+  const until = Date.now() + 900_000;
+  savePersistedPrSession("fixture/repo", { cooldownUntilMs: until, entries: { 1: { watchState: {}, sinceCommentId: 900 } } }, dir);
+  process.env.GH_HOST = "ghe.fixture.test";
+  assert.deepEqual(loadPersistedPrSession("fixture/repo", dir).entries, {});
+  assert.equal(loadPersistedPrSession("fixture/repo", dir).cooldownUntilMs, null);
+  savePersistedPrSession("fixture/repo", { entries: { 1: { watchState: {}, sinceCommentId: 10 } } }, dir);
+  process.env.GH_HOST = "github.com";
+  assert.equal(loadPersistedPrSession("fixture/repo", dir).entries[1].sinceCommentId, 900);
+  assert.equal(loadPersistedPrSession("fixture/repo", dir).cooldownUntilMs, until);
+});
+
+test("body review 5707347169: diagnostic owner discovery cannot reuse a partial watch inventory", async (t) => {
+  const time = clock(t);
+  for (const mode of ["once", "status", "optimize"]) {
+    const dir = fixture(t);
+    const args = parseArgs(["watch", "--owner", "@me", "--visibility", "private",
+      "--config-file", path.join(dir, "config.json")]);
+    let fresh = false;
+    const calls = [];
+    const request = async ({ endpoint }) => {
+      calls.push(endpoint);
+      let data;
+      if (endpoint.startsWith("user/repos")) {
+        if (!fresh) {
+          time.advance(100);
+          data = Array.from({ length: 100 }, (_, i) => ({ full_name: `fixture/old-${i}`, private: true, archived: i > 0 }));
+        } else data = endpoint.endsWith("page=1") ? [{ full_name: "fixture/new", private: true }] : [];
+      } else data = endpoint.includes("/commits/") ? { sha: "new" } : { workflow_runs: [] };
+      return { ok: true, status: 200, cacheScope: "fixture", headers: {}, data };
+    };
+    request.cacheScope = async () => "fixture";
+    args.chunkDeadlineMs = time.now + 100;
+    assert.equal((await nativeEvaluateMultiRepoPollTick(args, {}, request)).chunkTimedOut, true);
+    fresh = true;
+    calls.length = 0;
+    const diagnostic = await nativeEvaluateMultiRepoPollTick({ ...args, mode, chunkDeadlineMs: undefined }, {}, request);
+    assert.match(calls[0], /^user\/repos.*page=1$/, mode);
+    assert.deepEqual(diagnostic.repos, ["fixture/new"], mode);
+  }
+});
+
+test("body review 5707347169: malformed session data cannot silently reset retry limits", (t) => {
+  const dir = fixture(t);
+  savePersistedPrSession("fixture/repo", { entries: {
+    1: { watchState: { copilotErrorRetriesByHead: { head: 2 } }, sinceCommentId: 100 },
+  } }, dir);
+  const file = path.join(dir, readdirSync(dir).find((name) => name.endsWith(".json")));
+  const valid = JSON.parse(readFileSync(file, "utf8"));
+  for (const text of ['{"entries":', JSON.stringify({
+    ...valid, entries: { 1: { watchState: { copilotErrorRetriesByHead: { head: -1 } } } },
+  }), JSON.stringify({ ...valid, cooldownUntilMs: "unverified" })]) {
+    writeFileSync(file, text);
+    assert.throws(() => loadPersistedPrSession("fixture/repo", dir), /Invalid PR watch state/);
+    assert.throws(() => savePersistedPrSession("fixture/repo", {}, dir), /Invalid PR watch state/);
+    assert.equal(readFileSync(file, "utf8"), text, "do not overwrite unverified retry/cursor proof");
   }
 });

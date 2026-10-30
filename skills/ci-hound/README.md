@@ -80,6 +80,9 @@ during discovery restarts every owner collection at page one; completed or
 partial saved pages without a verified scope are discarded. Quota backoffs and
 genuine API errors remain distinct from clean chunk expiry, including when a
 deadline interrupts paginated job inspection.
+Explicit `once`, `status` and `optimize` owner queries discard partial watch
+discovery state before fetching a fresh inventory; normal watch chunk
+continuations still retain their scoped progress.
 
 ## GitHub transport and degraded state
 
