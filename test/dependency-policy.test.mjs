@@ -10,6 +10,7 @@ async function activeRoots() {
   const skills = await readdir(new URL("skills/", root), { withFileTypes: true });
   return [
     ".github/tools/vally",
+    "runtime/github-client",
     "site",
     ...skills.filter((entry) => entry.isDirectory()).map((entry) => `skills/${entry.name}`),
   ];
@@ -49,7 +50,7 @@ test("CI selects skill policy edits and shared Vally changes for lint", async ()
   assert.ok(selectAll.test(".github/tools/vally/.npmrc"));
 });
 
-test("active Vally manifests and resolved packages share the exact 0.19.0 pin", async () => {
+test("active Vally manifests and resolved packages share the exact 0.20.0 pin", async () => {
   for (const path of await activeRoots()) {
     const manifest = await json(`${path}/package.json`);
     const lock = await json(`${path}/package-lock.json`);
@@ -57,17 +58,17 @@ test("active Vally manifests and resolved packages share the exact 0.19.0 pin", 
     const dependencies = { ...manifest.dependencies, ...manifest.devDependencies };
     for (const name of ["@microsoft/vally-cli", "@microsoft/vally"]) {
       if (!dependencies[name]) continue;
-      assert.equal(dependencies[name], "0.19.0", `${path}: ${name}`);
+      assert.equal(dependencies[name], "0.20.0", `${path}: ${name}`);
       const locked = { ...lock.packages[""].dependencies, ...lock.packages[""].devDependencies };
       assert.equal(locked[name], dependencies[name], `${path}: lockfile root`);
-      assert.equal(lock.packages[`node_modules/${name}`].version, "0.19.0", path);
+      assert.equal(lock.packages[`node_modules/${name}`].version, "0.20.0", path);
     }
   }
 });
 
 test("CI compatibility tests declare their Vally core dependency directly", async () => {
   const manifest = await json(".github/tools/vally/package.json");
-  assert.equal(manifest.devDependencies["@microsoft/vally"], "0.19.0");
+  assert.equal(manifest.devDependencies["@microsoft/vally"], "0.20.0");
 });
 
 test("site security overrides remain scoped to the vulnerable parents", async () => {

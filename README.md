@@ -265,10 +265,10 @@ new plugin content.
 
 ## Dependency maintenance
 
-Active development tooling uses Vally **0.19.0**, pinned in the shared CI tools
+Active development tooling uses Vally **0.20.0**, pinned in the shared CI tools
 and each skill's manifest and lockfile. The active `create-skill` generator uses
 the same pin. The `create-skills-repo` bundled authoring snapshot and its shared
-Vally tooling also use 0.19.0 to preserve byte-for-byte authoring parity and
+Vally tooling also use 0.20.0 to preserve byte-for-byte authoring parity and
 generated-skill compatibility. Intentional evaluation fixtures and unrelated
 template dependencies retain their independent version snapshots.
 
