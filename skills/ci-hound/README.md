@@ -92,6 +92,9 @@ including inherited cooldowns when an explicit state file is reused.
 Ordinary next-poll times also survive re-arming, scoped to the same host,
 repository, branch and credential identity. Waiting never replays green events;
 diagnostic `once`, `status` and `optimize` calls remain fresh.
+A hard poll error discards held completion/green proof, not the repository
+inventory or continuation cursor. Previously passing peers must be observed
+again before recovery can release aggregate green.
 If one target consumes a whole fresh chunk without completing, held completion
 proof is discarded before rotating to its peers. A stalled target therefore
 cannot freeze their observations or later promote their old green snapshots.

@@ -1182,6 +1182,48 @@ for (const surface of ["ci", "single-pr", "multi-pr"]) {
   });
 }
 
+for (const boundary of ["repository-api", "credential"]) {
+  test(`review 5708121188: ${boundary} errors invalidate previously passing repository proofs before recovery`, async (t) => {
+    const time = clock(t);
+    const dir = fixture(t);
+    const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
+      "--config-file", path.join(dir, "config.json")]);
+    args.respectPollInterval = true;
+    args.chunkDeadlineMs = time.now + 200;
+    const initial = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+      time.advance(40);
+      return greenCiExec(ghArgs);
+    });
+    assert.equal(initial.chunkTimedOut, true);
+    assert.equal(initial.events.some((event) => /GREEN$/.test(event.type)), false);
+    const discoveryFile = path.join(dir, "_discovery.json");
+    const held = loadState(discoveryFile).metrics.watchSweep;
+    assert.ok(held.completed["fixture/one"] && held.greenEvents["fixture/one"], boundary);
+    time.advance(1000);
+    args.chunkDeadlineMs = time.now + 2000;
+    const failing = authenticatedFixture(() => ({ ok: false, stdout: "", stderr: "HTTP 503 unavailable" }));
+    if (boundary === "credential") failing.cacheScope = async () => { throw new Error("credential resolver unavailable"); };
+    const failed = await nativeEvaluateMultiRepoPollTick(args, {}, failing);
+    assert.ok(failed.events.some((event) => event.type === "POLL_ERROR"), boundary);
+    assert.equal(failed.events.some((event) => /GREEN$/.test(event.type)), false, boundary);
+    assert.deepEqual(loadState(discoveryFile).metrics.watchSweep.repos, held.repos,
+      `${boundary}: discard green proof, not the retained repository inventory`);
+    time.advance(61000);
+    args.chunkDeadlineMs = time.now + 2000;
+    let refreshedPreviouslyPassing = false;
+    const recovered = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+      if (ghArgs[2].includes("fixture/one/")) {
+        refreshedPreviouslyPassing = true;
+        return ghArgs[2].includes("/commits/") ? json({ sha: "now-uncertified" }) : json({ workflow_runs: [] });
+      }
+      return greenCiExec(ghArgs);
+    });
+    assert.ok(refreshedPreviouslyPassing, `${boundary}: old peer success must be checked again after a hard error`);
+    assert.equal(recovered.events.some((event) => /GREEN$/.test(event.type)), false,
+      `${boundary}: a different passing peer cannot release queued green for the now-uncertified repository`);
+  });
+}
+
 test("review 5707961776: poll-error recovery requires fresh current-head CI evidence before a green signal", async (t) => {
   const dir = fixture(t);
   const time = clock(t);

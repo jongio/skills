@@ -1896,6 +1896,13 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   execFn = chunkExec(execFn, args.chunkDeadlineMs ?? Infinity);
   const discoveryStateFile = join(stateDirectory(args), "_discovery.json");
   const discoveryState = loadState(discoveryStateFile);
+  const discardGreenProof = () => {
+    const savedSweep = discoveryState.metrics.watchSweep;
+    if (savedSweep) {
+      savedSweep.completed = {};
+      savedSweep.greenEvents = {};
+    }
+  };
   const host = githubHost();
   if (discoveryState.host !== host) Object.assign(discoveryState, loadState(""));
   discoveryState.host = host;
@@ -1957,6 +1964,10 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   try {
     credentialScope = await execFn.cacheScope?.();
   } catch (error) {
+    if (!(error instanceof WatchChunkDeadline)) {
+      discardGreenProof();
+      saveState(discoveryStateFile, discoveryState);
+    }
     const repos = reportingRepos;
     return {
       repos, reports: [], statuses: savedSnapshots(repos), nextIntervalSec: args.idleIntervalSec,
@@ -2214,6 +2225,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       }
       completedThisTick += 1;
     }
+    if (allEvents.some((event) => event.type === "POLL_ERROR")) discardGreenProof();
     invalidateChangedResults();
     const sweepComplete = targetRepos.every((repo) => sweep.completed[repo]);
     const pendingAllGreenEvents = targetRepos.map((repo) => sweep.greenEvents[repo]).filter(Boolean);
