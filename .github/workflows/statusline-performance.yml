@@ -32,6 +32,8 @@ jobs:
       - name: Detect relevant changes and validate test-merge parents
         id: scope
         env:
+          # The event base can lag the immutable test-merge's first parent.
+          # Detection validates its ancestry and emits that actual parent as base.
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CANDIDATE_SHA: ${{ github.sha }}
@@ -66,7 +68,7 @@ jobs:
       - name: Statusline correctness and gate contracts
         shell: pwsh
         working-directory: candidate
-        run: node --test --test-concurrency=1 "extensions/*-statusline/test/*.test.mjs" test/statusline-performance.test.mjs test/distribution-manifests.test.mjs
+        run: node --test --test-concurrency=1 "extensions/*-statusline/test/*.test.mjs" "extensions/daemon-notifications/test/*.test.mjs" test/statusline-performance.test.mjs test/distribution-manifests.test.mjs test/github-runtime.test.mjs
       - name: Compare identical workloads sequentially
         shell: pwsh
         working-directory: candidate

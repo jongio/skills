@@ -12,7 +12,7 @@
       "name": "jongio-skills",
       "source": "./",
       "description": "Install the complete Jon Gallant skills collection as one plugin.",
-      "version": "2.1.1"
+      "version": "2.1.4"
     },
     {
       "name": "statuslines",
@@ -24,7 +24,7 @@
       "name": "create-canvas-app",
       "source": "./skills/create-canvas-app",
       "description": "Build GitHub Copilot canvas extensions fast — a no-build Preact + htm kit with live SSE state, durable storage, Primer theming, official GitHub Lucide icons, a generator, and tests.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "create-gh-pages-site",
@@ -90,13 +90,13 @@
       "name": "pr",
       "source": "./skills/pr",
       "description": "A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "go",
       "source": "./skills/go",
       "description": "Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "retro",
@@ -138,12 +138,18 @@
       "name": "ci-hound",
       "source": "./skills/ci-hound",
       "description": "Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows.",
-      "version": "1.0.0"
+      "version": "1.1.0"
     },
     {
       "name": "session-statusline",
       "source": "./skills/session-statusline",
       "description": "Manage only the current session's active statusline pills and clear entries without deleting work or changing enabled components.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "create-session-board-canvas",
+      "source": "./skills/create-session-board-canvas",
+      "description": "Show a live session progress board with canonical tasks, blockers, and primary/subagent updates.",
       "version": "1.0.0"
     }
   ]

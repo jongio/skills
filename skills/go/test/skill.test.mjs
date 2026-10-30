@@ -117,5 +117,12 @@ test("catalog body has a copyable install command with every required skill", as
   const body = catalog.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
   assert.match(body, /Requires `test-doctor` and `pr`/);
   assert.match(body, /`doc-doctor`/);
-  assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill go --skill test-doctor --skill pr --skill doc-doctor -g --agent github-copilot\r?\n```/);
+  assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill go --skill test-doctor --skill pr --skill doc-doctor --skill create-session-board-canvas -g --agent github-copilot\r?\n```/);
+});
+
+test("each go invocation opens the optional board and carries identity through delivery", () => {
+  assert.match(skill, /For every invocation.*after resolving the worktree choice.*invoke `create-session-board-canvas`/);
+  assert.match(skill, /text fallback.*does not block `go`/);
+  assert.match(skill, /board\/goal identity when available/);
+  assert.match(pr, /optional.*session progress reporting.*through delivery/);
 });

@@ -93,6 +93,7 @@ export function readState(sessionId, home = configHome()) {
 		...(typeof pr.title === "string" && pr.title ? { title: pr.title } : {}),
 		...(typeof pr.status === "string" && pr.status ? { status: pr.status } : {}),
 		...(Number.isFinite(pr.checkedAt) ? { checkedAt: pr.checkedAt } : {}),
+		...(typeof pr.stale === "boolean" ? { stale: pr.stale } : {}),
 		...(Number.isFinite(pr.mergedAt) ? { mergedAt: pr.mergedAt } : {}),
 		...(Number.isFinite(pr.mergedObservedAt) ? { mergedObservedAt: pr.mergedObservedAt } : {}),
 		...(Number.isSafeInteger(pr.generation) && pr.generation >= 0 ? { generation: pr.generation } : {}),
@@ -368,12 +369,13 @@ function inspectWorkspaceMetadata(tracker, sessionDir) {
 export function refreshTrackedPrStatuses(tracker, {
 	home = configHome(),
 	now = Date.now(),
-	fetchPrStatus = queryPrStatusWithGh,
+	fetchPrStatus,
 	prCacheTtlMs,
 	force = false,
+	prefetched = false,
 	onError,
 } = {}) {
-	return refreshTrackedPrStatusesImpl(tracker, { home, now, fetchPrStatus, prCacheTtlMs, force, onError });
+	return refreshTrackedPrStatusesImpl(tracker, { home, now, fetchPrStatus, prCacheTtlMs, force, prefetched, onError });
 }
 
 export function syncSession(payload, {
@@ -422,7 +424,6 @@ export function syncSession(payload, {
 	let changed = Boolean(migrate || (previous && previous.mergeStateVersion !== tracker.state.mergeStateVersion)) ||
 		((hasTranscript || hasWorkspace) && (!previous || reset));
 	if (initializeMergedPrs(tracker, now)) changed = true;
-
 	if ((hasTranscript || hasWorkspace) && inspectWorkspaceMetadata(tracker, sessionDir)) {
 		changed = true;
 	}
@@ -457,8 +458,9 @@ export function syncSession(payload, {
 
 	const statusFetcher = typeof fetchPrStatus === "function"
 		? fetchPrStatus
-		: (fetchPrStatus !== false && (hasTranscript || hasWorkspace) ? queryPrStatusWithGh : null);
-	if (statusFetcher && refreshTrackedPrStatuses(tracker, { home, now, fetchPrStatus: statusFetcher, prCacheTtlMs })) {
+		: undefined;
+	if (fetchPrStatus !== false && (statusFetcher || hasTranscript || hasWorkspace) &&
+			refreshTrackedPrStatuses(tracker, { home, now, fetchPrStatus: statusFetcher, prCacheTtlMs })) {
 		changed = true;
 	}
 

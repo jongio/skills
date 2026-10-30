@@ -1,0 +1,272 @@
+/* canvas-kit/theme.css
+ *
+ * Baseline canvas styling built on the Primer design tokens the runtime injects
+ * onto the canvas document (see github-app src/lib/extensionCanvasThemeContract.json).
+ *
+ * Theme awareness. The tokens the host injects are computed from the *current*
+ * user theme, so a light-theme user gets light values and a dark-theme user gets
+ * dark ones. Author against the --ck-* aliases below and your canvas follows the
+ * user's theme for free. Two rules keep that honest:
+ *   1. Never hardcode a dark-only color. Use a --ck-* alias, an injected token, or
+ *      color-mix() of one so the value tracks the theme. (--ck-bg-inset derives
+ *      itself from --ck-bg-muted + --ck-fg for exactly this reason.)
+ *   2. The dark fallbacks below only apply when a token is missing. Because the
+ *      host injects its theme *after* first paint, a light user would otherwise
+ *      see a dark flash, so the block after :root follows the OS color scheme
+ *      until the host takes over (it sets data-color-mode when it does).
+ */
+
+:root {
+  /* semantic aliases -> injected tokens (fallbacks = GitHub dark) */
+  --ck-bg: var(--background-color-default, #0d1117);
+  --ck-bg-muted: var(--background-color-muted, #161b22);
+  /* Recessed control surface (tabs track, wells, chips). Derived from the two
+     theme-aware tokens above rather than --background-color-emphasis, which is a
+     high-contrast chip color that is *dark* in light mode (#25292e) and would
+     paint every inset surface as a dark box on a light canvas. This mix stays a
+     touch more prominent than a card in either theme (dark ~#363c43, light
+     ~#d6d8db). */
+  --ck-bg-inset: color-mix(in srgb, var(--ck-bg-muted) 85%, var(--ck-fg) 15%);
+  --ck-fg: var(--text-color-default, #f0f6fc);
+  --ck-muted: var(--text-color-muted, #8b949e);
+  --ck-link: var(--text-color-link, #58a6ff);
+  --ck-accent: var(--text-color-accent, #58a6ff);
+  --ck-danger: var(--text-color-danger, #f85149);
+  --ck-success: var(--text-color-success, #3fb950);
+  --ck-attention: var(--text-color-attention, #d29922);
+  --ck-border: var(--border-color-default, #30363d);
+  --ck-border-muted: var(--border-color-muted, #21262d);
+  --ck-focus: var(--color-focus-outline, var(--outline-color-focus-default, #1f6feb));
+
+  --ck-font: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif);
+  --ck-mono: var(--font-mono, ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace);
+  --ck-fs: var(--text-body-medium, 14px);
+  --ck-lh: var(--leading-body-medium, 1.5);
+  --ck-fw-medium: var(--font-weight-medium, 500);
+  --ck-fw-semibold: var(--font-weight-semibold, 600);
+
+  --ck-radius: 6px;
+  --ck-gap: 12px;
+}
+
+/* Theme-aware fallback (see header note 2). The host injects its Primer tokens
+   only after first paint. Until then (and in any non-app context that never
+   injects) follow the webview's OS color scheme instead of forcing dark. Both
+   rules are gated on :not([data-color-mode]): the host sets that attribute
+   alongside its tokens and explicit color-scheme, so the instant it themes the
+   canvas these back off and the host is fully in control. --ck-bg-inset is
+   omitted on purpose; it derives from --ck-bg-muted + --ck-fg, which are
+   redefined here, so it tracks the light values automatically. */
+:root:not([data-color-mode]) { color-scheme: light dark; }
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-color-mode]) {
+    --ck-bg: var(--background-color-default, #ffffff);
+    --ck-bg-muted: var(--background-color-muted, #f6f8fa);
+    --ck-fg: var(--text-color-default, #1f2328);
+    --ck-muted: var(--text-color-muted, #59636e);
+    --ck-link: var(--text-color-link, #0969da);
+    --ck-accent: var(--text-color-accent, #0969da);
+    --ck-danger: var(--text-color-danger, #d1242f);
+    --ck-success: var(--text-color-success, #1a7f37);
+    --ck-attention: var(--text-color-attention, #9a6700);
+    --ck-border: var(--border-color-default, #d1d9e0);
+    --ck-border-muted: var(--border-color-muted, #d1d9e0);
+    --ck-focus: var(--color-focus-outline, var(--outline-color-focus-default, #0969da));
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+  font-family: var(--ck-font);
+  font-size: var(--ck-fs);
+  line-height: var(--ck-lh);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body { padding: 16px; }
+
+a { color: var(--ck-link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1, h2, h3 { margin: 0 0 8px; line-height: var(--leading-title-medium, 1.25); }
+h1 { font-size: var(--text-title-large, 1.5rem); font-weight: var(--ck-fw-semibold); }
+h2 { font-size: var(--text-title-medium, 1.25rem); font-weight: var(--ck-fw-semibold); }
+h3 { font-size: var(--text-title-small, 1rem); font-weight: var(--ck-fw-semibold); }
+
+.ck-muted { color: var(--ck-muted); }
+.ck-mono { font-family: var(--ck-mono); }
+.ck-caption { font-size: var(--text-caption, 12px); color: var(--ck-muted); }
+.ck-row { display: flex; gap: var(--ck-gap); align-items: center; }
+.ck-col { display: flex; flex-direction: column; gap: var(--ck-gap); }
+.ck-spread { display: flex; justify-content: space-between; align-items: center; gap: var(--ck-gap); }
+.ck-wrap { flex-wrap: wrap; }
+.ck-grow { flex: 1 1 auto; }
+
+/* ---- card ---------------------------------------------------------------- */
+.ck-card {
+  background: var(--ck-bg-muted);
+  border: 1px solid var(--ck-border);
+  border-radius: var(--ck-radius);
+  padding: 12px 14px;
+}
+
+/* ---- buttons ------------------------------------------------------------- */
+.ck-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: inherit;
+  font-weight: var(--ck-fw-medium);
+  padding: 5px 12px;
+  border-radius: var(--ck-radius);
+  border: 1px solid var(--border-color-button-default-rest, var(--ck-border));
+  background: var(--background-color-button-default-rest, var(--ck-bg-inset));
+  color: var(--text-color-button-default-rest, var(--ck-fg));
+  cursor: pointer;
+}
+.ck-btn:hover { background: var(--background-color-button-default-hover, #30363d); }
+.ck-btn:active { background: var(--background-color-button-default-active, #282e33); }
+.ck-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ck-btn-primary {
+  border-color: var(--border-color-button-primary-rest, transparent);
+  background: var(--background-color-button-primary-rest, #238636);
+  color: var(--text-color-button-primary-rest, #ffffff);
+}
+.ck-btn-primary:hover { background: var(--background-color-button-primary-hover, #2ea043); }
+.ck-btn-primary:active { background: var(--background-color-button-primary-active, #238636); }
+
+.ck-btn-danger {
+  background: var(--background-color-button-invisible-rest, transparent);
+  color: var(--text-color-button-danger-rest, var(--ck-danger));
+  border-color: transparent;
+}
+.ck-btn-danger:hover { background: var(--background-color-button-danger-hover, #da3633); color: #fff; }
+
+.ck-btn-sm { padding: 2px 8px; font-size: var(--text-caption, 12px); }
+
+/* ---- inputs -------------------------------------------------------------- */
+.ck-input, .ck-textarea, .ck-select {
+  font: inherit;
+  width: 100%;
+  color: var(--ck-fg);
+  background: var(--background-color-default, var(--ck-bg-inset));
+  border: 1px solid var(--border-color-default, var(--ck-border));
+  border-radius: var(--ck-radius);
+  padding: 5px 10px;
+}
+.ck-textarea { resize: vertical; min-height: 38px; }
+.ck-input::placeholder, .ck-textarea::placeholder { color: var(--text-color-control-placeholder, var(--ck-muted)); }
+
+.ck-btn:focus-visible,
+.ck-input:focus-visible,
+.ck-textarea:focus-visible,
+.ck-select:focus-visible,
+.ck-tab:focus-visible {
+  outline: 2px solid var(--ck-focus);
+  outline-offset: -1px;
+}
+
+/* ---- badges / status ----------------------------------------------------- */
+.ck-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-badge, 12px);
+  font-weight: var(--ck-fw-medium);
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ck-border);
+  color: var(--ck-muted);
+}
+/* Generic semantic badge variants (map your own statuses to these in the view;
+   e.g. open -> ck-badge-success, decided -> ck-badge-accent). Do NOT add
+   app-specific status names here; this is the shared kit theme. */
+.ck-badge-success { color: var(--ck-success); border-color: var(--border-color-success-emphasis, #238636); }
+.ck-badge-accent { color: var(--text-color-accent, #a371f7); border-color: var(--border-color-accent-emphasis, #8957e5); }
+.ck-badge-danger { color: var(--ck-danger); border-color: var(--border-color-danger-emphasis, #da3633); }
+.ck-badge-attention { color: var(--ck-attention); border-color: var(--border-color-attention-emphasis, #9e6a03); }
+.ck-badge-muted { color: var(--ck-muted); border-color: var(--ck-border); }
+
+/* ---- segmented tabs ------------------------------------------------------ */
+.ck-tabs { display: inline-flex; gap: 2px; background: var(--ck-bg-inset); padding: 2px; border-radius: var(--ck-radius); border: 1px solid var(--ck-border); }
+.ck-tab {
+  font: inherit; font-size: var(--text-caption, 12px);
+  border: 0; background: transparent; color: var(--ck-muted);
+  padding: 3px 10px; border-radius: 4px; cursor: pointer;
+}
+.ck-tab[aria-selected="true"] { background: var(--background-color-button-default-hover, #30363d); color: var(--ck-fg); }
+
+/* ---- connection pill ----------------------------------------------------- */
+.ck-status { font-size: var(--text-caption, 12px); color: var(--ck-muted); display: inline-flex; align-items: center; gap: 6px; }
+.ck-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ck-muted); }
+.ck-dot-live { background: var(--ck-success); }
+.ck-dot-off { background: var(--ck-attention); }
+
+.ck-empty { color: var(--ck-muted); text-align: center; padding: 28px 0; }
+
+/* ---- loading: spinner + skeleton ----------------------------------------- */
+/* Spinner: pair with a Lucide "loader-circle" icon:
+   html`<${Icon} name="loader-circle" class="ck-spinner" />`. */
+.ck-spinner { animation: ck-spin 0.9s linear infinite; transform-origin: center; }
+@keyframes ck-spin { to { transform: rotate(360deg); } }
+
+/* Skeleton: a shimmering placeholder block while data loads. */
+.ck-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--ck-bg-muted);
+  border-radius: var(--ck-radius);
+  min-height: 14px;
+}
+.ck-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ck-fg) 8%, transparent), transparent);
+  animation: ck-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes ck-shimmer { to { transform: translateX(100%); } }
+
+/* ---- callout / error surface --------------------------------------------- */
+.ck-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--ck-border);
+  border-left: 3px solid var(--ck-accent);
+  border-radius: var(--ck-radius);
+  background: var(--ck-bg-muted);
+  color: var(--ck-fg);
+}
+.ck-callout .ck-icon { margin-top: 2px; color: var(--ck-accent); }
+.ck-error { border-left-color: var(--ck-danger); }
+.ck-error .ck-icon { color: var(--ck-danger); }
+
+/* ---- icons (Lucide) ------------------------------------------------------ */
+/* Inline SVGs inherit text color via stroke="currentColor". */
+.ck-icon { flex: none; vertical-align: text-bottom; }
+.ck-empty .ck-icon { display: block; margin: 0 auto 8px; color: var(--ck-muted); }
+
+/* ---- motion safety ------------------------------------------------------- */
+/* Global guard: respect the OS "reduce motion" setting for every animation a
+   canvas adds (kit spinners/skeletons included). Author-added keyframes inherit
+   this automatically, so you do not need to repeat it per canvas. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

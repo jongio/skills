@@ -1,5 +1,12 @@
 version: 2
 updates:
+  - package-ecosystem: npm
+    directory: /runtime/github-client
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -161,6 +168,13 @@ updates:
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/session-statusline
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: npm
+    directory: /skills/create-session-board-canvas
     cooldown:
       default-days: 7
     schedule:

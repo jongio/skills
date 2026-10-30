@@ -4,12 +4,13 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { collect } from "../collector.mjs";
+import { collect as collectNative } from "../collector.mjs";
 import { SessionTracker, readState, syncSession, writeState } from "../tracker.mjs";
 import { IssueTracker, readState as readIssues, syncSession as syncIssues, writeState as writeIssues } from "../../issue-statusline/tracker.mjs";
 import { SubagentTracker, readState as readAgents, syncSession as syncAgents, writeState as writeAgents } from "../../subagent-statusline/tracker.mjs";
 
 const pr = "https://github.com/acme/app/pull/43";
+const collect = (session, options) => collectNative(session, { ...options, refreshRemote: false });
 const issue = "https://github.com/acme/app/issues/7";
 const event = (type, time, data = {}, agentId) => ({ type, timestamp: new Date(time).toISOString(), data, agentId });
 const start = (id, time, command, agentId) => event("tool.execution_start", time, {

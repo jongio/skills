@@ -8,7 +8,7 @@ import test from "node:test";
 import { composeGroups, repositoryKey } from "../grouping.mjs";
 import { checkoutKey, sessionContexts, sessionDirectory } from "../tracker.mjs";
 import { composeStatusLine, ensurePluginStatuslineRegistered } from "../compose.mjs";
-import { EXTENSION_CATALOG, configureStatuslines } from "../../../scripts/setup-statusline.mjs";
+import { EXTENSION_CATALOG, SHARED_RUNTIME_FILES, configureStatuslines } from "../../../scripts/setup-statusline.mjs";
 import { SessionTracker, readState as readPrState, writeState as writePrState } from "../../pr-statusline/tracker.mjs";
 import { OCTICONS, prContextFields, refreshTrackedPrStatuses, summarizePrStatus, writePrCache } from "../../pr-statusline/github.mjs";
 import { IssueTracker, readState as readIssueState, writeState as writeIssueState } from "../../issue-statusline/tracker.mjs";
@@ -64,8 +64,10 @@ test("repository identity normalizes SSH/HTTPS and rejects branch-only or malfor
 test("remote shell and PowerShell installer runtime lists match the canonical catalog", () => {
 	const shell = readFileSync(join(repoRoot, "install-statusline.sh"), "utf8");
 	const powershell = readFileSync(join(repoRoot, "install-statusline.ps1"), "utf8");
-	assert.match(shell, /curl[^\r\n]+extensions\/state-lock\.mjs/);
-	assert.match(powershell, /Invoke-WebRequest[^\r\n]+extensions\/state-lock\.mjs/);
+	const sharedShell = /for file in ([^;\r\n]+); do\r?\n\s*curl[^\r\n]+extensions\/\$file/.exec(shell)?.[1];
+	assert.deepEqual(sharedShell?.split(/\s+/), SHARED_RUNTIME_FILES);
+	const sharedPs = /foreach \(\$file in @\(([^)]+)\)\) \{\r?\n\s*Invoke-WebRequest[^\r\n]+extensions\/\$file/.exec(powershell)?.[1];
+	assert.deepEqual([...String(sharedPs).matchAll(/'([^']+)'/g)].map((match) => match[1]), SHARED_RUNTIME_FILES);
 	for (const { id, files } of EXTENSION_CATALOG) {
 		const shellList = new RegExp(`for file in ([^;\\r\\n]+); do\\r?\\n\\s*mkdir -p "\\$TEMP_ROOT/extensions/${id}"`).exec(shell)?.[1];
 		assert.ok(shellList, `${id} shell manifest`);

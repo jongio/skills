@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { OCTICONS, syncSession } from "./tracker.mjs";
+import { PR_CLOSED_TTL_MS, PR_RUNNING_TTL_MS, PR_SETTLED_TTL_MS } from "./github.mjs";
 import { composeStatusLine, shouldUseNerdFont, toUnicodeIcons } from "./compose.mjs";
 
 const clean = (text) => String(text).replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
@@ -55,7 +56,9 @@ function prAttentionLevel(rawStatus) {
 function formatPrItem(pr, _currentRepo, { links, color, nerdFont = true }) {
 	const displayLabel = pr.label;
 	let raw = pr.status ? clean(pr.status).trim() : "";
-	const level = prAttentionLevel(raw);
+	if (pr.stale) raw += " (stale)";
+	const attention = prAttentionLevel(raw);
+	const level = pr.stale && attention !== "critical" ? "attention" : attention;
 	const theme = PALETTE[level] ?? PALETTE.neutral;
 	let leadIcon = `${OCTICONS.pr} `;
 	if (raw.startsWith(OCTICONS.draft) || raw.startsWith("📝")) {
@@ -89,9 +92,13 @@ export function renderEntries(payload, {
 	if (!state) return [];
 	const useNerdFont = shouldUseNerdFont({ home, nerdFont, autoDetect: false });
 	const currentRepo = state.repository || null;
-	const entries = state.prs.map((pr) => ({
-		...pr, text: formatPrItem(pr, currentRepo, { links, color, nerdFont: useNerdFont }).mid,
-	}));
+	const entries = state.prs.map((pr) => {
+		const ttl = prCacheTtlMs ?? (pr.mergedAt ? PR_CLOSED_TTL_MS
+			: pr.status?.includes(OCTICONS.running) ? PR_RUNNING_TTL_MS : PR_SETTLED_TTL_MS);
+		const stale = pr.checkedAt === 0 && Boolean(pr.status) || pr.checkedAt > 0 && now - pr.checkedAt >= ttl;
+		const item = stale ? { ...pr, stale: true } : pr;
+		return { ...item, text: formatPrItem(item, currentRepo, { links, color, nerdFont: useNerdFont }).mid };
+	});
 	if (Object.keys(state.ignoredRevisions ?? {}).length) entries.push({ kind: "dismissal", text: "" });
 	return entries;
 }

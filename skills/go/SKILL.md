@@ -3,7 +3,7 @@ name: go
 description: >-
   **WORKFLOW SKILL** - Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge. USE FOR: /go, implement this context end to end, take this issue from plan to merge. DO NOT USE FOR: PR-only work on existing changes (use pr), standalone test audits (use test-doctor), Go language questions without an implementation request.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Go
@@ -23,11 +23,13 @@ Default to squash merging and deleting the PR branch after merge unless the user
 
 ## Workflow
 
+For every invocation, after resolving the worktree choice, invoke `create-session-board-canvas` to open/reuse the session board and follow the [progress contract](references/session-progress.md). Keep it updated through delegation and the `pr` handoff; missing canvas support uses a disclosed text fallback and does not block `go`.
+
 1. Inspect the current context, repository instructions, and existing work; resolve the worktree choice before tests or edits. Before defining touched scope, map affected user journeys, equivalent entry points, and the canonical behavior owner. State a brief plan and acceptance criteria for that affected behavioral scope; reuse valid completed work and ask only blocking questions. Do not turn this into a whole-repository audit or silently expand authorized edits.
 2. Invoke `test-doctor fix` on that scope to establish a baseline and write meaningful regression tests before implementation, using the journey contract and affected surfaces.
 3. Implement the smallest complete change: the smallest coherent product change, not the fewest files. For the same operation across affected surfaces, preserve the intended shared sequence, approval information, cancellation, retries/recovery, and outcome semantics, including durable effects and continuations. Centralize shared sequencing rather than duplicating host logic. Justify capability or presentation differences; disclose capability gaps rather than silently substituting a different journey. Run focused checks and finish the scoped Test Doctor assessment.
 4. Review the final diff for correctness, regressions, introduced duplication and state complexity, and run a `rubber-duck` sub-agent review on the diff using a different model family than the currently active model (selecting a strong complementary model family such as Claude, Gemini, or GPT based on the active model when sub-agent model selection is available); fix material findings and repeat affected checks until the acceptance criteria are met.
-5. Invoke `jongio/pr` (`pr` when installed, e.g. `/jongio-skills:pr`) with a merge request, merge mode and its user-authorization source (or default approval mode), plan, scope, journey contract, affected surfaces, exception evidence, worktree/base/changeset identity, and passing test/review evidence. It owns Git, remaining preflight, CI, review resolution, and merge; do not duplicate those stages. Leave `doc-doctor` to `pr`; do not invoke it separately.
+5. Invoke `jongio/pr` (`pr` when installed, e.g. `/jongio-skills:pr`) with a merge request, merge mode and its user-authorization source (or default approval mode), plan, scope, journey contract, affected surfaces, exception evidence, worktree/base/changeset identity, passing test/review evidence, and board/goal identity when available. It owns Git, remaining preflight, CI, review resolution, and merge; do not duplicate those stages. Leave `doc-doctor` to `pr`; do not invoke it separately.
 
 ## Safety
 

@@ -16,12 +16,21 @@ function fixture(run) {
 	try { run(home); } finally { rmSync(home, { recursive: true, force: true }); }
 }
 function node(home, args, input = "") {
-	const result = spawnSync(process.execPath, args, {
-		input, encoding: "utf8", timeout: 60000, windowsHide: true,
-		env: { ...process.env, COPILOT_HOME: home, LOCALAPPDATA: join(home, "appdata"), NO_COLOR: "1" },
-	});
-	assert.ifError(result.error);
-	return result;
+	const overrides = { COPILOT_HOME: home, LOCALAPPDATA: join(home, "appdata"), NO_COLOR: "1" };
+	const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]));
+	try {
+		Object.assign(process.env, overrides);
+		const result = spawnSync(process.execPath, args, {
+			input, encoding: "utf8", timeout: 60000, windowsHide: true, env: process.env,
+		});
+		assert.ifError(result.error);
+		return result;
+	} finally {
+		for (const [key, value] of previous) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	}
 }
 
 test("standalone renderers and compositor reject malformed or non-object input without success output", () => fixture((home) => {
@@ -54,10 +63,10 @@ function extensionScript(entry, full) {
 		import { registerHooks } from "node:module";
 		import { createSdkHost } from ${JSON.stringify(pathToFileURL(join(root, "extensions", "worktree-statusline", "test", "mock-sdk.mjs")).href)};
 		let configuration, observer;
-		const logs = [];
+		const logs = [], notifications = [];
 		const session = {
 			sessionId: "handler-fixture", capabilities: {},
-			log: async value => logs.push(value),
+			log: async (value, options) => { logs.push(value); if (options?.ephemeral) notifications.push(value); },
 			on: fn => { observer = fn; return () => {}; }, getEvents: async () => [],
 			rpc: { metadata: { activity: async () => ({ hasActiveWork: false }) } },
 		};
@@ -66,6 +75,13 @@ function extensionScript(entry, full) {
 		registerHooks({ resolve(specifier, context, next) {
 			return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
 		} });
+		const { statuslineGitHub } = await import(${JSON.stringify(pathToFileURL(join(dirname(dirname(entry)), "github-transport.mjs")).href)});
+		statuslineGitHub.cacheScope = async () => "fixture";
+		statuslineGitHub.request = async ({ query }) => ({
+			ok: true, status: 200, headers: {}, cacheScope: "fixture",
+			data: { data: { repository: query.includes("pullRequest(")
+				? { pullRequest: { state: "OPEN" } } : { issue: { state: "OPEN" } } } },
+		});
 		await import(${JSON.stringify(pathToFileURL(entry).href)});
 		const command = name => {
 			const entry = configuration.commands.find(item => item.name === name);
@@ -131,8 +147,12 @@ function extensionScript(entry, full) {
 			assert.deepEqual(unknown[1].provenance, { root: false, unknown: true, agents: [] });
 			await command("session-prs")({ args: "clear" });
 			logs.pop();
+			assert.ok(notifications.includes("Session tracking changed: prs"),
+				"direct commands must invalidate the session-owned reference read model");
+			const beforeInvalid = notifications.length;
 			await command("session-prs")({ args: "invalid" });
 			assert.match(logs.pop(), /Usage:/);
+			assert.equal(notifications.length, beforeInvalid);
 			await command("session-subagents")({ args: "list" });
 			assert.match(logs.pop(), /0 starting/);
 			await command("session-subagents")({ args: "clear" });
@@ -145,6 +165,7 @@ function extensionScript(entry, full) {
 			await command("session-issues")({ args: "list" });
 			assert.match(logs.pop(), /example\\/widget#2/);
 			assert.equal(JSON.parse(await tool("session_issues")({ action: "clear" })).length, 0);
+			assert.ok(notifications.includes("Session tracking changed: issues"));
 			const agentsModule = await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "subagent-statusline", "tracker.mjs")).href)});
 			await tool("session_prs")({ action: "add", reference: "example/widget#88" });
 			const directory = join(process.env.COPILOT_HOME, "session-state", session.sessionId);
@@ -168,6 +189,7 @@ function extensionScript(entry, full) {
 					assert.match(logs.pop(), /Cleared this session/);
 				} else {
 					assert.match(await tool("session_statusline")({ action: "clear" }), /Cleared this session/);
+					assert.ok(notifications.includes("Session tracking changed: all"));
 				}
 				assert.deepEqual(JSON.parse(await tool("session_prs")({ action: "list" })), []);
 				assert.deepEqual(JSON.parse(await tool("session_issues")({ action: "list" })), []);
@@ -189,12 +211,14 @@ function extensionScript(entry, full) {
 			const keptPrs = JSON.parse(await tool("session_prs")({ action: "list" }));
 			const keptIssues = JSON.parse(await tool("session_issues")({ action: "list" }));
 			const keptAgents = agentsModule.readState(session.sessionId);
+			const beforeNames = notifications.length;
 			await command("session-statusline")({ args: "clear-name" });
 			assert.equal(logs.pop(), "Session name cleared.");
 			assert.equal(await tool("session_statusline")({ action: "name" }), "No custom session name.");
 			assert.deepEqual(JSON.parse(await tool("session_prs")({ action: "list" })), keptPrs);
 			assert.deepEqual(JSON.parse(await tool("session_issues")({ action: "list" })), keptIssues);
 			assert.deepEqual(agentsModule.readState(session.sessionId), keptAgents);
+			assert.equal(notifications.length, beforeNames, "session names must not change tracking membership");
 			await command("session-statusline")({ args: "name Final name" });
 			logs.pop();
 			assert.equal(await tool("session_statusline")({ action: "clear-name" }), "Session name cleared.");
@@ -220,6 +244,72 @@ test("unified extension handlers manage session state, validate references and c
 		extensionScript(join(home, "extensions", "pr-statusline", "extension.mjs"), true)]);
 	assert.equal(result.status, 0, result.stderr);
 	assert.match(result.stdout, /handlers passed/);
+}));
+
+test("standalone issue commands and tools refresh the same session board without trusting signal payloads", () => fixture((home) => {
+	configureStatuslines({ home, repoRoot: root, enabled: ["issue-statusline"] });
+	const result = node(home, ["--input-type=module", "-e", `
+		import assert from "node:assert/strict";
+		import { registerHooks } from "node:module";
+		import { createSdkHost } from ${JSON.stringify(pathToFileURL(join(root, "extensions", "worktree-statusline", "test", "mock-sdk.mjs")).href)};
+		import { createProgressService } from ${JSON.stringify(pathToFileURL(join(root, "skills", "create-session-board-canvas", "runtime", "progress.mjs")).href)};
+		import { createTrackingSync, trackingChangeKind } from ${JSON.stringify(pathToFileURL(join(root, "skills", "create-session-board-canvas", "runtime", "references.mjs")).href)};
+		let configuration, sync, failSignal = false;
+		const pending = [], notifications = [];
+		const service = await createProgressService({
+			sessionId: "issue-command-parity",
+			store: { load: async () => null, save: async () => {} },
+			readSources: async () => ({ plan: {}, rows: [], dependencies: [] }),
+		});
+		const session = {
+			sessionId: "issue-command-parity", capabilities: {},
+			on: () => () => {}, getEvents: async () => [],
+			log: async (message, options) => {
+				if (!options?.ephemeral) return;
+				if (failSignal) throw new Error("Signal transport unavailable");
+				notifications.push(message);
+				const kind = trackingChangeKind({ type: "session.info", data: { infoType: "notification", message } });
+				if (kind) pending.push(sync.refresh(kind));
+			},
+			rpc: { metadata: { activity: async () => ({ hasActiveWork: false }) }, tools: {
+				execute: async ({ name, arguments: args }) => {
+					assert.equal(name, "session_issues");
+					assert.deepEqual(args, { action: "list" });
+					return configuration.tools.find((item) => item.name === name).handler(args);
+				},
+			} },
+		};
+		sync = createTrackingSync(session, service);
+		globalThis.joinTestSession = createSdkHost(session, (value) => { configuration = value; }).joinSession;
+		const sdk = "data:text/javascript," + encodeURIComponent("export const joinSession = globalThis.joinTestSession;");
+		registerHooks({ resolve(specifier, context, next) {
+			return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
+		} });
+		const { statuslineGitHub } = await import(${JSON.stringify(pathToFileURL(join(home, "extensions", "github-transport.mjs")).href)});
+		statuslineGitHub.cacheScope = async () => "fixture";
+		statuslineGitHub.request = async () => ({ ok: false, error: "No live GitHub in this fixture" });
+		await import(${JSON.stringify(pathToFileURL(join(home, "extensions", "issue-statusline", "extension.mjs")).href)});
+		const command = configuration.commands.find((item) => item.name === "session-issues").handler;
+		const tool = configuration.tools.find((item) => item.name === "session_issues").handler;
+		const flush = async () => { await Promise.all(pending.splice(0)); };
+		await command({ args: "add fixture/repo#1" }); await flush();
+		assert.equal(service.snapshot().references.issues.length, 1);
+		await command({ args: "remove fixture/repo#1" }); await flush();
+		assert.deepEqual(service.snapshot().references.issues, []);
+		await tool({ action: "add", reference: "fixture/repo#2" }); await flush();
+		assert.equal(service.snapshot().references.issues[0].reference, "fixture/repo#2");
+		await tool({ action: "clear" }); await flush();
+		assert.deepEqual(service.snapshot().references.issues, []);
+		assert.equal(notifications.length, 4);
+		await command({ args: "add invalid" }); await flush();
+		assert.equal(notifications.length, 4);
+		failSignal = true;
+		assert.equal(JSON.parse(await tool({ action: "add", reference: "fixture/repo#3" })).length, 1);
+		assert.equal(JSON.parse(await tool({ action: "list" })).length, 1);
+		console.log("command/tool board parity passed");
+	`]);
+	assert.equal(result.status, 0, result.stderr);
+	assert.match(result.stdout, /command\/tool board parity passed/);
 }));
 
 test("installed composer reads session names across processes without changing enabled components", () => fixture((home) => {

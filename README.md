@@ -33,6 +33,7 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`skill-doctor`](skills/skill-doctor/) | Learn from recent session feedback and trim skill bloat, with cached audits, a dedicated worktree, and one improvement PR. |
 | [`ci-hound`](skills/ci-hound/) | Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows. |
 | [`session-statusline`](skills/session-statusline/) | Manage only the current session's active statusline pills and clear entries without deleting work or changing enabled components. |
+| [`create-session-board-canvas`](skills/create-session-board-canvas/) | Show a live session progress board with canonical tasks, blockers, and primary/subagent updates. |
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:

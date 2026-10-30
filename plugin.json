@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "jongio-skills",
   "description": "Jon Gallant's collection of cross-agent skills for AI coding agents — GitHub Copilot, Claude, and Codex. Browse and install individual skills from the skills/ directory.",
-  "version": "2.1.1",
+  "version": "2.1.4",
   "author": {
     "name": "Jon Gallant",
     "url": "https://github.com/jongio"
@@ -62,7 +62,8 @@
     "refactor",
     "skill-doctor",
     "ci-hound",
-    "session-statusline"
+    "session-statusline",
+    "create-session-board-canvas"
   ],
   "repository": "https://github.com/jongio/skills"
 }

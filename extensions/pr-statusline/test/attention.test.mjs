@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { EventEmitter, once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { PassThrough, Writable } from "node:stream";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { AttentionState } from "../attention-state.mjs";
 import {
@@ -311,6 +313,176 @@ test("running sessions reload shared preferences independently without re-arming
 	} finally {
 		first.attention.stop();
 		second.attention.stop();
+	}
+}));
+
+test("independent sessions adopt an atomic preference update after their initial snapshot but before watching", { timeout: 15000 }, async () => fixture(async (home) => {
+	setAttentionConfig({ enabled: true }, { home });
+	const release = join(home, "release-startup");
+	const source = pathToFileURL(join(root, "extensions", "pr-statusline", "attention.mjs")).href;
+	const children = [];
+	function start(id, acknowledge) {
+		const script = `
+			import * as fs from "node:fs";
+			import { registerHooks } from "node:module";
+			import { EventEmitter } from "node:events";
+			import { PassThrough, Writable } from "node:stream";
+			import { setImmediate as flush } from "node:timers/promises";
+			const home = ${JSON.stringify(home)}, release = ${JSON.stringify(release)};
+			let captured = false, reads = 0, attention, stopped = false;
+			const descriptors = new Set(), wait = new Int32Array(new SharedArrayBuffer(4));
+			globalThis.attentionFs = {
+				...fs,
+				openSync(file, ...args) {
+					const fd = fs.openSync(file, ...args);
+					if (file === ${JSON.stringify(attentionConfigPath(home))}) descriptors.add(fd);
+					return fd;
+				},
+				readFileSync(file, ...args) {
+					const bytes = fs.readFileSync(file, ...args);
+					if (descriptors.has(file)) reads++;
+					return bytes;
+				},
+				closeSync(fd) {
+					const config = descriptors.delete(fd);
+					const result = fs.closeSync(fd);
+					if (config && !captured) {
+						captured = true;
+						fs.writeSync(1, JSON.stringify({ type: "captured" }) + "\\n");
+						const deadline = Date.now() + 5000;
+						while (!fs.existsSync(release) && Date.now() < deadline) Atomics.wait(wait, 0, 0, 10);
+						if (!fs.existsSync(release)) throw new Error("Startup writer barrier did not release");
+					}
+					return result;
+				},
+			};
+			const facade = "data:text/javascript," + encodeURIComponent(
+				"export const { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, watchFile, unwatchFile, writeFileSync } = globalThis.attentionFs;");
+			registerHooks({ resolve(specifier, context, next) {
+				return specifier === "node:fs" && context.parentURL === ${JSON.stringify(source)}
+					? { url: facade, shortCircuit: true } : next(specifier, context);
+			} });
+			const { createSessionAttention } = await import(${JSON.stringify(source)});
+			const helper = (${fakeHelper.toString()})();
+			const report = () => fs.writeSync(1, JSON.stringify({
+				type: "status", stopped, reads, status: attention.status(),
+				last: helper.messages.at(-1), helpers: helper.children.length,
+				ended: helper.children[0]?.child.stdin.writableEnded,
+			}) + "\\n");
+			process.on("message", (message) => {
+				if (message === "stop") { attention.stop(); stopped = true; report(); }
+				if (message === "exit") { attention?.stop(); process.exit(0); }
+			});
+			attention = createSessionAttention({
+				home, platform: "win32", env: { WT_SESSION: "fixture" }, ownerProcessId: 321,
+				spawn: helper.spawn, build: async () => "attention.exe", watch: true,
+			});
+			attention.observe({ type: "permission.requested", data: { requestId: ${JSON.stringify(id)} } });
+			await flush();
+			if (${acknowledge}) helper.children[0].child.message({ type: "acknowledged", generation: 1 });
+			report();
+			setInterval(report, 25);
+		`;
+		const child = spawn(process.execPath, ["--input-type=module", "-e", script], {
+			env: process.env, windowsHide: true, stdio: ["ignore", "pipe", "pipe", "ipc"],
+		});
+		const record = { child, captured: false, state: null, stderr: "" };
+		child.stderr.on("data", (data) => { record.stderr = (record.stderr + data).slice(-8000); });
+		const lines = createInterface({ input: child.stdout });
+		lines.on("line", (line) => {
+			const message = JSON.parse(line);
+			if (message.type === "captured") record.captured = true;
+			else record.state = message;
+		});
+		children.push(record);
+		return record;
+	}
+	async function until(predicate, message) {
+		const deadline = Date.now() + 5000;
+		while (!predicate() && Date.now() < deadline) {
+			for (const { child, stderr } of children) assert.equal(child.exitCode, null, stderr);
+			await new Promise((resolve) => setTimeout(resolve, 25));
+		}
+		assert.ok(predicate(), `${message}: ${JSON.stringify(children.map((entry) => entry.state))}`);
+	}
+	const first = start("first", true), second = start("second", false);
+	try {
+		// Delay only the return of a real, closed initial read; both watcher and atomic writer stay real.
+		await until(() => first.captured && second.captured, "Initial preference snapshots were not captured");
+		setAttentionConfig({ style: "background" }, { home });
+		writeFileSync(release, "continue");
+		await until(() => first.state?.status.style === "background" && second.state?.status.style === "background",
+			"Initial external style update was lost");
+		for (const entry of children) {
+			assert.equal(entry.state.helpers, 1);
+			assert.equal(entry.state.last.generation, 1);
+		}
+		assert.equal(first.state.last.acknowledged, true);
+		assert.equal(second.state.last.acknowledged, false);
+		first.child.send("stop");
+		await until(() => first.state.stopped, "First watcher did not stop");
+		const stoppedReads = first.state.reads;
+		setAttentionConfig({ enabled: false }, { home });
+		await until(() => !second.state.status.enabled && second.state.ended, "Other session did not adopt external disable");
+		assert.equal(first.state.reads, stoppedReads, "Stopped sessions must not keep reading preferences");
+		assert.equal(first.state.status.enabled, true);
+		assert.equal(first.state.ended, true);
+	} finally {
+		writeFileSync(release, "continue");
+		await Promise.all(children.map(async ({ child }) => {
+			if (child.exitCode !== null) return;
+			const closed = once(child, "close");
+			child.send("exit");
+			await closed;
+		}));
+	}
+}));
+
+test("a transient preference read failure reapplies the same valid revision without re-arming an acknowledged alert", { timeout: 10000 }, async (t) => fixture(async (home) => {
+	setAttentionConfig({ enabled: true }, { home });
+	const file = attentionConfigPath(home);
+	const revision = () => {
+		const stat = fs.statSync(file, { bigint: true });
+		return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs];
+	};
+	const { attention, helper, reports } = controller(home, { watch: true });
+	let replacement;
+	async function until(predicate, message) {
+		const deadline = Date.now() + 5000;
+		while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+		assert.ok(predicate(), message);
+	}
+	try {
+		attention.observe(event("permission.requested", { requestId: "acknowledged" }));
+		await flush();
+		helper.children[0].child.message({ type: "acknowledged", generation: 1 });
+		const before = revision();
+		const open = fs.openSync;
+		let failNext = true;
+		replacement = t.mock.method(fs, "openSync", (path, ...args) => {
+			if (path === file && failNext) {
+				failNext = false;
+				throw Object.assign(new Error("Fixture transient preference read failure"), { code: "EACCES" });
+			}
+			return open(path, ...args);
+		});
+		syncBuiltinESMExports();
+		await until(() => attention.status().error?.includes("Fixture transient"), "The real poll did not observe the read failure");
+		assert.equal(attention.status().enabled, false);
+		assert.equal(helper.children[0].child.stdin.writableEnded, true);
+		replacement.mock.restore();
+		syncBuiltinESMExports();
+		assert.deepEqual(revision(), before, "Recovery must not depend on a writer-created revision");
+		await until(() => attention.status().enabled && attention.status().error === null,
+			"Unchanged authoritative settings did not recover after the transient read failure");
+		assert.equal(attention.status().generation, 1);
+		assert.equal(helper.children.length, 1, "An acknowledged alert must not be re-armed by configuration recovery");
+		assert.equal(reports.length, 1);
+		assert.deepEqual(revision(), before);
+	} finally {
+		replacement?.mock.restore();
+		syncBuiltinESMExports();
+		attention.stop();
 	}
 }));
 

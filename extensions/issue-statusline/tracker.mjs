@@ -85,6 +85,7 @@ export function readState(sessionId, home = configHome()) {
 		...(typeof item.status === "string" && item.status ? { status: item.status } : {}),
 		...(Number.isFinite(item.checkedAt) ? { checkedAt: item.checkedAt } : {}),
 		...(Number.isFinite(item.closedAt) ? { closedAt: item.closedAt } : {}),
+		...(typeof item.stale === "boolean" ? { stale: item.stale } : {}),
 		...(item.simulated ? { simulated: true } : {}),
 		...(item.owned === true ? { owned: true } : {}),
 	}));
@@ -101,7 +102,15 @@ export function writeState(state, home = configHome()) {
 
 export function updateState(sessionId, update, home = configHome()) {
 	return withStateLock(statePath(sessionId, home), () => {
-		const state = update(readState(sessionId, home));
+		const previous = readState(sessionId, home);
+		const state = update(previous);
+		if (previous?.explicitRevisions || state.explicitRevisions) {
+			const revisions = { ...previous?.explicitRevisions };
+			for (const [url, revision] of Object.entries(state.explicitRevisions || {})) {
+				if (Number.isSafeInteger(revision) && revision >= 0) revisions[url] = Math.max(revisions[url] || 0, revision);
+			}
+			state.explicitRevisions = revisions;
+		}
 		atomicWriteJson(statePath(sessionId, home), state);
 		return state;
 	});
@@ -119,6 +128,7 @@ export class IssueTracker {
 			issues: (previous?.issues ?? []).filter((issue) => previous?.version !== 1 || issue.owned === true || issue.simulated)
 				.map((issue) => ({ ...issue, ...(previous?.version !== 1 ? { owned: true } : {}) })),
 			ignored: [...(previous?.ignored ?? [])],
+			...(previous?.explicitRevisions ? { explicitRevisions: { ...previous.explicitRevisions } } : {}),
 			updatedAt: previous?.updatedAt ?? Date.now(),
 			transcriptOffset: Number.isInteger(previous?.transcriptOffset) && previous.transcriptOffset >= 0
 				? previous.transcriptOffset
@@ -131,7 +141,12 @@ export class IssueTracker {
 
 	add(reference, explicit = false) {
 		const item = issueReference(reference);
-		if (explicit) this.state.ignored = this.state.ignored.filter((url) => url !== item.url);
+		if (explicit) {
+			this.state.ignored = this.state.ignored.filter((url) => url !== item.url);
+			this.state.explicitRevisions ??= {};
+			const revision = this.state.explicitRevisions[item.url];
+			this.state.explicitRevisions[item.url] = Number.isSafeInteger(revision) && revision >= 0 ? revision + 1 : 1;
+		}
 		if (!this.state.ignored.includes(item.url) && !this.state.issues.some((i) => i.url === item.url)) {
 			this.state.issues.push({ ...item, owned: true });
 		}
@@ -259,12 +274,13 @@ function inspectWorkspaceMetadata(tracker, sessionDir) {
 export function refreshTrackedIssueStatuses(tracker, {
 	home = configHome(),
 	now = Date.now(),
-	fetchIssueStatus = queryIssueStatusWithGh,
+	fetchIssueStatus,
 	issueCacheTtlMs,
 	force = false,
+	prefetched = false,
 	onError,
 } = {}) {
-	return refreshTrackedIssueStatusesImpl(tracker, { home, now, fetchIssueStatus, issueCacheTtlMs, force, onError });
+	return refreshTrackedIssueStatusesImpl(tracker, { home, now, fetchIssueStatus, issueCacheTtlMs, force, prefetched, onError });
 }
 
 export function syncSession(payload, {
@@ -303,7 +319,7 @@ export function syncSession(payload, {
 	const reset = hasTranscript && (!previous || migrate || !Number.isInteger(previous.transcriptOffset) || previous.transcriptOffset > stat.size);
 	const tracker = new IssueTracker(
 		sessionId,
-		reset && previous ? { issues: previous.issues, ignored: previous.ignored,
+		reset && previous ? { issues: previous.issues, ignored: previous.ignored, explicitRevisions: previous.explicitRevisions,
 			clearedAt: previous.clearedAt, clearedWorkspace: previous.clearedWorkspace,
 			...(previous.clearedAt ? { repository: previous.repository, host: previous.host, lastUserInputAt: previous.lastUserInputAt } : {}) } : previous,
 	);
@@ -336,8 +352,9 @@ export function syncSession(payload, {
 
 	const statusFetcher = typeof fetchIssueStatus === "function"
 		? fetchIssueStatus
-		: (fetchIssueStatus !== false && (hasTranscript || hasWorkspace) ? queryIssueStatusWithGh : null);
-	if (statusFetcher && refreshTrackedIssueStatuses(tracker, { home, now, fetchIssueStatus: statusFetcher, issueCacheTtlMs })) {
+		: undefined;
+	if (fetchIssueStatus !== false && (statusFetcher || hasTranscript || hasWorkspace) &&
+			refreshTrackedIssueStatuses(tracker, { home, now, fetchIssueStatus: statusFetcher, issueCacheTtlMs })) {
 		changed = true;
 	}
 
