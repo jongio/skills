@@ -136,6 +136,11 @@ wait on nested tool reads. Standalone issue controls use the same signal.
 Refresh requests current tracking as well as canonical plan/tasks; no periodic
 tracking or GitHub poller is added. Unsupported, denied, failed, or malformed
 reads preserve the last-known data with an unverified source label.
+This includes direct `session_progress refresh` and successful
+`session_statusline refresh`, even when an earlier invalidation was missed.
+Direct progress-refresh results retain cached references as unverified while
+the native list reads run; only successful canonical inventories may confirm
+current membership or an empty list.
 
 When tracking controls are unavailable, disclose that source limitation; do not
 claim an empty verified list. Primary may supply only explicitly owned current

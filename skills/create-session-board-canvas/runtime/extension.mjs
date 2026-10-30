@@ -52,6 +52,7 @@ if (lease) {
         if (input.toolArgs?.action === "list" && tracking?.isReading(delta.kind)) return;
         try {
           await ready;
+          if (delta.refreshAll) { refreshTracking(); return; }
           await service.syncTracking(delta);
           refreshTracking(delta.kind || "all");
         } catch (error) {
@@ -70,6 +71,11 @@ if (lease) {
           const errors = validate(progressInputSchema, input);
           if (errors.length) throw new Error(`Invalid progress input: ${errors.join("; ")}`);
           const result = await service.update(input, actorFor(invocation, session.sessionId));
+          if (input.action === "refresh") {
+            const pending = await service.syncTracking({ error: "Session tracking refresh pending" });
+            refreshTracking();
+            return JSON.stringify(pending);
+          }
           return JSON.stringify(result);
         } catch (error) {
           return { resultType: "failure", textResultForLlm: JSON.stringify({ error: String(error.message) }) };

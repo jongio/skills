@@ -122,7 +122,9 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
       import { join } from "node:path";
       import { setTimeout as delay } from "node:timers/promises";
       let configuration, observer, reads = 0;
-      let prs = [{ url: "https://github.com/fixture/repo/pull/1", owned: true }];
+      const ownedPr = { url: "https://github.com/fixture/repo/pull/1", owned: true };
+      const ownedIssue = { url: "https://github.com/fixture/repo/issues/9", owned: true };
+      let prs = [ownedPr], issues = [];
       const sessionId = process.env.SESSION_ID;
       const session = {
         sessionId, workspacePath: join(process.env.COPILOT_HOME, "session-state", sessionId),
@@ -133,10 +135,10 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
             rows: [{ id: "task", title: "Canonical task", status: "pending" }], dependencies: [],
           }) },
           tools: { execute: async ({ name, arguments: args }) => {
-            assert.ok(++reads <= 6, "recursive native tracking read");
+            assert.ok(++reads <= 10, "recursive native tracking read");
             assert.ok(["session_prs", "session_issues"].includes(name));
             assert.deepEqual(args, { action: "list" });
-            const result = { resultType: "success", textResultForLlm: JSON.stringify(name === "session_prs" ? prs : []) };
+            const result = { resultType: "success", textResultForLlm: JSON.stringify(name === "session_prs" ? prs : issues) };
             await configuration.hooks.onPostToolUse({ toolName: name, toolArgs: args, toolResult: result }, { sessionId });
             return result;
           } },
@@ -176,6 +178,25 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
       const final = await until((value) => reads === 4 && value.references.source.status === "verified");
       assert.deepEqual(final.references.prs, []);
       assert.equal(final.tasks[0].status, "pending");
+      await tool({ action: "goal", goalId: "current-goal", title: "Current goal", taskIds: ["task"] },
+        { sessionId, agentId: undefined });
+      const currentGoal = (await status()).goals;
+      await tool({ action: "references", prs: [ownedPr], issues: [ownedIssue] }, { sessionId, agentId: undefined });
+      prs = []; issues = [];
+      const pending = JSON.parse(await tool({ action: "refresh" }, { sessionId, agentId: undefined }));
+      assert.notEqual(pending.references.source.status, "verified", "Direct refresh cannot return stale ownership as verified");
+      assert.equal(pending.references.prs.length, 1, "Pending reads retain last-known history rather than inventing empty ownership");
+      await until((value) => reads === 6 && value.references.source.status === "verified"
+        && value.references.prs.length === 0 && value.references.issues.length === 0);
+      await tool({ action: "references", prs: [ownedPr], issues: [ownedIssue] }, { sessionId, agentId: undefined });
+      await configuration.hooks.onPostToolUse({ toolName: "session_statusline", toolArgs: { action: "refresh" },
+        toolResult: { resultType: "success",
+          textResultForLlm: "Refreshed this session's tracked statusline entries. Tracking and enabled components are unchanged." } }, { sessionId });
+      const refreshed = await until((value) => reads === 8 && value.references.source.status === "verified"
+        && value.references.prs.length === 0 && value.references.issues.length === 0);
+      assert.equal(refreshed.tasks[0].status, "pending");
+      assert.equal(refreshed.activeGoalId, "current-goal");
+      assert.deepEqual(refreshed.goals, currentGoal, "Membership refresh must not erase canonical goal history");
       console.log("native adapter boundaries passed");
       process.emit("SIGTERM");
     `], { encoding: "utf8", timeout: 15000, windowsHide: true, env: process.env });

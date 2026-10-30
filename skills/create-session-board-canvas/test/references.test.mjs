@@ -30,6 +30,19 @@ test("only explicit successful tracking controls produce ownership snapshots", (
   assert.ok(trackingResult({ ...input, toolResult: { textResultForLlm: '[{"url":"https://github.com/owner/repo/pull/42"}]' } }).error);
 });
 
+test("successful statusline tool refresh is an invalidation, never an empty ownership snapshot", () => {
+  const input = { toolName: "session_statusline", toolArgs: { action: "refresh" }, toolResult: {
+    resultType: "success", textResultForLlm: "Refreshed this session's tracked statusline entries. Tracking and enabled components are unchanged.",
+  } };
+  assert.deepEqual(trackingResult(input), { refreshAll: true });
+  assert.deepEqual(trackingResult({ ...input, toolResult: {
+    resultType: "success", textResultForLlm: "Session statusline refresh incomplete:\nRemote status unavailable",
+  } }), { refreshAll: true });
+  assert.equal(trackingResult({ ...input, toolResult: { resultType: "failure" } }), null);
+  assert.ok(trackingResult({ ...input, toolResult: { resultType: "success", textResultForLlm: "" } }).error);
+  assert.equal(trackingResult({ ...input, toolName: "session_prs" }), null);
+});
+
 test("session control snapshots mirror targets and clear without enrolling work", async () => {
   const { service } = await fixture();
   await service.syncTracking({ kind: "prs", values: [{ url: "https://github.com/owner/repo/pull/42", owned: true }] });

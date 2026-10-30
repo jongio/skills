@@ -93,13 +93,19 @@ export function updateCi(references, input) {
 
 export function trackingResult(input) {
   const match = String(input.toolName || "").match(/^session_(prs|issues|statusline)$/);
-  if (!match || !["list", "add", "remove", "clear"].includes(input.toolArgs?.action)) return null;
-  if (input.toolResult?.resultType && input.toolResult.resultType !== "success") return null;
+  if (!match) return null;
   const kind = match[1];
+  const action = input.toolArgs?.action;
+  if (!(kind === "statusline" ? ["clear", "refresh"] : ["list", "add", "remove", "clear"]).includes(action)) return null;
+  if (input.toolResult?.resultType && input.toolResult.resultType !== "success") return null;
   const raw = typeof input.toolResult === "string" ? input.toolResult : input.toolResult?.textResultForLlm;
   try {
     if (kind === "statusline") {
-      if (input.toolArgs.action !== "clear") return null;
+      if (action === "refresh") {
+        if (!String(raw).startsWith("Refreshed this session's tracked statusline entries.") &&
+            !String(raw).startsWith("Session statusline refresh incomplete:")) throw new Error("Refresh completion was not verified");
+        return { refreshAll: true };
+      }
       if (!String(raw).startsWith("Cleared this session's PR, issue, subagent, and worktree entries.")) throw new Error("Clear completion was not verified");
       return { clearAll: true };
     }
