@@ -52,9 +52,10 @@ if (lease) {
         if (input.toolArgs?.action === "list" && tracking?.isReading(delta.kind)) return;
         try {
           await ready;
-          if (delta.refreshAll) { refreshTracking(); return; }
-          await service.syncTracking(delta);
-          refreshTracking(delta.kind || "all");
+          if (delta.refreshAll) { await refreshTracking(); return; }
+          const snapshot = service.syncTracking(delta);
+          const pending = refreshTracking(delta.kind || "all");
+          await Promise.all([snapshot, pending]);
         } catch (error) {
           await session.log(`Session board tracking sync unavailable: ${String(error.message).slice(0, 300)}`).catch(() => {});
         }
@@ -72,8 +73,7 @@ if (lease) {
           if (errors.length) throw new Error(`Invalid progress input: ${errors.join("; ")}`);
           const result = await service.update(input, actorFor(invocation, session.sessionId));
           if (input.action === "refresh") {
-            const pending = await service.syncTracking({ error: "Session tracking refresh pending" });
-            refreshTracking();
+            const pending = await refreshTracking();
             return JSON.stringify(pending);
           }
           return JSON.stringify(result);
@@ -86,9 +86,11 @@ if (lease) {
   let stopped = false;
   let refreshTimer;
   function refreshTracking(kind = "all") {
-    // A native tool hook must return before requesting another native tool.
+    // Native callbacks wait only for the local barrier, never for a nested tool to finish.
+    const pending = service.syncTracking({ ...(kind === "all" ? {} : { kind }), error: "Session tracking refresh pending" });
     void tracking.refresh(kind).catch((error) =>
       session.log(`Session board tracking sync unavailable: ${String(error.message).slice(0, 300)}`).catch(() => {}));
+    return pending;
   }
   const handle = (event) => {
     if (stopped) return;

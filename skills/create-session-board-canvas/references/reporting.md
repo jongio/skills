@@ -141,6 +141,10 @@ This includes direct `session_progress refresh` and successful
 Direct progress-refresh results retain cached references as unverified while
 the native list reads run; only successful canonical inventories may confirm
 current membership or an empty list.
+Every refresh surface commits that unverified ownership barrier before it
+returns, without waiting on nested native tools. CI updates for a PR whose
+ownership read is pending are rejected. A superseded in-flight inventory
+cannot temporarily restore known ownership before the fresh read completes.
 
 When tracking controls are unavailable, disclose that source limitation; do not
 claim an empty verified list. Primary may supply only explicitly owned current

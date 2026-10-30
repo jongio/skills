@@ -140,6 +140,7 @@ export function createTrackingSync(session, service) {
             const toolName = `session_${component}`;
             const toolArgs = { action: "list" };
             const toolResult = await session.rpc.tools.execute({ name: toolName, arguments: toolArgs });
+            if (pending.has(component)) continue;
             const delta = trackingResult({ toolName, toolArgs, toolResult });
             if (!delta) throw new Error("Session tracking read was not successful");
             await service.syncTracking(delta);

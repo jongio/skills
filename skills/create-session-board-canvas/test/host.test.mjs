@@ -121,8 +121,8 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
       import { registerHooks } from "node:module";
       import { join } from "node:path";
       import { setTimeout as delay } from "node:timers/promises";
-      let configuration, observer, reads = 0;
-      const ownedPr = { url: "https://github.com/fixture/repo/pull/1", owned: true };
+      let configuration, observer, reads = 0, readBarrier = null, releaseRead;
+      const ownedPr = { url: "https://github.com/fixture/repo/pull/1", owned: true, headRefOid: "a".repeat(40) };
       const ownedIssue = { url: "https://github.com/fixture/repo/issues/9", owned: true };
       let prs = [ownedPr], issues = [];
       const sessionId = process.env.SESSION_ID;
@@ -135,9 +135,10 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
             rows: [{ id: "task", title: "Canonical task", status: "pending" }], dependencies: [],
           }) },
           tools: { execute: async ({ name, arguments: args }) => {
-            assert.ok(++reads <= 10, "recursive native tracking read");
+            assert.ok(++reads <= 14, "recursive native tracking read");
             assert.ok(["session_prs", "session_issues"].includes(name));
             assert.deepEqual(args, { action: "list" });
+            if (readBarrier) await readBarrier;
             const result = { resultType: "success", textResultForLlm: JSON.stringify(name === "session_prs" ? prs : issues) };
             await configuration.hooks.onPostToolUse({ toolName: name, toolArgs: args, toolResult: result }, { sessionId });
             return result;
@@ -197,6 +198,31 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
       assert.equal(refreshed.tasks[0].status, "pending");
       assert.equal(refreshed.activeGoalId, "current-goal");
       assert.deepEqual(refreshed.goals, currentGoal, "Membership refresh must not erase canonical goal history");
+      for (const surface of ["canvas", "statusline"]) {
+        await tool({ action: "references", prs: [ownedPr], issues: [ownedIssue] }, { sessionId, agentId: undefined });
+        readBarrier = new Promise((resolve) => { releaseRead = resolve; });
+        if (surface === "canvas") {
+          const refreshing = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ actionName: "refresh", input: {} }), signal: AbortSignal.timeout(5000) });
+          assert.equal(refreshing.status, 200);
+          await refreshing.json();
+        } else {
+          await configuration.hooks.onPostToolUse({ toolName: "session_statusline", toolArgs: { action: "refresh" },
+            toolResult: { resultType: "success",
+              textResultForLlm: "Refreshed this session's tracked statusline entries. Tracking and enabled components are unchanged." } }, { sessionId });
+        }
+        const uncertain = await status();
+        const ci = await tool({ action: "ci", reference: "fixture/repo#1", headRefOid: ownedPr.headRefOid,
+          status: "passed", passed: 1, total: 1, observedAt: new Date().toISOString() }, { sessionId, agentId: undefined });
+        assert.equal(ci.resultType, "failure", surface + " must reject CI while canonical membership is pending");
+        assert.match(ci.textResultForLlm, /ownership.*not verified/i);
+        assert.equal(uncertain.references.source.known.prs, false);
+        assert.equal(uncertain.references.prs.length, 1, "Uncertainty must retain last-known history");
+        releaseRead(); readBarrier = null;
+        const expectedReads = surface === "canvas" ? 10 : 12;
+        await until((value) => reads === expectedReads && value.references.source.status === "verified"
+          && value.references.prs.length === 0 && value.references.issues.length === 0);
+      }
       console.log("native adapter boundaries passed");
       process.emit("SIGTERM");
     `], { encoding: "utf8", timeout: 15000, windowsHide: true, env: process.env });

@@ -9,12 +9,13 @@ const headA = "a".repeat(40);
 const headB = "b".repeat(40);
 const pr = { reference: "owner/repo#42", owned: true, state: "OPEN", headRefOid: headA, title: "Current PR" };
 const observedAt = "2026-10-27T18:00:00.000Z";
-async function fixture() {
+async function fixture(onChange) {
   let saved;
   const options = {
     sessionId: "references-test",
     store: { load: async () => saved, save: async (value) => { saved = structuredClone(value); } },
     readSources: async () => ({ plan: { exists: false }, rows: [], dependencies: [] }),
+    onChange,
   };
   const service = await createProgressService(options);
   return { service, resume: () => createProgressService(options) };
@@ -149,7 +150,8 @@ test("tracking invalidations reread canonical controls instead of trusting notif
 });
 
 test("changes during an in-flight tracking read coalesce into a fresh follow-up snapshot", async () => {
-  const { service } = await fixture();
+  const snapshots = [];
+  const { service } = await fixture((state) => snapshots.push(state.references));
   let release, started;
   const gate = new Promise((resolve) => { release = resolve; });
   const beginning = new Promise((resolve) => { started = resolve; });
@@ -169,6 +171,8 @@ test("changes during an in-flight tracking read coalesce into a fresh follow-up 
   assert.equal(reads, 3);
   assert.deepEqual(service.snapshot().references.prs, []);
   assert.equal(service.snapshot().references.source.status, "verified");
+  assert.equal(snapshots.some((entry) => entry.source.known.prs && entry.prs.length), false,
+    "A superseded read must not temporarily re-verify removed ownership");
 });
 
 test("unsupported, denied, failed, and malformed native reads keep ownership unverified", async () => {
