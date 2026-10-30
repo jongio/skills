@@ -968,7 +968,8 @@ test("body review 5707347169: malformed session data cannot silently reset retry
   JSON.stringify({ ...valid, entries: { 1: { watchState: { nextPollAtMs: "unverified" } } } }),
   JSON.stringify({ ...valid, nextPrByWatchlist: [] }),
   JSON.stringify({ ...valid, nextPrByWatchlist: { unverified: 1 } }),
-  JSON.stringify({ ...valid, nextPrByWatchlist: { ["a".repeat(64)]: -1 } })]) {
+  JSON.stringify({ ...valid, nextPrByWatchlist: { ["a".repeat(64)]: -1 } }),
+  JSON.stringify({ ...valid, entries: { 1: { watchState: {}, lastStatusScope: [] } } })]) {
     writeFileSync(file, text);
     assert.throws(() => loadPersistedPrSession("fixture/repo", dir), /Invalid PR watch state/);
     assert.throws(() => savePersistedPrSession("fixture/repo", {}, dir), /Invalid PR watch state/);
@@ -1507,6 +1508,177 @@ for (const surface of ["single-pr", "multi-pr"]) {
     });
   }
 }
+
+for (const surface of ["single-pr", "multi-pr"]) {
+  for (const [boundary, outcome] of [["graphql", "quota"], ["workflow", "quota"], ["graphql", "success"]]) {
+    test(`review 5708899427: ${surface} refresh during ${boundary} ${outcome} cannot rebind cached metadata`, async (t) => {
+      const dir = fixture(t);
+      const time = clock(t);
+      const output = capture(t);
+      let scope = "first", refresh = false;
+      const adapter = fixtureRequest((args) => {
+        const node = prNode();
+        node.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].name = `${scope}-account-only-check`;
+        return args[1] === "graphql" ? graph(node) : json({ workflow_runs: [], total_count: 0 });
+      });
+      const request = async (input, options) => {
+        if (refresh && (boundary === "graphql" ? input.kind === "graphql" : input.endpoint?.includes("/actions/runs"))) {
+          scope = "second";
+          if (outcome === "quota") {
+            return { ok: false, status: 429, rateLimited: true, cacheScope: scope,
+              headers: { "retry-after": "900" }, error: "quota after credential refresh" };
+          }
+        }
+        return { ...await adapter(input, options), cacheScope: scope };
+      };
+      request.cacheScope = async () => scope;
+      const argv = ["watch", "--repo", "fixture/repo", "--interval", "10", "--max-wait-sec", "1",
+        ...(surface === "single-pr" ? ["--pr", "1", "--head", "head"] : ["--prs", "1:head,2:head"])];
+      const services = { execFn: request, stateDir: dir, sleep: time.sleep };
+      await nativeRunPr(argv, services);
+      assert.match(JSON.stringify(output), /first-account-only-check/);
+      const saved = loadPersistedPrSession("fixture/repo", dir);
+      saved.entries[1].watchState.copilotErrorRetriesByHead.head = 2;
+      saved.entries[1].watchState.retriedCopilotReviewIds = [99];
+      savePersistedPrSession("fixture/repo", saved, dir);
+      time.advance(11000);
+      refresh = true;
+      const until = time.now + 900000;
+      const start = output.length;
+      await nativeRunPr(argv, services);
+      assert.doesNotMatch(JSON.stringify(output.slice(start)), /first-account-only-check/);
+      const after = loadPersistedPrSession("fixture/repo", dir);
+      if (outcome === "quota") {
+        assert.equal(after.cooldownUntilMs, until, "the new identity's observed quota remains authoritative");
+        refresh = false;
+        time.advance(900000);
+        const resumedAt = output.length;
+        await nativeRunPr(argv, services);
+        assert.match(JSON.stringify(output.slice(resumedAt)), /second-account-only-check/);
+        assert.doesNotMatch(JSON.stringify(output.slice(resumedAt)), /first-account-only-check/);
+        assert.equal(loadPersistedPrSession("fixture/repo", dir).cooldownUntilMs, null);
+      } else {
+        assert.match(JSON.stringify(output.slice(start)), /second-account-only-check/);
+        assert.ok(after.entries[1].watchState.nextPollAtMs > time.now,
+          "a coherent refreshed observation retains its ordinary polling interval");
+      }
+      assert.equal(after.entries[1].watchState.copilotErrorRetriesByHead.head, 2);
+      assert.deepEqual(after.entries[1].watchState.retriedCopilotReviewIds, [99]);
+    });
+  }
+}
+
+test("review 5708899427: a later PR refresh cannot release an earlier identity's readiness", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const output = capture(t);
+  let scope = "first", refresh = false;
+  const adapter = fixtureRequest((args) =>
+    args[1] === "graphql" ? graph(prNode({ checks: "COMPLETED" })) : json({ workflow_runs: [], total_count: 0 }));
+  const request = async (input, options) => {
+    if (refresh && input.kind === "graphql" && input.variables.pr === 2) {
+      scope = "second";
+      return { ok: false, status: 429, rateLimited: true, cacheScope: scope,
+        headers: { "retry-after": "900" }, error: "quota after credential refresh" };
+    }
+    return { ...await adapter(input, options), cacheScope: scope };
+  };
+  request.cacheScope = async () => scope;
+  const argv = ["watch", "--repo", "fixture/repo", "--prs", "1:head,2:head",
+    "--no-copilot", "--interval", "10", "--max-wait-sec", "1"];
+  const services = { execFn: request, stateDir: dir, sleep: time.sleep };
+  await nativeRunPr(argv, services);
+  assert.ok(output.flatMap((row) => row.events || []).some((event) => event.type === "PR_READY_TO_MERGE"));
+  time.advance(61000);
+  refresh = true;
+  const start = output.length;
+  await nativeRunPr(argv, services);
+  const changed = output.slice(start);
+  assert.equal(scope, "second", "the later member must actually observe the refreshed identity");
+  assert.equal(changed.flatMap((row) => row.events || []).some((event) => event.type === "PR_READY_TO_MERGE"), false);
+  assert.equal(changed.flatMap((row) => row.statuses || []).length, 0,
+    "no earlier identity's retained status survives the rate-limited refresh");
+});
+
+for (const surface of ["single-pr", "multi-pr"]) {
+  test(`review 5708899427: ${surface} legacy status without an identity receipt is not rebound`, async (t) => {
+    const dir = fixture(t);
+    const time = clock(t);
+    const output = capture(t);
+    let scope = "first", calls = 0;
+    const adapter = fixtureRequest((args) => {
+      const node = prNode();
+      node.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].name = `${scope}-account-only-check`;
+      return args[1] === "graphql" ? graph(node) : json({ workflow_runs: [], total_count: 0 });
+    });
+    const request = async (input, options) => {
+      calls += 1;
+      return { ...await adapter(input, options), cacheScope: scope };
+    };
+    request.cacheScope = async () => scope;
+    const argv = ["watch", "--repo", "fixture/repo", "--interval", "10", "--max-wait-sec", "1",
+      ...(surface === "single-pr" ? ["--pr", "1", "--head", "head"] : ["--prs", "1:head,2:head"])];
+    const services = { execFn: request, stateDir: dir, sleep: time.sleep };
+    await nativeRunPr(argv, services);
+    assert.match(JSON.stringify(output), /first-account-only-check/);
+    const file = path.join(dir, readdirSync(dir).find((name) => name.endsWith(".json")));
+    const legacy = JSON.parse(readFileSync(file, "utf8"));
+    const until = time.now + 900000;
+    legacy.cooldownUntilMs = until;
+    for (const entry of Object.values(legacy.entries)) {
+      entry.watchState.cacheScope = "second";
+      entry.watchState.cooldownUntilMs = until;
+      delete entry.lastStatusScope;
+    }
+    legacy.entries[1].watchState.copilotErrorRetriesByHead.head = 2;
+    writeFileSync(file, JSON.stringify(legacy));
+    scope = "second";
+    const start = output.length;
+    const before = calls;
+    await nativeRunPr(argv, services);
+    assert.doesNotMatch(JSON.stringify(output.slice(start)), /first-account-only-check/);
+    assert.equal(calls, before, "legacy invalidation cannot bypass observed quota");
+    const after = loadPersistedPrSession("fixture/repo", dir);
+    assert.equal(after.cooldownUntilMs, until);
+    assert.equal(after.entries[1].watchState.copilotErrorRetriesByHead.head, 2);
+  });
+}
+
+test("review 5708899427: CI refresh during a quota response cannot restore the old workflow", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const output = capture(t);
+  let scope = "first", refresh = false;
+  const adapter = fixtureRequest((args) => {
+    const endpoint = args[2];
+    if (endpoint.includes("/commits/")) return json({ sha: "head" });
+    if (endpoint.includes("/jobs")) return json({ total_count: 1, jobs: [{
+      id: 1, name: `${scope}-account-only-job`, status: "in_progress",
+    }] });
+    return json({ workflow_runs: [{
+      id: 1, workflow_id: 1, name: `${scope}-account-only-workflow`, event: "push",
+      head_branch: "main", head_sha: "head", status: "in_progress",
+    }] });
+  });
+  const request = async (input, options) => {
+    if (refresh && input.endpoint?.includes("/actions/runs")) {
+      scope = "second";
+      return { ok: false, status: 429, rateLimited: true, cacheScope: scope,
+        headers: { "retry-after": "900" }, error: "quota after credential refresh" };
+    }
+    return { ...await adapter(input, options), cacheScope: scope };
+  };
+  request.cacheScope = async () => scope;
+  const argv = ["watch", "--repo", "fixture/repo", "--config-file", path.join(dir, "config.json"),
+    "--max-wait-sec", "1", "--active-interval", "1", "--idle-interval", "1"];
+  await nativeRunCi(argv, { execFn: request, sleep: time.sleep });
+  assert.match(JSON.stringify(output), /first-account-only/);
+  time.advance(61000);
+  refresh = true;
+  const start = output.length;
+  await nativeRunCi(argv, { execFn: request, sleep: time.sleep });
+  assert.doesNotMatch(JSON.stringify(output.slice(start)), /first-account-only/);
+});
 
 for (const boundary of ["before-request", "during-request"]) {
   test(`review 5708185900: observed ${boundary} credential change cannot carry an old snapshot into error or quota output`, async (t) => {

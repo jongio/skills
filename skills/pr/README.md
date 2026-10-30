@@ -163,6 +163,8 @@ An active cooldown prevents API calls even in a newly launched chunk.
 Cached status is reused only after verifying the current credential identity.
 Changed or unavailable identities discard cached observations, not retry budgets
 or an unexpired shared cooldown.
+Legacy observations without their own identity receipt are also unverified until
+a fresh observation is available; a newer request scope cannot relabel old status.
 An interrupted reviewer request still consumes its persisted retry attempt,
 preventing uncertain submission outcomes from bypassing the retry limit.
 Running watchers also reload the shared deadline before each poll, so another

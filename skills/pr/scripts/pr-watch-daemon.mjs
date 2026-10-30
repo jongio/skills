@@ -447,6 +447,9 @@ function readPrSession(filePath, host) {
           !entry.watchState || typeof entry.watchState !== "object" || Array.isArray(entry.watchState)) {
         throw new Error("Invalid watch state entry");
       }
+      if (entry.lastStatusScope !== undefined && typeof entry.lastStatusScope !== "string") {
+        throw new Error("Invalid cached status identity");
+      }
       if (!validDeadline(entry.watchState.cooldownUntilMs)) throw new Error("Invalid watch cooldown");
       if (!validDeadline(entry.watchState.nextPollAtMs)) throw new Error("Invalid next poll time");
       const retries = entry?.watchState?.copilotErrorRetriesByHead;
@@ -515,6 +518,7 @@ export function loadPersistedPrSession(repo, stateDir = PR_WATCH_DIR, host = git
           watchState: ws,
           lastPhase: typeof entry.lastPhase === "string" ? entry.lastPhase : "",
           lastStatus: entry.lastStatus || null,
+          ...(typeof entry.lastStatusScope === "string" ? { lastStatusScope: entry.lastStatusScope } : {}),
           hasExplicitSinceCommentId: Boolean(entry.hasExplicitSinceCommentId),
           sinceCommentId: Number.isSafeInteger(entry.sinceCommentId) ? entry.sinceCommentId : 0,
         };
@@ -615,6 +619,14 @@ function chunkExec(execFn, deadlineMs) {
   return request;
 }
 
+function resetPrObservations(state, scope) {
+  state.etags = {};
+  state.cacheScope = scope;
+  state.nextPollAtMs = null;
+  state.consecutiveUnchangedPolls = 0;
+  state.metrics = createPrWatchState().metrics;
+}
+
 async function verifyCachedPrStatuses(entries, execFn, args) {
   const cached = entries.filter(Boolean);
   if (!cached.some((entry) => entry.lastStatus || entry.lastPhase ||
@@ -628,14 +640,11 @@ async function verifyCachedPrStatuses(entries, execFn, args) {
   }
   if (typeof scope !== "string") scope = "";
   for (const entry of cached) {
-    if (scope && entry.watchState.cacheScope === scope) continue;
-    const state = entry.watchState;
-    state.etags = {};
-    state.cacheScope = scope;
-    state.nextPollAtMs = null;
-    state.consecutiveUnchangedPolls = 0;
-    state.metrics = createPrWatchState().metrics;
+    if (scope && entry.watchState.cacheScope === scope &&
+        (!(entry.lastStatus || entry.lastPhase) || entry.lastStatusScope === scope)) continue;
+    resetPrObservations(entry.watchState, scope);
     entry.lastStatus = null;
+    entry.lastStatusScope = "";
     entry.lastPhase = "";
   }
 }
@@ -1201,9 +1210,14 @@ async function evaluatePrPollTickInner(args, execFn, state) {
 
   const gqlRes = await execFn({ kind: "graphql", query, variables: { owner, name, pr: args.pr } });
   const parsedGqlHttp = httpDetails(gqlRes);
-  if (state && gqlRes?.cacheScope && state.cacheScope !== gqlRes.cacheScope) {
-    state.etags = {};
-    state.cacheScope = gqlRes.cacheScope;
+  if (state && typeof gqlRes?.cacheScope === "string" && state.cacheScope !== gqlRes.cacheScope) {
+    if (state.cacheScope) {
+      resetPrObservations(state, gqlRes.cacheScope);
+      state.metrics.apiCalls = 1;
+    } else {
+      state.etags = {};
+      state.cacheScope = gqlRes.cacheScope;
+    }
   }
   if (state?.metrics) {
     if (parsedGqlHttp.rateLimitRemaining !== null) {
@@ -1433,15 +1447,17 @@ async function evaluatePrPollTickInner(args, execFn, state) {
     state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
   }
   const runsRes = await execFn(runsRequest);
-  if (runsRes?.ok && gqlRes?.cacheScope && runsRes.cacheScope && runsRes.cacheScope !== gqlRes.cacheScope) {
-    if (state) {
-      state.etags = {};
-      state.cacheScope = runsRes.cacheScope;
-    }
+  const parsedRunsHttp = httpDetails(runsRes);
+  const credentialChanged = typeof gqlRes?.cacheScope === "string" &&
+    typeof runsRes?.cacheScope === "string" && runsRes.cacheScope !== gqlRes.cacheScope;
+  if (credentialChanged && state) {
+    resetPrObservations(state, runsRes.cacheScope);
+    state.metrics.apiCalls = 1;
+  }
+  if (credentialChanged && (runsRes.ok || parsedRunsHttp.status === 304)) {
     const error = "GitHub credentials changed during the poll; retry the pinned head";
     return { events: [{ type: "POLL_ERROR", error }], error };
   }
-  const parsedRunsHttp = httpDetails(runsRes);
   if (state?.metrics) {
     if (parsedRunsHttp.rateLimitRemaining !== null) {
       state.metrics.rateLimitRemaining = parsedRunsHttp.rateLimitRemaining;
@@ -2061,7 +2077,29 @@ export async function evaluateMultiPrPollTick(args, execFn = defaultRequest, mul
       hasExplicitSinceCommentId: entry.hasExplicitSinceCommentId,
       sinceCommentId: entry.sinceCommentId,
     };
+    const previousScope = entry.watchState.cacheScope;
     const tick = await evaluatePrPollTick(prArgs, execFn, entry.watchState);
+    const currentScope = entry.watchState.cacheScope;
+    if (previousScope !== currentScope) {
+      entry.lastStatus = null;
+      entry.lastStatusScope = "";
+      entry.lastPhase = "";
+      const invalidated = new Set([prNumber]);
+      for (const [otherPr, otherEntry] of Object.entries(multiState)) {
+        if (otherEntry === entry || otherEntry.watchState.cacheScope === currentScope) continue;
+        resetPrObservations(otherEntry.watchState, currentScope);
+        otherEntry.lastStatus = null;
+        otherEntry.lastStatusScope = "";
+        otherEntry.lastPhase = "";
+        invalidated.add(Number(otherPr));
+      }
+      for (let i = statuses.length - 1; i >= 0; i--) {
+        if (invalidated.has(statuses[i].pr)) statuses.splice(i, 1);
+      }
+      for (let i = allEvents.length - 1; i >= 0; i--) {
+        if (invalidated.has(allEvents[i].pr)) allEvents.splice(i, 1);
+      }
+    }
     nextPr = targetPrs[(targetPrs.indexOf(prNumber) + 1) % targetPrs.length];
     if (tick.chunkTimedOut) {
       if (completedThisTick > 0) nextPr = prNumber;
@@ -2076,6 +2114,7 @@ export async function evaluateMultiPrPollTick(args, execFn = defaultRequest, mul
     }
     if (tick.status) {
       entry.lastStatus = tick.status;
+      if (!tick.pollDeferred) entry.lastStatusScope = entry.watchState.cacheScope || "";
       entry.lastPhase = tick.status.phase || entry.lastPhase;
       if (
         !entry.hasExplicitSinceCommentId &&
@@ -2223,6 +2262,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
           watchState: savedEntry.watchState,
           lastPhase: savedEntry.lastPhase || "",
           lastStatus: savedEntry.lastStatus || null,
+          lastStatusScope: savedEntry.lastStatusScope || "",
           hasExplicitSinceCommentId: hasOverride ? true : savedEntry.hasExplicitSinceCommentId,
           sinceCommentId: hasOverride ? overrideId : savedEntry.sinceCommentId,
         };
@@ -2238,13 +2278,6 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
     while (true) {
       polls += 1;
       await verifyCachedPrStatuses(Object.values(multiState), execFn, args);
-      for (const [pr, entry] of Object.entries(multiState)) {
-        if (!entry.lastStatus) {
-          statusByPr.delete(Number(pr));
-          lastSummaryByPr.delete(Number(pr));
-        }
-      }
-      lastStatuses = [...statusByPr.values()];
       const sharedCooldown = refreshSharedCooldown(Object.values(multiState).map((entry) => entry.watchState));
       if (sharedCooldown) persistedSession.cooldownUntilMs = Math.max(persistedSession.cooldownUntilMs || 0, sharedCooldown);
       const multi = await evaluateMultiPrPollTick(
@@ -2257,6 +2290,13 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
         execFn,
         multiState
       );
+      for (const [pr, entry] of Object.entries(multiState)) {
+        if (!entry.lastStatus) {
+          statusByPr.delete(Number(pr));
+          lastSummaryByPr.delete(Number(pr));
+        }
+      }
+      lastStatuses = [...statusByPr.values()];
       emit(multi);
       args.nextPr = multi.nextPr;
       if (multi.statuses && multi.statuses.length > 0) {
@@ -2411,6 +2451,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
   let baselinePhase = args.lastPhase || savedPrEntry?.lastPhase || "";
   let lastSummary = "";
   let lastStatus = savedPrEntry?.lastStatus || null;
+  let lastStatusScope = savedPrEntry?.lastStatusScope || "";
   let lastEmitMs = 0;
   const explicitSinglePrCommentId = args.prSinceCommentIds?.[args.pr];
   let hasCommentBaseline =
@@ -2426,11 +2467,13 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
   let polls = 0;
   while (true) {
     polls += 1;
-    const cachedEntry = { watchState, lastStatus, lastPhase: baselinePhase };
+    const cachedEntry = { watchState, lastStatus, lastStatusScope, lastPhase: baselinePhase };
     await verifyCachedPrStatuses([cachedEntry], execFn, args);
     lastStatus = cachedEntry.lastStatus;
+    lastStatusScope = cachedEntry.lastStatusScope;
     baselinePhase = cachedEntry.lastPhase;
     refreshSharedCooldown([watchState]);
+    const previousScope = watchState.cacheScope;
     const tick = await evaluatePrPollTick(
       {
         ...args,
@@ -2442,9 +2485,16 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
       execFn,
       watchState
     );
+    if (previousScope !== watchState.cacheScope) {
+      lastStatus = null;
+      lastStatusScope = "";
+      baselinePhase = "";
+      lastSummary = "";
+    }
     emit(tick);
     if (tick.status) {
       lastStatus = tick.status;
+      if (!tick.pollDeferred) lastStatusScope = watchState.cacheScope || "";
     }
     if (tick.rateLimited) {
       saveSession({
@@ -2454,6 +2504,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
             watchState,
             lastPhase: baselinePhase,
             lastStatus,
+            lastStatusScope,
             hasExplicitSinceCommentId: hasCommentBaseline,
             sinceCommentId: baselineCommentId,
           },
@@ -2524,6 +2575,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
             watchState,
             lastPhase: baselinePhase,
             lastStatus,
+            lastStatusScope,
             hasExplicitSinceCommentId: hasCommentBaseline,
             sinceCommentId: baselineCommentId,
           },
@@ -2539,6 +2591,7 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
           watchState,
           lastPhase: baselinePhase,
           lastStatus,
+          lastStatusScope,
           hasExplicitSinceCommentId: hasCommentBaseline,
           sinceCommentId: baselineCommentId,
         },
