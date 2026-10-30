@@ -175,6 +175,73 @@ test("changes during an in-flight tracking read coalesce into a fresh follow-up 
     "A superseded read must not temporarily re-verify removed ownership");
 });
 
+for (const mode of ["queued", "saving"]) {
+  test(`a ${mode} inventory cannot publish new verified ownership after a later invalidation`, async () => {
+    let releaseSave, enteredSave, releaseFresh, enteredFresh, inventoryQueued;
+    const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+    const saveStarted = new Promise((resolve) => { enteredSave = resolve; });
+    const freshGate = new Promise((resolve) => { releaseFresh = resolve; });
+    const freshStarted = new Promise((resolve) => { enteredFresh = resolve; });
+    const queued = new Promise((resolve) => { inventoryQueued = resolve; });
+    let blockSave = false, observe = false, tick = 0, calls = 0;
+    const publications = [];
+    const service = await createProgressService({
+      sessionId: `serialized-${mode}`,
+      store: { load: async () => null, save: async () => {
+        if (blockSave) { blockSave = false; enteredSave(); await saveGate; }
+      } },
+      readSources: async () => ({ plan: {}, rows: [], dependencies: [] }),
+      clock: () => new Date(Date.UTC(2026, 9, 30) + ++tick).toISOString(),
+      onChange: (state) => { if (observe) publications.push(state.references); },
+    });
+    await service.update({ action: "references", prs: [pr], issues: [] }, primary);
+    const seededAt = service.snapshot().references.source.updatedAt;
+    const syncTracking = service.syncTracking.bind(service);
+    service.syncTracking = (delta, ...args) => {
+      const result = syncTracking(delta, ...args);
+      if (delta.kind === "prs" && !delta.error) inventoryQueued();
+      return result;
+    };
+    const sync = createTrackingSync({ rpc: { tools: { execute: async () => {
+      if (++calls === 1) return JSON.stringify([pr]);
+      enteredFresh();
+      await freshGate;
+      return "[]";
+    } } } }, service);
+    let blocker, old, fresh;
+    try {
+      blockSave = true;
+      if (mode === "queued") {
+        blocker = service.update({ action: "phase", phase: "testing", status: "running" }, primary);
+        await saveStarted;
+      }
+      old = sync.refresh("prs");
+      await (mode === "queued" ? queued : saveStarted);
+      observe = true;
+      const invalidated = service.syncTracking({ kind: "prs", error: "Session tracking refresh pending" });
+      fresh = sync.refresh("prs");
+      const ci = service.update({ action: "ci", reference: pr.reference, headRefOid: headA,
+        status: "passed", passed: 1, total: 1, observedAt }, primary)
+        .then(() => ({ accepted: true }), (error) => ({ accepted: false, error: error.message }));
+      releaseSave();
+      await invalidated;
+      await freshStarted;
+      assert.equal(service.snapshot().references.source.known.prs, false);
+      assert.deepEqual(await ci, { accepted: false, error: "PR ownership is not verified; sync session tracking before CI" });
+      assert.equal(publications.some((entry) => entry.source.known.prs && entry.prs.length
+        && entry.source.updatedAt !== seededAt), false,
+      `${mode} stale inventory published a new verified confirmation after invalidation`);
+      releaseFresh();
+      await Promise.all([old, fresh]);
+      assert.deepEqual(service.snapshot().references.prs, []);
+      assert.equal(service.snapshot().references.source.known.prs, true);
+    } finally {
+      releaseSave(); releaseFresh();
+      await Promise.allSettled([blocker, old, fresh].filter(Boolean));
+    }
+  });
+}
+
 test("unsupported, denied, failed, and malformed native reads keep ownership unverified", async () => {
   for (const result of [null, { resultType: "denied" }, { resultType: "failure" }, '[{"owned":true}]']) {
     const { service } = await fixture();

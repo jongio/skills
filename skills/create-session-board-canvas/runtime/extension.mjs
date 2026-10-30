@@ -53,7 +53,7 @@ if (lease) {
         try {
           await ready;
           if (delta.refreshAll) { await refreshTracking(); return; }
-          const snapshot = service.syncTracking(delta);
+          const snapshot = service.syncTracking(delta, tracking.current(delta.kind || "all"));
           const pending = refreshTracking(delta.kind || "all");
           await Promise.all([snapshot, pending]);
         } catch (error) {

@@ -145,6 +145,10 @@ Every refresh surface commits that unverified ownership barrier before it
 returns, without waiting on nested native tools. CI updates for a PR whose
 ownership read is pending are rejected. A superseded in-flight inventory
 cannot temporarily restore known ownership before the fresh read completes.
+Read generations are checked inside the serial commit queue and again after
+persistence, before live state or publication changes. An older response that
+was already queued or saving cannot publish a new verified confirmation after
+a later refresh supersedes it.
 If persisting a source invalidation fails, the live provider still marks its
 cached ownership unverified and retains history. Background observers log the
 failure without disconnecting panels; awaited refresh actions report the

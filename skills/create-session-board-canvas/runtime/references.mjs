@@ -126,16 +126,26 @@ export function trackingChangeKind(event) {
 export function createTrackingSync(session, service) {
   const pending = new Set();
   const reading = new Set();
+  const generations = { prs: 0, issues: 0 };
   let running;
+  const current = (kind = "all") => {
+    const kinds = kind === "all" ? ["prs", "issues"] : [kind];
+    const captured = kinds.map((component) => generations[component]);
+    return () => kinds.every((component, index) => generations[component] === captured[index]);
+  };
   const refresh = (kind = "all") => {
     if (!["prs", "issues", "all"].includes(kind)) throw new Error("Unknown tracking component");
-    for (const component of kind === "all" ? ["prs", "issues"] : [kind]) pending.add(component);
+    for (const component of kind === "all" ? ["prs", "issues"] : [kind]) {
+      generations[component]++;
+      pending.add(component);
+    }
     if (!running) {
       running = Promise.resolve().then(async () => {
         while (pending.size) {
           const component = pending.values().next().value;
           pending.delete(component);
           reading.add(component);
+          const isCurrent = current(component);
           try {
             const toolName = `session_${component}`;
             const toolArgs = { action: "list" };
@@ -143,9 +153,9 @@ export function createTrackingSync(session, service) {
             if (pending.has(component)) continue;
             const delta = trackingResult({ toolName, toolArgs, toolResult });
             if (!delta) throw new Error("Session tracking read was not successful");
-            await service.syncTracking(delta);
+            await service.syncTracking(delta, isCurrent);
           } catch (error) {
-            await service.syncTracking({ kind: component, error: String(error.message).slice(0, 500) });
+            await service.syncTracking({ kind: component, error: String(error.message).slice(0, 500) }, isCurrent);
           } finally {
             reading.delete(component);
           }
@@ -157,5 +167,5 @@ export function createTrackingSync(session, service) {
     }
     return running;
   };
-  return { refresh, isReading: (kind) => reading.has(kind) };
+  return { refresh, current, isReading: (kind) => reading.has(kind) };
 }

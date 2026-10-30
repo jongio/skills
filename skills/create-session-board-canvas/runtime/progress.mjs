@@ -120,9 +120,10 @@ export async function createProgressService({ sessionId, readSources, store, onC
     out.delivery = active?.delivery || out.delivery;
     return out;
   };
-  async function commit(next) {
+  async function commit(next, isCurrent = () => true) {
     next.revision = state.revision + 1;
     await store.save(next);
+    if (!isCurrent()) return;
     state = next;
     await onChange(snapshot());
   }
@@ -412,8 +413,9 @@ export async function createProgressService({ sessionId, readSources, store, onC
       await commit(next);
     });
   }
-  async function syncTracking(delta) {
+  async function syncTracking(delta, isCurrent = () => true) {
     return queue(async () => {
+      if (!isCurrent()) return snapshot();
       const next = clone(state);
       if (delta.error) {
         const known = { ...next.references.source.known };
@@ -431,9 +433,9 @@ export async function createProgressService({ sessionId, readSources, store, onC
         next.references.source.updatedAt = clock();
         next.references.source.error = null;
       }
-      try { await commit(next); }
+      try { await commit(next, isCurrent); }
       catch (error) {
-        if (delta.error && state !== next) {
+        if (delta.error && state !== next && isCurrent()) {
           state.references.source = clone(next.references.source);
           try { await onChange(snapshot()); } catch {}
         }
