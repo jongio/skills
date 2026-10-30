@@ -16,6 +16,7 @@ for (const skill of ["pr", "ci-hound"]) {
       mkdirSync(fixtureRoot, { recursive: true });
       const home = mkdtempSync(path.join(fixtureRoot, `${skill}-`));
       const marker = path.join(home, "credential-pid");
+      const credentialLiveAtAbort = path.join(home, "credential-live-at-abort.json");
       const operationStarted = path.join(home, "operation-started");
       const operationSettled = path.join(home, "operation-settled");
       const credentialClosed = path.join(home, "credential-closed");
@@ -81,10 +82,24 @@ for (const skill of ["pr", "ci-hound"]) {
           import { writeFileSync } from "node:fs";
           const execFile = childProcess.execFile;
           childProcess.execFile = function(command, args, options, callback) {
-            const child = execFile.call(this, command, args, options, callback);
-            if (command === "gh" && args[0] === "auth") {
+            const credential = command === "gh" && args[0] === "auth";
+            let child;
+            const onAbort = () => {
+              if (child?.pid && child.exitCode === null) {
+                try {
+                  process.kill(child.pid, 0);
+                  writeFileSync(${JSON.stringify(credentialLiveAtAbort)}, JSON.stringify({ pid: child.pid, at: Date.now() }));
+                } catch {}
+              }
+            };
+            if (credential) options.signal.addEventListener("abort", onAbort, { once: true });
+            child = execFile.call(this, command, args, options, callback);
+            if (credential) {
               child.once("spawn", () => writeFileSync(${JSON.stringify(marker)}, String(child.pid)));
-              child.once("close", () => writeFileSync(${JSON.stringify(credentialClosed)}, String(Date.now())));
+              child.once("close", () => {
+                options.signal.removeEventListener("abort", onAbort);
+                writeFileSync(${JSON.stringify(credentialClosed)}, String(Date.now()));
+              });
             }
             return child;
           };
@@ -129,9 +144,14 @@ for (const skill of ["pr", "ci-hound"]) {
         assert.equal(events.at(-1).type, "WATCH_CHUNK_TIMEOUT", "final event is durably drained before process close");
         if (boundary === "credential") {
           assert.ok(existsSync(marker), "the real credential child must have emitted its OS spawn event");
+          assert.ok(existsSync(credentialLiveAtAbort), "the credential child must still be alive when its SDK operation is aborted");
+          const pid = Number(readFileSync(marker, "utf8"));
+          const liveAtAbort = JSON.parse(readFileSync(credentialLiveAtAbort, "utf8"));
+          assert.equal(liveAtAbort.pid, pid, "the same OS-launched credential child must be alive at operation abort");
+          assert.ok(liveAtAbort.at >= operationStartedAt, "live PID observation belongs to the actual SDK operation");
           const credentialElapsed = Number(readFileSync(credentialClosed, "utf8")) - operationStartedAt;
           assert.ok(credentialElapsed < 2500, `credential child and stdio must close within the SDK shutdown bound (${credentialElapsed}ms)`);
-          assert.equal(alive(Number(readFileSync(marker, "utf8"))), false, "credential child must not outlive the chunk");
+          assert.equal(alive(pid), false, "credential child must not outlive the chunk");
           assert.equal(requests, 0);
         } else {
           assert.ok(requests > 0, "the real SDK must reach a genuinely pending response body");

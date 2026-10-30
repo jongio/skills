@@ -1182,6 +1182,96 @@ for (const surface of ["ci", "single-pr", "multi-pr"]) {
   });
 }
 
+test("review 5708185900: an idle peer ordinary interval cannot suppress another repository's due active polls", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  capture(t);
+  const start = time.now;
+  const activePolls = [];
+  const idlePolls = [];
+  const argv = ["watch", "--repos", "fixture/idle,fixture/active", "--config-file", path.join(dir, "config.json"),
+    "--active-interval", "5", "--idle-interval", "15", "--max-wait-sec", "1"];
+  const services = {
+    sleep: time.sleep,
+    execFn(args) {
+      const endpoint = args[2];
+      const active = endpoint.includes("fixture/active/");
+      if (endpoint.includes("/commits/")) {
+        (active ? activePolls : idlePolls).push(time.now - start);
+        return json({ sha: "head" });
+      }
+      if (endpoint.includes("/jobs")) return json({ total_count: 1, jobs: [{ id: 1, name: "build", status: "in_progress" }] });
+      return json({ workflow_runs: active ? [{
+        id: 1, workflow_id: 1, name: "CI", event: "push", head_branch: "main",
+        head_sha: "head", status: "in_progress", updated_at: "2026-10-30T00:00:00Z",
+      }] : [] });
+    },
+  };
+  for (let chunk = 0; chunk < 12; chunk += 1) await runCi(argv, services);
+  assert.deepEqual(idlePolls, [0], "the idle target retains its independent fifteen-second interval");
+  assert.deepEqual(activePolls, [0, 5000, 10000], "completed-sweep bookkeeping cannot hide another target after it becomes due");
+});
+
+for (const boundary of ["before-request", "during-request"]) {
+  test(`review 5708185900: observed ${boundary} credential change cannot carry an old snapshot into error or quota output`, async (t) => {
+    const dir = fixture(t);
+    const time = clock(t);
+    capture(t);
+    let credential = "first", responseScope = "first", failed = false, scopeUnavailable = false, calls = 0;
+    const adapter = fixtureRequest(ciExec);
+    const request = async (input, options) => {
+      calls += 1;
+      return failed
+        ? { ok: false, status: 503, cacheScope: responseScope, headers: {}, error: "unavailable" }
+        : { ...await adapter(input, options), cacheScope: responseScope };
+    };
+    request.cacheScope = async () => {
+      if (scopeUnavailable) throw new Error("credential resolver unavailable");
+      return credential;
+    };
+    const argv = ["watch", "--repo", "fixture/repo", "--config-file", path.join(dir, "config.json"), "--max-wait-sec", "1"];
+    await nativeRunCi(argv, { execFn: request, sleep: time.sleep });
+    const args = parseArgs(argv);
+    args.respectPollInterval = true;
+    const snapshot = loadState(stateFileForRepo("fixture/repo", args)).metrics.lastStatus;
+    assert.ok(snapshot);
+    const discoveryFile = path.join(dir, "_discovery.json");
+    const sameScope = loadState(discoveryFile);
+    sameScope.metrics.repoCooldownUntilMs = time.now + 5000;
+    saveState(discoveryFile, sameScope);
+    const sameScopeCalls = calls;
+    const unchanged = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+    assert.equal(unchanged.statuses[0].phase, snapshot.phase, "same observed identity keeps its legitimate quota snapshot");
+    assert.equal(calls, sameScopeCalls);
+    sameScope.metrics.repoCooldownUntilMs = null;
+    saveState(discoveryFile, sameScope);
+    scopeUnavailable = true;
+    const unknown = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+    assert.deepEqual(unknown.statuses, [], "unresolved credentials cannot reuse the last known identity's snapshot");
+    scopeUnavailable = false;
+    time.advance(61000);
+    failed = true;
+    responseScope = "second";
+    if (boundary === "before-request") credential = "second";
+    const changed = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+    assert.ok(changed.events.some((event) => event.type === "POLL_ERROR"));
+    assert.deepEqual(changed.statuses, [], "the carried snapshot belongs to the previous observed credential");
+    credential = "second";
+    const retry = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+    assert.deepEqual(retry.statuses, [], "a second failure cannot rebind the old snapshot to the new credential");
+    const discovery = loadState(discoveryFile);
+    const until = time.now + 900000;
+    discovery.metrics.repoCooldownUntilMs = until;
+    saveState(discoveryFile, discovery);
+    const beforeQuota = calls;
+    const quota = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+    assert.equal(quota.rateLimited, true);
+    assert.equal(calls, beforeQuota, "legitimate unexpired shared quota remains authoritative");
+    assert.deepEqual(quota.statuses, [], "quota output cannot resurrect a snapshot from the old observed credential");
+    assert.equal(loadState(discoveryFile).metrics.repoCooldownUntilMs, until);
+  });
+}
+
 for (const boundary of ["repository-api", "credential"]) {
   test(`review 5708121188: ${boundary} errors invalidate previously passing repository proofs before recovery`, async (t) => {
     const time = clock(t);

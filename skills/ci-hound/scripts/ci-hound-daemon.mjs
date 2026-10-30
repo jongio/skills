@@ -902,6 +902,9 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
     state.etags = {};
     state.runs = {};
     state.lastMainSha = "";
+    delete state.metrics.lastStatus;
+    delete state.metrics.lastPhase;
+    delete state.metrics.nextPollAtMs;
     state.cacheScope = scope;
   }
   const cached = state.etags[endpoint];
@@ -922,6 +925,9 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
     state.etags = {};
     state.runs = {};
     state.lastMainSha = "";
+    delete state.metrics.lastStatus;
+    delete state.metrics.lastPhase;
+    delete state.metrics.nextPollAtMs;
     state.cacheScope = result.cacheScope;
   }
   const parsed = httpDetails(result);
@@ -1939,9 +1945,11 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   }
   const reportingRepos = savedSelectionKey === selectionKey
     ? discoveryState.metrics.targetRepos || knownRepos : knownRepos;
+  let credentialScope = discoveryState.cacheScope;
   const snapshotForRepo = (repo, saved) => {
     const status = saved.metrics.lastStatus;
-    return saved.host === host && saved.repo === repo && saved.branch === effectiveBranch &&
+    return credentialScope && saved.cacheScope === credentialScope &&
+      saved.host === host && saved.repo === repo && saved.branch === effectiveBranch &&
       status?.repo === repo && status.branch === effectiveBranch
       ? { ...status, previousPhase: status.phase } : null;
   };
@@ -1960,8 +1968,8 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       nextIntervalSec: remainingSec,
     };
   }
-  let credentialScope;
   try {
+    credentialScope = undefined;
     credentialScope = await execFn.cacheScope?.();
   } catch (error) {
     if (!(error instanceof WatchChunkDeadline)) {
@@ -2129,7 +2137,8 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     invalidateChangedResults();
     const startIndex = resumable ? Math.max(0, targetRepos.indexOf(discoveryState.metrics.nextRepo)) : 0;
     const orderedRepos = [...targetRepos.slice(startIndex), ...targetRepos.slice(0, startIndex)]
-      .filter((repo) => !sweep.completed[repo]);
+      .filter((repo) => !sweep.completed[repo] || args.respectPollInterval &&
+        (loadState(stateFileForRepo(repo, args)).metrics.nextPollAtMs || 0) <= Date.now());
     let completedThisTick = 0;
     for (const repo of orderedRepos) {
       if (Date.now() >= (args.chunkDeadlineMs ?? Infinity)) {

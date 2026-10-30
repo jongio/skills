@@ -92,6 +92,9 @@ including inherited cooldowns when an explicit state file is reused.
 Ordinary next-poll times also survive re-arming, scoped to the same host,
 repository, branch and credential identity. Waiting never replays green events;
 diagnostic `once`, `status` and `optimize` calls remain fresh.
+An idle peer's ordinary interval does not suppress another target once its own
+poll is due. An observed credential change also discards old snapshots, phases
+and ordinary timing alongside the credential-scoped response cache.
 A hard poll error discards held completion/green proof, not the repository
 inventory or continuation cursor. Previously passing peers must be observed
 again before recovery can release aggregate green.
