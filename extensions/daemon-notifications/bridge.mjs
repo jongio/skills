@@ -160,10 +160,24 @@ export function createNotificationBridge(session, {
           } finally { finish(delivery, name, event, target, delivered); }
         }
       }
-    } finally { busy = false; }
+    } finally {
+      busy = false;
+      if (stopped) clearInterval(timer);
+    }
   }
   heartbeat();
-  const timer = setInterval(() => poll().catch((error) =>
+  const tick = async () => {
+    if (stopped) {
+      if (busy) locked((authority) => {
+        if (authority.delivery?.owner !== id) return;
+        authority.delivery.until = now() + leaseMs;
+        writeObject(authorityFile, authority);
+      });
+      return;
+    }
+    await poll();
+  };
+  const timer = setInterval(() => tick().catch((error) =>
     console.error(`[daemon-notifications] ${error.message}`)), interval);
   timer.unref();
   return {
@@ -186,7 +200,7 @@ export function createNotificationBridge(session, {
     stop() {
       if (stopped) return;
       stopped = true;
-      clearInterval(timer);
+      if (!busy) clearInterval(timer);
       locked((authority) => {
         delete authority.providers[id];
         writeObject(authorityFile, authority);

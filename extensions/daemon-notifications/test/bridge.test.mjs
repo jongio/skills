@@ -227,3 +227,40 @@ test("full-provider authority is session-local and unreadable authority fails cl
   await standalone.poll();
   assert.equal(logs.length, 1, "failed authority reads never reset the replay watermark");
 });
+
+test("graceful stop renews pending log authority until delayed handover completes", async (t) => {
+  const home = mkdtempSync(join(tmpdir(), "daemon-delayed-stop-"));
+  const timers = new Map(), logs = [];
+  t.mock.method(globalThis, "setInterval", (callback) => {
+    const handle = { unref() {} };
+    timers.set(handle, callback);
+    return handle;
+  });
+  t.mock.method(globalThis, "clearInterval", (handle) => timers.delete(handle));
+  const entered = Promise.withResolvers(), finish = Promise.withResolvers();
+  let time = 1000;
+  const full = createNotificationBridge({
+    sessionId: "delayed-stop", log: async () => { logs.push("full"); entered.resolve(); await finish.promise; },
+  }, { home, provider: "full", now: () => time });
+  const standalone = createNotificationBridge({
+    sessionId: "delayed-stop", log: async () => logs.push("standalone"),
+  }, { home, now: () => time });
+  t.after(() => { finish.resolve(); full.stop(); standalone.stop(); rmSync(home, { recursive: true, force: true }); });
+  const { file } = standalone.manage("subscribe", "ci");
+  const emit = createEventWriter(file, "ci-hound");
+  emit({ events: [{ type: "JOB_FAILED" }] });
+  const running = full.poll();
+  await entered.promise;
+  full.stop();
+  try {
+    for (let tick = 0; tick < 4; tick++) {
+      time += 5000;
+      for (const callback of [...timers.values()]) await callback();
+    }
+    assert.deepEqual(logs, ["full"], "stop must not expire a still-running log's delivery authority");
+  } finally { finish.resolve(); await running; }
+  assert.equal(timers.size, 1, "the stopped provider releases its keepalive after logging settles");
+  emit({ events: [{ type: "WORKFLOW_FAILED" }] });
+  await standalone.poll();
+  assert.deepEqual(logs, ["full", "standalone"]);
+});

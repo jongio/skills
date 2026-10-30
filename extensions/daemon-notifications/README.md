@@ -12,7 +12,9 @@ lease expires (15 seconds at the default poll interval); installed files alone d
 not establish authority. Nothing is disabled, uninstalled, or renamed, and other
 sessions are unaffected. Providers share opt-in subscriptions and replay
 watermarks, so unsubscribe through either copy is authoritative for this session.
-An in-flight delivery is serialized across handover; a failed log can retry.
+An in-flight delivery is serialized across handover; graceful stop keeps its
+delivery claim alive until logging settles without retaining provider priority.
+A failed log can retry.
 Provider heartbeat metadata does not enable subscriptions. Update all copies and
 restart Copilot when upgrading so every active provider uses this coordination.
 Subscription is disabled until explicitly requested. For a manual install, run
