@@ -55,8 +55,10 @@ npm run eval:lint
 Tests are deterministic. They use temporary repositories, injected clients, and local PNG buffers.
 They never perform a real network request or billed image generation.
 
-Generated skills pin `@microsoft/vally-cli` to `0.18.0` and reuse a matching
-repository Vally tool lockfile. Update older repository tooling before authoring.
+Generated skills pin `@microsoft/vally-cli` to `0.19.0` and reuse a matching
+repository Vally tool lockfile. They carry a scoped Copilot SDK override to Zod
+`4.6.7`. The source lock must already resolve that override; otherwise generation
+stops before writing files. Update older repository tooling before authoring.
 
 ## License
 
