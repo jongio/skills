@@ -264,9 +264,10 @@ test("renderer imports never load the transport or SDK bundle", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
-test("both plugin notification entry points register opt-in tools without model calls", (t) => {
+test("manual and both plugin notification entry points register opt-in tools without model calls", (t) => {
   const home = fixture(t);
   for (const entry of [
+    join(root, "extensions", "daemon-notifications", "extension.mjs"),
     join(root, "com.github.copilot", "extensions", "daemon-notifications", "extension.mjs"),
     join(root, "extensions", "com.github.copilot", "extensions", "daemon-notifications", "extension.mjs"),
   ]) {
@@ -306,11 +307,8 @@ test("both plugin notification entry points register opt-in tools without model 
   }
 });
 
-test("plugin notification handover retires the manual provider and preserves single delivery/unsubscribe", (t) => {
-  for (const entry of [
-    join(root, "com.github.copilot", "extensions", "daemon-notifications", "extension.mjs"),
-    join(root, "extensions", "com.github.copilot", "extensions", "daemon-notifications", "extension.mjs"),
-  ]) {
+test("live full-plugin notifications take priority without disabling standalone providers or changing installed files", (t) => {
+  for (const order of [["standalone", "full"], ["full", "standalone"]]) {
     const home = fixture(t);
     const code = `
       import assert from "node:assert/strict";
@@ -318,28 +316,21 @@ test("plugin notification handover retires the manual provider and preserves sin
       import { join } from "node:path";
       import { registerHooks } from "node:module";
       import { createEventWriter } from ${JSON.stringify(pathToFileURL(join(root, "runtime", "github-client", "events.mjs")).href)};
-      const timers = new Map(), logs = [], disabled = [], configurations = {}, observers = { manual: [], plugin: [] };
-      let stage = "manual", nextTimer = 0;
+      const timers = new Map(), logs = [], configurations = {}, observers = { standalone: [], full: [] };
+      let stage, nextTimer = 0;
       globalThis.setInterval = (callback) => {
         const handle = { id: ++nextTimer, unref() {} };
         timers.set(handle, callback);
         return handle;
       };
       globalThis.clearInterval = (handle) => timers.delete(handle);
-      const sessions = Object.fromEntries(["manual", "plugin"].map((kind) => [kind, {
+      const sessions = Object.fromEntries(["standalone", "full"].map((kind) => [kind, {
         sessionId: "handover", log: async (text) => logs.push({ kind, text }),
         on: (callback) => observers[kind].push(callback), disconnect: async () => {},
         send: () => assert.fail("No model calls"), sendAndWait: () => assert.fail("No model calls"),
         rpc: { extensions: {
-          list: async () => ({ extensions: stage === "manual"
-            ? [{ id: "user:daemon-notifications", pid: process.pid }]
-            : [{ id: "user:daemon-notifications", pid: process.pid + 1 },
-               { id: "plugin:fixture:daemon-notifications", pid: process.pid }] }),
-          disable: async ({ id }) => {
-            assert.equal(id, "user:daemon-notifications");
-            disabled.push(id);
-            for (const observe of observers.manual) observe({ type: "session.shutdown" });
-          },
+          list: async () => assert.fail("installed-provider presence is not live session authority"),
+          disable: async () => assert.fail("must not disable providers across sessions"),
         } },
       }]));
       globalThis.joinSessionFixture = async (value) => {
@@ -353,29 +344,36 @@ test("plugin notification handover retires the manual provider and preserves sin
       const legacy = join(process.env.COPILOT_HOME, "extensions", "daemon-notifications", "extension.mjs");
       mkdirSync(join(process.env.COPILOT_HOME, "extensions", "daemon-notifications"), { recursive: true });
       writeFileSync(legacy, "manual entrypoint fixture");
-      await import(${JSON.stringify(pathToFileURL(join(root, "extensions", "daemon-notifications", "extension.mjs")).href + "?manual")});
-      const manualTool = configurations.manual.tools.find((tool) => tool.name === "daemon_notifications");
-      const { file } = JSON.parse(manualTool.handler({ action: "subscribe", watcher: "ci" }));
+      const entries = {
+        full: ${JSON.stringify(pathToFileURL(join(root, "com.github.copilot", "extensions", "daemon-notifications", "extension.mjs")).href)},
+        standalone: ${JSON.stringify(pathToFileURL(join(root, "extensions", "com.github.copilot", "extensions", "daemon-notifications", "extension.mjs")).href)},
+      };
+      for (stage of ${JSON.stringify(order)}) await import(entries[stage]);
+      const standaloneTool = configurations.standalone.tools.find((tool) => tool.name === "daemon_notifications");
+      const fullTool = configurations.full.tools.find((tool) => tool.name === "daemon_notifications");
+      const { file } = JSON.parse(standaloneTool.handler({ action: "subscribe", watcher: "ci" }));
       const emit = createEventWriter(file, "ci-hound");
-      stage = "plugin";
-      await import(${JSON.stringify(pathToFileURL(entry).href)});
       emit({ events: [{ type: "JOB_FAILED", repo: "fixture/repo" }] });
       for (const poll of [...timers.values()]) await poll();
       assert.equal(logs.length, 1, "one event is delivered by exactly one active provider");
-      assert.equal(logs[0].kind, "plugin");
-      assert.deepEqual(disabled, ["user:daemon-notifications"]);
-      assert.equal(timers.size, 1);
-      assert.equal(existsSync(legacy), false);
+      assert.equal(logs[0].kind, "full");
+      assert.equal(timers.size, 2, "standalone stays available for fallback");
+      assert.equal(existsSync(legacy), true);
       assert.equal(readdirSync(join(process.env.COPILOT_HOME, "extensions", "daemon-notifications"))
-        .filter((name) => name.startsWith("extension.mjs.disabled-")).length, 1);
-      const pluginTool = configurations.plugin.tools.find((tool) => tool.name === "daemon_notifications");
-      assert.equal(JSON.parse(pluginTool.handler({ action: "status" })).length, 1);
-      pluginTool.handler({ action: "unsubscribe", watcher: "ci" });
+        .filter((name) => name.startsWith("extension.mjs.disabled-")).length, 0);
+      assert.equal(JSON.parse(fullTool.handler({ action: "status" })).length, 1);
+      standaloneTool.handler({ action: "unsubscribe", watcher: "ci" });
       emit({ events: [{ type: "JOB_FAILED", repo: "fixture/repo" }] });
       for (const poll of [...timers.values()]) await poll();
-      assert.equal(logs.length, 1, "unsubscribe cannot leave a legacy provider polling");
+      assert.equal(logs.length, 1, "unsubscribe through either copy is authoritative");
+      const fallback = JSON.parse(standaloneTool.handler({ action: "subscribe", watcher: "fallback" }));
+      for (const observe of observers.full) observe({ type: "session.shutdown" });
+      createEventWriter(fallback.file, "ci-hound")({ events: [{ type: "JOB_FAILED", repo: "fixture/repo" }] });
+      for (const poll of [...timers.values()]) await poll();
+      assert.equal(logs.length, 2);
+      assert.equal(logs[1].kind, "standalone", "full provider shutdown enables standalone fallback");
+      for (const observe of observers.standalone) observe({ type: "session.shutdown" });
       assert.equal(timers.size, 0);
-      for (const observe of observers.plugin) observe({ type: "session.shutdown" });
     `;
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", code], {
       cwd: root, encoding: "utf8", timeout: 30000, windowsHide: true,

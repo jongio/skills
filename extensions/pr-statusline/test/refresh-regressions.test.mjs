@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import test from "node:test";
 import { prefetchStatuses, refreshTracker } from "../../github-refresh.mjs";
 import { statuslineGitHub } from "../../github-transport.mjs";
@@ -43,6 +43,34 @@ function mockGitHub(t, respond) {
 const session = (id) => ({
   sessionId: id, on: () => () => {}, getEvents: async () => [],
   rpc: { metadata: { activity: async () => ({ hasActiveWork: false }) } },
+});
+
+test("later sequential items acquire a fresh cross-process refresh lease", async (t) => {
+  const home = fixture(t);
+  const start = Date.UTC(2026, 0, 1);
+  let time = start, requests = 0;
+  const entered = Promise.withResolvers(), finish = Promise.withResolvers();
+  const later = "https://github.com/acme/project/pull/3";
+  t.mock.method(statuslineGitHub, "cacheScope", async () => "fixture");
+  t.mock.method(statuslineGitHub, "request", async ({ variables }) => {
+    if (variables.number === 1) {
+      time += 40000;
+      return { ok: true, cacheScope: "fixture", data: { data: { repository: { pullRequest: { state: "OPEN" } } } } };
+    }
+    const request = ++requests;
+    if (request === 1) { entered.resolve(); await finish.promise; }
+    return { ok: true, cacheScope: "fixture", data: { data: { repository: {
+      pullRequest: { state: "OPEN", title: request === 1 ? "Owned response" : "Duplicate response" },
+    } } } };
+  });
+  const running = prefetchStatuses("pr", [{ url: refs.pr }, { url: later }], { home, now: start, clock: () => time });
+  await entered.promise;
+  try {
+    // A path alias bypasses process-local coalescing while sharing the same on-disk lease.
+    await prefetchStatuses("pr", [{ url: later }], { home: home + sep + ".", now: time, clock: () => time });
+  } finally { finish.resolve(); await running; }
+  assert.equal(requests, 1, "another process cannot steal a newly acquired late-item lease");
+  assert.equal(readPrCache(home)[later].info.title, "Owned response");
 });
 
 for (const kind of ["pr", "issue"]) {

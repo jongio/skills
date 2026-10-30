@@ -39,6 +39,8 @@ belong only to this package.
 - Statusline refresh cooldowns start when the failure is received, not when a
   sequential poll started. Caller cancellation releases its shared refresh lease
   without adding GitHub failure backoff for other sessions.
+- Refresh leases start when each item acquires ownership, so slow earlier items
+  cannot leave a later request's cross-process lease already expired.
 - Failures cannot renew cached success evidence. Callers must check response
   validity and inventory completeness before reporting readiness.
 

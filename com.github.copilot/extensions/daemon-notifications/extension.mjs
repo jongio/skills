@@ -1,1 +1,1 @@
-import "../../../extensions/daemon-notifications/extension.mjs";
+import "../../../extensions/daemon-notifications/extension.mjs?provider=full";

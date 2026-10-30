@@ -6,10 +6,15 @@ creates another Copilot runtime, calls a model, starts watchers or repairs, or
 authorizes a merge.
 
 The full plugin and standalone statuslines plugin expose this entry point.
-When a plugin starts, it retires the legacy manual notifications provider before
-registering its tools, preserving a disabled entrypoint backup and the session's
-subscriptions and replay watermarks. This prevents concurrent manual/plugin
-delivery and makes unsubscribe authoritative for the active provider.
+Live, session-local leases give the full plugin delivery priority over standalone
+or manual copies. Standalone delivery resumes when the full provider stops or its
+lease expires (15 seconds at the default poll interval); installed files alone do
+not establish authority. Nothing is disabled, uninstalled, or renamed, and other
+sessions are unaffected. Providers share opt-in subscriptions and replay
+watermarks, so unsubscribe through either copy is authoritative for this session.
+An in-flight delivery is serialized across handover; a failed log can retry.
+Provider heartbeat metadata does not enable subscriptions. Update all copies and
+restart Copilot when upgrading so every active provider uses this coordination.
 Subscription is disabled until explicitly requested. For a manual install, run
 from the repository root:
 

@@ -60,8 +60,9 @@ export async function prefetchStatuses(kind, items, {
         const acquired = withStateLock(cacheFile, () => {
           const cache = read(home);
           const previous = cache[item.url];
-          if (!force && previous?.scope === scope && previous.refreshingUntil > now) return false;
-          cache[item.url] = { ...(previous?.scope === scope ? previous : {}), scope, lease, refreshingUntil: now + 35000 };
+          const acquiredAt = clock();
+          if (!force && previous?.scope === scope && previous.refreshingUntil > acquiredAt) return false;
+          cache[item.url] = { ...(previous?.scope === scope ? previous : {}), scope, lease, refreshingUntil: acquiredAt + 35000 };
           write(cache, home);
           return true;
         });
