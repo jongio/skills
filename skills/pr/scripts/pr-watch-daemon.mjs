@@ -2,7 +2,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createGitHubClient, createEventWriter, githubHost, httpDetails, runGh } from "./lib/github-client.mjs";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -555,8 +555,10 @@ export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries =
       }
     }
     let existing = { cooldownUntilMs: null, entries: {} };
-    if (existsSync(filePath)) {
+    try {
       existing = readPrSession(filePath, host);
+    } catch (error) {
+      if (error.cause?.code !== "ENOENT") throw error;
     }
     const mergedEntries = { ...(existing.entries || {}), ...entries };
     const validCooldown = Math.max(

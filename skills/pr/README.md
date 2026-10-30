@@ -167,6 +167,8 @@ Legacy observations without their own identity receipt are also unverified until
 a fresh observation is available; a newer request scope cannot relabel old status.
 Cancelled SDK responses retain their observed identity for invalidation, without
 an extra lookup after expiry. Same-identity chunk expiry remains resumable.
+Session saves read existing state under the lock without an existence probe.
+Only `ENOENT` permits new state; other read errors leave shared quota and peers intact.
 An interrupted reviewer request still consumes its persisted retry attempt,
 preventing uncertain submission outcomes from bypassing the retry limit.
 Running watchers also reload the shared deadline before each poll, so another
