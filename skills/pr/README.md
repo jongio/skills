@@ -165,6 +165,9 @@ PR's newly observed backoff is honored without restarting.
 Rounded remaining seconds control waiting only; repeated short chunks preserve
 the original absolute deadline and resume once it expires, without bypassing
 legitimate unexpired quota.
+Re-arming also retains each PR's ordinary next-poll time: short chunks wait
+without replaying readiness events. A newly requested head and `once` still poll
+fresh rather than inheriting the earlier head's interval.
 
 Session state is scoped to the validated GitHub host. Public `github.com` keeps
 the legacy repository filename; other hosts use `pr-watch/hosts/<host>/` and do

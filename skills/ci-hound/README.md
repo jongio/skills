@@ -89,6 +89,9 @@ applying cooldown. Shared-backoff output reports the current requested targets,
 not an unrelated earlier watchlist.
 Cached snapshots also must match the requested host, repository and branch,
 including inherited cooldowns when an explicit state file is reused.
+Ordinary next-poll times also survive re-arming, scoped to the same host,
+repository, branch and credential identity. Waiting never replays green events;
+diagnostic `once`, `status` and `optimize` calls remain fresh.
 If one target consumes a whole fresh chunk without completing, held completion
 proof is discarded before rotating to its peers. A stalled target therefore
 cannot freeze their observations or later promote their old green snapshots.

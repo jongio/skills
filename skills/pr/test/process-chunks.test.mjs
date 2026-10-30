@@ -17,13 +17,27 @@ for (const skill of ["pr", "ci-hound"]) {
       const home = mkdtempSync(path.join(fixtureRoot, `${skill}-`));
       const marker = path.join(home, "credential-pid");
       const operationStarted = path.join(home, "operation-started");
+      const operationSettled = path.join(home, "operation-settled");
+      const credentialClosed = path.join(home, "credential-closed");
       const bin = path.join(home, "bin");
       const executable = path.join(bin, process.platform === "win32" ? "gh.exe" : "gh");
       const eventsFile = path.join(home, "events.jsonl");
       let child;
       let requests = 0;
+      let bodyClosedAt;
+      let resolveBodyClosed;
+      const bodyClosed = new Promise((resolve) => { resolveBodyClosed = resolve; });
+      const responses = new Set();
       const server = createServer((_request, response) => {
         requests += 1;
+        responses.add(response);
+        response.once("close", () => {
+          responses.delete(response);
+          if (responses.size === 0) {
+            bodyClosedAt = Date.now();
+            resolveBodyClosed();
+          }
+        });
         response.writeHead(200, { "content-type": "application/json" });
         response.write("{");
       });
@@ -36,7 +50,7 @@ for (const skill of ["pr", "ci-hound"]) {
         try { linkSync(process.execPath, executable); }
         catch { copyFileSync(process.execPath, executable); }
         writeFileSync(path.join(home, "auth"),
-          `require("node:fs").writeFileSync(${JSON.stringify(marker)}, String(process.pid));setInterval(()=>{},1000);`);
+          `setInterval(()=>{},1000);`);
         const daemon = path.join(root, "skills", skill, "scripts",
           skill === "pr" ? "pr-watch-daemon.mjs" : "ci-hound-daemon.mjs");
         const shim = path.join(home, "sdk.mjs");
@@ -46,12 +60,35 @@ for (const skill of ["pr", "ci-hound"]) {
           import { writeFileSync } from "node:fs";
           export const createGitHubClient = () => {
             writeFileSync(${JSON.stringify(operationStarted)}, String(Date.now()));
-            return actual({ baseUrl: "http://127.0.0.1:${server.address().port}", env: process.env });
+            const client = actual({ baseUrl: "http://127.0.0.1:${server.address().port}", env: process.env });
+            return {
+              ...client,
+              async cacheScope(...args) {
+                try { return await client.cacheScope(...args); }
+                finally { writeFileSync(${JSON.stringify(operationSettled)}, String(Date.now())); }
+              },
+              async request(...args) {
+                try { return await client.request(...args); }
+                finally { writeFileSync(${JSON.stringify(operationSettled)}, String(Date.now())); }
+              },
+            };
           };
         `);
         const loader = path.join(home, "loader.mjs");
         writeFileSync(loader, `
-          import { registerHooks } from "node:module";
+          import childProcess from "node:child_process";
+          import { registerHooks, syncBuiltinESMExports } from "node:module";
+          import { writeFileSync } from "node:fs";
+          const execFile = childProcess.execFile;
+          childProcess.execFile = function(command, args, options, callback) {
+            const child = execFile.call(this, command, args, options, callback);
+            if (command === "gh" && args[0] === "auth") {
+              child.once("spawn", () => writeFileSync(${JSON.stringify(marker)}, String(child.pid)));
+              child.once("close", () => writeFileSync(${JSON.stringify(credentialClosed)}, String(Date.now())));
+            }
+            return child;
+          };
+          syncBuiltinESMExports();
           registerHooks({ resolve(specifier, context, next) {
             if (specifier === "./lib/github-client.mjs" && context.parentURL === ${JSON.stringify(pathToFileURL(daemon).href)})
               return { url: ${JSON.stringify(pathToFileURL(shim).href)}, shortCircuit: true };
@@ -84,17 +121,35 @@ for (const skill of ["pr", "ci-hound"]) {
         const elapsed = Date.now() - start;
         assert.equal(status, 0, `${stderr}\n${stdout}`);
         assert.ok(elapsed < 4000, `two-second chunk must exit before the four-second host ceiling (${elapsed}ms)`);
-        const operationElapsed = Date.now() - Number(readFileSync(operationStarted, "utf8"));
-        assert.ok(operationElapsed < 2500, `pending SDK work and process drain must fit the chunk plus 500ms shutdown margin (${operationElapsed}ms)`);
+        const operationStartedAt = Number(readFileSync(operationStarted, "utf8"));
+        const operationElapsed = Number(readFileSync(operationSettled, "utf8")) - operationStartedAt;
+        assert.ok(operationElapsed < 2500, `pending SDK work must settle within the chunk plus 500ms shutdown margin (${operationElapsed}ms)`);
         assert.match(stdout, /WATCH_CHUNK_TIMEOUT/);
         const events = readFileSync(eventsFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
         assert.equal(events.at(-1).type, "WATCH_CHUNK_TIMEOUT", "final event is durably drained before process close");
         if (boundary === "credential") {
-          assert.ok(existsSync(marker), "a real credential child must have started and remained pending");
+          assert.ok(existsSync(marker), "the real credential child must have emitted its OS spawn event");
+          const credentialElapsed = Number(readFileSync(credentialClosed, "utf8")) - operationStartedAt;
+          assert.ok(credentialElapsed < 2500, `credential child and stdio must close within the SDK shutdown bound (${credentialElapsed}ms)`);
           assert.equal(alive(Number(readFileSync(marker, "utf8"))), false, "credential child must not outlive the chunk");
           assert.equal(requests, 0);
         } else {
           assert.ok(requests > 0, "the real SDK must reach a genuinely pending response body");
+          let timeout;
+          try {
+            await Promise.race([
+              bodyClosed,
+              new Promise((_, reject) => {
+                timeout = setTimeout(() => reject(new Error("SDK response body did not close within its shutdown bound")),
+                  Math.max(1, operationStartedAt + 2500 - Date.now()));
+              }),
+            ]);
+          } finally {
+            clearTimeout(timeout);
+          }
+          assert.equal(responses.size, 0, "all SDK response bodies must close before fixture cleanup");
+          const bodyElapsed = bodyClosedAt - operationStartedAt;
+          assert.ok(bodyElapsed < 2500, `response body must close within the SDK shutdown bound (${bodyElapsed}ms)`);
         }
       } finally {
         if (child && child.exitCode === null && !child.signalCode) child.kill();

@@ -440,6 +440,7 @@ function readPrSession(filePath, host) {
         throw new Error("Invalid watch state entry");
       }
       if (!validDeadline(entry.watchState.cooldownUntilMs)) throw new Error("Invalid watch cooldown");
+      if (!validDeadline(entry.watchState.nextPollAtMs)) throw new Error("Invalid next poll time");
       const retries = entry?.watchState?.copilotErrorRetriesByHead;
       if (retries !== undefined && (!retries || typeof retries !== "object" || Array.isArray(retries) ||
           Object.values(retries).some((count) => !Number.isSafeInteger(count) || count < 0))) {
@@ -475,6 +476,7 @@ function hydrateWatchState(raw) {
   if (Number.isFinite(raw.cooldownUntilMs) && raw.cooldownUntilMs > Date.now()) {
     base.cooldownUntilMs = raw.cooldownUntilMs;
   }
+  if (Number.isFinite(raw.nextPollAtMs)) base.nextPollAtMs = raw.nextPollAtMs;
   if (raw.metrics && typeof raw.metrics === "object") {
     base.metrics = { ...base.metrics, ...raw.metrics };
   }
@@ -1011,8 +1013,23 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
 }
 
 export async function evaluatePrPollTick(args, execFn = defaultRequest, state = null) {
+  const nowMs = Date.now();
+  if (args.respectPollInterval && state?.nextPollAtMs > nowMs && !(state.cooldownUntilMs > nowMs) &&
+      (!args.head || (state.metrics.nextPollHeadOid || args.lastStatus?.headRefOid) === args.head)) {
+    return {
+      events: [], pollDeferred: true, nextIntervalSec: (state.nextPollAtMs - nowMs) / 1000,
+      ...(args.lastStatus ? { status: args.lastStatus } : {}),
+    };
+  }
+  if (args.respectPollInterval && state) state.nextPollAtMs = null;
   try {
-    return await evaluatePrPollTickInner(args, chunkExec(execFn, args.chunkDeadlineMs ?? Infinity), state);
+    const tick = await evaluatePrPollTickInner(args, chunkExec(execFn, args.chunkDeadlineMs ?? Infinity), state);
+    const polledHead = tick.status?.headRefOid || tick.events?.find((event) => event.type === "PR_READY_TO_MERGE")?.headRefOid;
+    if (args.respectPollInterval && state && polledHead && !tick.error && !tick.rateLimited && !tick.chunkTimedOut) {
+      state.nextPollAtMs = Date.now() + (tick.nextIntervalSec || args.intervalSec) * 1000;
+      state.metrics.nextPollHeadOid = polledHead;
+    }
+    return tick;
   } catch (error) {
     if (!(error instanceof WatchChunkDeadline)) throw error;
     return { events: [], chunkTimedOut: true, nextIntervalSec: args.intervalSec };
@@ -1992,6 +2009,7 @@ export async function evaluateMultiPrPollTick(args, execFn = defaultRequest, mul
       head: prHead,
       maxCopilotRetries: args.mode === "once" ? 0 : args.maxCopilotRetries,
       lastPhase: entry.lastPhase,
+      lastStatus: entry.lastStatus,
       hasExplicitSinceCommentId: entry.hasExplicitSinceCommentId,
       sinceCommentId: entry.sinceCommentId,
     };
@@ -2076,6 +2094,7 @@ export function shouldEmitPrWatchStatus({
 
 export async function runCli(argv = process.argv.slice(2), services = {}) {
   const args = parsePrWatchArgs(argv);
+  args.respectPollInterval = args.mode === "watch";
   const execFn = services.execFn || defaultRequest;
   const sleep = services.sleep || sleepSeconds;
   const stateDir = services.stateDir || PR_WATCH_DIR;

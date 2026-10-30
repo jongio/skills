@@ -1316,11 +1316,20 @@ export function computeCiHoundPhase({
 export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   execFn = chunkExec(execFn, args.chunkDeadlineMs ?? Infinity);
   const host = githubHost();
+  const nowMs = Date.now();
+  if (args.respectPollInterval && state.host === host && state.repo === args.repo && state.branch === args.branch &&
+      state.cacheScope && state.cacheScope === args.pollCacheScope &&
+      state.metrics.nextPollAtMs > nowMs && !(state.metrics.cooldownUntilMs > nowMs)) {
+    return {
+      events: [], pollDeferred: true, activeMainRuns: 0,
+      nextIntervalSec: (state.metrics.nextPollAtMs - nowMs) / 1000,
+    };
+  }
+  if (args.respectPollInterval) state.metrics.nextPollAtMs = null;
   if ((state.host || "github.com") !== host) Object.assign(state, loadState(""));
   state.host = host;
   state.repo = args.repo;
   state.branch = args.branch;
-  const nowMs = Date.now();
   state.metrics.lastPollAt = new Date(nowMs).toISOString();
   if (Number.isFinite(state.metrics?.cooldownUntilMs) && state.metrics.cooldownUntilMs > nowMs) {
     const remainingSec = Math.max(1, Math.ceil((state.metrics.cooldownUntilMs - nowMs) / 1000));
@@ -1855,6 +1864,9 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
         rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
       };
 
+  if (args.respectPollInterval && !tickRateLimited && !tickChunkTimedOut && !tickError) {
+    state.metrics.nextPollAtMs = Date.now() + nextIntervalSec * 1000;
+  }
   return {
     events,
     activeMainRuns,
@@ -2047,6 +2059,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   let totalActiveMainRuns = 0;
   let anyRateLimited = Boolean(discoveryState.rateLimited);
   let chunkTimedOut = false;
+  let deferredIntervalSec = Infinity;
   let inventoryScopeInvalidated = false;
   let minRateLimitRemaining = Number.isFinite(discoveryState.metrics?.rateLimitRemaining)
     ? discoveryState.metrics.rateLimitRemaining
@@ -2125,6 +2138,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
         ...args,
         repo,
         branch: effectiveBranch,
+        pollCacheScope: credentialScope,
         mergeMode: effectiveMergeMode,
         stateFile: repoStateFile,
         watchRunIds: repoWatchRunIds,
@@ -2136,6 +2150,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
           : args.wakeOnAllGreen,
       };
       const tick = await evaluatePollTick(repoArgs, repoState, execFn);
+      if (tick.pollDeferred) deferredIntervalSec = Math.min(deferredIntervalSec, tick.nextIntervalSec);
       const changedScope = credentialScope && repoState.cacheScope !== credentialScope;
       discoveryState.metrics.nextRepo = targetRepos[(targetRepos.indexOf(repo) + 1) % targetRepos.length];
       if (tick.status) {
@@ -2189,7 +2204,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
         anyRateLimited = true;
         break;
       }
-      if (!tick.error && !tick.events.some((event) => event.type === "POLL_ERROR")) {
+      if (!tick.pollDeferred && !tick.error && !tick.events.some((event) => event.type === "POLL_ERROR")) {
         sweep.completed[repo] = {
           sha: repoState.lastMainSha,
           branch: repoState.branch,
@@ -2223,11 +2238,12 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   }
   totalActiveMainRuns = Math.max(totalActiveMainRuns, statuses.reduce((total, status) =>
     total + Math.max(status.activeMainRuns || 0, status.activeRuns?.length || 0), 0));
-  const nextIntervalSec = computeNextPollIntervalSec(args, totalActiveMainRuns, {
+  const computedIntervalSec = computeNextPollIntervalSec(args, totalActiveMainRuns, {
     rateLimitRemaining: minRateLimitRemaining,
     rateLimitReset: maxRateLimitReset,
     retryAfterSec: maxRetryAfterSec,
   });
+  const nextIntervalSec = anyRateLimited ? computedIntervalSec : Math.min(computedIntervalSec, deferredIntervalSec);
   if (!inventoryScopeInvalidated) {
     discoveryState.metrics.targetRepos = targetRepos;
     discoveryState.metrics.targetSelectionKey = selectionKey;
@@ -2253,6 +2269,7 @@ async function sleepSeconds(sec) {
 
 export async function runCli(argv = process.argv.slice(2), services = {}) {
   const args = parseArgs(argv);
+  args.respectPollInterval = args.mode === "watch";
   const execFn = services.execFn || defaultRequest;
   const sleep = services.sleep || sleepSeconds;
   const watchStartedAtMs = Date.now();

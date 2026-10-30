@@ -169,6 +169,7 @@ test("single-PR chunks wait out their budget and restore phase, cursor, ETags, a
   const newExec = (args) => args[1] === "graphql"
     ? graph(prNode({ comments: [{ databaseId: 11, body: "new feedback" }] }))
     : json({ workflow_runs: [] });
+  time.advance(15000);
   await runPr(argv, { execFn: newExec, stateDir: dir, sleep: time.sleep });
   assert.equal(output.at(-1).events[0].type, "NEW_PR_COMMENTS");
   session = loadPersistedPrSession("fixture/repo", dir);
@@ -962,7 +963,8 @@ test("body review 5707347169: malformed session data cannot silently reset retry
   const valid = JSON.parse(readFileSync(file, "utf8"));
   for (const text of ['{"entries":', JSON.stringify({
     ...valid, entries: { 1: { watchState: { copilotErrorRetriesByHead: { head: -1 } } } },
-  }), JSON.stringify({ ...valid, cooldownUntilMs: "unverified" })]) {
+  }), JSON.stringify({ ...valid, cooldownUntilMs: "unverified" }),
+  JSON.stringify({ ...valid, entries: { 1: { watchState: { nextPollAtMs: "unverified" } } } })]) {
     writeFileSync(file, text);
     assert.throws(() => loadPersistedPrSession("fixture/repo", dir), /Invalid PR watch state/);
     assert.throws(() => savePersistedPrSession("fixture/repo", {}, dir), /Invalid PR watch state/);
@@ -1146,3 +1148,163 @@ test("short multi-PR chunks preserve an absolute shared cooldown and resume afte
   assert.ok(calls > 0, "an expired absolute deadline must not slide forward forever on chunk re-arm");
   assert.equal(loadPersistedPrSession("fixture/repo", dir).cooldownUntilMs, null);
 });
+
+for (const surface of ["ci", "single-pr", "multi-pr"]) {
+  test(`review 5707961776: rearmed ${surface} chunks honor the existing ordinary polling interval`, async (t) => {
+    const dir = fixture(t);
+    const time = clock(t);
+    capture(t);
+    const started = time.now;
+    const intervalSec = surface === "ci" ? 15 : 10;
+    let calls = 0;
+    const services = {
+      stateDir: dir, sleep: time.sleep,
+      execFn(args) {
+        calls += 1;
+        if (time.now !== started) assert.ok(time.now >= started + intervalSec * 1000, "re-arming cannot bypass the pending ordinary interval");
+        return surface === "ci" ? ciExec(args)
+          : args[1] === "graphql" ? graph(prNode()) : json({ workflow_runs: [], total_count: 0 });
+      },
+    };
+    const argv = ["watch", "--repo", "fixture/repo", "--max-wait-sec", "1",
+      ...(surface === "ci" ? ["--config-file", path.join(dir, "config.json"), "--active-interval", "15", "--idle-interval", "15"]
+        : ["--interval", "10", ...(surface === "single-pr" ? ["--pr", "1", "--head", "head"] : ["--prs", "1:head,2:head"])])];
+    const run = surface === "ci" ? runCi : runPr;
+    await run(argv, services);
+    const initialCalls = calls;
+    assert.ok(initialCalls > 0);
+    for (let chunk = 1; chunk < intervalSec; chunk += 1) {
+      await run(argv, services);
+      assert.equal(calls, initialCalls, "no API calls before the original poll deadline");
+    }
+    await run(argv, services);
+    assert.ok(calls > initialCalls, "ordinary polling resumes after the original interval expires");
+  });
+}
+
+test("review 5707961776: poll-error recovery requires fresh current-head CI evidence before a green signal", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const args = parseArgs(["watch", "--repo", "fixture/one", "--config-file", path.join(dir, "config.json")]);
+  const state = loadState(stateFileForRepo("fixture/one", args));
+  assert.ok((await evaluatePollTick(args, state, greenCiExec)).events.some((event) => event.type === "ALL_GREEN"));
+  time.advance(1000);
+  const failed = await evaluatePollTick(args, state, () => ({ ok: false, stdout: "", stderr: "HTTP 503 unavailable" }));
+  assert.ok(failed.events.some((event) => event.type === "POLL_ERROR"));
+  assert.equal(failed.events.some((event) => /GREEN$/.test(event.type) || event.deliverySkill), false);
+  time.advance(1000);
+  const recovering = await evaluatePollTick(args, state, (ghArgs) =>
+    ghArgs[2].includes("/commits/") ? json({ sha: "new-head" }) : json({ workflow_runs: [] }));
+  assert.equal(recovering.events.some((event) => /GREEN$/.test(event.type) || event.deliverySkill), false,
+    "old successful runs cannot authorize recovery for a newly observed head");
+  const fresh = await evaluatePollTick(args, state, (ghArgs) => {
+    const response = greenCiExec(ghArgs);
+    const body = JSON.parse(response.stdout);
+    if (body.sha) body.sha = "new-head";
+    if (body.workflow_runs) for (const run of body.workflow_runs) run.head_sha = "new-head";
+    return json(body);
+  });
+  assert.ok(fresh.events.some((event) => event.type === "ALL_GREEN" && event.sha === "new-head"));
+});
+
+test("ordinary PR intervals do not defer a new head or a diagnostic once call", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  capture(t);
+  let head = "head", calls = 0;
+  const services = {
+    stateDir: dir, sleep: time.sleep,
+    execFn(args) {
+      calls += 1;
+      return args[1] === "graphql" ? graph(prNode({ head })) : json({ workflow_runs: [], total_count: 0 });
+    },
+  };
+  const argv = ["watch", "--repo", "fixture/repo", "--pr", "1", "--head", head, "--interval", "10", "--max-wait-sec", "1"];
+  await runPr(argv, services);
+  const firstCalls = calls;
+  head = "new-head";
+  argv[argv.indexOf("--head") + 1] = head;
+  await runPr(argv, services);
+  assert.ok(calls > firstCalls, "the previous head's ordinary interval cannot delay a new requested head");
+  const resumedCalls = calls;
+  await runPr(["once", "--repo", "fixture/repo", "--pr", "1", "--head", head], services);
+  assert.ok(calls > resumedCalls, "once remains fresh during a pending watch interval");
+});
+
+test("ordinary CI intervals are credential/branch scoped and diagnostics remain fresh", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const output = capture(t);
+  let scope = "first", calls = 0;
+  const adapter = fixtureRequest(ciExec);
+  const request = async (input, options) => {
+    calls += 1;
+    return { ...await adapter(input, options), cacheScope: scope };
+  };
+  request.cacheScope = async () => scope;
+  const services = { execFn: request, sleep: time.sleep };
+  const argv = ["watch", "--repo", "fixture/repo", "--config-file", path.join(dir, "config.json"), "--max-wait-sec", "1"];
+  await nativeRunCi(argv, services);
+  const firstCalls = calls;
+  scope = "second";
+  await nativeRunCi(argv, services);
+  assert.ok(calls > firstCalls, "a different credential must not inherit the previous identity's ordinary interval");
+  const refreshedCalls = calls;
+  await nativeRunCi([...argv, "--branch", "release"], services);
+  assert.ok(calls > refreshedCalls, "a different branch must poll fresh");
+  for (const mode of ["once", "status", "optimize"]) {
+    const before = calls;
+    await nativeRunCi([mode, ...argv.slice(1), "--branch", "release"], services);
+    assert.ok(calls > before, mode);
+  }
+  const knownScopeCalls = calls;
+  scope = undefined;
+  await nativeRunCi([...argv, "--branch", "release"], services);
+  assert.ok(calls > knownScopeCalls, "unknown scope cannot reuse the previous credential's deferred proof");
+  assert.equal(output.at(-1).events.some((event) => /GREEN$/.test(event.type)), false);
+});
+
+for (const surface of ["ci", "single-pr", "multi-pr"]) {
+  test(`retained green during ${surface} interval waits cannot replay readiness or slide the original due time`, async (t) => {
+    const dir = fixture(t);
+    const time = clock(t);
+    const output = capture(t);
+    const intervalSec = surface === "ci" ? 15 : 10;
+    const due = time.now + intervalSec * 1000;
+    const configFile = path.join(dir, "config.json");
+    const review = { databaseId: 1, state: "COMMENTED", submittedAt: "2026-10-30T00:00:00Z",
+      author: { login: "copilot" }, commit: { oid: "head" }, body: "" };
+    let calls = 0;
+    const services = {
+      stateDir: dir, sleep: time.sleep,
+      execFn(args) {
+        calls += 1;
+        return surface === "ci" ? greenCiExec(args)
+          : args[1] === "graphql" ? graph(prNode({ checks: "COMPLETED", reviews: [review] }))
+            : json({ workflow_runs: [], total_count: 0 });
+      },
+    };
+    const argv = ["watch", "--repo", "fixture/repo", "--max-wait-sec", "1",
+      ...(surface === "ci" ? ["--config-file", configFile, "--idle-interval", "15"]
+        : ["--interval", "10", ...(surface === "single-pr" ? ["--pr", "1", "--head", "head"] : ["--prs", "1:head,2:head"])])];
+    const run = surface === "ci" ? runCi : runPr;
+    const green = (event) => event.type === "ALL_GREEN" || event.type === "PR_READY_TO_MERGE";
+    await run(argv, services);
+    assert.ok(output.at(-1).events.some(green), "seed a real successful observation, not invented cached proof");
+    const initialCalls = calls;
+    for (let chunk = 0; chunk < intervalSec; chunk += 1) {
+      await run(argv, services);
+      assert.equal(calls, initialCalls, "waiting cannot poll or send a queued mutation");
+      assert.equal(output.at(-1).events.some(green), false, "retained cached green is not a new authorization");
+      assert.equal(output.at(-1).events[0].type, "WATCH_CHUNK_TIMEOUT");
+      const savedDue = surface === "ci"
+        ? loadState(stateFileForRepo("fixture/repo", parseArgs(argv))).metrics.nextPollAtMs
+        : loadPersistedPrSession("fixture/repo", dir).entries[1].watchState.nextPollAtMs;
+      assert.equal(savedDue, due, "no-op chunks retain the original absolute ordinary due time");
+    }
+    assert.equal(time.now, due);
+    await run(argv, services);
+    assert.ok(calls > initialCalls, "a fresh successful poll is required at the actual due time");
+    assert.ok(output.at(-1).events.some(green));
+  });
+}
