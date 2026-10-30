@@ -75,6 +75,12 @@ watch scope or superseding saved head/poll/credential identities invalidate carr
 `once`, `status` and `optimize` still poll fresh rather than reusing a partial
 watch sweep. Cooldown chunks report saved status snapshots without API calls.
 
+Discovery pages are bound to their observed SDK credential identity. A refresh
+during discovery restarts every owner collection at page one; completed or
+partial saved pages without a verified scope are discarded. Quota backoffs and
+genuine API errors remain distinct from clean chunk expiry, including when a
+deadline interrupts paginated job inspection.
+
 ## GitHub transport and degraded state
 
 The daemon ships a locked, self-contained Octokit runtime. End users do not need

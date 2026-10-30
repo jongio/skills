@@ -387,13 +387,36 @@ export function applySetupConfig(args, existingConfig) {
   return next;
 }
 
+class DiscoveryScopeChanged extends Error {}
+
 async function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultRequest) {
   state.metrics.discoveryProgress ??= {};
-  const progress = state.metrics.discoveryProgress[baseEndpoint] ??= { page: 1, results: [], complete: false };
+  const progress = state.metrics.discoveryProgress[baseEndpoint] ??= {
+    page: 1, results: [], complete: false, cacheScope: state.cacheScope || "",
+  };
+  const invalidateScope = () => {
+    state.metrics.discoveryProgress = {};
+    for (const key of ["watchSweep", "targetRepos", "nextRepo"]) delete state.metrics[key];
+    state.discoveryScopeChanged = true;
+  };
+  if ((!progress.cacheScope && (progress.page > 1 || progress.complete || progress.results.length > 0)) ||
+      (progress.cacheScope && state.cacheScope && progress.cacheScope !== state.cacheScope)) {
+    invalidateScope();
+    throw new DiscoveryScopeChanged();
+  }
   const results = progress.results;
   if (progress.complete) return results;
   for (let page = progress.page; ; page += 1) {
     const res = await ghApiWithEtag(`${baseEndpoint}&page=${page}`, state, execFn);
+    const observedScope = state.cacheScope || "";
+    if (progress.cacheScope && progress.cacheScope !== observedScope) {
+      invalidateScope();
+      if (res.chunkTimedOut) { state.chunkTimedOut = true; return []; }
+      if (res.rateLimited) { state.rateLimited = true; return []; }
+      if (res.error) throw new Error(res.error);
+      throw new DiscoveryScopeChanged();
+    }
+    progress.cacheScope = observedScope;
     if (res.chunkTimedOut) {
       state.chunkTimedOut = true;
       return results;
@@ -404,7 +427,7 @@ async function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultRequest)
       }
       break;
     }
-    if (!Array.isArray(res.data)) {
+    if (res.error || !Array.isArray(res.data)) {
       throw new Error(res.error || `Repository discovery failed for ${baseEndpoint}&page=${page}`);
     }
     if (res.data.length === 0) {
@@ -422,6 +445,17 @@ async function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultRequest)
 }
 
 export async function discoverOwnerRepos(owner, visibility = "all", state, execFn = defaultRequest) {
+  while (true) {
+    try {
+      const repos = await discoverOwnerReposOnce(owner, visibility, state, execFn);
+      return state?.discoveryScopeChanged && (state.chunkTimedOut || state.rateLimited) ? [] : repos;
+    } catch (error) {
+      if (!(error instanceof DiscoveryScopeChanged)) throw error;
+    }
+  }
+}
+
+async function discoverOwnerReposOnce(owner, visibility, state, execFn) {
   if (!owner) {
     return [];
   }
@@ -1532,7 +1566,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
       } else {
         jobsComplete = false;
       }
-      if (!jobsComplete && !tickRateLimited) {
+      if (!jobsComplete && !tickRateLimited && !tickChunkTimedOut) {
         tickError = jobsRes.error || `Incomplete jobs inventory for run ${run.id}`;
       }
       if (run.status === "completed" && jobsComplete && !prevRun?.telemetryRecorded && jobs.length > 0) {
@@ -1840,6 +1874,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
   const discoveryState = loadState(discoveryStateFile);
   discoveryState.chunkTimedOut = false;
+  discoveryState.discoveryScopeChanged = false;
   const nowMs = Date.now();
   const savedSnapshots = (repos) => repos
     .map((repo) => loadState(stateFileForRepo(repo, args)).metrics.lastStatus)
@@ -1869,12 +1904,19 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
         : { events: [{ type: "POLL_ERROR", error: error.message }], error: error.message }),
     };
   }
+  if (credentialScope && discoveryState.cacheScope !== credentialScope) {
+    discoveryState.cacheScope = credentialScope;
+    discoveryState.etags = {};
+    discoveryState.runs = {};
+    discoveryState.lastMainSha = "";
+    for (const key of ["discoveryProgress", "watchSweep", "targetRepos", "nextRepo"]) delete discoveryState.metrics[key];
+  }
   const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
   const effectiveMergeMode = args.explicitMergeMode
     ? args.mergeMode
     : config?.mergeMode || args.mergeMode || "approval";
   const resumable = args.mode === "watch";
-  const scopeKey = JSON.stringify({
+  const currentScopeKey = () => JSON.stringify({
     repos: args.explicitRepos.length > 0 ? args.explicitRepos : config?.repos || [],
     fallbackRepo: args.explicitRepos.length > 0 || args.owner || config?.owner || config?.repos?.length ? "" : args.repo,
     owner: args.owner || config?.owner || "",
@@ -1886,6 +1928,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     wakeOnNewCommit: args.wakeOnNewCommit,
     cacheScope: credentialScope || "",
   });
+  const scopeKey = currentScopeKey();
   if (resumable && discoveryState.metrics.watchScope !== scopeKey) {
     if (discoveryState.metrics.watchScope !== undefined) {
       delete discoveryState.metrics.discoveryProgress;
@@ -1895,7 +1938,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     discoveryState.metrics.watchScope = scopeKey;
     delete discoveryState.metrics.watchSweep;
   }
-  const sweep = resumable
+  let sweep = resumable
     ? discoveryState.metrics.watchSweep ??= { repos: null, completed: {}, greenEvents: {} }
     : { repos: null, completed: {}, greenEvents: {} };
   let targetRepos = [];
@@ -1920,6 +1963,12 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       discoveryState.metrics.retryAfterSec = null;
     }
     targetRepos = await resolveTargetRepos(args, config, discoveryState, execFn);
+    if (discoveryState.discoveryScopeChanged) {
+      credentialScope = discoveryState.cacheScope;
+      discoveryState.metrics.watchScope = currentScopeKey();
+      sweep = { repos: null, completed: {}, greenEvents: {} };
+      if (resumable) discoveryState.metrics.watchSweep = sweep;
+    }
     if (discoveryState.rateLimited && discoveryState.metrics) {
       const discRetrySec = computeNextPollIntervalSec(args, 0, discoveryState.metrics);
       discoveryState.metrics.cooldownUntilMs = Date.now() + discRetrySec * 1000;
@@ -1958,6 +2007,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   let totalActiveMainRuns = 0;
   let anyRateLimited = Boolean(discoveryState.rateLimited);
   let chunkTimedOut = false;
+  let inventoryScopeInvalidated = false;
   let minRateLimitRemaining = Number.isFinite(discoveryState.metrics?.rateLimitRemaining)
     ? discoveryState.metrics.rateLimitRemaining
     : null;
@@ -2046,6 +2096,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
           : args.wakeOnAllGreen,
       };
       const tick = await evaluatePollTick(repoArgs, repoState, execFn);
+      const changedScope = credentialScope && repoState.cacheScope !== credentialScope;
       discoveryState.metrics.nextRepo = targetRepos[(targetRepos.indexOf(repo) + 1) % targetRepos.length];
       if (tick.status) {
         tick.status.previousPhase = repoState.metrics.lastPhase || "";
@@ -2055,6 +2106,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       saveState(repoStateFile, repoState);
       delete sweep.greenEvents[repo];
       for (const ev of tick.events) {
+        if (changedScope && /GREEN$/.test(ev.type)) continue;
         if (ev.type === "ALL_GREEN" && targetRepos.length > 1) {
           if (!tick.chunkTimedOut && !tick.rateLimited) sweep.greenEvents[repo] = ev;
         } else {
@@ -2073,6 +2125,16 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       );
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
+      if (changedScope) {
+        for (const key of ["discoveryProgress", "watchSweep", "targetRepos", "nextRepo"]) delete discoveryState.metrics[key];
+        inventoryScopeInvalidated = true;
+        anyRateLimited ||= Boolean(tick.rateLimited);
+        if (tick.chunkTimedOut) chunkTimedOut = true;
+        else if (!tick.rateLimited) {
+          allEvents.push({ type: "POLL_ERROR", repo, error: "GitHub credentials changed during the watch sweep; refresh repository discovery" });
+        }
+        break;
+      }
       if (tick.chunkTimedOut) {
         if (completedThisTick > 0) discoveryState.metrics.nextRepo = repo;
         chunkTimedOut = true;
@@ -2121,7 +2183,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     rateLimitReset: maxRateLimitReset,
     retryAfterSec: maxRetryAfterSec,
   });
-  discoveryState.metrics.targetRepos = targetRepos;
+  if (!inventoryScopeInvalidated) discoveryState.metrics.targetRepos = targetRepos;
   if (anyRateLimited) discoveryState.metrics.repoCooldownUntilMs = Date.now() + nextIntervalSec * 1000;
   saveState(discoveryStateFile, discoveryState);
 

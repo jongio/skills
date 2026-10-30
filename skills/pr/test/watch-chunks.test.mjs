@@ -25,16 +25,23 @@ import {
   stateFileForRepo,
 } from "../../ci-hound/scripts/ci-hound-daemon.mjs";
 
+function authenticatedFixture(execute) {
+  const adapter = fixtureRequest(execute);
+  const request = async (input, options) => ({ ...await adapter(input, options), cacheScope: "fixture-scope" });
+  request.cacheScope = async () => "fixture-scope";
+  return request;
+}
+
 const evaluateMultiRepoPollTick = (args, config, execute) =>
-  nativeEvaluateMultiRepoPollTick(args, config, fixtureRequest(execute));
+  nativeEvaluateMultiRepoPollTick(args, config, authenticatedFixture(execute));
 const evaluatePollTick = (args, state, execute) =>
-  nativeEvaluatePollTick(args, state, fixtureRequest(execute));
+  nativeEvaluatePollTick(args, state, authenticatedFixture(execute));
 const evaluateMultiPrPollTick = (args, execute, state) =>
-  nativeEvaluateMultiPrPollTick(args, fixtureRequest(execute), state);
+  nativeEvaluateMultiPrPollTick(args, authenticatedFixture(execute), state);
 const runPr = (argv, services) =>
-  nativeRunPr(argv, { ...services, execFn: fixtureRequest(services.execFn) });
+  nativeRunPr(argv, { ...services, execFn: authenticatedFixture(services.execFn) });
 const runCi = (argv, services) =>
-  nativeRunCi(argv, { ...services, execFn: fixtureRequest(services.execFn) });
+  nativeRunCi(argv, { ...services, execFn: authenticatedFixture(services.execFn) });
 
 function fixture(t) {
   const root = path.resolve(".fleet-pr-192-test-fixtures");
@@ -321,6 +328,7 @@ test("CI repository cooldown survives a terminal event from an earlier repositor
     "--config-file", path.join(dir, "config.json")]);
   const state = loadState(path.join(dir, "missing.json"));
   state.lastMainSha = "old";
+  state.cacheScope = "fixture-scope";
   saveState(stateFileForRepo("fixture/one", args), state);
   const first = await evaluateMultiRepoPollTick(args, {}, (ghArgs) =>
     ghArgs[2].includes("fixture/two") ? throttled() : ciExec(ghArgs));
@@ -685,5 +693,188 @@ test("SDK notification output retains chunk rotations for both direct entrypoint
     const events = readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     assert.equal(events.filter((event) => event.type === "WATCH_CHUNK_TIMEOUT").length, 1);
     assert.ok(events.some((event) => event.type === "STATUS" && event.repo === "fixture/repo"));
+  }
+});
+
+test("review 5707186762: discovery restarts every owner collection after a mid-request credential refresh", async (t) => {
+  const time = clock(t);
+  for (const owner of ["@me", "fixture"]) {
+    const dir = fixture(t);
+    const args = parseArgs(["watch", "--owner", owner, "--visibility", owner === "@me" ? "private" : "all",
+      "--config-file", path.join(dir, "config.json")]);
+    let scope = "before";
+    const calls = [];
+    const request = async ({ endpoint }) => {
+      let data;
+      if (endpoint.startsWith("user/repos") || endpoint.startsWith("users/fixture/repos")) {
+        const page = Number(new URLSearchParams(endpoint.split("?")[1]).get("page"));
+        const refreshHere = owner === "@me" || endpoint.startsWith("users/fixture/repos");
+        if (scope === "before" && refreshHere && page === 2) scope = "after";
+        calls.push({ endpoint, scope });
+        if (scope === "before" && refreshHere) {
+          time.advance(100);
+          data = Array.from({ length: 100 }, (_, i) => ({
+            full_name: `fixture/old-${i}`, owner: { login: "fixture" }, private: owner === "@me", archived: i > 0,
+          }));
+        } else if (scope === "before") {
+          data = [{ full_name: "fixture/old-accessible", owner: { login: "fixture" }, private: true }];
+        } else if (page === 2) data = [];
+        else data = [{ full_name: owner === "@me" ? "fixture/new"
+          : endpoint.startsWith("user/repos") ? "fixture/new-private" : "fixture/new-public",
+        owner: { login: "fixture" }, private: !endpoint.startsWith("users/fixture/repos") }];
+      } else {
+        data = endpoint.includes("/commits/") ? { sha: "new-head" } : { workflow_runs: [] };
+      }
+      return { ok: true, status: 200, cacheScope: scope, headers: {}, data };
+    };
+    request.cacheScope = async () => scope;
+    args.chunkDeadlineMs = time.now + 100;
+    assert.equal((await nativeEvaluateMultiRepoPollTick(args, {}, request)).chunkTimedOut, true);
+    args.chunkDeadlineMs = time.now + 1000;
+    const resumed = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+    assert.deepEqual(resumed.repos.sort(), owner === "@me"
+      ? ["fixture/new"] : ["fixture/new-private", "fixture/new-public"]);
+    assert.ok(calls.some(({ endpoint, scope: identity }) => identity === "after" &&
+      endpoint.startsWith("user/repos") && endpoint.endsWith("page=1")));
+  }
+});
+
+test("review 5707186762: paginated job chunk expiry emits rotation instead of a terminal poll error", async (t) => {
+  const time = clock(t);
+  const output = capture(t);
+  for (const expiredChunk of [true, false]) {
+  const dir = fixture(t);
+  output.length = 0;
+  let laterPages = 0;
+  await nativeRunCi(["watch", "--repo", "fixture/repo", "--max-wait-sec", "1",
+    "--config-file", path.join(dir, "config.json")], {
+    sleep: time.sleep,
+    execFn: async ({ endpoint }) => {
+      if (endpoint.includes("/jobs?") && new URLSearchParams(endpoint.split("?")[1]).get("page") === "2") {
+        laterPages += 1;
+        if (expiredChunk) {
+          time.advance(1000);
+          return { ok: false, chunkTimedOut: true };
+        }
+        return { ok: false, status: 0, error: "Request timed out before the chunk deadline" };
+      }
+      const data = endpoint.includes("/commits/") ? { sha: "head" }
+        : endpoint.includes("/jobs?") ? { total_count: 51, jobs: Array.from({ length: 50 }, (_, i) => ({
+          id: i + 1, name: `job-${i}`, status: "completed", conclusion: "success",
+        })) } : { workflow_runs: [{
+          id: 1, name: "CI", event: "push", head_branch: "main", head_sha: "head",
+          status: "in_progress", conclusion: null,
+        }] };
+      return { ok: true, status: 200, headers: {}, data };
+    },
+  });
+  assert.equal(laterPages, 1);
+  assert.equal(output.flatMap((item) => item.events).some((event) => event.type === "POLL_ERROR"), !expiredChunk);
+  assert.equal(output.at(-1).events[0].type, expiredChunk ? "WATCH_CHUNK_TIMEOUT" : "POLL_ERROR");
+  }
+});
+
+test("review 5707186762: unknown-scope completed and partial saved discovery are never trusted", async (t) => {
+  const time = clock(t);
+  for (const complete of [true, false]) {
+    for (const missingGlobalScope of [false, true]) {
+    const dir = fixture(t);
+    const configFile = path.join(dir, "config.json");
+    const args = parseArgs(["watch", "--owner", "@me", "--visibility", "private", "--config-file", configFile]);
+    const state = loadState(path.join(dir, "missing.json"));
+    state.cacheScope = missingGlobalScope ? "" : "current";
+    state.metrics.discoveryProgress = {
+      "user/repos?affiliation=owner&visibility=private&per_page=100": {
+        page: 2, complete, results: [{ full_name: "fixture/old", private: true }],
+        ...(missingGlobalScope ? { cacheScope: "old-identity" } : {}),
+      },
+    };
+    saveState(path.join(dir, "_discovery.json"), state);
+    const calls = [];
+    const request = async ({ endpoint }) => {
+      calls.push(endpoint);
+      return { ok: true, status: 200, cacheScope: "current", headers: {},
+        data: endpoint.startsWith("user/repos")
+          ? endpoint.endsWith("page=1") ? [{ full_name: "fixture/new", private: true }] : []
+          : endpoint.includes("/commits/") ? { sha: "new" } : { workflow_runs: [] } };
+    };
+    request.cacheScope = async () => "current";
+    args.chunkDeadlineMs = time.now + 1000;
+    const result = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+    assert.match(calls[0], /^user\/repos.*page=1$/);
+    assert.deepEqual(result.repos, ["fixture/new"]);
+    }
+  }
+});
+
+test("review 5707186762: a scope refresh during repository polling invalidates the owner inventory before green", async (t) => {
+  const time = clock(t);
+  for (const expiredChunk of [false, true]) {
+  const dir = fixture(t);
+  const args = parseArgs(["watch", "--owner", "@me", "--visibility", "private",
+    "--config-file", path.join(dir, "config.json")]);
+  let scope = "before";
+  const adapter = fixtureRequest(greenCiExec);
+  const request = async (input) => {
+    if (input.endpoint.startsWith("user/repos")) {
+      if (scope === "before") time.advance(100);
+      return { ok: true, status: 200, cacheScope: scope, headers: {},
+        data: [{ full_name: `fixture/${scope}`, private: true }] };
+    }
+    if (input.endpoint.includes("/commits/") && scope === "before") {
+      scope = "after";
+      if (expiredChunk) time.advance(1000);
+    }
+    return { ...await adapter(input), cacheScope: scope };
+  };
+  request.cacheScope = async () => scope;
+  args.chunkDeadlineMs = time.now + 100;
+  assert.equal((await nativeEvaluateMultiRepoPollTick(args, {}, request)).chunkTimedOut, true);
+  args.chunkDeadlineMs = time.now + 1000;
+  const changed = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+  assert.equal(changed.events.some((event) => /GREEN$/.test(event.type)), false);
+  assert.equal(changed.events.some((event) => event.type === "POLL_ERROR"), !expiredChunk);
+  assert.equal(Boolean(changed.chunkTimedOut), expiredChunk);
+  args.chunkDeadlineMs = time.now + 1000;
+  const fresh = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+  assert.deepEqual(fresh.repos, ["fixture/after"]);
+  }
+});
+
+test("discovery scope reset preserves Retry-After and genuine API errors", async (t) => {
+  const time = clock(t);
+  for (const status of [429, 503]) {
+    const dir = fixture(t);
+    const args = parseArgs(["watch", "--owner", "@me", "--visibility", "private",
+      "--config-file", path.join(dir, "config.json")]);
+    let scope = "before";
+    let calls = 0;
+    const request = async ({ endpoint }) => {
+      calls += 1;
+      assert.equal(scope, "before", "scope reset cannot immediately retry a quota failure or transport error");
+      if (endpoint.endsWith("page=1")) {
+        time.advance(100);
+        return { ok: true, status: 200, cacheScope: scope, headers: {},
+          data: Array.from({ length: 100 }, (_, i) => ({ full_name: `fixture/old-${i}`, private: true })) };
+      }
+      scope = "after";
+      return { ok: false, status, cacheScope: scope, rateLimited: status === 429,
+        headers: status === 429 ? { "retry-after": "900" } : {}, data: null,
+        error: status === 429 ? "quota" : "Service unavailable" };
+    };
+    request.cacheScope = async () => scope;
+    args.chunkDeadlineMs = time.now + 100;
+    assert.equal((await nativeEvaluateMultiRepoPollTick(args, {}, request)).chunkTimedOut, true);
+    args.chunkDeadlineMs = time.now + 1000;
+    if (status === 503) {
+      await assert.rejects(nativeEvaluateMultiRepoPollTick(args, {}, request), /Service unavailable/);
+    } else {
+      const limited = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+      assert.equal(limited.rateLimited, true);
+      assert.ok(limited.nextIntervalSec >= 900);
+      const resumed = await nativeEvaluateMultiRepoPollTick(args, {}, () => assert.fail("cooldown must prevent requests"));
+      assert.equal(resumed.rateLimited, true);
+    }
+    assert.equal(calls, 2);
   }
 });
