@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { collect } from "../../pr-statusline/collector.mjs";
+import { collect as collectNative } from "../../pr-statusline/collector.mjs";
 import { SessionTracker, readState, syncSession, writeState } from "../../pr-statusline/tracker.mjs";
 import { reconcilePrStates } from "../../pr-statusline/lifecycle.mjs";
 import { render as renderPr } from "../../pr-statusline/render.mjs";
@@ -13,6 +13,7 @@ import { atomicWriteJson, OCTICONS, PR_CLOSED_TTL_MS } from "../../pr-statusline
 import { SubagentTracker, writeState as writeAgents } from "../../subagent-statusline/tracker.mjs";
 import { composeStatusLine } from "../compose.mjs";
 import { configureStatuslines } from "../../../scripts/setup-statusline.mjs";
+const collect = (session, options) => collectNative(session, { ...options, refreshRemote: false });
 
 const url = (number) => `https://github.com/example/widget/pull/${number}`;
 const event = (type, time, data = {}, agentId) => ({ type, timestamp: new Date(time).toISOString(), data, agentId });
@@ -269,7 +270,7 @@ test("settled subagent counts dismiss independently, without losing active PRs o
 		lastUserInputAt: 500,
 		agents: { a: { id: "a", status: "completed", prs: [url(1)], mergedPrs: [url(1)], completedAt: 10 } },
 	});
-	legacy.syncWithPrCache(data, 1000);
+	legacy.syncWithPrCache({ [url(1)]: { ...data[url(1)], checkedAt: 1000 } }, 1000);
 	assert.equal(legacy.agents.get("a").settlementObservedAt, 1000);
 	legacy.observe(event("user.message", 750));
 	assert.equal(legacy.counts().merged, 1);

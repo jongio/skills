@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { collect } from "./collector.mjs";
+import { requestedGitHubEnvironment } from "../github-transport.mjs";
 import { configHome } from "./tracker.mjs";
 import { createSessionAttention, runAttentionCommand } from "./attention.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
@@ -42,7 +43,7 @@ function manageAgents(action, id) {
 	return agents;
 }
 
-function updateSession(action, name) {
+async function updateSession(action, name) {
 	if (action === "name" || action === "clear-name") {
 		const value = action === "clear-name" ? setSessionName(session.sessionId, null)
 			: name === undefined ? readSessionName(session.sessionId) : setSessionName(session.sessionId, name);
@@ -50,12 +51,13 @@ function updateSession(action, name) {
 	}
 	if (!collector) throw new Error("Session statusline is still loading; retry shortly.");
 	const payload = { session_id: session.sessionId };
-	const result = action === "clear" ? clearSessionStatusline(payload) : refreshSessionStatusline(payload);
+	const result = action === "clear" ? clearSessionStatusline(payload) : await refreshSessionStatusline(payload);
 	collector.reload();
 	return result;
 }
 
 const configuration = {
+	requestedEnvironmentVariables: requestedGitHubEnvironment(),
 	commands: [
 		{
 			name: "session-attention",
@@ -76,11 +78,11 @@ const configuration = {
 				const [action, ...selection] = args.trim().split(/\s+/);
 				try {
 					if (action === "name") {
-						await session.log(updateSession(action, selection.length ? selection.join(" ") : undefined));
+						await session.log(await updateSession(action, selection.length ? selection.join(" ") : undefined));
 					} else if (action === "setup") {
 						await runInteractiveStatuslinePicker(session, { args: selection.join(" ") });
 					} else if (["clear", "refresh", "clear-name"].includes(action) && !selection.length) {
-						await session.log(updateSession(action));
+						await session.log(await updateSession(action));
 					} else {
 						await session.log("Usage: /session-statusline [name [<label>] | clear-name | refresh | clear | setup [all | none | prs issues subagents worktrees]]");
 					}
@@ -162,13 +164,13 @@ const configuration = {
 				required: ["action"],
 				additionalProperties: false,
 			},
-			handler: ({ action, name }) => {
+			handler: async ({ action, name }) => {
 				if (!["clear", "refresh", "name", "clear-name"].includes(action)) throw new Error("Use clear or refresh, name, or clear-name.");
 				try {
 					if (name !== undefined && (action !== "name" || typeof name !== "string")) {
 						throw new Error("A name string is only supported with action name.");
 					}
-					return updateSession(action, name);
+					return await updateSession(action, name);
 				} catch (error) {
 					return { resultType: "failure", textResultForLlm: error instanceof Error ? error.message : String(error) };
 				}
@@ -242,7 +244,7 @@ const configuration = {
 	],
 };
 
-const bootstrap = await joinSession({ tools: [] });
+const bootstrap = await joinSession({ tools: [], requestedEnvironmentVariables: configuration.requestedEnvironmentVariables });
 const { extensions } = await bootstrap.rpc.extensions.list();
 const current = extensions.find((entry) => entry.pid === process.pid);
 if (!current) throw new Error("Cannot verify the current statusline controller; restart Copilot before migrating.");

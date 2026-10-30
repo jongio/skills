@@ -6,7 +6,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SessionTracker, readState, refreshTrackedPrStatuses, statePath, writeState } from "../tracker.mjs";
 import { render } from "../render.mjs";
-import { collect } from "../collector.mjs";
+import { collect as collectNative } from "../collector.mjs";
+const collect = (session, options) => collectNative(session, { ...options, refreshRemote: false });
 
 const home = mkdtempSync(join(tmpdir(), "pr-statusline-test-"));
 const event = (type, data = {}, agentId) => ({ type, data, agentId, timestamp: new Date(1000).toISOString() });

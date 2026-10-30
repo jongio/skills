@@ -140,10 +140,12 @@ test("scope includes runtime, setup, manifests and gate self-changes but ignores
 		"scripts/setup-statusline.mjs", "scripts/benchmark-statuslines.mjs",
 		"scripts/statusline-performance-offline.mjs", "scripts/compare-statusline-performance.mjs",
 		"test/statusline-performance.test.mjs", ".github/workflows/statusline-performance.yml",
+		"test/github-runtime.test.mjs", "runtime/github-client/client.mjs", "runtime/github-client/package-lock.json",
 		"install-statusline.ps1", "install-statusline.sh",
 	]) assert.ok(isRelevantPath(path), path);
 	for (const path of [
 		"README.md", "extensions/worktree-statusline/README.md", "extensions/pr-statusline/screenshot.png",
+		"runtime/github-client/README.md",
 		"site/src/pages/index.astro", "skills/eli5/SKILL.md", "scripts/unrelated.mjs",
 	]) assert.equal(isRelevantPath(path), false, path);
 });
@@ -176,7 +178,7 @@ test("NUL-delimited Git detection handles renames/removals/spaces and excludes b
 	const { directory, commit } = fixture(t);
 	mkdirSync(join(directory, "extensions", "pr-statusline"), { recursive: true });
 	writeFileSync(join(directory, "extensions", "pr-statusline", "a space.mjs"), "original");
-	commit();
+	const eventBaseSha = commit();
 	command(directory, "branch", "contributor");
 	mkdirSync(join(directory, "extensions", "issue-statusline"));
 	writeFileSync(join(directory, "extensions", "issue-statusline", "base-only.mjs"), "base");
@@ -190,6 +192,21 @@ test("NUL-delimited Git detection handles renames/removals/spaces and excludes b
 	const result = detectChanges({ root: directory, baseSha, headSha, candidateSha });
 	assert.equal(result.changed, true);
 	assert.deepEqual(result.relevant, ["extensions/pr-statusline/a space.mjs"]);
+	const drifted = detectChanges({ root: directory, baseSha: eventBaseSha, headSha, candidateSha });
+	assert.equal(drifted.baseSha, baseSha, "measure against the immutable merge's actual first parent");
+	assert.equal(drifted.eventBaseSha, eventBaseSha);
+	assert.deepEqual(drifted.relevant, result.relevant, "base-only drift is still excluded");
+	const output = join(directory, "drift-outputs.txt");
+	const cli = spawnSync(process.execPath, [join(root, "scripts", "compare-statusline-performance.mjs"), "--detect"], {
+		cwd: directory, encoding: "utf8", timeout: 30000, windowsHide: true,
+		env: { ...process.env, BASE_SHA: eventBaseSha, HEAD_SHA: headSha, CANDIDATE_SHA: candidateSha,
+			GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: "" },
+	});
+	assert.equal(cli.status, 0, cli.stderr);
+	assert.match(readFileSync(output, "utf8"), new RegExp(`\\nbase=${baseSha}\\nhead=${headSha}\\ncandidate=${candidateSha}\\n`));
+	assert.throws(() => detectChanges({ root: directory, baseSha, headSha: baseSha, candidateSha }), /test-merge/);
+	assert.throws(() => detectChanges({ root: directory, baseSha: headSha, headSha, candidateSha }), /ancestor/);
+	assert.throws(() => detectChanges({ root: directory, baseSha: candidateSha, headSha, candidateSha }), /ancestor/);
 	assert.throws(() => detectChanges({ root: directory, baseSha: "f".repeat(40), headSha, candidateSha }));
 	assert.throws(() => detectChanges({ root: directory, baseSha, headSha, candidateSha: headSha }), /test-merge/);
 });
@@ -336,7 +353,7 @@ test("workflow keeps a stable gate, two OS targets, exact revisions and explicit
 	assert.match(workflow, /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
 	assert.match(workflow, /CANDIDATE_SHA: \$\{\{ github\.sha \}\}/);
 	assert.ok(workflow.indexOf("Statusline correctness") < workflow.indexOf("Compare identical workloads"));
-	assert.match(workflow, /run: node --test --test-concurrency=1 "extensions\/\*-statusline\/test\/\*\.test\.mjs" test\/statusline-performance\.test\.mjs test\/distribution-manifests\.test\.mjs/);
+	assert.match(workflow, /run: node --test --test-concurrency=1 "extensions\/\*-statusline\/test\/\*\.test\.mjs" "extensions\/daemon-notifications\/test\/\*\.test\.mjs" test\/statusline-performance\.test\.mjs test\/distribution-manifests\.test\.mjs test\/github-runtime\.test\.mjs/);
 	assert.match(workflow, /retention-days: 3/);
 	assert.match(workflow, /if-no-files-found: warn/);
 	for (const file of ["base", "candidate", "confirmation-base", "confirmation-candidate", "comparison"]) {

@@ -11,7 +11,7 @@
       "name": "jongio-skills",
       "source": "./",
       "description": "Jon Gallant's collection of reusable skills for AI coding agents.",
-      "version": "2.1.1"
+      "version": "2.1.3"
     }
   ]
 }

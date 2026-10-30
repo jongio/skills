@@ -88,6 +88,10 @@ export function reconcilePrStates(tracker, disk) {
 			const newer = (pr.checkedAt ?? 0) > (existing.checkedAt ?? 0) ? pr : existing;
 			const older = newer === pr ? existing : pr;
 			const merged = { ...older, ...newer, provenance: mergePrProvenance(existing.provenance, pr.provenance) };
+			// Cache recovery changes failure state without renewing the remote observation.
+			if (pr.checkedAt === existing.checkedAt && typeof pr.stale === "boolean") {
+				merged.stale = pr.stale;
+			}
 			if (newer.status && !isMergedPr(newer)) {
 				delete merged.mergedAt;
 				delete merged.mergedObservedAt;

@@ -124,9 +124,12 @@ explicit successful no-op. Maintainers can require the stable
 configure branch protection automatically.
 
 On both Windows and Linux, correctness tests finish before any measurement.
-The candidate's common harness runs against the PR event's exact base commit and
-GitHub test-merge commit, in separate processes on the same runner. The contributor
-head is recorded as provenance. The base does not need its own benchmark script.
+The candidate's common harness runs against the immutable GitHub test-merge's
+exact first parent and the test-merge commit, in separate processes on the same
+runner. Detection requires exactly two parents and the event's exact contributor
+head as the second parent. If the event base is stale, it must be an ancestor of
+the actual first parent; unrelated or newer event bases are rejected. The
+contributor head is recorded as provenance. The base does not need its own benchmark script.
 All four statuslines and the combined footer are measured, including warm caches,
 cold transcript replay, and Node CLI startup.
 
@@ -257,8 +260,9 @@ When updating an existing install, copy every runtime file listed in
 `worktree-statusline/grouping.mjs`, `worktree-statusline/worktrees.mjs` and
 `pr-statusline/provenance.mjs`, plus `pr-statusline/lifecycle.mjs` and
 `subagent-statusline/settlement.mjs`.
-Copy the shared `extensions/state-lock.mjs` to
-`$COPILOT_HOME/extensions/state-lock.mjs`.
+Copy all common assets in `SHARED_RUNTIME_FILES`, including the state lock,
+bundled GitHub client and notices, transport, and refresh helpers, into the
+installed extensions root.
 Copy `pr-statusline/compose.mjs` to
 `$COPILOT_HOME/statusline-compose.mjs` too. Preserve existing
 `statusline-config.json` and `settings.json`; no dependency install is required.
@@ -267,3 +271,23 @@ For plugin installs, update the same extension assets and
 `scripts/setup-statusline.mjs` in every installed plugin source copy too.
 Registration reads those source assets at module startup and can otherwise
 replace updated runtime files with older copies.
+
+## Built-in CLI worktree creation failures
+
+`Creating name for new worktree...` followed by a failing
+`git --no-optional-locks for-each-ref --format=%(refname) refs/heads/`
+comes from the CLI's worktree creation path, not this statusline renderer.
+The reported incident did not reproduce in bounded fresh-process reference
+enumeration or earlier disposable native worktree probes. This migration does
+not claim to fix that unconfirmed CLI failure.
+
+Capture the exact exit code, stderr, cwd, executable, Git/CLI versions, and
+timeout/signal details before choosing a recovery. Retry in the affected session
+and compare with a fresh process. If reproducible only in the running CLI,
+restart that CLI after preserving evidence. A manual worktree is a recovery
+option only after verifying the branch and configured external destination;
+switch the session with `/cwd` after successful creation.
+
+Do not patch installed runtime files, prune existing worktrees, alter global Git
+configuration, or expose credentials/log contents while collecting diagnostics.
+Prepare a minimal sanitized upstream reproducer only if the failure recurs.

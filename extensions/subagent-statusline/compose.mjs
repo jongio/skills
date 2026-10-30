@@ -913,11 +913,13 @@ export function ensurePluginStatuslineRegistered(extensionId, extensionDir, {
 		mkdirSync(home, { recursive: true });
 		const extRoot = join(home, "extensions");
 		const parentDir = dirname(extensionDir);
-		const lockSrc = join(parentDir, "state-lock.mjs");
-		const lockDst = join(extRoot, "state-lock.mjs");
-		if (existsSync(lockSrc) && resolve(lockSrc) !== resolve(lockDst)) {
-			mkdirSync(extRoot, { recursive: true });
-			copyFileSync(lockSrc, lockDst);
+		for (const name of ["state-lock.mjs", "github-client.mjs", "github-client.LICENSE",
+			"github-transport.mjs", "github-refresh.mjs", "refresh-github.mjs"]) {
+			const src = join(parentDir, name), dst = join(extRoot, name);
+			if (existsSync(src) && resolve(src) !== resolve(dst)) {
+				mkdirSync(extRoot, { recursive: true });
+				copyFileSync(src, dst);
+			}
 		}
 		const candidateIds = includeSiblings ? new Set([extensionId, ...PREFERRED_ORDER]) : new Set([extensionId]);
 		for (const id of candidateIds) {

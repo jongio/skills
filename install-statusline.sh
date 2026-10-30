@@ -33,7 +33,14 @@ BASE_URL="https://raw.githubusercontent.com/$REPO_SLUG/$GIT_REF"
 mkdir -p "$TEMP_ROOT/scripts"
 curl -fsSL "$BASE_URL/scripts/setup-statusline.mjs" -o "$TEMP_ROOT/scripts/setup-statusline.mjs"
 mkdir -p "$TEMP_ROOT/extensions"
-curl -fsSL "$BASE_URL/extensions/state-lock.mjs" -o "$TEMP_ROOT/extensions/state-lock.mjs"
+for file in state-lock.mjs github-client.mjs github-client.LICENSE github-transport.mjs github-refresh.mjs refresh-github.mjs; do
+  curl -fsSL "$BASE_URL/extensions/$file" -o "$TEMP_ROOT/extensions/$file"
+done
+
+mkdir -p "$TEMP_ROOT/extensions/daemon-notifications"
+for file in extension.mjs bridge.mjs; do
+  curl -fsSL "$BASE_URL/extensions/daemon-notifications/$file" -o "$TEMP_ROOT/extensions/daemon-notifications/$file"
+done
 
 for file in extension.mjs collector.mjs session-statusline.mjs tracker.mjs github.mjs provenance.mjs lifecycle.mjs render.mjs compose.mjs attention.mjs attention-state.mjs attention.windows.cs copilot-extension.json; do
   mkdir -p "$TEMP_ROOT/extensions/pr-statusline"
