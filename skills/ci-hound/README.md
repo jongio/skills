@@ -102,7 +102,7 @@ diagnostic `once`, `status` and `optimize` calls remain fresh.
 An idle peer's ordinary interval does not suppress another target once its own
 poll is due. An observed credential change also discards old snapshots, phases
 and ordinary timing alongside the credential-scoped response cache.
-If identity changes during a response, error/quota fallbacks cannot reuse the
+If identity changes during a response, including deadline cancellation, fallbacks cannot reuse the
 previous identity's cached body. A sweep also discards previously collected
 peer statuses and reports; recovery observes those peers under the new identity.
 Outstanding sweep members precede optional due-peer refreshes; a completed

@@ -594,7 +594,7 @@ export function savePersistedPrSession(repo, { cooldownUntilMs = null, entries =
 class WatchChunkDeadline extends Error {}
 
 function chunkExec(execFn, deadlineMs) {
-  const invoke = async (fn, input, options = {}) => {
+  const invoke = async (fn, input, options = {}, scopeLookup = false) => {
     const remaining = deadlineMs - Date.now();
     if (remaining <= 0) throw new WatchChunkDeadline();
     const control = new AbortController();
@@ -604,10 +604,15 @@ function chunkExec(execFn, deadlineMs) {
     try {
       const signal = options.signal ? AbortSignal.any([control.signal, options.signal]) : control.signal;
       const result = await fn(input, { ...options, signal });
-      if (control.signal.aborted || result?.chunkTimedOut) throw new WatchChunkDeadline();
+      if (control.signal.aborted || result?.chunkTimedOut) {
+        const error = new WatchChunkDeadline();
+        const scope = scopeLookup ? result : result?.cacheScope;
+        if (typeof scope === "string") error.cacheScope = scope;
+        throw error;
+      }
       return result;
     } catch (error) {
-      if (control.signal.aborted) throw new WatchChunkDeadline();
+      if (control.signal.aborted && !(error instanceof WatchChunkDeadline)) throw new WatchChunkDeadline();
       throw error;
     } finally {
       clearTimeout(timer);
@@ -615,7 +620,7 @@ function chunkExec(execFn, deadlineMs) {
   };
   const request = (input, options) => invoke(execFn, input, options);
   if (execFn.cacheScope) request.cacheScope = (options) =>
-    invoke((_, requestOptions) => execFn.cacheScope(requestOptions), undefined, options);
+    invoke((_, requestOptions) => execFn.cacheScope(requestOptions), undefined, options, true);
   return request;
 }
 
@@ -1089,6 +1094,9 @@ export async function evaluatePrPollTick(args, execFn = defaultRequest, state = 
     return tick;
   } catch (error) {
     if (!(error instanceof WatchChunkDeadline)) throw error;
+    if (state && typeof error.cacheScope === "string" && state.cacheScope !== error.cacheScope) {
+      resetPrObservations(state, error.cacheScope);
+    }
     return { events: [], chunkTimedOut: true, nextIntervalSec: args.intervalSec };
   }
 }

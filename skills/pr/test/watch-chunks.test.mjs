@@ -1728,6 +1728,60 @@ test("review 5708899427: CI refresh during a quota response cannot restore the o
   assert.doesNotMatch(JSON.stringify(output.slice(start)), /first-account-only/);
 });
 
+for (const surface of ["ci", "single-pr", "multi-pr"]) {
+  test(`review 5709554215: ${surface} refreshed cancellation cannot retain older status or phase`, { timeout: 5000 }, async (t) => {
+    const dir = fixture(t);
+    const time = clock(t);
+    const output = capture(t);
+    let scope = "first", refresh = false, aborted = false;
+    const adapter = fixtureRequest((args) => {
+      if (surface === "ci") return args[2].includes("/commits/")
+        ? json({ sha: `${scope}-account-only-head` }) : json({ workflow_runs: [] });
+      const node = prNode();
+      node.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[0].name = `${scope}-account-only-check`;
+      return args[1] === "graphql" ? graph(node) : json({ workflow_runs: [], total_count: 0 });
+    });
+    const request = async (input, options) => {
+      if (!refresh) return { ...await adapter(input, options), cacheScope: scope };
+      scope = "second";
+      assert.equal(options.signal.aborted, false, "refresh precedes actual deadline cancellation");
+      await new Promise((resolve) => options.signal.addEventListener("abort", () => {
+        aborted = true;
+        time.advance(1000);
+        resolve();
+      }, { once: true }));
+      return { ok: false, status: 0, headers: {}, data: null, cacheScope: scope,
+        error: "GitHub request cancelled or deadline exceeded" };
+    };
+    request.cacheScope = async () => scope;
+    const argv = ["watch", "--repo", "fixture/repo", "--max-wait-sec", "1",
+      ...(surface === "ci"
+        ? ["--config-file", path.join(dir, "config.json")]
+        : ["--interval", "10", ...(surface === "single-pr" ? ["--pr", "1", "--head", "head"] : ["--prs", "1:head,2:head"])])];
+    const services = { execFn: request, stateDir: dir, sleep: time.sleep };
+    const run = surface === "ci" ? nativeRunCi : nativeRunPr;
+    await run(argv, services);
+    assert.match(JSON.stringify(output), /first-account-only/);
+    time.advance(61000);
+    refresh = true;
+    const start = output.length;
+    await run(argv, services);
+    assert.equal(aborted, true, "the real chunk timer must cancel the pending request");
+    assert.doesNotMatch(JSON.stringify(output.slice(start)), /first-account-only/);
+    if (surface !== "ci") {
+      const saved = loadPersistedPrSession("fixture/repo", dir);
+      for (const entry of Object.values(saved.entries)) {
+        assert.equal(entry.lastStatus, null);
+        assert.equal(entry.lastPhase, "");
+      }
+    } else {
+      const saved = loadState(stateFileForRepo("fixture/repo", parseArgs(argv)));
+      assert.equal(saved.metrics.lastStatus, undefined);
+      assert.equal(saved.metrics.lastPhase, undefined);
+    }
+  });
+}
+
 for (const status of [429, 503, 304]) {
   test(`review 5709153540: refreshed CI scope cannot reuse a ${status} conditional body`, async () => {
     const state = loadState("");
