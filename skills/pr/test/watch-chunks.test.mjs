@@ -1241,6 +1241,173 @@ test("review 5708286540: due completed peers cannot interrupt the final member o
     "finish all outstanding members and evaluate aggregate green before an optional due-peer refresh consumes the chunk");
 });
 
+for (const delay of [0, 10]) {
+test(`review 5709769920: an older overlapping poll at ${delay}ms cannot overwrite a newer failure and release green`, async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const config = path.join(dir, "config.json");
+  let release, entered, first = true;
+  const ready = new Promise((resolve) => { entered = resolve; });
+  const pending = new Promise((resolve) => { release = resolve; });
+  const older = authenticatedFixture(async (args) => {
+    if (first) { first = false; entered(); await pending; }
+    return greenCiExec(args);
+  });
+  const inFlight = nativeEvaluateMultiRepoPollTick(
+    parseArgs(["watch", "--repos", "fixture/one,fixture/two", "--config-file", config]), {}, older);
+  await ready;
+  time.advance(delay);
+  try {
+    const newer = await evaluateMultiRepoPollTick(
+      parseArgs(["status", "--repo", "fixture/one", "--config-file", config]), {},
+      () => ({ ok: false, stdout: "HTTP/2.0 503 Unavailable\n\n{}", stderr: "newer poll failed" }));
+    assert.ok(newer.events.some((event) => event.type === "POLL_ERROR"));
+  } finally { release(); }
+  const result = await inFlight;
+  assert.equal(result.events.some((event) => /GREEN$/.test(event.type)), false,
+    "an earlier-started response cannot erase a later failed observation and renew its green proof");
+});
+}
+
+test("review 5709769920: a same-millisecond diagnostic invalidates an already held peer proof", async (t) => {
+  const dir = fixture(t);
+  clock(t);
+  const config = path.join(dir, "config.json");
+  let release, entered, paused = false;
+  const ready = new Promise((resolve) => { entered = resolve; });
+  const pending = new Promise((resolve) => { release = resolve; });
+  const older = authenticatedFixture(async (args) => {
+    if (!paused && args[2].includes("fixture/two/")) {
+      paused = true; entered(); await pending;
+    }
+    return greenCiExec(args);
+  });
+  const inFlight = nativeEvaluateMultiRepoPollTick(
+    parseArgs(["watch", "--repos", "fixture/one,fixture/two", "--config-file", config]), {}, older);
+  await ready;
+  try {
+    const failed = await evaluateMultiRepoPollTick(
+      parseArgs(["status", "--repo", "fixture/one", "--config-file", config]), {},
+      () => ({ ok: false, stdout: "HTTP/2.0 503 Unavailable\n\n{}", stderr: "same-millisecond failure" }));
+    assert.ok(failed.events.some((event) => event.type === "POLL_ERROR"));
+  } finally { release(); }
+  assert.equal((await inFlight).events.some((event) => /GREEN$/.test(event.type)), false,
+    "matching timestamps are not proof that the held peer observation is still current");
+});
+
+test("review 5709769920: a newer overlapping failure can still supersede an earlier published success", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const config = path.join(dir, "config.json");
+  let releaseOlder, releaseNewer, enteredOlder, enteredNewer;
+  const olderReady = new Promise((resolve) => { enteredOlder = resolve; });
+  const newerReady = new Promise((resolve) => { enteredNewer = resolve; });
+  const olderPending = new Promise((resolve) => { releaseOlder = resolve; });
+  const newerPending = new Promise((resolve) => { releaseNewer = resolve; });
+  let first = true;
+  const older = nativeEvaluateMultiRepoPollTick(
+    parseArgs(["watch", "--repo", "fixture/one", "--config-file", config]), {},
+    authenticatedFixture(async (args) => {
+      if (first) { first = false; enteredOlder(); await olderPending; }
+      return greenCiExec(args);
+    }));
+  await olderReady;
+  time.advance(10);
+  const newer = nativeEvaluateMultiRepoPollTick(
+    parseArgs(["status", "--repo", "fixture/one", "--config-file", config]), {},
+    authenticatedFixture(async () => {
+      enteredNewer();
+      await newerPending;
+      return { ok: false, stdout: "HTTP/2.0 503 Unavailable\n\n{}", stderr: "newer poll failed" };
+    }));
+  await newerReady;
+  try { releaseOlder(); await older; }
+  finally { releaseNewer(); }
+  assert.ok((await newer).events.some((event) => event.type === "POLL_ERROR"));
+  const saved = loadState(stateFileForRepo("fixture/one", parseArgs(["watch", "--config-file", config])));
+  assert.equal(saved.metrics.lastPollAt, new Date(time.now).toISOString());
+  assert.equal(saved.lastMainSha, "", "rejecting older writers cannot discard a genuinely newer failure");
+});
+
+test("review 5709769920: refreshed workflow quota remains authoritative for the next owner query", async (t) => {
+  const dir = fixture(t);
+  clock(t);
+  const config = path.join(dir, "config.json");
+  let scope = "first", calls = 0;
+  const adapter = fixtureRequest(greenCiExec);
+  const request = async (input, options) => {
+    calls += 1;
+    if (input.endpoint.includes("/actions/runs?branch=")) {
+      scope = "second";
+      return { ok: false, status: 429, headers: { "retry-after": "900" },
+        cacheScope: scope, rateLimited: true, error: "quota after refresh" };
+    }
+    return { ...await adapter(input, options), cacheScope: scope };
+  };
+  request.cacheScope = async () => scope;
+  const first = await nativeEvaluateMultiRepoPollTick(
+    parseArgs(["watch", "--repo", "fixture/repo", "--config-file", config]), {}, request);
+  assert.equal(first.rateLimited, true);
+  const until = loadState(path.join(dir, "_discovery.json")).metrics.repoCooldownUntilMs;
+  assert.equal(until, Date.now() + 900000);
+  const before = calls;
+  const next = await nativeEvaluateMultiRepoPollTick(
+    parseArgs(["watch", "--owner", "fixture", "--config-file", config]), {}, request);
+  assert.equal(next.rateLimited, true);
+  assert.equal(calls, before, "scope refresh cannot discard quota before fresh owner discovery");
+  assert.equal(loadState(path.join(dir, "_discovery.json")).metrics.repoCooldownUntilMs, until);
+});
+
+for (const boundary of ["workflow", "jobs", "job-page"]) {
+  for (const outcome of ["quota", "cancel"]) {
+    test(`review 5709769920: CI ${boundary} refresh preserves ${outcome}`, { timeout: 5000 }, async (t) => {
+      const time = clock(t);
+      const args = parseArgs(["watch", "--repo", "fixture/repo"]);
+      args.chunkDeadlineMs = time.now + 100;
+      const state = loadState("");
+      let scope = "first", triggered = false, aborted = false;
+      const adapter = fixtureRequest((ghArgs) => {
+        if (boundary === "job-page" && ghArgs[2].includes("/jobs") && !ghArgs[2].includes("&page=")) {
+          return json({ total_count: 51, jobs: Array.from({ length: 50 }, (_, i) => ({
+            id: i + 1, name: "test", status: "completed", conclusion: "success", steps: [],
+          })) });
+        }
+        return greenCiExec(ghArgs);
+      });
+      const request = async (input, options) => {
+        const matches = boundary === "workflow" ? input.endpoint.includes("/actions/runs?branch=")
+          : boundary === "jobs" ? input.endpoint.includes("/jobs")
+          : input.endpoint.includes("/jobs") && input.endpoint.includes("&page=");
+        if (!matches) return { ...await adapter(input, options), cacheScope: scope };
+        triggered = true;
+        scope = "second";
+        if (outcome === "quota") return { ok: false, status: 429, headers: { "retry-after": "900" },
+          cacheScope: scope, rateLimited: true, error: "quota after refresh" };
+        assert.equal(options.signal.aborted, false);
+        await new Promise((resolve) => options.signal.addEventListener("abort", () => {
+          aborted = true; time.advance(100); resolve();
+        }, { once: true }));
+        return { ok: false, status: 0, headers: {}, data: null, cacheScope: scope,
+          error: "GitHub request cancelled or deadline exceeded" };
+      };
+      request.cacheScope = async () => scope;
+      const tick = await nativeEvaluatePollTick(args, state, request);
+      assert.equal(triggered, true);
+      assert.equal(state.cacheScope, "second");
+      assert.equal(tick.events.some((event) => /GREEN$/.test(event.type)), false);
+      if (outcome === "quota") {
+        assert.equal(tick.rateLimited, true);
+        assert.ok(tick.events.some((event) => event.type === "RATE_LIMITED"));
+        assert.equal(state.metrics.cooldownUntilMs, time.now + 900000);
+      } else {
+        assert.equal(aborted, true);
+        assert.equal(tick.chunkTimedOut, true);
+        assert.equal(tick.error, undefined);
+      }
+    });
+  }
+}
+
 test("review 5708365127: an overlapping diagnostic cannot erase already published shared quota", async (t) => {
   const dir = fixture(t);
   clock(t);

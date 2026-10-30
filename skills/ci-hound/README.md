@@ -89,7 +89,10 @@ applying cooldown. Shared-backoff output reports the current requested targets,
 not an unrelated earlier watchlist.
 State saves serialize read/merge/rename within the caller's remaining budget,
 preserving validated same-host unexpired cooldowns, never another identity's
-cached payload. Only a genuinely missing state file initializes fresh state;
+cached payload. Repository publication also compares the observation read before
+polling: older writers cannot replace newer results, and ambiguous simultaneous
+observations discard green proof rather than guessing an order.
+Only a genuinely missing state file initializes fresh state;
 other read or JSON errors stop polling without replacing the file. Resolve the
 reported read/parse problem before re-arming rather than discarding saved quota.
 Current SDK identity is verified before cached status is
@@ -105,6 +108,8 @@ and ordinary timing alongside the credential-scoped response cache.
 If identity changes during a response, including deadline cancellation, fallbacks cannot reuse the
 previous identity's cached body. A sweep also discards previously collected
 peer statuses and reports; recovery observes those peers under the new identity.
+Workflow and paginated-job scope changes preserve observed quota or clean chunk
+expiry instead of replacing those outcomes with a generic poll error.
 Outstanding sweep members precede optional due-peer refreshes; a completed
 passing sweep is evaluated before those refreshes can consume the next chunk.
 A hard poll error discards held completion/green proof, not the repository

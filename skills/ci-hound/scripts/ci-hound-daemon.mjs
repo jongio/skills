@@ -595,7 +595,13 @@ export function loadState(stateFile) {
   };
 }
 
-export function saveState(stateFile, state, { deadlineMs = Infinity } = {}) {
+function pollVersion(state) {
+  return JSON.stringify([state?.host || "github.com", state?.repo || "", state?.branch || "main",
+    state?.cacheScope || "", state?.lastMainSha || "", state?.metrics?.lastPollAt || null,
+    state?.metrics?.apiCalls || 0]);
+}
+
+export function saveState(stateFile, state, { deadlineMs = Infinity, expectedPollVersion } = {}) {
   mkdirSync(dirname(stateFile), { recursive: true });
   const lockFile = `${stateFile}.lock`;
   const stopAt = performance.now() + Math.max(0, Math.min(2000, deadlineMs - Date.now()));
@@ -610,16 +616,33 @@ export function saveState(stateFile, state, { deadlineMs = Infinity } = {}) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(20, stopAt - performance.now()));
     }
   }
-  let failure;
+  let failure, superseded = false;
   try {
     writeFileSync(lock, String(process.pid));
     let saved;
     try { saved = JSON.parse(readFileSync(stateFile, "utf8")); }
     catch (error) { if (error.code !== "ENOENT") throw error; }
-    if (saved && githubHost(saved.host || "github.com") === githubHost(state.host)) {
+    const sameHost = saved && githubHost(saved.host || "github.com") === githubHost(state.host);
+    const proposedMetrics = state.metrics;
+    if (saved && expectedPollVersion !== undefined && pollVersion(saved) !== expectedPollVersion) {
+      const savedAt = Date.parse(saved.metrics?.lastPollAt);
+      const proposedAt = Date.parse(state.metrics?.lastPollAt);
+      if (!(Number.isFinite(savedAt) && Number.isFinite(proposedAt) && proposedAt > savedAt)) {
+        superseded = true;
+        Object.assign(state, saved);
+        // Simultaneous or unorderable observations cannot retain either green proof.
+        if (!(Number.isFinite(savedAt) && Number.isFinite(proposedAt) && proposedAt < savedAt)) {
+          resetCiObservations(state, state.cacheScope || "");
+        }
+      }
+    }
+    if (sameHost) {
       for (const key of ["cooldownUntilMs", "repoCooldownUntilMs"]) {
-        const until = saved.metrics?.[key];
-        if (Number.isFinite(until) && until > Date.now()) {
+        const until = Math.max(
+          Number.isFinite(saved.metrics?.[key]) ? saved.metrics[key] : 0,
+          Number.isFinite(proposedMetrics[key]) ? proposedMetrics[key] : 0
+        );
+        if (until > Date.now()) {
           state.metrics[key] = Math.max(state.metrics[key] || 0, until);
         }
       }
@@ -632,6 +655,7 @@ export function saveState(stateFile, state, { deadlineMs = Infinity } = {}) {
     try { rmSync(lockFile); } catch (error) { failure ??= error; }
   }
   if (failure) throw failure;
+  if (superseded) return false;
 }
 
 export function normalizeWorkflowTelemetryName(name) {
@@ -1435,6 +1459,22 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   }
   const pollScope = state.cacheScope;
   const scopeChangedError = "GitHub credentials changed during the poll; retry the watched repositories";
+  const changedScopePoll = (response = {}) => {
+    if (response.rateLimited || tickRateLimited) {
+      state.rateLimited = true;
+      state.metrics.cooldownUntilMs = Date.now() + computeNextPollIntervalSec(args, 0, state.metrics) * 1000;
+      const remainingSec = Math.max(1, (state.metrics.cooldownUntilMs - Date.now()) / 1000);
+      return {
+        events: [{ type: "RATE_LIMITED", repo: args.repo, retryAfterSec: remainingSec,
+          rateLimitRemaining: state.metrics.rateLimitRemaining }],
+        rateLimited: true, activeMainRuns: 0, nextIntervalSec: remainingSec,
+      };
+    }
+    if (response.chunkTimedOut || tickChunkTimedOut) {
+      return { events: [], chunkTimedOut: true, activeMainRuns: 0, nextIntervalSec: args.idleIntervalSec };
+    }
+    return failedPoll(scopeChangedError);
+  };
   const currentSha = commitRes.data?.sha || state.lastMainSha;
   if (!tickRateLimited && !tickChunkTimedOut && currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
     const prevSha = state.lastMainSha;
@@ -1521,7 +1561,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
       }
     }
   }
-  if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
+  if (pollScope && state.cacheScope !== pollScope) return changedScopePoll();
   const workflowRuns = [...runMap.values()];
   const { resolveKey: resolveWorkflowKey, eligibleByWorkflow } = selectActiveBranchWorkflowRuns(
     [...Object.values(state.runs || {}), ...workflowRuns],
@@ -1584,7 +1624,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
         continue;
       }
       const jobsRes = await ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
-      if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
+      if (pollScope && state.cacheScope !== pollScope) return changedScopePoll(jobsRes);
       if (jobsRes.rateLimited || jobsRes.chunkTimedOut) {
         if (jobsRes.rateLimited) tickRateLimited = true;
         if (jobsRes.chunkTimedOut) tickChunkTimedOut = true;
@@ -1614,7 +1654,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
             state,
             execFn
           );
-          if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
+          if (pollScope && state.cacheScope !== pollScope) return changedScopePoll(pageRes);
           if (pageRes.rateLimited || pageRes.chunkTimedOut) {
             if (pageRes.rateLimited) tickRateLimited = true;
             if (pageRes.chunkTimedOut) tickChunkTimedOut = true;
@@ -2177,6 +2217,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
         if (proof.sha !== current.lastMainSha || proof.branch !== current.branch ||
             (proof.cacheScope || "") !== (current.cacheScope || "") ||
             (credentialScope && proof.cacheScope !== credentialScope) ||
+            proof.pollVersion !== pollVersion(current) ||
             proof.lastPollAt !== current.metrics.lastPollAt) {
           delete sweep.completed[repo];
           delete sweep.greenEvents[repo];
@@ -2200,6 +2241,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       }
       const repoStateFile = stateFileForRepo(repo, args);
       const repoState = loadState(repoStateFile);
+      const expectedPollVersion = pollVersion(repoState);
       const qualifiedIds = args.watchRunsByRepo?.[repo] || [];
       const repoWatchRunIds =
         targetRepos.length === 1
@@ -2230,7 +2272,11 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
         repoState.metrics.lastPhase = tick.status.phase;
         repoState.metrics.lastStatus = tick.status;
       }
-      saveState(repoStateFile, repoState, { deadlineMs: args.chunkDeadlineMs });
+      if (saveState(repoStateFile, repoState, { deadlineMs: args.chunkDeadlineMs, expectedPollVersion }) === false) {
+        allEvents.push({ type: "POLL_ERROR", repo, error: "CI observations superseded by an overlapping poll; retry" });
+        discardGreenProof();
+        break;
+      }
       delete sweep.greenEvents[repo];
       for (const ev of tick.events) {
         if (changedScope && /GREEN$/.test(ev.type)) continue;
@@ -2293,6 +2339,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
           branch: repoState.branch,
           cacheScope: repoState.cacheScope || "",
           lastPollAt: repoState.metrics.lastPollAt,
+          pollVersion: pollVersion(repoState),
         };
       }
       completedThisTick += 1;
