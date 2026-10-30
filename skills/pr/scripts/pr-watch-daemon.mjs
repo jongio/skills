@@ -2177,6 +2177,10 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
         entriesToSave[String(k)] = v;
       }
       if (multi.error) {
+        saveSession({
+          cooldownUntilMs: multi.rateLimited ? Date.now() + (multi.nextIntervalSec || 60) * 1000 : null,
+          entries: entriesToSave,
+        });
         console.error(JSON.stringify(multi, null, 2));
         process.exit(1);
       }

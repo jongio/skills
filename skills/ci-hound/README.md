@@ -83,6 +83,10 @@ deadline interrupts paginated job inspection.
 Explicit `once`, `status` and `optimize` owner queries discard partial watch
 discovery state before fetching a fresh inventory; normal watch chunk
 continuations still retain their scoped progress.
+CI observations and backoff are host-scoped, including an explicit state file:
+switching its validated host discards the previous host's observations before
+applying cooldown. Shared-backoff output reports the current requested targets,
+not an unrelated earlier watchlist.
 
 ## GitHub transport and degraded state
 

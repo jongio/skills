@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createGitHubClient, createEventWriter, httpDetails } from "./lib/github-client.mjs";
+import { createGitHubClient, createEventWriter, githubHost, httpDetails } from "./lib/github-client.mjs";
 
 export const FLAKE_PATTERNS = [
   {
@@ -566,6 +566,7 @@ export function loadState(stateFile) {
       const parsed = JSON.parse(readFileSync(stateFile, "utf8"));
       return {
         repo: parsed.repo || "",
+        host: parsed.host || "github.com",
         branch: parsed.branch || "main",
         lastMainSha: parsed.lastMainSha || "",
         cacheScope: parsed.cacheScope || "",
@@ -582,6 +583,7 @@ export function loadState(stateFile) {
   }
   return {
     repo: "",
+    host: "github.com",
     branch: "main",
     lastMainSha: "",
     etags: {},
@@ -1313,6 +1315,9 @@ export function computeCiHoundPhase({
 
 export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   execFn = chunkExec(execFn, args.chunkDeadlineMs ?? Infinity);
+  const host = githubHost();
+  if ((state.host || "github.com") !== host) Object.assign(state, loadState(""));
+  state.host = host;
   state.repo = args.repo;
   state.branch = args.branch;
   const nowMs = Date.now();
@@ -1861,28 +1866,67 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   };
 }
 
+function stateDirectory(args) {
+  const host = githubHost();
+  return host === "github.com" ? dirname(args.configFile)
+    : join(dirname(args.configFile), "hosts", host.replace(/:/g, "__"));
+}
+
 export function stateFileForRepo(repo, args) {
   if (args.explicitStateFile) {
     return args.stateFile;
   }
   const safeSlug = normalizeRepoSlug(repo || "default").replace(/[^a-zA-Z0-9._-]+/g, "__");
-  return join(dirname(args.configFile), `${safeSlug}.json`);
+  return join(stateDirectory(args), `${safeSlug}.json`);
 }
 
 export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRequest) {
   execFn = chunkExec(execFn, args.chunkDeadlineMs ?? Infinity);
-  const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
+  const discoveryStateFile = join(stateDirectory(args), "_discovery.json");
   const discoveryState = loadState(discoveryStateFile);
+  const host = githubHost();
+  if (discoveryState.host !== host) Object.assign(discoveryState, loadState(""));
+  discoveryState.host = host;
   discoveryState.chunkTimedOut = false;
   discoveryState.discoveryScopeChanged = false;
   const nowMs = Date.now();
+  const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
+  const selection = {
+    repos: args.explicitRepos.length > 0 ? args.explicitRepos : config?.repos || [],
+    fallbackRepo: args.explicitRepos.length > 0 || args.owner || config?.owner || config?.repos?.length ? "" : args.repo,
+    owner: args.owner || config?.owner || "",
+    visibility: args.visibility || config?.visibility || "all",
+    branch: effectiveBranch,
+    watchRunIds: args.watchRunIds,
+    watchRunsByRepo: args.watchRunsByRepo,
+    wakeOnAllGreen: args.wakeOnAllGreen,
+    wakeOnNewCommit: args.wakeOnNewCommit,
+  };
+  const selectionKey = JSON.stringify(selection);
+  let savedSelectionKey = discoveryState.metrics.targetSelectionKey;
+  if (!savedSelectionKey && discoveryState.metrics.watchScope) {
+    try {
+      const { cacheScope, ...savedSelection } = JSON.parse(discoveryState.metrics.watchScope);
+      savedSelectionKey = JSON.stringify(savedSelection);
+    } catch {}
+  }
+  const knownRepos = [...new Set(selection.repos.map(normalizeRepoSlug).filter(Boolean))];
+  if (!selection.owner && knownRepos.length === 0 && args.repo) knownRepos.push(normalizeRepoSlug(args.repo));
+  for (const repo of Object.keys(args.watchRunsByRepo || {})) {
+    if (args.explicitRepos.length > 0 && !args.explicitRepos.includes(repo)) {
+      throw new Error(`Watched run repository "${repo}" is not in the explicit --repo/--repos list.`);
+    }
+    if (!knownRepos.includes(repo)) knownRepos.push(repo);
+  }
+  const reportingRepos = savedSelectionKey === selectionKey
+    ? discoveryState.metrics.targetRepos || knownRepos : knownRepos;
   const savedSnapshots = (repos) => repos
     .map((repo) => loadState(stateFileForRepo(repo, args)).metrics.lastStatus)
     .filter(Boolean)
     .map((status) => ({ ...status, previousPhase: status.phase }));
   if (discoveryState.metrics.repoCooldownUntilMs > nowMs) {
     const remainingSec = Math.max(1, Math.ceil((discoveryState.metrics.repoCooldownUntilMs - nowMs) / 1000));
-    const repos = discoveryState.metrics.targetRepos || args.explicitRepos || [];
+    const repos = reportingRepos;
     return {
       repos,
       events: [{ type: "RATE_LIMITED", retryAfterSec: remainingSec }],
@@ -1896,7 +1940,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   try {
     credentialScope = await execFn.cacheScope?.();
   } catch (error) {
-    const repos = discoveryState.metrics.targetRepos || args.explicitRepos || [];
+    const repos = reportingRepos;
     return {
       repos, reports: [], statuses: savedSnapshots(repos), nextIntervalSec: args.idleIntervalSec,
       ...(error instanceof WatchChunkDeadline
@@ -1911,7 +1955,6 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     discoveryState.lastMainSha = "";
     for (const key of ["discoveryProgress", "watchSweep", "targetRepos", "nextRepo"]) delete discoveryState.metrics[key];
   }
-  const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
   const effectiveMergeMode = args.explicitMergeMode
     ? args.mergeMode
     : config?.mergeMode || args.mergeMode || "approval";
@@ -1919,18 +1962,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   if (!resumable) {
     for (const key of ["discoveryProgress", "watchSweep", "nextRepo"]) delete discoveryState.metrics[key];
   }
-  const currentScopeKey = () => JSON.stringify({
-    repos: args.explicitRepos.length > 0 ? args.explicitRepos : config?.repos || [],
-    fallbackRepo: args.explicitRepos.length > 0 || args.owner || config?.owner || config?.repos?.length ? "" : args.repo,
-    owner: args.owner || config?.owner || "",
-    visibility: args.visibility || config?.visibility || "all",
-    branch: effectiveBranch,
-    watchRunIds: args.watchRunIds,
-    watchRunsByRepo: args.watchRunsByRepo,
-    wakeOnAllGreen: args.wakeOnAllGreen,
-    wakeOnNewCommit: args.wakeOnNewCommit,
-    cacheScope: credentialScope || "",
-  });
+  const currentScopeKey = () => JSON.stringify({ ...selection, cacheScope: credentialScope || "" });
   const scopeKey = currentScopeKey();
   if (resumable && discoveryState.metrics.watchScope !== scopeKey) {
     if (discoveryState.metrics.watchScope !== undefined) {
@@ -2186,7 +2218,10 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     rateLimitReset: maxRateLimitReset,
     retryAfterSec: maxRetryAfterSec,
   });
-  if (!inventoryScopeInvalidated) discoveryState.metrics.targetRepos = targetRepos;
+  if (!inventoryScopeInvalidated) {
+    discoveryState.metrics.targetRepos = targetRepos;
+    discoveryState.metrics.targetSelectionKey = selectionKey;
+  }
   if (anyRateLimited) discoveryState.metrics.repoCooldownUntilMs = Date.now() + nextIntervalSec * 1000;
   saveState(discoveryStateFile, discoveryState);
 
@@ -2225,8 +2260,12 @@ export async function runCli(argv = process.argv.slice(2), services = {}) {
   if (args.mode === "setup") {
     const updatedConfig = applySetupConfig(args, existingConfig);
     saveConfig(args.configFile, updatedConfig);
-    const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
+    const discoveryStateFile = join(stateDirectory(args), "_discovery.json");
     const discoveryState = loadState(discoveryStateFile);
+    const host = githubHost();
+    if (discoveryState.host !== host) Object.assign(discoveryState, loadState(""));
+    discoveryState.host = host;
+    for (const key of ["discoveryProgress", "watchSweep", "nextRepo"]) delete discoveryState.metrics[key];
     const resolvedRepos = await resolveTargetRepos(
       { ...args, explicitRepos: [] },
       updatedConfig,

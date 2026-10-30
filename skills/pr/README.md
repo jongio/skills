@@ -168,6 +168,9 @@ the legacy repository filename; other hosts use `pr-watch/hosts/<host>/` and do
 not import unqualified public-GitHub cursors or cooldowns. Malformed session
 data, host mismatches, invalid cooldowns and invalid retry counters stop the
 watcher rather than silently resetting its feedback/retry proof.
+Multi-PR watches flush completed-prefix retry/cursor state before reporting a
+later PR's API error, so a failed sibling poll cannot reset an already consumed
+review attempt.
 
 After handling comments, use `--since-comment-id <id>` for the primary PR, or
 `--since-comment-id <pr>:<id>` for a specific PR in `--prs`; do not advance other

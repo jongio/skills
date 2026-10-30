@@ -969,3 +969,106 @@ test("body review 5707347169: malformed session data cannot silently reset retry
     assert.equal(readFileSync(file, "utf8"), text, "do not overwrite unverified retry/cursor proof");
   }
 });
+
+test("body review 5707482862: shared cooldown reports the currently requested repository", async (t) => {
+  const dir = fixture(t);
+  clock(t);
+  const configFile = path.join(dir, "config.json");
+  const firstArgs = parseArgs(["watch", "--repo", "fixture/old", "--config-file", configFile]);
+  const request = async () => ({ ok: false, status: 429, rateLimited: true,
+    cacheScope: "fixture", headers: { "retry-after": "900" }, error: "quota" });
+  request.cacheScope = async () => "fixture";
+  assert.equal((await nativeEvaluateMultiRepoPollTick(firstArgs, {}, request)).rateLimited, true);
+  const nextArgs = parseArgs(["watch", "--repo", "fixture/new", "--config-file", configFile]);
+  const next = await nativeEvaluateMultiRepoPollTick(nextArgs, {}, () => assert.fail("shared cooldown must prevent requests"));
+  assert.deepEqual(next.repos, ["fixture/new"]);
+  assert.equal(next.statuses.some((status) => status.repo === "fixture/old"), false);
+  const configured = await nativeEvaluateMultiRepoPollTick(
+    parseArgs(["watch", "--config-file", configFile]), { repos: ["fixture/configured"] },
+    () => assert.fail("configured watchlist must retain shared backoff"));
+  assert.deepEqual(configured.repos, ["fixture/configured"]);
+  const qualified = await nativeEvaluateMultiRepoPollTick(
+    parseArgs(["watch", "--owner", "@me", "--watch-run", "fixture/dispatched:7", "--config-file", configFile]), {},
+    () => assert.fail("qualified target must retain shared backoff"));
+  assert.deepEqual(qualified.repos, ["fixture/dispatched"]);
+});
+
+test("body review 5707482862: CI cooldown state does not throttle a different GitHub host", async (t) => {
+  clock(t);
+  const previous = process.env.GH_HOST;
+  t.after(() => previous === undefined ? delete process.env.GH_HOST : process.env.GH_HOST = previous);
+  for (const explicit of [false, true]) {
+  const dir = fixture(t);
+  const args = parseArgs(["watch", "--repo", "fixture/repo", "--config-file", path.join(dir, "config.json"),
+    ...(explicit ? ["--state-file", path.join(dir, "shared-state.json")] : [])]);
+  process.env.GH_HOST = "github.com";
+  const quota = async () => ({ ok: false, status: 429, rateLimited: true, cacheScope: "fixture",
+    headers: { "retry-after": "900" }, error: "quota" });
+  quota.cacheScope = async () => "fixture";
+  assert.equal((await nativeEvaluateMultiRepoPollTick(args, {}, quota)).rateLimited, true);
+  process.env.GH_HOST = "ghe.fixture.test";
+  let calls = 0;
+  const request = async ({ endpoint }) => {
+    calls += 1;
+    return { ok: true, status: 200, cacheScope: "fixture", headers: {},
+      data: endpoint.includes("/commits/") ? { sha: "new" } : { workflow_runs: [] } };
+  };
+  request.cacheScope = async () => "fixture";
+  const next = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+  assert.equal(next.rateLimited, false);
+  assert.ok(calls > 0);
+  }
+});
+
+test("body review 5707482862: multi-PR errors retain retry state from a completed prefix", async (t) => {
+  const dir = fixture(t);
+  clock(t);
+  t.mock.method(console, "error", () => {});
+  t.mock.method(process, "exit", (code) => { throw new Error(`fixture-exit-${code}`); });
+  let mutations = 0;
+  const failedReview = { databaseId: 123, state: "COMMENTED", submittedAt: "2026-01-01T00:00:00Z",
+    author: { login: "copilot" }, commit: { oid: "head" },
+    body: "Copilot encountered an error and was unable to review this pull request" };
+  const request = async (input) => {
+    if (input.kind === "graphql") {
+      if (input.variables.pr === 2) return { ok: false, status: 503, error: "offline" };
+      return { ok: true, status: 200, cacheScope: "fixture",
+        data: { data: { repository: { pullRequest: prNode({ reviews: [failedReview] }) } } } };
+    }
+    if (input.kind === "reviewer") mutations += 1;
+    return { ok: true, status: 200, cacheScope: "fixture", data: { workflow_runs: [], total_count: 0 } };
+  };
+  request.cacheScope = async () => "fixture";
+  await assert.rejects(nativeRunPr(["watch", "--repo", "fixture/repo", "--prs", "1:head,2:head"],
+    { stateDir: dir, execFn: request }), /fixture-exit-1/);
+  assert.equal(mutations, 1);
+  assert.equal(loadPersistedPrSession("fixture/repo", dir).entries[1]?.watchState.copilotErrorRetriesByHead.head, 1);
+});
+
+test("host-scoped CI setup retains validated discovery cache for the following watch", async (t) => {
+  const dir = fixture(t);
+  capture(t);
+  const previous = process.env.GH_HOST;
+  t.after(() => previous === undefined ? delete process.env.GH_HOST : process.env.GH_HOST = previous);
+  process.env.GH_HOST = "ghe.fixture.test";
+  const configFile = path.join(dir, "config.json");
+  let revalidated = 0;
+  const request = async ({ endpoint, headers }) => {
+    if (endpoint.startsWith("user/repos")) {
+      if (headers["If-None-Match"]) {
+        revalidated += 1;
+        return { ok: true, status: 304, cacheScope: "fixture", headers: { etag: '"inventory"' }, data: null };
+      }
+      return { ok: true, status: 200, cacheScope: "fixture", headers: { etag: '"inventory"' },
+        data: [{ full_name: "fixture/repo", private: true }] };
+    }
+    return { ok: true, status: 200, cacheScope: "fixture", headers: {},
+      data: endpoint.includes("/commits/") ? { sha: "new" } : { workflow_runs: [] } };
+  };
+  request.cacheScope = async () => "fixture";
+  await nativeRunCi(["setup", "--owner", "@me", "--visibility", "private", "--config-file", configFile], { execFn: request });
+  const config = JSON.parse(readFileSync(configFile, "utf8"));
+  const result = await nativeEvaluateMultiRepoPollTick(parseArgs(["watch", "--config-file", configFile]), config, request);
+  assert.equal(revalidated, 1);
+  assert.deepEqual(result.repos, ["fixture/repo"]);
+});
