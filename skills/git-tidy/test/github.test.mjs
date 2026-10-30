@@ -41,6 +41,9 @@ test("GitHub environment limits child executable search to trusted tools", () =>
   const env = createGitHubEnvironment(ghPath, gitPath, {
     Path: path.join(root, "untrusted"),
     GH_TOKEN: "REDACTED",
+    GITHUB_ENTERPRISE_TOKEN: "unscoped-token-for-another-host",
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/nondefault-gh-bus",
+    XDG_RUNTIME_DIR: path.join(root, "runtime"),
     HOME: path.join(root, "home"),
     HTTPS_PROXY: "https://proxy.example",
     GIT_EXEC_PATH: path.join(root, "untrusted-git"),
@@ -52,6 +55,9 @@ test("GitHub environment limits child executable search to trusted tools", () =>
     [path.dirname(ghPath), path.dirname(gitPath)].join(path.delimiter),
   );
   assert.equal(env.GH_TOKEN, "REDACTED");
+  assert.equal("GITHUB_ENTERPRISE_TOKEN" in env, false);
+  assert.equal(env.DBUS_SESSION_BUS_ADDRESS, "unix:path=/run/user/1000/nondefault-gh-bus");
+  assert.equal(env.XDG_RUNTIME_DIR, path.join(root, "runtime"));
   assert.equal(env.HOME, path.join(root, "home"));
   assert.equal(env.HTTPS_PROXY, "https://proxy.example");
   assert.equal(env.GH_PROMPT_DISABLED, "1");

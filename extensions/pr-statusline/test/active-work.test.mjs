@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { collect } from "../collector.mjs";
+import { collect as collectNative } from "../collector.mjs";
 import { clearSessionStatusline } from "../session-statusline.mjs";
 import { SessionTracker, readState, syncSession, writeState } from "../tracker.mjs";
 import { IssueTracker, syncSession as syncIssues, writeState as writeIssues } from "../../issue-statusline/tracker.mjs";
@@ -12,6 +12,7 @@ import { configureStatuslines } from "../../../scripts/setup-statusline.mjs";
 import { composeStatusLine } from "../../worktree-statusline/compose.mjs";
 
 const pr = "https://github.com/acme/app/pull/42";
+const collect = (session, options) => collectNative(session, { ...options, refreshRemote: false });
 const issue = "https://github.com/acme/app/issues/7";
 const event = (type, data = {}, agentId) => ({ type, data, agentId, timestamp: new Date(1000).toISOString() });
 const start = (id, command = "", toolName = "powershell", args = {}, agentId) => event("tool.execution_start", {

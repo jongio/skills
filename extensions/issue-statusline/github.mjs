@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -104,47 +103,6 @@ export function summarizeIssueStatus(data) {
 	return tokens.join(" ");
 }
 
-function getSecondaryGhAccounts() {
-	const res = spawnSync("gh", ["auth", "status", "--json", "hosts"], {
-		encoding: "utf8",
-		timeout: 3000,
-		windowsHide: true,
-	});
-	if (res.status !== 0 || !res.stdout) return [];
-	try {
-		const parsed = JSON.parse(res.stdout);
-		const accounts = parsed?.hosts?.["github.com"] ?? [];
-		return accounts.filter((a) => !a.active && a.login).map((a) => a.login);
-	} catch {
-		return [];
-	}
-}
-
-function runGhWithFallback(args) {
-	let res = spawnSync("gh", args, { encoding: "utf8", timeout: 4000, windowsHide: true });
-	if (res.status === 0) return res;
-	const stderr = String(res.stderr ?? "");
-	if (/Could not resolve to a Repository/i.test(stderr)) {
-		for (const login of getSecondaryGhAccounts()) {
-			const tokenRes = spawnSync("gh", ["auth", "token", "--user", login], {
-				encoding: "utf8",
-				timeout: 2000,
-				windowsHide: true,
-			});
-			const token = tokenRes.status === 0 ? tokenRes.stdout.trim() : "";
-			if (!token) continue;
-			res = spawnSync("gh", args, {
-				encoding: "utf8",
-				timeout: 4000,
-				windowsHide: true,
-				env: { ...process.env, GH_TOKEN: token },
-			});
-			if (res.status === 0) return res;
-		}
-	}
-	return res;
-}
-
 const ISSUE_STATUS_GRAPHQL = `query($owner:String!,$name:String!,$number:Int!){
 	repository(owner:$owner,name:$name){
 		issue(number:$number){
@@ -160,66 +118,53 @@ const ISSUE_STATUS_GRAPHQL = `query($owner:String!,$name:String!,$number:Int!){
 	}
 }`;
 
-export function queryIssueStatusWithGh(url) {
-	let parsed;
-	try {
-		parsed = new URL(url);
-	} catch {
-		return null;
-	}
-	const match = /^\/([\w.-]+)\/([\w.-]+)\/issues\/([1-9]\d*)(?:\/|$)/.exec(parsed.pathname);
-	if (!match) return null;
-	const [, owner, repo, number] = match;
-	const args = [
-		"api",
-		"graphql",
-		...(parsed.hostname !== "github.com" ? ["--hostname", parsed.hostname] : []),
-		"-F",
-		`owner=${owner}`,
-		"-F",
-		`name=${repo}`,
-		"-F",
-		`number=${number}`,
-		"-f",
-		`query=${ISSUE_STATUS_GRAPHQL}`,
-	];
-	const res = runGhWithFallback(args);
-	if (res.status !== 0) {
-		const stderr = String(res.stderr ?? "");
-		if (/Could not resolve to an Issue/i.test(stderr)) {
-			return { state: "NOT_FOUND" };
-		}
-		return null;
-	}
-	if (!res.stdout) return null;
-	try {
-		const payload = JSON.parse(res.stdout);
-		const issue = payload?.data?.repository?.issue;
-		return issue ?? { state: "NOT_FOUND" };
-	} catch {
-		return null;
-	}
-}
 
+export async function queryIssueStatusWithGh(url, { request, signal } = {}) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return null; }
+  const match = /^\/([\w.-]+)\/([\w.-]+)\/issues\/([1-9]\d*)(?:\/|$)/.exec(parsed.pathname);
+  if (!match) return null;
+  request ??= (await import("../github-transport.mjs")).statuslineGitHub.request;
+  const [, owner, name, number] = match;
+  const response = await request({
+    kind: "graphql", query: ISSUE_STATUS_GRAPHQL,
+    variables: { owner, name, number: Number(number) },
+  }, parsed.hostname, { signal, target: url });
+  if (!response.ok) {
+    if (/Could not resolve to an Issue/i.test(response.error || "")) return { state: "NOT_FOUND" };
+    throw Object.assign(new Error(response.error || "GitHub status unavailable"), { response });
+  }
+  const repository = response.data?.data?.repository;
+  if (!repository || !Object.hasOwn(repository, "issue")) throw new Error("GitHub response missing issue data");
+  const item = repository.issue;
+  if (item !== null && !["OPEN", "CLOSED"].includes(item?.state)) throw new Error("GitHub response has invalid issue state");
+  const info = item ? { ...item } : { state: "NOT_FOUND" };
+  Object.defineProperty(info, "cacheScope", { value: response.cacheScope });
+  return info;
+}
 export function refreshTrackedIssueStatuses(tracker, {
 	home,
 	now = Date.now(),
-	fetchIssueStatus = queryIssueStatusWithGh,
+	fetchIssueStatus,
 	issueCacheTtlMs = ISSUE_OPEN_TTL_MS,
 	force = false,
+	prefetched = false,
 	onError = (error) => { throw error; },
 } = {}) {
-	if (typeof fetchIssueStatus !== "function") return false;
-	const useSharedCache = fetchIssueStatus === queryIssueStatusWithGh;
+	const useSharedCache = fetchIssueStatus === undefined;
+	if (!useSharedCache && typeof fetchIssueStatus !== "function") return false;
 	const cache = useSharedCache ? readIssueCache(home) : null;
-	let cacheDirty = false;
 	let changed = false;
 
 	for (const issue of [...tracker.state.issues]) {
 		const cached = cache?.[issue.url];
+		if (useSharedCache && cached?.lastError) {
+			if (!issue.stale) { issue.stale = true; changed = true; }
+			continue;
+		}
 		if (!force && updateIssueContext(issue, cached?.info, (cached?.checkedAt ?? 0) < (issue.checkedAt ?? 0))) changed = true;
-		if (issue.simulated || (!force && issue.closedAt)) continue;
-		if (!force && typeof issue.status === "string" && issue.status.includes(ICONS.comment) &&
+		if (issue.simulated || (!force && !prefetched && issue.closedAt)) continue;
+		if (!force && !prefetched && typeof issue.status === "string" && issue.status.includes(ICONS.comment) &&
 				Number.isFinite(issue.checkedAt) && issue.checkedAt > 0 && now - issue.checkedAt < issueCacheTtlMs) {
 			continue;
 		}
@@ -233,20 +178,7 @@ export function refreshTrackedIssueStatuses(tracker, {
 			} else if (!force && entry?.refreshingUntil && entry.refreshingUntil > now) {
 				continue;
 			} else {
-				cache[issue.url] = { ...(entry ?? {}), refreshingUntil: now + 8000 };
-				writeIssueCache(cache, home);
-				try {
-					info = fetchIssueStatus(issue.url);
-				} catch (error) {
-					failure = error;
-					info = null;
-				}
-				const stateName = String(info?.state ?? "").toUpperCase();
-				const ttlMs = !info
-					? 5_000
-					: (stateName === "CLOSED" || stateName === "NOT_FOUND" ? ISSUE_CLOSED_TTL_MS : ISSUE_OPEN_TTL_MS);
-				cache[issue.url] = { info, checkedAt: now, ttlMs, refreshingUntil: 0 };
-				cacheDirty = true;
+				continue;
 			}
 		} else {
 			try {
@@ -256,7 +188,12 @@ export function refreshTrackedIssueStatuses(tracker, {
 				info = null;
 			}
 		}
-		if (force && !info) {
+		const observedAt = prefetched && Number.isFinite(info?.observedAt) ? info.observedAt
+			: useSharedCache && Number.isFinite(cached?.checkedAt) ? cached.checkedAt : now;
+		if (info && (useSharedCache || info.observedFromCache) && Number.isFinite(issue.checkedAt) && observedAt < issue.checkedAt) continue;
+		if (failure && !issue.stale) { issue.stale = true; changed = true; }
+		if (info && issue.stale !== false) { issue.stale = false; changed = true; }
+		if ((force || failure) && !info) {
 			onError(new Error(`Could not refresh ${issue.label}: ${failure?.message ?? "GitHub returned no status."}`));
 			continue;
 		}
@@ -285,8 +222,8 @@ export function refreshTrackedIssueStatuses(tracker, {
 					issue.status = closedStatus;
 					changed = true;
 				}
-				if (issue.checkedAt !== now) {
-					issue.checkedAt = now;
+				if (issue.checkedAt !== observedAt) {
+					issue.checkedAt = observedAt;
 					changed = true;
 				}
 				continue;
@@ -305,11 +242,10 @@ export function refreshTrackedIssueStatuses(tracker, {
 				changed = true;
 			}
 		}
-		if ((info || !useSharedCache) && issue.checkedAt !== now) {
-			issue.checkedAt = now;
+		if (info && issue.checkedAt !== observedAt) {
+			issue.checkedAt = observedAt;
 			changed = true;
 		}
 	}
-	if (cacheDirty && cache) writeIssueCache(cache, home);
 	return changed;
 }

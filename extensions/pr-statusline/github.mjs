@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -163,47 +162,6 @@ export function summarizePrStatus(data) {
 	return tokens.join(" ");
 }
 
-function getSecondaryGhAccounts() {
-	const res = spawnSync("gh", ["auth", "status", "--json", "hosts"], {
-		encoding: "utf8",
-		timeout: 3000,
-		windowsHide: true,
-	});
-	if (res.status !== 0 || !res.stdout) return [];
-	try {
-		const parsed = JSON.parse(res.stdout);
-		const accounts = parsed?.hosts?.["github.com"] ?? [];
-		return accounts.filter((a) => !a.active && a.login).map((a) => a.login);
-	} catch {
-		return [];
-	}
-}
-
-function runGhWithFallback(args) {
-	let res = spawnSync("gh", args, { encoding: "utf8", timeout: 4000, windowsHide: true });
-	if (res.status === 0) return res;
-	const stderr = String(res.stderr ?? "");
-	if (/Could not resolve to a Repository/i.test(stderr)) {
-		for (const login of getSecondaryGhAccounts()) {
-			const tokenRes = spawnSync("gh", ["auth", "token", "--user", login], {
-				encoding: "utf8",
-				timeout: 2000,
-				windowsHide: true,
-			});
-			const token = tokenRes.status === 0 ? tokenRes.stdout.trim() : "";
-			if (!token) continue;
-			res = spawnSync("gh", args, {
-				encoding: "utf8",
-				timeout: 4000,
-				windowsHide: true,
-				env: { ...process.env, GH_TOKEN: token },
-			});
-			if (res.status === 0) return res;
-		}
-	}
-	return res;
-}
-
 const PR_STATUS_GRAPHQL = `query($owner:String!,$name:String!,$number:Int!){
 	repository(owner:$owner,name:$name){
 		pullRequest(number:$number){
@@ -341,88 +299,65 @@ function normalizeGraphqlPr(pr) {
 	};
 }
 
-export function queryPrStatusWithGh(url, { run = runGhWithFallback } = {}) {
-	let parsed;
-	try {
-		parsed = new URL(url);
-	} catch {
-		return null;
-	}
-	const match = /^\/([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)(?:\/|$)/.exec(parsed.pathname);
-	if (!match) return null;
-	const [, owner, repo, number] = match;
-	const args = [
-		"api",
-		"graphql",
-		...(parsed.hostname !== "github.com" ? ["--hostname", parsed.hostname] : []),
-		"-F",
-		`owner=${owner}`,
-		"-F",
-		`name=${repo}`,
-		"-F",
-		`number=${number}`,
-		"-f",
-		`query=${PR_STATUS_GRAPHQL}`,
-	];
-	const res = run(args);
-	if (res.status !== 0) {
-		const stderr = String(res.stderr ?? "");
-		if (/Could not resolve to a PullRequest/i.test(stderr)) {
-			return { state: "NOT_FOUND" };
-		}
-		return null;
-	}
-	if (!res.stdout) return null;
-	try {
-		const payload = JSON.parse(res.stdout);
-		const pr = payload?.data?.repository?.pullRequest;
-		return pr ? normalizeGraphqlPr(pr) : { state: "NOT_FOUND" };
-	} catch {
-		return null;
-	}
+
+export async function queryPrStatusWithGh(url, { request, signal } = {}) {
+  let parsed;
+  try { parsed = new URL(url); } catch { return null; }
+  const match = /^\/([\w.-]+)\/([\w.-]+)\/pull\/([1-9]\d*)(?:\/|$)/.exec(parsed.pathname);
+  if (!match) return null;
+  request ??= (await import("../github-transport.mjs")).statuslineGitHub.request;
+  const [, owner, name, number] = match;
+  const response = await request({
+    kind: "graphql", query: PR_STATUS_GRAPHQL,
+    variables: { owner, name, number: Number(number) },
+  }, parsed.hostname, { signal, target: url });
+  if (!response.ok) {
+    if (/Could not resolve to a PullRequest/i.test(response.error || "")) return { state: "NOT_FOUND" };
+    throw Object.assign(new Error(response.error || "GitHub status unavailable"), { response });
+  }
+  const repository = response.data?.data?.repository;
+  if (!repository || !Object.hasOwn(repository, "pullRequest")) throw new Error("GitHub response missing pull request data");
+  const item = repository.pullRequest;
+  if (item !== null && !["OPEN", "CLOSED", "MERGED"].includes(item?.state)) throw new Error("GitHub response has invalid pull request state");
+  const info = item ? normalizeGraphqlPr(item) : { state: "NOT_FOUND" };
+  Object.defineProperty(info, "cacheScope", { value: response.cacheScope });
+  return info;
 }
 
-export function queryBranchPrWithGh(repository, branch, { run = runGhWithFallback } = {}) {
-	const [owner, repo] = String(repository ?? "").split("/");
-	if (!owner || !repo || !branch) return null;
-	const res = run([
-		"api",
-		"graphql",
-		"-F",
-		`owner=${owner}`,
-		"-F",
-		`name=${repo}`,
-		"-F",
-		`head=${branch}`,
-		"-f",
-		`query=${BRANCH_PR_GRAPHQL}`,
-	]);
-	if (res.status !== 0 || !res.stdout) return null;
-	try {
-		const payload = JSON.parse(res.stdout);
-		const nodes = payload?.data?.repository?.pullRequests?.nodes;
-		return Array.isArray(nodes) && nodes.length > 0 ? normalizeGraphqlPr(nodes[0]) : { state: "NONE" };
-	} catch {
-		return null;
-	}
+export async function queryBranchPrWithGh(repository, branch, { request, host = "github.com", signal } = {}) {
+  const [owner, name] = String(repository ?? "").split("/");
+  if (!owner || !name || !branch) return null;
+  request ??= (await import("../github-transport.mjs")).statuslineGitHub.request;
+  const response = await request({ kind: "graphql", query: BRANCH_PR_GRAPHQL, variables: { owner, name, head: branch } }, host,
+    { signal, target: `branch:${host}/${repository}:${branch}` });
+  if (!response.ok) throw Object.assign(new Error(response.error || "Branch PR discovery unavailable"), { response });
+  const nodes = response.data?.data?.repository?.pullRequests?.nodes;
+  if (!Array.isArray(nodes)) throw new Error("GitHub response missing branch PR inventory");
+  if (nodes.some((item) => !["OPEN", "CLOSED", "MERGED"].includes(item?.state))) throw new Error("GitHub response has invalid branch PR state");
+  const info = nodes.length ? normalizeGraphqlPr(nodes[0]) : { state: "NONE" };
+  Object.defineProperty(info, "cacheScope", { value: response.cacheScope });
+  return info;
 }
-
 export function refreshTrackedPrStatuses(tracker, {
 	home,
 	now = Date.now(),
-	fetchPrStatus = queryPrStatusWithGh,
+	fetchPrStatus,
 	prCacheTtlMs,
 	force = false,
+	prefetched = false,
 	onError = (error) => { throw error; },
 } = {}) {
-	if (typeof fetchPrStatus !== "function") return false;
-	const useSharedCache = fetchPrStatus === queryPrStatusWithGh;
+	const useSharedCache = fetchPrStatus === undefined;
+	if (!useSharedCache && typeof fetchPrStatus !== "function") return false;
 	const cache = useSharedCache ? readPrCache(home) : null;
-	let cacheDirty = false;
 	let changed = false;
 
 	for (const pr of [...tracker.state.prs]) {
 		const cached = cache?.[pr.url];
+		if (useSharedCache && cached?.lastError) {
+			if (!pr.stale) { pr.stale = true; changed = true; }
+			continue;
+		}
 		if (!force && updatePrContext(pr, cached?.info, (cached?.checkedAt ?? 0) < (pr.checkedAt ?? 0))) changed = true;
 		if (pr.simulated) continue;
 		const hasOcticonFormat = typeof pr.status === "string" &&
@@ -432,7 +367,7 @@ export function refreshTrackedPrStatuses(tracker, {
 		const defaultTtl = merged ? PR_CLOSED_TTL_MS :
 			(pr.status?.includes(OCTICONS.running) ? PR_RUNNING_TTL_MS : PR_SETTLED_TTL_MS);
 		const effectiveTtl = prCacheTtlMs ?? defaultTtl;
-		if (!force && (hasOcticonFormat || merged) && Number.isFinite(pr.checkedAt) && pr.checkedAt > 0 &&
+		if (!force && !prefetched && (hasOcticonFormat || merged) && Number.isFinite(pr.checkedAt) && pr.checkedAt > 0 &&
 				now - pr.checkedAt < effectiveTtl && !((cached?.checkedAt ?? 0) > pr.checkedAt)) continue;
 
 		let info = null;
@@ -455,23 +390,7 @@ export function refreshTrackedPrStatuses(tracker, {
 			} else if (!force && entry?.refreshingUntil && entry.refreshingUntil > now) {
 				continue;
 			} else {
-				cache[pr.url] = { ...(entry ?? {}), refreshingUntil: now + 8000 };
-				writePrCache(cache, home);
-				try {
-					info = fetchPrStatus(pr.url);
-				} catch (error) {
-					failure = error;
-					info = null;
-				}
-				const stateName = String(info?.state ?? "").toUpperCase();
-				const summary = info ? summarizePrStatus(info) : null;
-				const ttlMs = !info
-					? 5_000
-					: stateName === "CLOSED" || stateName === "MERGED" || stateName === "NOT_FOUND"
-						? PR_CLOSED_TTL_MS
-						: (summary?.includes(OCTICONS.running) ? PR_RUNNING_TTL_MS : PR_SETTLED_TTL_MS);
-				cache[pr.url] = { info, checkedAt: now, ttlMs, refreshingUntil: 0 };
-				cacheDirty = true;
+				continue;
 			}
 		} else {
 			try {
@@ -481,7 +400,12 @@ export function refreshTrackedPrStatuses(tracker, {
 				info = null;
 			}
 		}
-		if (force && !info) {
+		const observedAt = prefetched && Number.isFinite(info?.observedAt) ? info.observedAt
+			: useSharedCache && Number.isFinite(cached?.checkedAt) ? cached.checkedAt : now;
+		if (info && (useSharedCache || info.observedFromCache) && Number.isFinite(pr.checkedAt) && observedAt < pr.checkedAt) continue;
+		if (failure && !pr.stale) { pr.stale = true; changed = true; }
+		if (info && pr.stale !== false) { pr.stale = false; changed = true; }
+		if ((force || failure) && !info) {
 			onError(new Error(`Could not refresh ${pr.label}: ${failure?.message ?? "GitHub returned no status."}`));
 			continue;
 		}
@@ -502,8 +426,8 @@ export function refreshTrackedPrStatuses(tracker, {
 					pr.status = mergedStatus;
 					changed = true;
 				}
-				if (pr.checkedAt !== now) {
-					pr.checkedAt = now;
+				if (pr.checkedAt !== observedAt) {
+					pr.checkedAt = observedAt;
 					changed = true;
 				}
 				continue;
@@ -523,11 +447,10 @@ export function refreshTrackedPrStatuses(tracker, {
 				changed = true;
 			}
 		}
-		if ((info || !useSharedCache) && pr.checkedAt !== now) {
-			pr.checkedAt = now;
+		if (info && pr.checkedAt !== observedAt) {
+			pr.checkedAt = observedAt;
 			changed = true;
 		}
 	}
-	if (cacheDirty && cache) writePrCache(cache, home);
 	return changed;
 }

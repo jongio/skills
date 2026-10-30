@@ -3,10 +3,15 @@ import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { ensurePluginStatuslineRegistered } from "./compose.mjs";
 import { IssueTracker, syncSession, writeState } from "./tracker.mjs";
+import { startIssueRefresh } from "../github-refresh.mjs";
+import { requestedGitHubEnvironment } from "../github-transport.mjs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 ensurePluginStatuslineRegistered("issue-statusline", dirname(fileURLToPath(import.meta.url)));
 
 const session = await joinSession({
+	requestedEnvironmentVariables: requestedGitHubEnvironment(),
 	commands: [{
 		name: "session-issues",
 		description: "Session issue links: list, add owner/repo#123, remove owner/repo#123, or clear",
@@ -41,4 +46,9 @@ const session = await joinSession({
 			return JSON.stringify(issues);
 		},
 	}],
+});
+
+const stopRefresh = startIssueRefresh(session, { home: process.env.COPILOT_HOME || join(homedir(), ".copilot") });
+session.on((event) => {
+	if (event.type === "session.shutdown") stopRefresh();
 });

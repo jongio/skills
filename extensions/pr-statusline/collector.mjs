@@ -1,13 +1,15 @@
 import { pullRequest, readState, RELEVANT_EVENT_TYPE, SessionTracker, statePath, writeState } from "./tracker.mjs";
 import { renameSync, rmSync, statSync } from "node:fs";
 import { dismissMergedPrs, initializeMergedPrs, reconcilePrStates } from "./lifecycle.mjs";
+import { refreshSessionStatusline } from "./session-statusline.mjs";
+import { refreshTracker } from "../github-refresh.mjs";
 
 function serializeComparable(snap) {
 	const { updatedAt: _ignored, ...rest } = snap;
 	return JSON.stringify(rest);
 }
 
-export async function collect(session, { home, interval = 15000, report = console.error, attention = null } = {}) {
+export async function collect(session, { home, interval = 15000, report = console.error, refreshRemote = true, attention = null } = {}) {
 	const file = statePath(session.sessionId, home);
 	let previous = null;
 	let lastDiskMtimeMs = 0;
@@ -36,6 +38,8 @@ export async function collect(session, { home, interval = 15000, report = consol
 	let loading = true;
 	let stopped = false;
 	let polling = false;
+	let activityRevision = 0;
+	const controller = new AbortController();
 	let lastComparable = previous ? serializeComparable(tracker.snapshot()) : null;
 	const reload = () => {
 		const disk = readState(session.sessionId, home);
@@ -85,6 +89,7 @@ export async function collect(session, { home, interval = 15000, report = consol
 			try {
 				reload();
 				tracker.observe(event);
+				activityRevision++;
 				attention?.observe(event);
 				save();
 			} catch (error) {
@@ -115,19 +120,28 @@ export async function collect(session, { home, interval = 15000, report = consol
 		if (polling || stopped) return;
 		polling = true;
 		try {
+			const revision = activityRevision;
 			const activity = await session.rpc.metadata.activity();
-			if (!stopped) save(activity);
+			if (!stopped) save(revision === activityRevision ? activity : undefined);
+			if (refreshRemote && !stopped) {
+				const failures = await refreshTracker("pr", session.sessionId, { home, signal: controller.signal });
+				for (const failure of failures) report(`[pr-statusline] ${failure}`);
+				const result = await refreshSessionStatusline({ session_id: session.sessionId }, { home, force: false, remoteOnly: true, signal: controller.signal });
+				if (result.startsWith("Session statusline refresh incomplete")) report(`[pr-statusline] ${result}`);
+			}
+			if (!stopped) save();
 		} catch (error) {
 			report(`[pr-statusline] Could not read session activity: ${error.message}`);
 		} finally {
 			polling = false;
 		}
 	}
-	await poll();
+	const initialPoll = poll();
 	const timer = setInterval(poll, interval);
 	timer.unref();
 	return {
 		tracker,
+		initialPoll,
 		manage(action, reference, toolCallId = null) {
 			reload();
 			const call = toolCallId ? tracker.calls.get(toolCallId) : null;
@@ -141,6 +155,7 @@ export async function collect(session, { home, interval = 15000, report = consol
 		reload,
 		stop() {
 			stopped = true;
+			controller.abort();
 			clearInterval(timer);
 			unsubscribe();
 			attention?.stop();

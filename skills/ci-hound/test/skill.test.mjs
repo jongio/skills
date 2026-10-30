@@ -1,3 +1,4 @@
+import { fixtureRequest, parseGhApiArgs, parseHttpResponse } from "./github-fixtures.mjs";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,25 +9,29 @@ import {
   buildOptimizationReport,
   computeCiHoundPhase,
   computeNextPollIntervalSec,
-  discoverOwnerRepos,
-  evaluateMultiRepoPollTick,
-  evaluatePollTick,
-  ghApiWithEtag,
+  discoverOwnerRepos as native_discoverOwnerRepos,
+  evaluateMultiRepoPollTick as native_evaluateMultiRepoPollTick,
+  evaluatePollTick as native_evaluatePollTick,
+  ghApiWithEtag as native_ghApiWithEtag,
   isValidRepoSlug,
   loadConfig,
   loadState,
   matchFlakePattern,
   parseArgs,
-  parseGhApiArgs,
-  parseHttpResponse,
-  pruneState,
-  resolveTargetRepos,
+      pruneState,
+  resolveTargetRepos as native_resolveTargetRepos,
   saveConfig,
   saveState,
   selectDeliverySkill,
   shouldEmitWatchStatus,
   slimEtagData,
 } from "../scripts/ci-hound-daemon.mjs";
+
+const discoverOwnerRepos = (...args) => { args[3] = fixtureRequest(args[3]); return native_discoverOwnerRepos(...args); };
+const resolveTargetRepos = (...args) => { args[3] = fixtureRequest(args[3]); return native_resolveTargetRepos(...args); };
+const ghApiWithEtag = (...args) => { args[2] = fixtureRequest(args[2]); return native_ghApiWithEtag(...args); };
+const evaluatePollTick = (...args) => { args[2] = fixtureRequest(args[2]); return native_evaluatePollTick(...args); };
+const evaluateMultiRepoPollTick = (...args) => { args[2] = fixtureRequest(args[2]); return native_evaluateMultiRepoPollTick(...args); };
 
 const skill = await readFile(new URL("../SKILL.md", import.meta.url), "utf8");
 
@@ -42,7 +47,7 @@ function disableAlertsForTest(t) {
   });
 }
 
-test("portable skill frontmatter contains name, description, and version metadata", () => {
+test("portable skill frontmatter contains name, description, and version metadata", async () => {
   const frontmatter = skill.match(/^---\n([\s\S]*?)\n---/);
   assert.ok(frontmatter);
   const keys = [...frontmatter[1].matchAll(/^([a-z][a-z-]*):/gm)].map((match) => match[1]);
@@ -51,7 +56,7 @@ test("portable skill frontmatter contains name, description, and version metadat
   assert.match(frontmatter[1], /^  version: "[^"]+"$/m);
 });
 
-test("skill includes workflow, setup, go/pr routing, safety, and exit criteria", () => {
+test("skill includes workflow, setup, go/pr routing, safety, and exit criteria", async () => {
   assert.match(skill, /^## Multi-Repository Setup \(`\/ci-hound setup`\)$/m);
   assert.match(skill, /^## `go` vs `pr` Delivery Routing$/m);
   assert.match(skill, /^## Workflow$/m);
@@ -112,7 +117,7 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
     archived: true,
     disabled: false,
   }));
-  const discovered = discoverOwnerRepos("@me", "private", discoveryState, (ghArgs) => {
+  const discovered = await discoverOwnerRepos("@me", "private", discoveryState, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100&page=1") {
       return {
@@ -138,7 +143,7 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   assert.ok(discoveryState.etags["user/repos?affiliation=owner&visibility=private&per_page=100&page=2"]);
 
   // Named owner discovery finds private repos via authenticated user/repos and public repos via users/<owner>/repos
-  const namedOwnerDiscovered = discoverOwnerRepos("jongio", "private", loadState("/nonexistent/d2.json"), (ghArgs) => {
+  const namedOwnerDiscovered = await discoverOwnerRepos("jongio", "private", loadState("/nonexistent/d2.json"), (ghArgs) => {
     assert.equal(
       ghArgs[2],
       "user/repos?affiliation=owner,organization_member,collaborator&visibility=private&per_page=100&page=1"
@@ -158,7 +163,7 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   const mixedCaseArgs = parseArgs(["watch", "--repo", "Acme/Project", "--watch-run", "acme/project:99"]);
   assert.deepEqual(mixedCaseArgs.explicitRepos, ["acme/project"]);
   assert.deepEqual(mixedCaseArgs.watchRunsByRepo, { "acme/project": [99] });
-  const mixedResolved = resolveTargetRepos(
+  const mixedResolved = await resolveTargetRepos(
     parseArgs(["watch"]),
     { repos: ["Jongio/Private-One"], owner: "@me", visibility: "private", branch: "main", mergeMode: "approval", worktreeRoot: "" },
     loadState("/nonexistent/d-case.json"),
@@ -173,9 +178,9 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   assert.deepEqual(mixedResolved, ["jongio/private-one"]);
 
   // Uncached discovery error throws instead of silently returning a partial/empty watchlist
-  assert.throws(
-    () =>
-      discoverOwnerRepos("@me", "private", loadState("/nonexistent/d-err.json"), () => ({
+  await assert.rejects(
+    async () =>
+      await discoverOwnerRepos("@me", "private", loadState("/nonexistent/d-err.json"), () => ({
         ok: false,
         stdout: "HTTP/2.0 403 Forbidden\n\n",
         stderr: "HTTP 403",
@@ -185,7 +190,7 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
 
   // Empty configured owner scope must return [] and NOT fall back to current git checkout
   const emptyOwnerConfig = { repos: [], owner: "jongio", visibility: "private", branch: "main", mergeMode: "approval", worktreeRoot: "" };
-  const emptyResolved = resolveTargetRepos(
+  const emptyResolved = await resolveTargetRepos(
     parseArgs(["watch"]),
     emptyOwnerConfig,
     loadState("/nonexistent/d3.json"),
@@ -194,9 +199,9 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   assert.deepEqual(emptyResolved, []);
 
   // Rejects explicit --state-file when multiple target repositories resolve
-  assert.throws(
-    () =>
-      evaluateMultiRepoPollTick(
+  await assert.rejects(
+    async () =>
+      await evaluateMultiRepoPollTick(
         parseArgs(["watch", "--config-file", configFile, "--state-file", path.join(tempDir, "shared.json")]),
         reloaded,
         (ghArgs) => {
@@ -216,9 +221,9 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   );
 
   // Rejects unqualified --watch-run when multiple target repositories resolve
-  assert.throws(
-    () =>
-      evaluateMultiRepoPollTick(
+  await assert.rejects(
+    async () =>
+      await evaluateMultiRepoPollTick(
         parseArgs(["watch", "--config-file", configFile, "--watch-run", "12345"]),
         reloaded,
         (ghArgs) => {
@@ -237,9 +242,9 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
     /Unqualified --watch-run requires a single target repository/
   );
   assert.throws(() => parseArgs(["watch", "--watch-run", "bad:id"]), /Invalid --watch-run/);
-  assert.throws(
-    () =>
-      evaluateMultiRepoPollTick(
+  await assert.rejects(
+    async () =>
+      await evaluateMultiRepoPollTick(
         parseArgs(["watch", "--repo", "acme/one", "--watch-run", "acme/two:99"]),
         reloaded,
         () => ({ ok: true, stdout: "[]", stderr: "" })
@@ -254,7 +259,7 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   assert.equal(multiHeaderParsed.bodyText, '{"ok":true}');
 
   const watchArgs = parseArgs(["watch", "--config-file", configFile]);
-  const multiTick = evaluateMultiRepoPollTick(watchArgs, reloaded, (ghArgs) => {
+  const multiTick = await evaluateMultiRepoPollTick(watchArgs, reloaded, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "user/repos?affiliation=owner&visibility=private&per_page=100&page=1") {
       return {
@@ -312,7 +317,7 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
     "github/evals:9999",
     "--existing-worktree",
   ]);
-  const qualifiedTick = evaluateMultiRepoPollTick(qualifiedWatchArgs, reloaded, (ghArgs) => {
+  const qualifiedTick = await evaluateMultiRepoPollTick(qualifiedWatchArgs, reloaded, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint.startsWith("user/repos?")) {
       return {
@@ -385,12 +390,12 @@ test("setup config, owner repo discovery, and multi-repo polling resolve and iso
   const cleared = applySetupConfig(parseArgs(["setup", "--clear-repos"]), reloaded);
   assert.deepEqual(cleared.repos, []);
   assert.equal(cleared.owner, "");
-  assert.deepEqual(resolveTargetRepos(parseArgs(["watch", "--repo", "github/evals"]), cleared, discoveryState), [
+  assert.deepEqual(await resolveTargetRepos(parseArgs(["watch", "--repo", "github/evals"]), cleared, discoveryState), [
     "github/evals",
   ]);
 });
 
-test("selectDeliverySkill routes new failures and optimizations to go and existing worktrees/PRs to pr", () => {
+test("selectDeliverySkill routes new failures and optimizations to go and existing worktrees/PRs to pr", async () => {
   assert.equal(selectDeliverySkill({ eventType: "JOB_FAILED" }), "go");
   assert.equal(selectDeliverySkill({ eventType: "WORKFLOW_FAILED" }), "go");
   assert.equal(selectDeliverySkill({ eventType: "OPTIMIZE" }), "go");
@@ -400,7 +405,7 @@ test("selectDeliverySkill routes new failures and optimizations to go and existi
   assert.equal(selectDeliverySkill({}), "pr");
 });
 
-test("parseArgs parses mode, repo, intervals, merge modes, flags, and watched run IDs", () => {
+test("parseArgs parses mode, repo, intervals, merge modes, flags, and watched run IDs", async () => {
   const parsed = parseArgs([
     "--mode",
     "optimize",
@@ -472,7 +477,7 @@ test("saveState and loadState round-trip state and recover from corrupted JSON",
   assert.equal(recovered.lastMainSha, "");
 });
 
-test("ghApiWithEtag caches 200 ETag responses, reuses 304 Not Modified, and falls back on HTTP/JSON errors", () => {
+test("ghApiWithEtag caches 200 ETag responses, reuses 304 Not Modified, and falls back on HTTP/JSON errors", async () => {
   const state = loadState("/nonexistent/state.json");
   let callCount = 0;
   const fakeExec = (ghArgs) => {
@@ -507,27 +512,27 @@ test("ghApiWithEtag caches 200 ETag responses, reuses 304 Not Modified, and fall
     };
   };
 
-  const first = ghApiWithEtag("repos/github/evals/commits/main", state, fakeExec);
+  const first = await ghApiWithEtag("repos/github/evals/commits/main", state, fakeExec);
   assert.equal(first.fromCache, false);
   assert.equal(first.data.sha, "abc12345");
 
-  const second = ghApiWithEtag("repos/github/evals/commits/main", state, fakeExec);
+  const second = await ghApiWithEtag("repos/github/evals/commits/main", state, fakeExec);
   assert.equal(second.fromCache, true);
   assert.equal(second.data.sha, "abc12345");
   assert.equal(state.metrics.cacheHits304, 1);
 
-  const third = ghApiWithEtag("repos/github/evals/commits/main", state, fakeExec);
+  const third = await ghApiWithEtag("repos/github/evals/commits/main", state, fakeExec);
   assert.equal(third.fromCache, false);
   assert.equal(third.data.sha, "abc12345");
   assert.match(third.error, /502/);
 
-  const fourth = ghApiWithEtag("repos/github/evals/commits/main", state, fakeExec);
+  const fourth = await ghApiWithEtag("repos/github/evals/commits/main", state, fakeExec);
   assert.equal(fourth.fromCache, false);
   assert.equal(fourth.data.sha, "abc12345");
   assert.ok(fourth.error);
 });
 
-test("evaluatePollTick detects instant job-level failure on active main run, harvests PR telemetry once, and skips unchanged completed runs", (t) => {
+test("evaluatePollTick detects instant job-level failure on active main run, harvests PR telemetry once, and skips unchanged completed runs", async (t) => {
   disableAlertsForTest(t);
   const state = loadState("/nonexistent/state.json");
   const args = parseArgs(["watch", "--repo", "github/evals"]);
@@ -653,7 +658,7 @@ test("evaluatePollTick detects instant job-level failure on active main run, har
     throw new Error(`Unexpected endpoint: ${endpoint}`);
   };
 
-  const tick = evaluatePollTick(args, state, fakeExec);
+  const tick = await evaluatePollTick(args, state, fakeExec);
   assert.equal(tick.activeMainRuns, 1);
   assert.equal(tick.nextIntervalSec, 15);
   assert.equal(tick.events.length, 1);
@@ -664,7 +669,7 @@ test("evaluatePollTick detects instant job-level failure on active main run, har
   assert.equal(prJobsCalls, 1);
 
   // Second poll with identical updated_at on completed PR run 102 must skip re-fetching 102/jobs
-  evaluatePollTick(args, state, fakeExec);
+  await evaluatePollTick(args, state, fakeExec);
   assert.equal(prJobsCalls, 1);
 
   const report = buildOptimizationReport(state);
@@ -677,7 +682,7 @@ test("evaluatePollTick detects instant job-level failure on active main run, har
   // When watching an existing PR run (--watch-run 102) that failed, evaluatePollTick emits deliverySkill: "pr"
   const watchedPrState = loadState("/nonexistent/state.json");
   const watchedPrArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "102", "--merge=auto"]);
-  const watchedPrTick = evaluatePollTick(watchedPrArgs, watchedPrState, fakeExec);
+  const watchedPrTick = await evaluatePollTick(watchedPrArgs, watchedPrState, fakeExec);
   const prFailureEvent = watchedPrTick.events.find((e) => e.runId === 102);
   assert.ok(prFailureEvent);
   assert.equal(prFailureEvent.type, "JOB_FAILED");
@@ -689,7 +694,7 @@ test("evaluatePollTick detects instant job-level failure on active main run, har
   assert.equal(matchFlakePattern("ordinary assertion failure"), null);
 });
 
-test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COMMIT, WORKFLOW_FAILED, and WATCHED_RUNS_GREEN", (t) => {
+test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COMMIT, WORKFLOW_FAILED, and WATCHED_RUNS_GREEN", async (t) => {
   disableAlertsForTest(t);
   const state = loadState("/nonexistent/state.json");
   state.lastMainSha = "oldsha0000000000000000000000000000000000";
@@ -758,19 +763,19 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
     throw new Error(`Unexpected endpoint: ${endpoint}`);
   };
 
-  const firstTick = evaluatePollTick(commitArgs, state, fakeExec);
+  const firstTick = await evaluatePollTick(commitArgs, state, fakeExec);
   assert.equal(firstTick.events[0].type, "NEW_MAIN_COMMIT");
   assert.equal(firstTick.events[0].previousSha, "oldsha0000000000000000000000000000000000");
 
   // Next tick without commit change emits WATCHED_RUNS_GREEN
   const greenArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "555"]);
-  const secondTick = evaluatePollTick(greenArgs, state, fakeExec);
+  const secondTick = await evaluatePollTick(greenArgs, state, fakeExec);
   assert.equal(secondTick.events.length, 1);
   assert.equal(secondTick.events[0].type, "WATCHED_RUNS_GREEN");
 
   // Without --watch-run, emits ALL_GREEN for the branch head
   const allGreenArgs = parseArgs(["watch", "--repo", "github/evals"]);
-  const thirdTick = evaluatePollTick(allGreenArgs, state, fakeExec);
+  const thirdTick = await evaluatePollTick(allGreenArgs, state, fakeExec);
   assert.equal(thirdTick.events.length, 1);
   assert.equal(thirdTick.events[0].type, "ALL_GREEN");
 
@@ -779,7 +784,7 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
   state.runs["555"].alertedFailure = false;
   run555Status = "completed";
   run555Conclusion = "timed_out";
-  const failedTick = evaluatePollTick(greenArgs, state, fakeExec);
+  const failedTick = await evaluatePollTick(greenArgs, state, fakeExec);
   assert.equal(failedTick.events.length, 1);
   assert.equal(failedTick.events[0].type, "WORKFLOW_FAILED");
   assert.equal(failedTick.events[0].conclusion, "timed_out");
@@ -796,14 +801,14 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
     "555",
     "--existing-worktree",
   ]);
-  const existingWorktreeFailedTick = evaluatePollTick(existingWorktreeArgs, state, fakeExec);
+  const existingWorktreeFailedTick = await evaluatePollTick(existingWorktreeArgs, state, fakeExec);
   assert.equal(existingWorktreeFailedTick.events[0].type, "WORKFLOW_FAILED");
   assert.equal(existingWorktreeFailedTick.events[0].deliverySkill, "pr");
 
   // A watched non-PR run on another branch (e.g. release/1.x workflow_dispatch with pull_requests: []) still emits deliverySkill: "go"
   const releaseState = loadState("/nonexistent/state.json");
   const releaseArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "777"]);
-  const releaseTick = evaluatePollTick(releaseArgs, releaseState, (ghArgs) => {
+  const releaseTick = await evaluatePollTick(releaseArgs, releaseState, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "repos/github/evals/commits/main") {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"mainsha"}', stderr: "" };
@@ -841,7 +846,7 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
   // A failed pull_request_target run sharing main's branch and SHA must not block ALL_GREEN for a passing main push run,
   // and a watched push run on a feature branch with associated pull_requests routes to "pr".
   const collisionState = loadState("/nonexistent/state.json");
-  const collisionTick = evaluatePollTick(parseArgs(["watch", "--repo", "github/evals"]), collisionState, (ghArgs) => {
+  const collisionTick = await evaluatePollTick(parseArgs(["watch", "--repo", "github/evals"]), collisionState, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "repos/github/evals/commits/main") {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sharedsha"}', stderr: "" };
@@ -890,7 +895,7 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
 
   // Explicitly monitoring a PR source branch (--branch feat/fix) whose push run has pull_requests routes to "pr"
   const prBranchState = loadState("/nonexistent/state.json");
-  const prBranchTick = evaluatePollTick(
+  const prBranchTick = await evaluatePollTick(
     parseArgs(["watch", "--repo", "github/evals", "--branch", "feat/fix"]),
     prBranchState,
     (ghArgs) => {
@@ -938,7 +943,7 @@ test("evaluatePollTick handles search-index blips for tracked runs, NEW_MAIN_COM
   assert.equal(prBranchTick.events[0].deliverySkill, "pr");
 });
 
-test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and back off under rate pressure", () => {
+test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and back off under rate pressure", async () => {
   // 1. parseGhApiArgs parses REST (-i, -H, -X) and GraphQL (-F typed, -f raw) requests for keep-alive execution
   const restReq = parseGhApiArgs([
     "api",
@@ -1054,7 +1059,7 @@ test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and ba
     data: { sha: "abc12345" },
     updatedAt: "2026-10-23T01:00:00Z",
   };
-  const rlRes = ghApiWithEtag("repos/o/r/commits/main", rlState, () => ({
+  const rlRes = await ghApiWithEtag("repos/o/r/commits/main", rlState, () => ({
     ok: false,
     stdout:
       "HTTP/2.0 429 Too Many Requests\r\nx-ratelimit-remaining: 12\r\nretry-after: 90\r\n\r\n{\"message\":\"You have exceeded a secondary rate limit\"}",
@@ -1076,7 +1081,7 @@ test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and ba
   // 4. Primary rate-limit 403 with X-RateLimit-Remaining: 0 and X-RateLimit-Reset (no Retry-After) backs off until reset
   const futureReset = Math.floor(Date.now() / 1000) + 600;
   const resetState = loadState("/nonexistent/state.json");
-  const resetRes = ghApiWithEtag("repos/o/r/commits/main", resetState, () => ({
+  const resetRes = await ghApiWithEtag("repos/o/r/commits/main", resetState, () => ({
     ok: false,
     stdout: `HTTP/2.0 403 Forbidden\r\nx-ratelimit-remaining: 0\r\nx-ratelimit-reset: ${futureReset}\r\n\r\n{"message":"API rate limit exceeded"}`,
     stderr: "HTTP 403",
@@ -1098,7 +1103,7 @@ test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and ba
     conclusion: "success",
   };
   let callsDuringCooldown = 0;
-  const deferTick = evaluatePollTick(pollArgs, deferState, () => {
+  const deferTick = await evaluatePollTick(pollArgs, deferState, () => {
     callsDuringCooldown += 1;
     return {
       ok: false,
@@ -1113,13 +1118,13 @@ test("pruneState, rate-limit headers, and parseGhApiArgs bound state size and ba
   assert.equal(deferTick.nextIntervalSec, 75);
 });
 
-test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run scopes failures and active intervals", (t) => {
+test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run scopes failures and active intervals", async (t) => {
   disableAlertsForTest(t);
   const state = loadState("/nonexistent/state.json");
   const args = parseArgs(["watch", "--repo", "github/evals"]);
 
   // 1. Earlier Release run 1001 failed on sha-main, newer Release run 1002 succeeded on sha-main -> emits ALL_GREEN
-  const tick = evaluatePollTick(args, state, (ghArgs) => {
+  const tick = await evaluatePollTick(args, state, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "repos/github/evals/commits/main") {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main"}', stderr: "" };
@@ -1197,7 +1202,7 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
     telemetryRecorded: true,
     alertedFailure: true,
   };
-  const legacyTick = evaluatePollTick(args, legacyState, (ghArgs) => {
+  const legacyTick = await evaluatePollTick(args, legacyState, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "repos/github/evals/commits/main") {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main"}', stderr: "" };
@@ -1306,20 +1311,20 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
     }
     throw new Error(`Unexpected endpoint: ${endpoint}`);
   };
-  const inProgressSchedTick = evaluatePollTick(args, scheduleState, execScheduleScenario);
+  const inProgressSchedTick = await evaluatePollTick(args, scheduleState, execScheduleScenario);
   assert.equal(inProgressSchedTick.events.length, 0, "ALL_GREEN must not fire while scheduled main run is in_progress");
 
   scheduledStatus = "completed";
   scheduledConclusion = "failure";
   scheduledUpdatedAt = "2026-10-25T05:30:12Z";
-  const failedSchedTick = evaluatePollTick(args, scheduleState, execScheduleScenario);
+  const failedSchedTick = await evaluatePollTick(args, scheduleState, execScheduleScenario);
   assert.equal(failedSchedTick.events.length, 1, "failed scheduled main run must emit JOB_FAILED even after main SHA advanced");
   assert.equal(failedSchedTick.events[0].type, "JOB_FAILED");
   assert.equal(failedSchedTick.events[0].runId, 5001);
 
   // Rerun of 5001 that fails again at a newer updated_at must re-emit JOB_FAILED
   scheduledUpdatedAt = "2026-10-25T06:00:00Z";
-  const rerunFailedTick = evaluatePollTick(args, scheduleState, execScheduleScenario);
+  const rerunFailedTick = await evaluatePollTick(args, scheduleState, execScheduleScenario);
   assert.equal(rerunFailedTick.events.length, 1, "rerun failure at newer updated_at must re-alert");
   assert.equal(rerunFailedTick.events[0].type, "JOB_FAILED");
 
@@ -1372,16 +1377,16 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
     }
     throw new Error(`Unexpected endpoint: ${endpoint}`);
   };
-  const poll1Early = evaluatePollTick(args, earlyLatchState, execEarlyLatch);
+  const poll1Early = await evaluatePollTick(args, earlyLatchState, execEarlyLatch);
   assert.equal(poll1Early.events.length, 1, "poll 1 emits early JOB_FAILED while in_progress");
   earlyRunStatus = "completed";
   earlyRunConclusion = "failure";
   earlyRunUpdatedAt = "2026-10-25T06:15:00Z";
   earlyJob2Status = "completed";
   earlyJob2Conclusion = "success";
-  const poll2Completed = evaluatePollTick(args, earlyLatchState, execEarlyLatch);
+  const poll2Completed = await evaluatePollTick(args, earlyLatchState, execEarlyLatch);
   assert.equal(poll2Completed.events.length, 0, "poll 2 (completion of same attempt) must not duplicate alert");
-  const poll3Unchanged = evaluatePollTick(args, earlyLatchState, execEarlyLatch);
+  const poll3Unchanged = await evaluatePollTick(args, earlyLatchState, execEarlyLatch);
   assert.equal(poll3Unchanged.events.length, 0, "poll 3 (unchanged completed poll) must not duplicate alert");
 
   // Superseded scheduled failure on SHA A must not resurface after workflow_dispatch success on SHA B when main advances to SHA C
@@ -1399,7 +1404,7 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
     telemetryRecorded: true,
     alertedFailure: false,
   };
-  const shaCTick = evaluatePollTick(args, scheduleState, (ghArgs) => {
+  const shaCTick = await evaluatePollTick(args, scheduleState, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "repos/github/evals/commits/main") {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-C"}', stderr: "" };
@@ -1444,7 +1449,7 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
   // an active main run 2000 before 2002 does not hijack displaySha, and watching an active PR run 2002 uses activeIntervalSec (15s)
   const watchState = loadState("/nonexistent/state.json");
   const watchArgs = parseArgs(["watch", "--repo", "github/evals", "--watch-run", "2002"]);
-  const watchTick = evaluatePollTick(watchArgs, watchState, (ghArgs) => {
+  const watchTick = await evaluatePollTick(watchArgs, watchState, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "repos/github/evals/commits/main") {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main12345678"}', stderr: "" };
@@ -1538,7 +1543,7 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
 
   // 2b. Even if /jobs fails transiently on an active watched PR run, it remains in activeRuns and polls at 15s
   const incompleteWatchState = loadState("/nonexistent/state.json");
-  const incompleteWatchTick = evaluatePollTick(watchArgs, incompleteWatchState, (ghArgs) => {
+  const incompleteWatchTick = await evaluatePollTick(watchArgs, incompleteWatchState, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "repos/github/evals/commits/main") {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main12345678"}', stderr: "" };
@@ -1575,7 +1580,7 @@ test("superseded workflow runs on main do not block ALL_GREEN, and --watch-run s
   assert.equal(incompleteWatchTick.status.activeRuns[0].id, 2002);
 });
 
-test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout heartbeat bound state and output", () => {
+test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout heartbeat bound state and output", async () => {
   // 1. slimEtagData strips commit file patches and nested run/job bloat
   const slimmedCommit = slimEtagData("repos/jongio/skills/commits/main", {
     sha: "8e23f105",
@@ -1644,7 +1649,7 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
   // 2b. In-progress unwatched PR runs do not trigger /jobs API calls, and cancelled/aggregator steps are excluded from flakeSightings
   const prSkipState = loadState("/nonexistent/state.json");
   let unwatchedPrJobsCalls = 0;
-  evaluatePollTick(parseArgs(["watch", "--repo", "github/evals"]), prSkipState, (ghArgs) => {
+  await evaluatePollTick(parseArgs(["watch", "--repo", "github/evals"]), prSkipState, (ghArgs) => {
     const endpoint = ghArgs[2];
     if (endpoint === "repos/github/evals/commits/main") {
       return { ok: true, stdout: 'HTTP/2.0 200 OK\n\n{"sha":"sha-main"}', stderr: "" };
@@ -1762,7 +1767,7 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
       }
       throw new Error(`Unexpected endpoint: ${endpoint}`);
     });
-  runEmptyJobsPoll();
+  await runEmptyJobsPoll();
   assert.equal(emptyJobsEndpointCalls, 1);
   assert.equal(emptyJobsState.runs["4001"].emptyJobsPolls, 1);
   assert.ok(
@@ -1770,7 +1775,7 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
     "/jobs ETag must be retained for the single empty-jobs eventual-consistency retry"
   );
   failNextEmptyJobsCall = true;
-  runEmptyJobsPoll();
+  await runEmptyJobsPoll();
   assert.equal(emptyJobsEndpointCalls, 2);
   assert.equal(
     emptyJobsState.runs["4001"].emptyJobsPolls,
@@ -1778,7 +1783,7 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
     "transient HTTP error returning cached jobs: [] must not increment emptyJobsPolls"
   );
   failNextEmptyJobsCall = false;
-  runEmptyJobsPoll();
+  await runEmptyJobsPoll();
   assert.equal(emptyJobsEndpointCalls, 3);
   assert.equal(emptyJobsState.runs["4001"].emptyJobsPolls, 2);
   assert.equal(
@@ -1786,7 +1791,7 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
     undefined,
     "/jobs ETag is evicted once empty-jobs inspection settles after 2 polls"
   );
-  runEmptyJobsPoll();
+  await runEmptyJobsPoll();
   assert.equal(emptyJobsEndpointCalls, 3, "settled jobless run must not be re-queried on poll 4");
 
   // 3. shouldEmitWatchStatus suppresses duplicate 15s ticks until summary changes or 60s heartbeat elapses
@@ -1848,6 +1853,3 @@ test("slimEtagData, telemetry normalization/pruning, flake matching, and stdout 
     true
   );
 });
-
-
-

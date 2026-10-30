@@ -1,27 +1,40 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
+import { fixtureRequest } from "./github-fixtures.mjs";
 import {
   defaultPrMaxWaitSec,
-  evaluateMultiPrPollTick,
-  evaluatePrPollTick,
+  createPrWatchState,
+  evaluateMultiPrPollTick as nativeEvaluateMultiPrPollTick,
+  evaluatePrPollTick as nativeEvaluatePrPollTick,
   loadPersistedPrSession,
   parsePrWatchArgs,
-  runCli as runPr,
+  runCli as nativeRunPr,
   savePersistedPrSession,
 } from "../scripts/pr-watch-daemon.mjs";
 import {
   defaultMaxWaitSec,
-  evaluateMultiRepoPollTick,
-  evaluatePollTick,
+  evaluateMultiRepoPollTick as nativeEvaluateMultiRepoPollTick,
+  evaluatePollTick as nativeEvaluatePollTick,
   loadState,
   parseArgs,
-  runCli as runCi,
+  runCli as nativeRunCi,
   saveState,
   stateFileForRepo,
 } from "../../ci-hound/scripts/ci-hound-daemon.mjs";
+
+const evaluateMultiRepoPollTick = (args, config, execute) =>
+  nativeEvaluateMultiRepoPollTick(args, config, fixtureRequest(execute));
+const evaluatePollTick = (args, state, execute) =>
+  nativeEvaluatePollTick(args, state, fixtureRequest(execute));
+const evaluateMultiPrPollTick = (args, execute, state) =>
+  nativeEvaluateMultiPrPollTick(args, fixtureRequest(execute), state);
+const runPr = (argv, services) =>
+  nativeRunPr(argv, { ...services, execFn: fixtureRequest(services.execFn) });
+const runCi = (argv, services) =>
+  nativeRunCi(argv, { ...services, execFn: fixtureRequest(services.execFn) });
 
 function fixture(t) {
   const root = path.resolve(".fleet-pr-192-test-fixtures");
@@ -172,7 +185,7 @@ test("CI chunks wait out their budget without additional model or API polling", 
   assert.equal(output.at(-1).statuses[0].repo, "fixture/repo");
 });
 
-test("deadline-interrupted CI polls cannot emit cached green or an invented phase", (t) => {
+test("deadline-interrupted CI polls cannot emit cached green or an invented phase", async (t) => {
   const time = clock(t);
   const args = parseArgs(["watch", "--repo", "fixture/repo"]);
   args.chunkDeadlineMs = time.now + 100;
@@ -181,7 +194,7 @@ test("deadline-interrupted CI polls cannot emit cached green or an invented phas
   state.runs["1"] = { id: 1, head_sha: "head", head_branch: "main", event: "push",
     status: "completed", conclusion: "success", workflow_id: 1 };
   let calls = 0;
-  const tick = evaluatePollTick(args, state, () => {
+  const tick = await evaluatePollTick(args, state, () => {
     calls += 1;
     time.advance(100);
     return json({ sha: "head" });
@@ -233,12 +246,12 @@ test("multi-PR rotation persists the next target and preserves untouched comment
   assert.equal(session.entries[2].sinceCommentId, 150);
 });
 
-test("multi-repository rotation resumes later targets rather than starving them", (t) => {
+test("multi-repository rotation resumes later targets rather than starving them", async (t) => {
   const dir = fixture(t);
   const time = clock(t);
   const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two", "--config-file", path.join(dir, "config.json")]);
   args.chunkDeadlineMs = time.now + 100;
-  const first = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+  const first = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
     assert.match(ghArgs[2], /fixture\/one/);
     time.advance(100);
     return json({ sha: "head" });
@@ -246,7 +259,7 @@ test("multi-repository rotation resumes later targets rather than starving them"
   assert.equal(first.chunkTimedOut, true);
   assert.equal(loadState(path.join(dir, "_discovery.json")).metrics.nextRepo, "fixture/two");
   args.chunkDeadlineMs = time.now + 100;
-  const second = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+  const second = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
     assert.match(ghArgs[2], /fixture\/two/);
     time.advance(100);
     return json({ sha: "head" });
@@ -254,13 +267,13 @@ test("multi-repository rotation resumes later targets rather than starving them"
   assert.equal(second.chunkTimedOut, true);
 });
 
-test("owner discovery resumes interrupted pagination instead of throwing or restarting page one", (t) => {
+test("owner discovery resumes interrupted pagination instead of throwing or restarting page one", async (t) => {
   const dir = fixture(t);
   const time = clock(t);
   const args = parseArgs(["watch", "--owner", "@me", "--visibility", "private",
     "--config-file", path.join(dir, "config.json")]);
   args.chunkDeadlineMs = time.now + 100;
-  const first = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+  const first = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
     assert.match(ghArgs[2], /page=1$/);
     time.advance(100);
     return json(Array.from({ length: 100 }, (_, i) => ({ full_name: `fixture/archived-${i}`, archived: true })));
@@ -268,7 +281,7 @@ test("owner discovery resumes interrupted pagination instead of throwing or rest
   assert.equal(first.chunkTimedOut, true);
   args.chunkDeadlineMs = time.now + 100;
   let calls = 0;
-  const second = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+  const second = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
     calls += 1;
     assert.match(ghArgs[2], /page=2$/);
     return json([]);
@@ -301,7 +314,7 @@ test("terminal multi-PR feedback preserves repository cooldown across chunk rest
   assert.equal(output.at(-1).events[0].type, "WATCH_CHUNK_TIMEOUT");
 });
 
-test("CI repository cooldown survives a terminal event from an earlier repository", (t) => {
+test("CI repository cooldown survives a terminal event from an earlier repository", async (t) => {
   const dir = fixture(t);
   const time = clock(t);
   const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two", "--wake-on-commit",
@@ -309,17 +322,17 @@ test("CI repository cooldown survives a terminal event from an earlier repositor
   const state = loadState(path.join(dir, "missing.json"));
   state.lastMainSha = "old";
   saveState(stateFileForRepo("fixture/one", args), state);
-  const first = evaluateMultiRepoPollTick(args, {}, (ghArgs) =>
+  const first = await evaluateMultiRepoPollTick(args, {}, (ghArgs) =>
     ghArgs[2].includes("fixture/two") ? throttled() : ciExec(ghArgs));
   assert.ok(first.events.some((x) => x.type === "NEW_MAIN_COMMIT"));
   assert.equal(first.rateLimited, true);
-  const second = evaluateMultiRepoPollTick(args, {}, () => assert.fail("shared cooldown must prevent requests"));
+  const second = await evaluateMultiRepoPollTick(args, {}, () => assert.fail("shared cooldown must prevent requests"));
   assert.equal(second.rateLimited, true);
   assert.equal(second.nextIntervalSec, 900);
   assert.ok(loadState(path.join(dir, "_discovery.json")).metrics.repoCooldownUntilMs > time.now);
 });
 
-test("chunk expiry during automatic Copilot retries rotates cleanly without a terminal review error", (t) => {
+test("chunk expiry during automatic Copilot retries rotates cleanly without a terminal review error", async (t) => {
   const time = clock(t);
   const args = parsePrWatchArgs(["watch", "--repo", "fixture/repo", "--pr", "1", "--head", "head"]);
   args.chunkDeadlineMs = time.now + 100;
@@ -327,11 +340,11 @@ test("chunk expiry during automatic Copilot retries rotates cleanly without a te
     author: { login: "copilot" }, commit: { oid: "head" },
     body: "Copilot encountered an error and was unable to review this pull request" };
   let calls = 0;
-  const tick = evaluateMultiPrPollTick(args, (ghArgs) => {
+  const tick = await nativeEvaluateMultiPrPollTick(args, (request) => {
     calls += 1;
     if (calls === 4) return { ok: false, chunkTimedOut: true };
-    if (ghArgs[1] === "graphql") return graph(prNode({ reviews: [review] }));
-    return json({ workflow_runs: [], total_count: 0 });
+    if (request.kind === "graphql") return { ok: true, data: { data: { repository: { pullRequest: prNode({ reviews: [review] }) } } } };
+    return { ok: true, data: { workflow_runs: [], total_count: 0 } };
   }, {});
   assert.equal(tick.chunkTimedOut, true);
   assert.equal(tick.error, undefined);
@@ -362,13 +375,13 @@ test("concurrent session writers retain different PR entries and the longest sha
   assert.deepEqual(readdirSync(dir), ["fixture__repo.json"]);
 });
 
-test("review regression: completed owner inventory survives until repository polling resumes", (t) => {
+test("review regression: completed owner inventory survives until repository polling resumes", async (t) => {
   const dir = fixture(t);
   const time = clock(t);
   const args = parseArgs(["watch", "--owner", "@me", "--visibility", "private",
     "--config-file", path.join(dir, "config.json")]);
   args.chunkDeadlineMs = time.now + 200;
-  const first = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+  const first = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
     time.advance(100);
     if (ghArgs[2].endsWith("page=1")) {
       return json([{ full_name: "fixture/target", private: true },
@@ -381,21 +394,21 @@ test("review regression: completed owner inventory survives until repository pol
   assert.deepEqual(first.repos, ["fixture/target"]);
   args.chunkDeadlineMs = time.now + 200;
   const visited = [];
-  evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+  await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
     visited.push(ghArgs[2]);
     assert.match(ghArgs[2], /^repos\/fixture\/target\//, "completed discovery must not consume the next chunk again");
     return ciExec(ghArgs);
   });
   assert.ok(visited.some((endpoint) => endpoint.includes("/commits/")));
   const refreshed = [];
-  evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+  await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
     refreshed.push(ghArgs[2]);
     return json([]);
   });
   assert.match(refreshed[0], /^user\/repos.*page=1$/, "discovery refreshes after the logical repository sweep finishes");
 });
 
-test("review regression: an interrupted repository gets the next full chunk after a completed prefix", (t) => {
+test("review regression: an interrupted repository gets the next full chunk after a completed prefix", async (t) => {
   const dir = fixture(t);
   const time = clock(t);
   const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
@@ -405,13 +418,13 @@ test("review regression: an interrupted repository gets the next full chunk afte
     return greenCiExec(ghArgs);
   };
   args.chunkDeadlineMs = time.now + 200;
-  const first = evaluateMultiRepoPollTick(args, {}, execFn);
+  const first = await evaluateMultiRepoPollTick(args, {}, execFn);
   assert.equal(first.chunkTimedOut, true);
   assert.ok(first.statuses.some((status) => status.repo === "fixture/one"));
   assert.equal(loadState(path.join(dir, "_discovery.json")).metrics.nextRepo, "fixture/two");
   args.chunkDeadlineMs = time.now + 200;
   const visited = [];
-  const second = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+  const second = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
     visited.push(ghArgs[2]);
     return execFn(ghArgs);
   });
@@ -419,7 +432,7 @@ test("review regression: an interrupted repository gets the next full chunk afte
   assert.ok(second.statuses.some((status) => status.repo === "fixture/two"));
 });
 
-test("review regression: logical repository sweeps retain completed green results across chunks", (t) => {
+test("review regression: logical repository sweeps retain completed green results across chunks", async (t) => {
   const dir = fixture(t);
   const time = clock(t);
   const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
@@ -429,16 +442,16 @@ test("review regression: logical repository sweeps retain completed green result
     return greenCiExec(ghArgs);
   };
   args.chunkDeadlineMs = time.now + 200;
-  const first = evaluateMultiRepoPollTick(args, {}, execFn);
+  const first = await evaluateMultiRepoPollTick(args, {}, execFn);
   assert.equal(first.chunkTimedOut, true);
   assert.equal(first.events.some((event) => event.type === "ALL_GREEN"), false);
   args.chunkDeadlineMs = time.now + 200;
-  const second = evaluateMultiRepoPollTick(args, {}, execFn);
+  const second = await evaluateMultiRepoPollTick(args, {}, execFn);
   assert.deepEqual(second.events.filter((event) => event.type === "ALL_GREEN").map((event) => event.repo).sort(),
     ["fixture/one", "fixture/two"]);
   args.chunkDeadlineMs = time.now + 200;
   const refreshed = [];
-  const third = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+  const third = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
     refreshed.push(ghArgs[2]);
     return execFn(ghArgs);
   });
@@ -446,7 +459,7 @@ test("review regression: logical repository sweeps retain completed green result
   assert.equal(third.events.some((event) => event.type === "ALL_GREEN"), false);
 });
 
-test("logical sweep evidence fails closed when another poll changes its head or observation", (t) => {
+test("logical sweep evidence fails closed when another poll changes its head or observation", async (t) => {
   const time = clock(t);
   for (const change of ["head", "observation"]) {
     const dir = fixture(t);
@@ -457,7 +470,7 @@ test("logical sweep evidence fails closed when another poll changes its head or 
       return greenCiExec(ghArgs);
     };
     args.chunkDeadlineMs = time.now + 200;
-    assert.equal(evaluateMultiRepoPollTick(args, {}, execFn).chunkTimedOut, true);
+    assert.equal((await evaluateMultiRepoPollTick(args, {}, execFn)).chunkTimedOut, true);
     const file = stateFileForRepo("fixture/one", args);
     const observed = loadState(file);
     if (change === "head") observed.lastMainSha = "new-head";
@@ -465,7 +478,7 @@ test("logical sweep evidence fails closed when another poll changes its head or 
     saveState(file, observed);
     args.chunkDeadlineMs = time.now + 200;
     const visited = [];
-    const resumed = evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
+    const resumed = await evaluateMultiRepoPollTick(args, {}, (ghArgs) => {
       visited.push(ghArgs[2]);
       return execFn(ghArgs);
     });
@@ -474,7 +487,7 @@ test("logical sweep evidence fails closed when another poll changes its head or 
   }
 });
 
-test("diagnostic entrypoints poll fresh and changed watch scope cannot reuse a partial green sweep", (t) => {
+test("diagnostic entrypoints poll fresh and changed watch scope cannot reuse a partial green sweep", async (t) => {
   const dir = fixture(t);
   const time = clock(t);
   const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
@@ -484,10 +497,10 @@ test("diagnostic entrypoints poll fresh and changed watch scope cannot reuse a p
     return greenCiExec(ghArgs);
   };
   args.chunkDeadlineMs = time.now + 200;
-  assert.equal(evaluateMultiRepoPollTick(args, {}, execFn).chunkTimedOut, true);
+  assert.equal((await evaluateMultiRepoPollTick(args, {}, execFn)).chunkTimedOut, true);
   for (const mode of ["once", "status", "optimize"]) {
     const visited = [];
-    evaluateMultiRepoPollTick({ ...args, mode, chunkDeadlineMs: undefined }, {}, (ghArgs) => {
+    await evaluateMultiRepoPollTick({ ...args, mode, chunkDeadlineMs: undefined }, {}, (ghArgs) => {
       visited.push(ghArgs[2]);
       return execFn(ghArgs);
     });
@@ -495,7 +508,7 @@ test("diagnostic entrypoints poll fresh and changed watch scope cannot reuse a p
     assert.ok(visited.some((endpoint) => endpoint.includes("fixture/two/commits/")), mode);
   }
   const visited = [];
-  const changed = evaluateMultiRepoPollTick({
+  const changed = await evaluateMultiRepoPollTick({
     ...args, branch: "release", explicitBranch: true, chunkDeadlineMs: time.now + 500,
   }, {}, (ghArgs) => {
     visited.push(ghArgs[2]);
@@ -506,7 +519,7 @@ test("diagnostic entrypoints poll fresh and changed watch scope cannot reuse a p
   assert.equal(changed.events.some((event) => event.type === "ALL_GREEN"), false);
 });
 
-test("review regression: an interrupted PR gets the next full chunk after a completed prefix", (t) => {
+test("review regression: an interrupted PR gets the next full chunk after a completed prefix", async (t) => {
   const time = clock(t);
   const args = parsePrWatchArgs(["watch", "--repo", "fixture/repo", "--prs", "1:head,2:head"]);
   const multiState = {};
@@ -515,14 +528,14 @@ test("review regression: an interrupted PR gets the next full chunk after a comp
     return ghArgs[1] === "graphql" ? graph(prNode()) : json({ workflow_runs: [] });
   };
   args.chunkDeadlineMs = time.now + 120;
-  const first = evaluateMultiPrPollTick(args, execFn, multiState);
+  const first = await evaluateMultiPrPollTick(args, execFn, multiState);
   assert.equal(first.chunkTimedOut, true);
   assert.equal(first.statuses[0].pr, 1);
   assert.equal(first.nextPr, 2);
   args.nextPr = first.nextPr;
   args.chunkDeadlineMs = time.now + 120;
   const visited = [];
-  const second = evaluateMultiPrPollTick(args, (ghArgs) => {
+  const second = await evaluateMultiPrPollTick(args, (ghArgs) => {
     visited.push(ghArgs);
     return execFn(ghArgs);
   }, multiState);
@@ -530,16 +543,16 @@ test("review regression: an interrupted PR gets the next full chunk after a comp
   assert.ok(second.statuses.some((status) => status.pr === 2));
 });
 
-test("review regression: CI cooldown restores saved snapshots without making API calls", (t) => {
+test("review regression: CI cooldown restores saved snapshots without making API calls", async (t) => {
   const dir = fixture(t);
   clock(t);
   const args = parseArgs(["watch", "--repos", "fixture/one,fixture/two",
     "--config-file", path.join(dir, "config.json")]);
-  const first = evaluateMultiRepoPollTick(args, {}, (ghArgs) =>
+  const first = await evaluateMultiRepoPollTick(args, {}, (ghArgs) =>
     ghArgs[2].includes("fixture/two") ? throttled() : ciExec(ghArgs));
   assert.equal(first.rateLimited, true);
   assert.equal(first.statuses[0].repo, "fixture/one");
-  const second = evaluateMultiRepoPollTick(args, {}, () => assert.fail("cooldown must not poll GitHub"));
+  const second = await evaluateMultiRepoPollTick(args, {}, () => assert.fail("cooldown must not poll GitHub"));
   assert.equal(second.statuses[0]?.repo, "fixture/one");
   assert.equal(second.statuses[0].phase, first.statuses[0].phase);
 });
@@ -570,4 +583,107 @@ test("review regression: single-PR cooldown saves its last completed snapshot fo
   });
   assert.equal(output.at(-1).events[0].type, "WATCH_CHUNK_TIMEOUT");
   assert.deepEqual(output.at(-1).status, snapshot);
+});
+
+for (const boundary of ["ci-request", "ci-auth", "pr-request", "pr-reviewer"]) {
+  test(`SDK chunk cancellation reaches ${boundary} without stale readiness or an unbounded retry`, { timeout: 5000 }, async (t) => {
+    const dir = fixture(t);
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let startedResolve;
+    const started = new Promise((resolve) => { startedResolve = resolve; });
+    const waitForAbort = (signal) => {
+      startedResolve();
+      assert.ok(signal instanceof AbortSignal, "the native async boundary must receive the chunk signal");
+      return new Promise((resolve) => signal.addEventListener("abort",
+        () => resolve({ ok: false, error: "cancelled" }), { once: true }));
+    };
+    const erroredReview = { databaseId: 99, state: "COMMENTED", submittedAt: "2026-01-01T00:00:00Z",
+      author: { login: "copilot" }, commit: { oid: "head" },
+      body: "Copilot encountered an error and was unable to review this pull request" };
+    let reviewerCalls = 0;
+    const request = async (input, { signal } = {}) => {
+      if (boundary === "ci-request" || boundary === "pr-request") return waitForAbort(signal);
+      if (input.kind === "reviewer") {
+        reviewerCalls += 1;
+        return waitForAbort(signal);
+      }
+      if (input.kind === "graphql") {
+        return { ok: true, data: { data: { repository: { pullRequest: prNode({ reviews: [erroredReview] }) } } } };
+      }
+      return { ok: true, data: { workflow_runs: [], total_count: 0 } };
+    };
+    if (boundary === "ci-auth") request.cacheScope = ({ signal }) => waitForAbort(signal);
+    const isCi = boundary.startsWith("ci-");
+    const args = isCi ? parseArgs(["watch", "--repo", "fixture/repo"])
+      : parsePrWatchArgs(["watch", "--repo", "fixture/repo", "--pr", "1", "--head", "head"]);
+    args.chunkDeadlineMs = Date.now() + 1000;
+    const state = isCi ? loadState(path.join(dir, "missing.json")) : createPrWatchState();
+    const pending = isCi ? nativeEvaluatePollTick(args, state, request)
+      : nativeEvaluatePrPollTick(args, request, state);
+    await started;
+    t.mock.timers.tick(1000);
+    const tick = await pending;
+    assert.equal(tick.chunkTimedOut, true);
+    assert.equal(tick.error, undefined);
+    assert.equal(tick.events.some((event) => /GREEN|READY|REVIEW_ERROR/.test(event.type)), false);
+    if (boundary === "pr-reviewer") {
+      assert.equal(reviewerCalls, 1);
+      assert.equal(state.copilotErrorRetriesByHead.head, 1, "an uncertain submitted retry still consumes its bounded attempt");
+      const resumed = await nativeEvaluatePrPollTick({
+        ...args, chunkDeadlineMs: undefined, maxCopilotRetries: 1,
+      }, request, state);
+      assert.equal(resumed.events[0].type, "COPILOT_REVIEW_ERROR");
+      assert.equal(reviewerCalls, 1, "resuming cannot exceed the persisted retry limit");
+    }
+  });
+}
+
+test("completed owner inventory cannot cross an SDK credential identity change", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  const args = parseArgs(["watch", "--owner", "@me", "--visibility", "private",
+    "--config-file", path.join(dir, "config.json")]);
+  let scope = "before";
+  const visited = [];
+  const request = async ({ endpoint }) => {
+    visited.push(endpoint);
+    let data;
+    if (endpoint.startsWith("user/repos")) {
+      time.advance(scope === "before" ? 100 : 10);
+      data = [{ full_name: `fixture/${scope}`, private: true }];
+    } else data = endpoint.includes("/commits/") ? { sha: `${scope}-head` } : { workflow_runs: [] };
+    return { ok: true, status: 200, cacheScope: scope, headers: {}, data };
+  };
+  request.cacheScope = async () => scope;
+  args.chunkDeadlineMs = time.now + 100;
+  assert.equal((await nativeEvaluateMultiRepoPollTick(args, {}, request)).chunkTimedOut, true);
+  scope = "after";
+  visited.length = 0;
+  args.chunkDeadlineMs = time.now + 1000;
+  const next = await nativeEvaluateMultiRepoPollTick(args, {}, request);
+  assert.match(visited[0], /^user\/repos/);
+  assert.deepEqual(next.repos, ["fixture/after"]);
+  assert.equal(visited.some((endpoint) => endpoint.includes("repos/fixture/before/")), false);
+});
+
+test("SDK notification output retains chunk rotations for both direct entrypoints", async (t) => {
+  const dir = fixture(t);
+  const time = clock(t);
+  capture(t);
+  const prFile = path.join(dir, "pr-events.jsonl");
+  await runPr(["watch", "--repo", "fixture/repo", "--pr", "1", "--head", "head",
+    "--max-wait-sec", "1", "--events-file", prFile], {
+    stateDir: dir, sleep: time.sleep,
+    execFn: (args) => args[1] === "graphql" ? graph(prNode()) : json({ workflow_runs: [] }),
+  });
+  const ciFile = path.join(dir, "ci-events.jsonl");
+  await runCi(["watch", "--repo", "fixture/repo", "--max-wait-sec", "1",
+    "--config-file", path.join(dir, "config.json"), "--events-file", ciFile], {
+    sleep: time.sleep, execFn: ciExec,
+  });
+  for (const file of [prFile, ciFile]) {
+    const events = readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(events.filter((event) => event.type === "WATCH_CHUNK_TIMEOUT").length, 1);
+    assert.ok(events.some((event) => event.type === "STATUS" && event.repo === "fixture/repo"));
+  }
 });
