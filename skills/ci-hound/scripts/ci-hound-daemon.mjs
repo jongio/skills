@@ -561,7 +561,7 @@ export function detectRepoFromGit(cwd = process.cwd()) {
 }
 
 export function loadState(stateFile) {
-  if (existsSync(stateFile)) {
+  if (stateFile) {
     try {
       const parsed = JSON.parse(readFileSync(stateFile, "utf8"));
       return {
@@ -577,8 +577,8 @@ export function loadState(stateFile) {
         flakeSightings: parsed.flakeSightings || [],
         metrics: parsed.metrics || { apiCalls: 0, cacheHits304: 0, lastPollAt: null },
       };
-    } catch {
-      // Fall through to fresh state
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
     }
   }
   return {

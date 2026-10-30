@@ -1361,6 +1361,53 @@ test("CI atomic state failure retains the original IO cause when lock cleanup al
   remove(`${file}.lock`);
 });
 
+for (const boundary of ["discovery-read", "repository-probe", "discovery-json"]) {
+  test(`review 5709458810: initial ${boundary} failure cannot bypass persisted quota`, async (t) => {
+    const dir = fixture(t);
+    clock(t);
+    const args = parseArgs(["watch", "--repo", "fixture/repo",
+      "--config-file", path.join(dir, "config.json")]);
+    const file = boundary === "repository-probe"
+      ? stateFileForRepo("fixture/repo", args) : path.join(dir, "_discovery.json");
+    const state = loadState("");
+    state.host = "github.com";
+    state.cacheScope = "fixture";
+    state.metrics[boundary === "repository-probe" ? "cooldownUntilMs" : "repoCooldownUntilMs"] = Date.now() + 900000;
+    saveState(file, state);
+    const read = fs.readFileSync;
+    if (boundary === "discovery-json") fs.writeFileSync(file, `${read(file, "utf8").trimEnd().slice(0, -1)},}`);
+    const before = read(file, "utf8");
+    const original = Object.assign(new Error("initial watch state unavailable"),
+      { code: boundary === "repository-probe" ? "EACCES" : "EIO" });
+    let firstRead = true, calls = 0, failure;
+    if (boundary !== "discovery-json") {
+      t.mock.method(fs, "readFileSync", (target, ...rest) => {
+        if (target === file && firstRead) { firstRead = false; throw original; }
+        return read(target, ...rest);
+      });
+    }
+    if (boundary === "repository-probe") {
+      const exists = fs.existsSync;
+      t.mock.method(fs, "existsSync", (target) => target === file ? false : exists(target));
+    }
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    const adapter = fixtureRequest(ciExec);
+    const request = async (input, options) => {
+      calls += 1;
+      return { ...await adapter(input, options), cacheScope: "fixture" };
+    };
+    request.cacheScope = async () => "fixture";
+    try { await nativeEvaluateMultiRepoPollTick(args, {}, request); }
+    catch (error) { failure = error; }
+    t.diagnostic(JSON.stringify({ boundary, requests: calls, error: failure?.code || failure?.name }));
+    assert.equal(calls, 0, "an unreadable quota must block polling, not just its eventual state save");
+    if (boundary === "discovery-json") assert.ok(failure instanceof SyntaxError);
+    else assert.equal(failure, original);
+    assert.equal(read(file, "utf8"), before, "leave the original state available for recovery");
+  });
+}
+
 test("CI atomic quota merge cannot silently replace a state whose protected read fails", (t) => {
   const dir = fixture(t);
   const file = path.join(dir, "state.json");

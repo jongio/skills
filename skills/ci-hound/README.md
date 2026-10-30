@@ -89,7 +89,10 @@ applying cooldown. Shared-backoff output reports the current requested targets,
 not an unrelated earlier watchlist.
 State saves serialize read/merge/rename within the caller's remaining budget,
 preserving validated same-host unexpired cooldowns, never another identity's
-cached payload. Current SDK identity is verified before cached status is
+cached payload. Only a genuinely missing state file initializes fresh state;
+other read or JSON errors stop polling without replacing the file. Resolve the
+reported read/parse problem before re-arming rather than discarding saved quota.
+Current SDK identity is verified before cached status is
 returned, including during quota; verification does not make an API poll.
 Cached snapshots also must match the requested host, repository and branch,
 including inherited cooldowns when an explicit state file is reused.
