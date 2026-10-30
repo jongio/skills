@@ -87,6 +87,9 @@ CI observations and backoff are host-scoped, including an explicit state file:
 switching its validated host discards the previous host's observations before
 applying cooldown. Shared-backoff output reports the current requested targets,
 not an unrelated earlier watchlist.
+If one target consumes a whole fresh chunk without completing, held completion
+proof is discarded before rotating to its peers. A stalled target therefore
+cannot freeze their observations or later promote their old green snapshots.
 
 ## GitHub transport and degraded state
 

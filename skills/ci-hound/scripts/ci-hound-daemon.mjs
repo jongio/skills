@@ -2172,6 +2172,10 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       }
       if (tick.chunkTimedOut) {
         if (completedThisTick > 0) discoveryState.metrics.nextRepo = repo;
+        else {
+          sweep.completed = {};
+          sweep.greenEvents = {};
+        }
         chunkTimedOut = true;
         break;
       }
