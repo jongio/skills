@@ -3,12 +3,20 @@ import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { ensurePluginStatuslineRegistered } from "./compose.mjs";
 import { IssueTracker, syncSession, writeState } from "./tracker.mjs";
-import { startIssueRefresh } from "../github-refresh.mjs";
+import { notifySessionTracking, startIssueRefresh } from "../github-refresh.mjs";
 import { requestedGitHubEnvironment } from "../github-transport.mjs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 ensurePluginStatuslineRegistered("issue-statusline", dirname(fileURLToPath(import.meta.url)));
+
+async function manageIssues(action, reference) {
+	const tracker = new IssueTracker(session.sessionId, syncSession({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
+	const issues = tracker.manage(action, reference);
+	writeState(tracker.snapshot());
+	if (["add", "remove", "clear"].includes(action)) await notifySessionTracking(session, "issues");
+	return issues;
+}
 
 const session = await joinSession({
 	requestedEnvironmentVariables: requestedGitHubEnvironment(),
@@ -18,9 +26,7 @@ const session = await joinSession({
 		handler: async ({ args }) => {
 			try {
 				const [action = "list", reference] = args.trim().split(/\s+/);
-				const tracker = new IssueTracker(session.sessionId, syncSession({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
-				const issues = tracker.manage(action, reference);
-				writeState(tracker.snapshot());
+				const issues = await manageIssues(action, reference);
 				await session.log(issues.length ? issues.map((i) => `${i.label}: ${i.url}`).join("\n") : "No tracked session issues.");
 			} catch (error) {
 				await session.log(`Usage: /session-issues [list | add <issue> | remove <issue> | clear] (${error.message})`);
@@ -39,12 +45,7 @@ const session = await joinSession({
 			required: ["action"],
 			additionalProperties: false,
 		},
-		handler: ({ action, reference }) => {
-			const tracker = new IssueTracker(session.sessionId, syncSession({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
-			const issues = tracker.manage(action, reference);
-			writeState(tracker.snapshot());
-			return JSON.stringify(issues);
-		},
+		handler: async ({ action, reference }) => JSON.stringify(await manageIssues(action, reference)),
 	}],
 });
 

@@ -123,6 +123,15 @@ results through the SDK post-tool hook. A confirmed `session_statusline clear`
 also clears the board's reference view, not its tasks, agents, or work. Only
 entries with explicit `owned: true` are imported. No shell text, PR body,
 closing link, example, or another session's tracking is enrollment evidence.
+Successful command and tool membership changes also publish a transient
+session-local invalidation. It only requests fresh `list` results through the
+host's native tool pipeline; its text or payload cannot supply ownership,
+targets, or arbitrary tool names. Concurrent invalidations coalesce, and a
+change during a read schedules a fresh follow-up. Native tool hooks do not
+wait on nested tool reads. Standalone issue controls use the same signal.
+Refresh requests current tracking as well as canonical plan/tasks; no periodic
+tracking or GitHub poller is added. Unsupported, denied, failed, or malformed
+reads preserve the last-known data with an unverified source label.
 
 When tracking controls are unavailable, disclose that source limitation; do not
 claim an empty verified list. Primary may supply only explicitly owned current

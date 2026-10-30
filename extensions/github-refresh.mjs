@@ -6,6 +6,16 @@ import { withStateLock } from "./state-lock.mjs";
 import { isDeepStrictEqual } from "node:util";
 
 const pending = new Map();
+export async function notifySessionTracking(session, kind) {
+  if (!["prs", "issues", "all"].includes(kind)) throw new Error("Unknown tracking component");
+  try {
+    await session.log(`Session tracking changed: ${kind}`, { ephemeral: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function retryDeadline(headers, now) {
   const retryAfter = headers["retry-after"];
   const retrySeconds = /^\d+$/.test(String(retryAfter ?? "")) ? Number(retryAfter)

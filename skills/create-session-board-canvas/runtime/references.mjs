@@ -110,3 +110,45 @@ export function trackingResult(input) {
     return { kind: kind === "statusline" ? null : kind, error: String(error.message).slice(0, 500) };
   }
 }
+
+export function trackingChangeKind(event) {
+  if (event.type !== "session.info" || event.data?.infoType !== "notification" ||
+      typeof event.data.message !== "string") return null;
+  return /^Session tracking changed: (prs|issues|all)$/.exec(event.data.message)?.[1] || null;
+}
+
+export function createTrackingSync(session, service) {
+  const pending = new Set();
+  const reading = new Set();
+  let running;
+  const refresh = (kind = "all") => {
+    if (!["prs", "issues", "all"].includes(kind)) throw new Error("Unknown tracking component");
+    for (const component of kind === "all" ? ["prs", "issues"] : [kind]) pending.add(component);
+    if (!running) {
+      running = Promise.resolve().then(async () => {
+        while (pending.size) {
+          const component = pending.values().next().value;
+          pending.delete(component);
+          reading.add(component);
+          try {
+            const toolName = `session_${component}`;
+            const toolArgs = { action: "list" };
+            const toolResult = await session.rpc.tools.execute({ name: toolName, arguments: toolArgs });
+            const delta = trackingResult({ toolName, toolArgs, toolResult });
+            if (!delta) throw new Error("Session tracking read was not successful");
+            await service.syncTracking(delta);
+          } catch (error) {
+            await service.syncTracking({ kind: component, error: String(error.message).slice(0, 500) });
+          } finally {
+            reading.delete(component);
+          }
+        }
+      }).finally(() => {
+        running = null;
+        if (pending.size) return refresh(pending.values().next().value);
+      });
+    }
+    return running;
+  };
+  return { refresh, isReading: (kind) => reading.has(kind) };
+}

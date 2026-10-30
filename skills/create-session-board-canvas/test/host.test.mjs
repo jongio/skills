@@ -4,6 +4,10 @@ import { actorFor, createProgressEventGate, isProgressEvent, readSessionSources,
 import { acquireProvider } from "../runtime/provider.mjs";
 import { validate } from "../runtime/canvas-kit/validate.mjs";
 import { createProgressService } from "../runtime/progress.mjs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 test("runtime caller attribution cannot be replaced with input actor/session IDs", () => {
   assert.deepEqual(actorFor({ sessionId: "s", agentId: undefined }, "s"), { id: "primary", primary: true });
@@ -103,4 +107,85 @@ test("the host routes root cancellation through startup buffering but ignores de
   }
   await route({ type: "abort", data: {} });
   assert.deepEqual(service.snapshot().attention, []);
+});
+
+test("the actual board entrypoint refreshes canonical tracking without recursive native hooks", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "board-native-adapter-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const overrides = { COPILOT_HOME: home, LOCALAPPDATA: join(home, "appdata"), SESSION_ID: `board-adapter-${process.pid}` };
+  const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]));
+  try {
+    Object.assign(process.env, overrides);
+    const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      import assert from "node:assert/strict";
+      import { registerHooks } from "node:module";
+      import { join } from "node:path";
+      import { setTimeout as delay } from "node:timers/promises";
+      let configuration, observer, reads = 0;
+      let prs = [{ url: "https://github.com/fixture/repo/pull/1", owned: true }];
+      const sessionId = process.env.SESSION_ID;
+      const session = {
+        sessionId, workspacePath: join(process.env.COPILOT_HOME, "session-state", sessionId),
+        on: (handler) => { observer = handler; return () => {}; }, getEvents: async () => [],
+        log: async () => {}, disconnect: async () => {},
+        rpc: {
+          plan: { read: async () => ({ exists: true }), readSqlTodosWithDependencies: async () => ({
+            rows: [{ id: "task", title: "Canonical task", status: "pending" }], dependencies: [],
+          }) },
+          tools: { execute: async ({ name, arguments: args }) => {
+            assert.ok(++reads <= 6, "recursive native tracking read");
+            assert.ok(["session_prs", "session_issues"].includes(name));
+            assert.deepEqual(args, { action: "list" });
+            const result = { resultType: "success", textResultForLlm: JSON.stringify(name === "session_prs" ? prs : []) };
+            await configuration.hooks.onPostToolUse({ toolName: name, toolArgs: args, toolResult: result }, { sessionId });
+            return result;
+          } },
+        },
+      };
+      globalThis.boardSdk = { createCanvas: (value) => value, CanvasError: class extends Error {},
+        joinSession: async (value) => { configuration = value; return session; } };
+      const sdk = "data:text/javascript," + encodeURIComponent("export const {createCanvas,CanvasError,joinSession}=globalThis.boardSdk;");
+      registerHooks({ resolve(specifier, context, next) {
+        return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
+      } });
+      await import(${JSON.stringify(new URL("../runtime/extension.mjs", import.meta.url).href)});
+      const tool = configuration.tools.find((entry) => entry.name === "session_progress").handler;
+      const status = async () => JSON.parse(await tool({ action: "status" }, { sessionId, agentId: undefined }));
+      const until = async (predicate) => {
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const value = await status();
+          if (predicate(value)) return value;
+          await delay(10);
+        }
+        throw new Error("Canonical tracking snapshot did not arrive");
+      };
+      await configuration.hooks.onPostToolUse({ toolName: "session_prs", toolArgs: { action: "list" },
+        toolResult: { resultType: "success", textResultForLlm: JSON.stringify(prs) } }, { sessionId });
+      await until((value) => reads === 1 && value.references.prs.length === 1);
+      prs = [];
+      observer({ type: "session.info", data: { infoType: "notification", message: "Session tracking changed: prs",
+        prs: [{ url: "https://github.com/other/repo/pull/9", owned: true }] } });
+      await until((value) => reads === 2 && value.references.prs.length === 0);
+      const panel = await configuration.canvases[0].open({ sessionId, instanceId: "test-panel", input: {} });
+      const url = new URL("action", panel.url);
+      url.search = new URL(panel.url).search;
+      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actionName: "refresh", input: {} }), signal: AbortSignal.timeout(5000) });
+      assert.equal(response.status, 200);
+      await response.json();
+      const final = await until((value) => reads === 4 && value.references.source.status === "verified");
+      assert.deepEqual(final.references.prs, []);
+      assert.equal(final.tasks[0].status, "pending");
+      console.log("native adapter boundaries passed");
+      process.emit("SIGTERM");
+    `], { encoding: "utf8", timeout: 15000, windowsHide: true, env: process.env });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /native adapter boundaries passed/);
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

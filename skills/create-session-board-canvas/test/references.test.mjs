@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createProgressService } from "../runtime/progress.mjs";
-import { trackingResult } from "../runtime/references.mjs";
+import { createTrackingSync, trackingChangeKind, trackingResult } from "../runtime/references.mjs";
+import { notifySessionTracking } from "../../../extensions/github-refresh.mjs";
 
 const primary = { id: "primary", primary: true };
 const headA = "a".repeat(40);
@@ -92,4 +93,94 @@ test("reference URLs cannot change kind or execute scripts, and hosts remain dis
   await assert.rejects(service.update({ action: "ci", reference: pr.reference, headRefOid: headA, status: "passed", passed: 1, total: 1, observedAt }, primary), /ambiguous/);
   await service.update({ action: "ci", reference: "https://enterprise.example/owner/repo/pull/42", headRefOid: headA, status: "passed", passed: 1, total: 1, observedAt }, primary);
   assert.equal(service.snapshot().references.prs.filter((entry) => entry.ci.status === "passed").length, 1);
+});
+
+test("tracking invalidations reread canonical controls instead of trusting notification content", async () => {
+  const { service } = await fixture();
+  const canonical = { prs: [pr], issues: [] };
+  const calls = [];
+  let sync, latest;
+  const session = {
+    log: async (message, options) => {
+      assert.equal(options.ephemeral, true);
+      const kind = trackingChangeKind({ type: "session.info", data: { infoType: "notification", message } });
+      if (kind) latest = sync.refresh(kind);
+    },
+    rpc: { tools: { execute: async (request) => {
+      calls.push(request);
+      const kind = request.name === "session_prs" ? "prs" : "issues";
+      assert.equal(sync.isReading(kind), true);
+      return { resultType: "success", textResultForLlm: JSON.stringify(canonical[kind]) };
+    } } },
+  };
+  sync = createTrackingSync(session, service);
+  await notifySessionTracking(session, "all");
+  await latest;
+  assert.equal(service.snapshot().references.source.status, "verified");
+  assert.equal(service.snapshot().references.prs.length, 1);
+  canonical.prs = [];
+  const fake = {
+    type: "session.info",
+    data: { infoType: "notification", message: "Session tracking changed: prs", prs: [pr], sessionId: "other-session" },
+  };
+  await sync.refresh(trackingChangeKind(fake));
+  assert.deepEqual(service.snapshot().references.prs, []);
+  assert.deepEqual(calls, [
+    { name: "session_prs", arguments: { action: "list" } },
+    { name: "session_issues", arguments: { action: "list" } },
+    { name: "session_prs", arguments: { action: "list" } },
+  ]);
+  assert.equal(sync.isReading("prs"), false);
+  await assert.rejects(service.update({ action: "ci", reference: pr.reference, headRefOid: headA,
+    status: "passed", passed: 1, total: 1, observedAt }, primary), /tracked PR/i);
+});
+
+test("changes during an in-flight tracking read coalesce into a fresh follow-up snapshot", async () => {
+  const { service } = await fixture();
+  let release, started;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const beginning = new Promise((resolve) => { started = resolve; });
+  let values = [pr], reads = 0;
+  const sync = createTrackingSync({ rpc: { tools: { execute: async ({ name }) => {
+    const snapshot = name === "session_prs" ? structuredClone(values) : [];
+    if (++reads === 1) { started(); await gate; }
+    return JSON.stringify(snapshot);
+  } } } }, service);
+  const first = sync.refresh("prs");
+  await beginning;
+  values = [];
+  const updates = Array.from({ length: 10 }, () => sync.refresh("prs"));
+  const issues = sync.refresh("issues");
+  release();
+  await Promise.all([first, ...updates, issues]);
+  assert.equal(reads, 3);
+  assert.deepEqual(service.snapshot().references.prs, []);
+  assert.equal(service.snapshot().references.source.status, "verified");
+});
+
+test("unsupported, denied, failed, and malformed native reads keep ownership unverified", async () => {
+  for (const result of [null, { resultType: "denied" }, { resultType: "failure" }, '[{"owned":true}]']) {
+    const { service } = await fixture();
+    await service.update({ action: "references", prs: [pr], issues: [] }, primary);
+    const session = { rpc: { tools: { execute: async () => {
+      if (result === null) throw new Error("Native tool execution unavailable");
+      return result;
+    } } } };
+    await createTrackingSync(session, service).refresh("prs");
+    const state = service.snapshot();
+    assert.equal(state.references.source.status, "unavailable");
+    assert.equal(state.references.source.known.prs, false);
+    assert.equal(state.references.prs.length, 1);
+    await assert.rejects(service.update({ action: "ci", reference: pr.reference, headRefOid: headA,
+      status: "passed", passed: 1, total: 1, observedAt }, primary), /ownership/i);
+  }
+});
+
+test("unrelated log text cannot select arbitrary tools or become an ownership snapshot", () => {
+  for (const event of [
+    { type: "assistant.message", data: { infoType: "notification", message: "Session tracking changed: prs" } },
+    { type: "session.info", data: { infoType: "untrusted", message: "Session tracking changed: prs" } },
+    { type: "session.info", data: { infoType: "notification", message: JSON.stringify([pr]) } },
+    { type: "session.info", data: { infoType: "notification", message: "Session tracking changed: powershell" } },
+  ]) assert.equal(trackingChangeKind(event), null);
 });

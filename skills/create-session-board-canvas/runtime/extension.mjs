@@ -7,7 +7,7 @@ import { workspaceStore, sessionStore } from "./canvas-kit/storage.mjs";
 import { validate } from "./canvas-kit/validate.mjs";
 import { actorFor, createProgressEventGate, isProgressEvent, progressInputSchema, readSessionSources } from "./host.mjs";
 import { acquireProvider } from "./provider.mjs";
-import { trackingResult } from "./references.mjs";
+import { createTrackingSync, trackingChangeKind, trackingResult } from "./references.mjs";
 
 // One SDK connection is required: disconnect/rejoin loses canvas callbacks on
 // the supported host. An OS-owned session lease prevents duplicate loaders.
@@ -16,6 +16,7 @@ const lease = await acquireProvider(process.env.SESSION_ID);
 if (lease) {
   let service;
   let runtime;
+  let tracking;
   let resolveReady;
   let rejectReady;
   const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
@@ -48,9 +49,11 @@ if (lease) {
       onPostToolUse: async (input, invocation) => {
         const delta = trackingResult(input);
         if (!delta || invocation.sessionId !== process.env.SESSION_ID) return;
+        if (input.toolArgs?.action === "list" && tracking?.isReading(delta.kind)) return;
         try {
           await ready;
           await service.syncTracking(delta);
+          refreshTracking(delta.kind || "all");
         } catch (error) {
           await session.log(`Session board tracking sync unavailable: ${String(error.message).slice(0, 300)}`).catch(() => {});
         }
@@ -76,8 +79,15 @@ if (lease) {
   });
   let stopped = false;
   let refreshTimer;
+  function refreshTracking(kind = "all") {
+    // A native tool hook must return before requesting another native tool.
+    void tracking.refresh(kind).catch((error) =>
+      session.log(`Session board tracking sync unavailable: ${String(error.message).slice(0, 300)}`).catch(() => {}));
+  }
   const handle = (event) => {
     if (stopped) return;
+    const trackingKind = trackingChangeKind(event);
+    if (trackingKind) { refreshTracking(trackingKind); return; }
     if (event.type === "session.plan_changed" || event.type === "session.todos_changed" ||
         event.type === "session.resume" || event.type === "session.compaction_complete") {
       clearTimeout(refreshTimer);
@@ -101,7 +111,10 @@ if (lease) {
         if (runtime) await runtime.invoke("get_status", {}, { domainId: session.sessionId });
       },
     });
-    runtime = createCanvasRuntime(createProgressCanvas(service, session.sessionId));
+    tracking = createTrackingSync(session, service);
+    runtime = createCanvasRuntime(createProgressCanvas(service, session.sessionId, {
+      refreshTracking,
+    }));
     await service.refresh();
     try {
       const history = await session.getEvents();

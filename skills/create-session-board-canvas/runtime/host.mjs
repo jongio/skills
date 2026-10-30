@@ -1,7 +1,9 @@
 import { isOperatorEvent, isRootCancellation } from "./progress.mjs";
+import { trackingChangeKind } from "./references.mjs";
 
 export const isProgressEvent = (event) => isOperatorEvent(event.type) || isRootCancellation(event) ||
-  /^(subagent\.|session\.(?:plan_changed|todos_changed|resume|compaction_complete))/.test(event.type);
+  /^(subagent\.|session\.(?:plan_changed|todos_changed|resume|compaction_complete))/.test(event.type) ||
+  trackingChangeKind(event) !== null;
 
 const trackedTargetSchema = {
   type: "object", properties: {

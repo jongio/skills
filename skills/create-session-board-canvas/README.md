@@ -50,7 +50,11 @@ All task titles stay visible. Expand a task for its ID, parent, and full reports
 delivery evidence, activity, and the plan stay collapsed until requested.
 
 Successful session PR/issue controls mirror their explicitly owned targets into
-Active work. CI is a verified, head-pinned snapshot published by the existing
+Active work. Commands and tools publish ephemeral invalidations; the board
+rereads the existing list tools through the native permission pipeline.
+Notification text is not ownership evidence. Refresh also requests those
+current tracking snapshots; denied or unsupported reads stay unverified.
+CI is a verified, head-pinned snapshot published by the existing
 PR workflow, with an observation time; the board does not start another poller.
 Wrong-head, stale, and incomplete green snapshots are rejected. Unknown tracking
 or CI is labelled unknown rather than shown as an empty verified list.
@@ -62,7 +66,9 @@ gets an explicit task mapping; earlier goal history is retained.
 ## Supported hosts and recovery
 
 Requires a Copilot host with canvas/extension support, plan/todo RPC readers,
-and runtime-attributed tool callers. Verified against CLI 1.0.104. Hosts without
+and runtime-attributed tool callers. The core provider was verified against
+CLI 1.0.104; command-to-board tracking sync additionally requires native tool
+execution RPC support. Hosts without
 those capabilities use text progress; the skill never blocks `go` merely
 because the board is unavailable. Already-running or read-only agents may lack
 the reporting tool: primary relays their returned reports with provenance.
@@ -73,6 +79,8 @@ the rows return or primary confirms removal; retained tasks still accept reports
 that clear operator requests. Archived-goal omissions do not make the current
 goal stale. Refresh or reconnect rehydrates canonical sources. Do not confirm an
 empty read without independently verifying canonical task removal.
+An empty current goal may adopt an empty read when only archived rows remain;
+active or unmapped work still requires independent removal confirmation.
 
 The session provider uses a local OS-owned IPC lease so duplicate loaders do
 not register duplicate tools. On Windows/Linux the lease disappears with its

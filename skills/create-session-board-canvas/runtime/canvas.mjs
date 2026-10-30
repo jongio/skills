@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 
 const emptyInput = { type: "object", properties: {}, additionalProperties: false };
 
-export function createProgressCanvas(service, sessionId) {
+export function createProgressCanvas(service, sessionId, { refreshTracking = async () => {} } = {}) {
   return {
     id: "session-progress",
     requireCapability: true,
@@ -27,10 +27,12 @@ export function createProgressCanvas(service, sessionId) {
         },
       },
       refresh: {
-        description: "Refresh canonical plan/tasks; never mutates task state.",
+        description: "Refresh canonical plan/tasks and request current owned references; never mutates tasks.",
         inputSchema: emptyInput,
         handler: async ({ set }) => {
-          const snapshot = await service.refresh();
+          await service.refresh();
+          await refreshTracking();
+          const snapshot = service.snapshot();
           set(snapshot);
           return { revision: snapshot.revision, source: snapshot.source };
         },

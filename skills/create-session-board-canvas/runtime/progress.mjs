@@ -143,9 +143,11 @@ export async function createProgressService({ sessionId, readSources, store, onC
     try {
       const source = await readSources();
       if (!Array.isArray(source?.rows) || !Array.isArray(source?.dependencies) || !source.plan) throw new Error("Session sources unavailable");
-      if (!source.rows.length && state.tasks.length && !confirmEmpty) throw new Error("Empty task read is ambiguous; primary must confirm task removal");
-      Object.assign(next, projectTasks(source.rows, source.dependencies), { plan: source.plan });
       const active = next.goals.find((goal) => goal.id === next.activeGoalId);
+      const archivedIds = new Set(next.goals.filter((goal) => goal !== active).flatMap((goal) => goal.taskIds));
+      const currentTasks = active ? state.tasks.filter((task) => active.taskIds.includes(task.id) || !archivedIds.has(task.id)) : state.tasks;
+      if (!source.rows.length && currentTasks.length && !confirmEmpty) throw new Error("Empty task read is ambiguous; primary must confirm task removal");
+      Object.assign(next, projectTasks(source.rows, source.dependencies), { plan: source.plan });
       const canonicalIds = new Set(next.tasks.map((task) => task.id));
       if (!confirmEmpty && active) {
         // Retained tasks stay reportable without making the source read complete.

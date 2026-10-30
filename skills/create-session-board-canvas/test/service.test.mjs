@@ -105,6 +105,35 @@ test("unexplained empty reads and source failures preserve the last good tasks",
   assert.equal(service.snapshot().tasks.length, 0);
 });
 
+test("archived-only cached rows do not block an empty new goal or its current plan", async () => {
+  const { service, setSource } = await fixture([task("a", "done")]);
+  await goal(service, "earlier", ["a"]);
+  await goal(service, "current", []);
+  const archived = service.snapshot().goals[0];
+  setSource({ plan: { exists: true, content: "Current empty-goal plan" }, rows: [], dependencies: [] });
+  await service.refresh();
+  const state = service.snapshot();
+  assert.equal(state.source.status, "live");
+  assert.equal(state.plan.content, "Current empty-goal plan");
+  assert.deepEqual(state.tasks, []);
+  assert.deepEqual(state.goals[0], archived);
+  assert.deepEqual(state.metrics, { done: 0, total: 0, percent: null });
+});
+
+test("an empty goal still protects unmapped canonical work from unexplained empty reads", async () => {
+  const { service, setSource } = await fixture([task("a"), task("unmapped")]);
+  await goal(service, "earlier", ["a"]);
+  await goal(service, "current", []);
+  const before = service.snapshot();
+  setSource({ plan: { exists: true, content: "Unverified replacement plan" }, rows: [], dependencies: [] });
+  await service.refresh();
+  const state = service.snapshot();
+  assert.equal(state.source.status, "stale");
+  assert.match(state.source.error, /ambiguous/i);
+  assert.deepEqual(state.tasks, before.tasks);
+  assert.deepEqual(state.plan, before.plan);
+});
+
 test("partial active-goal reads warn until missing rows return or removal is confirmed", async () => {
   const { service, setSource } = await fixture([task("a", "done"), task("b")]);
   await goal(service);
