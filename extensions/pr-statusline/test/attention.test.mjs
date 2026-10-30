@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { EventEmitter, once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -433,6 +435,54 @@ test("independent sessions adopt an atomic preference update after their initial
 			child.send("exit");
 			await closed;
 		}));
+	}
+}));
+
+test("a transient preference read failure reapplies the same valid revision without re-arming an acknowledged alert", { timeout: 10000 }, async (t) => fixture(async (home) => {
+	setAttentionConfig({ enabled: true }, { home });
+	const file = attentionConfigPath(home);
+	const revision = () => {
+		const stat = fs.statSync(file, { bigint: true });
+		return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs];
+	};
+	const { attention, helper, reports } = controller(home, { watch: true });
+	let replacement;
+	async function until(predicate, message) {
+		const deadline = Date.now() + 5000;
+		while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+		assert.ok(predicate(), message);
+	}
+	try {
+		attention.observe(event("permission.requested", { requestId: "acknowledged" }));
+		await flush();
+		helper.children[0].child.message({ type: "acknowledged", generation: 1 });
+		const before = revision();
+		const open = fs.openSync;
+		let failNext = true;
+		replacement = t.mock.method(fs, "openSync", (path, ...args) => {
+			if (path === file && failNext) {
+				failNext = false;
+				throw Object.assign(new Error("Fixture transient preference read failure"), { code: "EACCES" });
+			}
+			return open(path, ...args);
+		});
+		syncBuiltinESMExports();
+		await until(() => attention.status().error?.includes("Fixture transient"), "The real poll did not observe the read failure");
+		assert.equal(attention.status().enabled, false);
+		assert.equal(helper.children[0].child.stdin.writableEnded, true);
+		replacement.mock.restore();
+		syncBuiltinESMExports();
+		assert.deepEqual(revision(), before, "Recovery must not depend on a writer-created revision");
+		await until(() => attention.status().enabled && attention.status().error === null,
+			"Unchanged authoritative settings did not recover after the transient read failure");
+		assert.equal(attention.status().generation, 1);
+		assert.equal(helper.children.length, 1, "An acknowledged alert must not be re-armed by configuration recovery");
+		assert.equal(reports.length, 1);
+		assert.deepEqual(revision(), before);
+	} finally {
+		replacement?.mock.restore();
+		syncBuiltinESMExports();
+		attention.stop();
 	}
 }));
 

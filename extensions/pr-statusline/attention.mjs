@@ -130,6 +130,7 @@ export function createSessionAttention({
 	let preview = null;
 	let activePreview = null;
 	let appliedRevision = null;
+	let appliedConfigValid = false;
 
 	const status = () => ({ enabled: config.enabled, supported, style: config.style,
 		binding, error: lastError, ...state.snapshot() });
@@ -278,7 +279,7 @@ export function createSessionAttention({
 	function reload({ explicitDisable = false, fromWatch = false } = {}) {
 		try {
 			const { config: next, revision } = readAttentionSettings(home);
-			if (fromWatch && revision === appliedRevision) return;
+			if (fromWatch && revision === appliedRevision && appliedConfigValid) return;
 			if (fromWatch) {
 				failed = false;
 				lastError = null;
@@ -290,8 +291,10 @@ export function createSessionAttention({
 			if (!next.enabled) acknowledgedGeneration = Math.max(acknowledgedGeneration, state.generation);
 			config = next;
 			appliedRevision = revision;
+			appliedConfigValid = true;
 			synchronize();
 		} catch (error) {
+			appliedConfigValid = false;
 			config = { ...ATTENTION_DEFAULTS };
 			stopChild();
 			fail(error);
