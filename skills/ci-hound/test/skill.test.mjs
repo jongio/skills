@@ -439,18 +439,31 @@ test("parseArgs parses mode, repo, intervals, merge modes, flags, and watched ru
   assert.equal(parsed.maxPolls, 3);
   assert.equal(parsed.mergeMode, "auto");
 
-  const defaultMerge = parseArgs(["watch", "--repo", "github/evals", "--merge", "approval"]);
+  const defaultMerge = parseArgs(["watch", "--repo", "github/evals", "--merge", "approval"], {});
   assert.equal(defaultMerge.mergeMode, "approval");
+  assert.equal(defaultMerge.maxWaitSec, 540, "default maxWaitSec is 540s (60s below 600s Autopilot timeout)");
+
+  const customWait = parseArgs(
+    ["watch", "--repo", "github/evals", "--max-wait-sec", "0"],
+    { COPILOT_TASK_WAIT_TIMEOUT_SECONDS: "300" }
+  );
+  assert.equal(customWait.maxWaitSec, 0);
+  assert.equal(
+    parseArgs(["watch", "--repo", "github/evals"], { COPILOT_TASK_WAIT_TIMEOUT_SECONDS: "300" }).maxWaitSec,
+    240
+  );
 
   assert.throws(() => parseArgs(["watch", "--repo", "github/evals", "--merge=invalid"]), /Invalid --merge mode/);
+  assert.throws(() => parseArgs(["watch", "--repo", "github/evals", "--max-wait-sec", "-1"]), /Invalid --max-wait-sec/);
 });
 
-test("saveState and loadState round-trip state and recover from corrupted JSON", async (t) => {
+test("saveState and loadState initialize missing state, round-trip it, and reject corrupted JSON", async (t) => {
   const tempDir = await mkdtemp(path.join(tmpdir(), "ci-hound-state-"));
   t.after(() => rm(tempDir, { recursive: true, force: true }));
   const statePath = path.join(tempDir, "nested", "state.json");
 
   const initial = loadState(statePath);
+  assert.equal(initial.repo, "");
   initial.repo = "github/evals";
   initial.lastMainSha = "deadbeef";
   saveState(statePath, initial);
@@ -460,9 +473,8 @@ test("saveState and loadState round-trip state and recover from corrupted JSON",
   assert.equal(reloaded.lastMainSha, "deadbeef");
 
   await writeFile(statePath, "{corrupted json", "utf8");
-  const recovered = loadState(statePath);
-  assert.equal(recovered.repo, "");
-  assert.equal(recovered.lastMainSha, "");
+  assert.throws(() => loadState(statePath), SyntaxError);
+  assert.equal(await readFile(statePath, "utf8"), "{corrupted json");
 });
 
 test("ghApiWithEtag caches 200 ETag responses, reuses 304 Not Modified, and falls back on HTTP/JSON errors", async () => {

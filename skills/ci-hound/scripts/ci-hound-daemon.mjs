@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createGitHubClient, createEventWriter, httpDetails } from "./lib/github-client.mjs";
+import { createGitHubClient, createEventWriter, githubHost, httpDetails } from "./lib/github-client.mjs";
 
 export const FLAKE_PATTERNS = [
   {
@@ -96,7 +96,13 @@ export function selectDeliverySkill({
   return "pr";
 }
 
-export function parseArgs(argv) {
+export function defaultMaxWaitSec(env = process.env) {
+  const raw = Number.parseInt(String(env?.COPILOT_TASK_WAIT_TIMEOUT_SECONDS ?? ""), 10);
+  const hostWaitSec = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 600) : 600;
+  return hostWaitSec > 60 ? hostWaitSec - 60 : Math.max(0.5, hostWaitSec / 2);
+}
+
+export function parseArgs(argv, env = process.env) {
   const args = {
     mode: "watch",
     eventsFile: "",
@@ -120,6 +126,7 @@ export function parseArgs(argv) {
     wakeOnNewCommit: false,
     wakeOnAllGreen: true,
     maxPolls: 0,
+    maxWaitSec: defaultMaxWaitSec(env),
     mergeMode: "approval",
     explicitMergeMode: false,
     hasExistingPr: false,
@@ -223,6 +230,13 @@ export function parseArgs(argv) {
       args.wakeOnAllGreen = false;
     } else if (token === "--max-polls" && argv[i + 1]) {
       args.maxPolls = Math.max(1, Number.parseInt(argv[++i], 10) || 1);
+    } else if (token === "--max-wait-sec" && argv[i + 1]) {
+      const rawWait = argv[++i];
+      const parsedWait = Number(rawWait);
+      if (!/^\d+$/.test(rawWait) || !Number.isSafeInteger(parsedWait)) {
+        throw new Error(`Invalid --max-wait-sec "${parsedWait}". Expected a non-negative integer.`);
+      }
+      args.maxWaitSec = parsedWait;
     } else if (token === "--merge" && argv[i + 1]) {
       args.mergeMode = argv[++i];
       args.explicitMergeMode = true;
@@ -373,27 +387,57 @@ export function applySetupConfig(args, existingConfig) {
   return next;
 }
 
+class DiscoveryScopeChanged extends Error {}
+
 async function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultRequest) {
-  const results = [];
-  for (let page = 1; ; page += 1) {
+  state.metrics.discoveryProgress ??= {};
+  const progress = state.metrics.discoveryProgress[baseEndpoint] ??= {
+    page: 1, results: [], complete: false, cacheScope: state.cacheScope || "",
+  };
+  const invalidateScope = () => {
+    state.metrics.discoveryProgress = {};
+    for (const key of ["watchSweep", "targetRepos", "nextRepo"]) delete state.metrics[key];
+    state.discoveryScopeChanged = true;
+  };
+  if ((!progress.cacheScope && (progress.page > 1 || progress.complete || progress.results.length > 0)) ||
+      (progress.cacheScope && state.cacheScope && progress.cacheScope !== state.cacheScope)) {
+    invalidateScope();
+    throw new DiscoveryScopeChanged();
+  }
+  const results = progress.results;
+  if (progress.complete) return results;
+  for (let page = progress.page; ; page += 1) {
     const res = await ghApiWithEtag(`${baseEndpoint}&page=${page}`, state, execFn);
+    const observedScope = state.cacheScope || "";
+    if (progress.cacheScope && progress.cacheScope !== observedScope) {
+      invalidateScope();
+      if (res.chunkTimedOut) { state.chunkTimedOut = true; return []; }
+      if (res.rateLimited) { state.rateLimited = true; return []; }
+      if (res.error) throw new Error(res.error);
+      throw new DiscoveryScopeChanged();
+    }
+    progress.cacheScope = observedScope;
+    if (res.chunkTimedOut) {
+      state.chunkTimedOut = true;
+      return results;
+    }
     if (res.rateLimited) {
       if (state) {
         state.rateLimited = true;
       }
-      if (Array.isArray(res.data)) {
-        results.push(...res.data);
-      }
       break;
     }
-    if (!Array.isArray(res.data)) {
+    if (res.error || !Array.isArray(res.data)) {
       throw new Error(res.error || `Repository discovery failed for ${baseEndpoint}&page=${page}`);
     }
     if (res.data.length === 0) {
+      progress.complete = true;
       break;
     }
     results.push(...res.data);
+    progress.page = page + 1;
     if (res.data.length < 100) {
+      progress.complete = true;
       break;
     }
   }
@@ -401,6 +445,17 @@ async function fetchPaginatedRepos(baseEndpoint, state, execFn = defaultRequest)
 }
 
 export async function discoverOwnerRepos(owner, visibility = "all", state, execFn = defaultRequest) {
+  while (true) {
+    try {
+      const repos = await discoverOwnerReposOnce(owner, visibility, state, execFn);
+      return state?.discoveryScopeChanged && (state.chunkTimedOut || state.rateLimited) ? [] : repos;
+    } catch (error) {
+      if (!(error instanceof DiscoveryScopeChanged)) throw error;
+    }
+  }
+}
+
+async function discoverOwnerReposOnce(owner, visibility, state, execFn) {
   if (!owner) {
     return [];
   }
@@ -432,7 +487,7 @@ export async function discoverOwnerRepos(owner, visibility = "all", state, execF
         byName.set(normalizeRepoSlug(r.full_name), r);
       }
     }
-    if (effectiveVisibility !== "private" && !state?.rateLimited) {
+    if (effectiveVisibility !== "private" && !state?.rateLimited && !state?.chunkTimedOut) {
       const publicOwnerRepos = await fetchPaginatedRepos(
         `users/${encodeURIComponent(owner)}/repos?type=all&per_page=100`,
         state,
@@ -452,6 +507,7 @@ export async function discoverOwnerRepos(owner, visibility = "all", state, execF
     rawRepos = [...byName.values()];
   }
 
+  if (!state?.rateLimited && !state?.chunkTimedOut) delete state.metrics.discoveryProgress;
   return rawRepos
     .filter((r) => {
       if (!r || r.archived || r.disabled || !isValidRepoSlug(r.full_name)) {
@@ -505,11 +561,12 @@ export function detectRepoFromGit(cwd = process.cwd()) {
 }
 
 export function loadState(stateFile) {
-  if (existsSync(stateFile)) {
+  if (stateFile) {
     try {
       const parsed = JSON.parse(readFileSync(stateFile, "utf8"));
       return {
         repo: parsed.repo || "",
+        host: parsed.host || "github.com",
         branch: parsed.branch || "main",
         lastMainSha: parsed.lastMainSha || "",
         cacheScope: parsed.cacheScope || "",
@@ -520,12 +577,13 @@ export function loadState(stateFile) {
         flakeSightings: parsed.flakeSightings || [],
         metrics: parsed.metrics || { apiCalls: 0, cacheHits304: 0, lastPollAt: null },
       };
-    } catch {
-      // Fall through to fresh state
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
     }
   }
   return {
     repo: "",
+    host: "github.com",
     branch: "main",
     lastMainSha: "",
     etags: {},
@@ -537,8 +595,67 @@ export function loadState(stateFile) {
   };
 }
 
-export function saveState(stateFile, state) {
-  writeJsonAtomically(stateFile, state);
+function pollVersion(state) {
+  return JSON.stringify([state?.host || "github.com", state?.repo || "", state?.branch || "main",
+    state?.cacheScope || "", state?.lastMainSha || "", state?.metrics?.lastPollAt || null,
+    state?.metrics?.apiCalls || 0]);
+}
+
+export function saveState(stateFile, state, { deadlineMs = Infinity, expectedPollVersion } = {}) {
+  mkdirSync(dirname(stateFile), { recursive: true });
+  const lockFile = `${stateFile}.lock`;
+  const stopAt = performance.now() + Math.max(0, Math.min(2000, deadlineMs - Date.now()));
+  let lock;
+  while (lock === undefined) {
+    try {
+      lock = openSync(lockFile, "wx");
+    } catch (cause) {
+      if (!["EEXIST", "EPERM"].includes(cause.code) || performance.now() >= stopAt) {
+        throw new Error(`Cannot acquire CI watch state lock: ${stateFile}`, { cause });
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(20, stopAt - performance.now()));
+    }
+  }
+  let failure, superseded = false;
+  try {
+    writeFileSync(lock, String(process.pid));
+    let saved;
+    try { saved = JSON.parse(readFileSync(stateFile, "utf8")); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    const sameHost = saved && githubHost(saved.host || "github.com") === githubHost(state.host);
+    const proposedMetrics = state.metrics;
+    if (saved && expectedPollVersion !== undefined && pollVersion(saved) !== expectedPollVersion) {
+      const savedAt = Date.parse(saved.metrics?.lastPollAt);
+      const proposedAt = Date.parse(state.metrics?.lastPollAt);
+      if (!(Number.isFinite(savedAt) && Number.isFinite(proposedAt) && proposedAt > savedAt)) {
+        superseded = true;
+        Object.assign(state, saved);
+        // Simultaneous or unorderable observations cannot retain either green proof.
+        if (!(Number.isFinite(savedAt) && Number.isFinite(proposedAt) && proposedAt < savedAt)) {
+          resetCiObservations(state, state.cacheScope || "");
+        }
+      }
+    }
+    if (sameHost) {
+      for (const key of ["cooldownUntilMs", "repoCooldownUntilMs"]) {
+        const until = Math.max(
+          Number.isFinite(saved.metrics?.[key]) ? saved.metrics[key] : 0,
+          Number.isFinite(proposedMetrics[key]) ? proposedMetrics[key] : 0
+        );
+        if (until > Date.now()) {
+          state.metrics[key] = Math.max(state.metrics[key] || 0, until);
+        }
+      }
+    }
+    writeJsonAtomically(stateFile, state);
+  } catch (error) {
+    failure = error;
+  } finally {
+    try { closeSync(lock); } catch (error) { failure ??= error; }
+    try { rmSync(lockFile); } catch (error) { failure ??= error; }
+  }
+  if (failure) throw failure;
+  if (superseded) return false;
 }
 
 export function normalizeWorkflowTelemetryName(name) {
@@ -832,30 +949,55 @@ export function computeNextPollIntervalSec(args, activeMainRuns, metrics = {}) {
   return intervalSec;
 }
 
+function resetCiObservations(state, scope) {
+  state.etags = {};
+  state.runs = {};
+  state.lastMainSha = "";
+  delete state.metrics.lastStatus;
+  delete state.metrics.lastPhase;
+  delete state.metrics.nextPollAtMs;
+  state.cacheScope = scope;
+}
+
 export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
   let scope;
   try {
     scope = await execFn.cacheScope?.();
   } catch (error) {
+    if (error instanceof WatchChunkDeadline) {
+      if (typeof error.cacheScope === "string" && state.cacheScope !== error.cacheScope) resetCiObservations(state, error.cacheScope);
+      return { data: null, chunkTimedOut: true };
+    }
+    resetCiObservations(state, "");
     return { data: null, error: error.message };
   }
-  if (scope && state.cacheScope !== scope) {
-    state.etags = {};
-    state.runs = {};
-    state.lastMainSha = "";
-    state.cacheScope = scope;
+  const observedScope = typeof scope === "string" ? scope : "";
+  if (state.cacheScope !== observedScope && (state.cacheScope || observedScope)) {
+    resetCiObservations(state, observedScope);
   }
   const cached = state.etags[endpoint];
   const requestedScope = state.cacheScope;
   const request = { endpoint, conditional: true, headers: cached?.etag ? { "If-None-Match": cached.etag } : {} };
   state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
-  const result = await execFn(request);
-  if (result.cacheScope && state.cacheScope !== result.cacheScope) {
-    state.etags = {};
-    state.runs = {};
-    state.lastMainSha = "";
-    state.cacheScope = result.cacheScope;
+  let result;
+  try {
+    result = await execFn(request);
+  } catch (error) {
+    if (error instanceof WatchChunkDeadline) {
+      if (typeof error.cacheScope === "string" && state.cacheScope !== error.cacheScope) resetCiObservations(state, error.cacheScope);
+      return { data: null, chunkTimedOut: true };
+    }
+    return { data: null, error: error.message };
   }
+  if (typeof result.cacheScope === "string" && state.cacheScope !== result.cacheScope) {
+    resetCiObservations(state, result.cacheScope);
+  }
+  if (result.chunkTimedOut) {
+    return { data: null, chunkTimedOut: true };
+  }
+  const cacheMatchesResponse = typeof result.cacheScope === "string"
+    ? Boolean(result.cacheScope) && result.cacheScope === requestedScope
+    : !requestedScope;
   const parsed = httpDetails(result);
   if (parsed.rateLimitRemaining !== null) {
     state.metrics.rateLimitRemaining = parsed.rateLimitRemaining;
@@ -869,7 +1011,7 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
 
   if (parsed.status === 304) {
     if (result.ok && cached?.etag && cached.data !== undefined &&
-        (!result.cacheScope || result.cacheScope === requestedScope)) {
+        cacheMatchesResponse) {
       state.metrics.cacheHits304 = (state.metrics.cacheHits304 || 0) + 1;
       return { fromCache: true, data: cached.data };
     }
@@ -891,14 +1033,15 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
       60
     );
     return {
-      fromCache: Boolean(cached?.data !== undefined),
-      data: cached?.data ?? null,
+      fromCache: Boolean(cacheMatchesResponse && cached?.data !== undefined),
+      data: cacheMatchesResponse ? cached?.data ?? null : null,
       rateLimited: true,
       error: result.error || `HTTP ${parsed.status} rate limited`,
     };
   }
   if (!result.ok && parsed.status !== 304) {
-    return { fromCache: false, data: cached?.data ?? null, error: result.error || `HTTP ${parsed.status}` };
+    return { fromCache: false, data: cacheMatchesResponse ? cached?.data ?? null : null,
+      error: result.error || `HTTP ${parsed.status}` };
   }
   try {
     const data = slimEtagData(endpoint, result.data);
@@ -913,16 +1056,50 @@ export async function ghApiWithEtag(endpoint, state, execFn = defaultRequest) {
 
 
 let githubClient;
-async function defaultRequest(request) {
+async function defaultRequest(request, options) {
   githubClient ??= createGitHubClient();
-  return githubClient.request(request);
+  return githubClient.request(request, options);
 }
-defaultRequest.cacheScope = async () => {
+defaultRequest.cacheScope = async (options) => {
   githubClient ??= createGitHubClient();
-  return githubClient.cacheScope();
+  return githubClient.cacheScope(options);
 };
-export function sendFailureAlert(title, message) {
-  if (process.env.CI_HOUND_NO_ALERT === "1") {
+
+class WatchChunkDeadline extends Error {}
+
+function chunkExec(execFn, deadlineMs) {
+  const invoke = async (fn, input, options = {}, scopeLookup = false) => {
+    const remaining = deadlineMs - Date.now();
+    if (remaining <= 0) throw new WatchChunkDeadline();
+    const control = new AbortController();
+    const timer = Number.isFinite(remaining)
+      ? setTimeout(() => control.abort(), Math.min(2147483647, Math.ceil(remaining)))
+      : null;
+    try {
+      const signal = options.signal ? AbortSignal.any([control.signal, options.signal]) : control.signal;
+      const result = await fn(input, { ...options, signal });
+      if (control.signal.aborted || result?.chunkTimedOut) {
+        const error = new WatchChunkDeadline();
+        const scope = scopeLookup ? result : result?.cacheScope;
+        if (typeof scope === "string") error.cacheScope = scope;
+        throw error;
+      }
+      return result;
+    } catch (error) {
+      if (control.signal.aborted && !(error instanceof WatchChunkDeadline)) throw new WatchChunkDeadline();
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const request = (input, options) => invoke(execFn, input, options);
+  if (execFn.cacheScope) request.cacheScope = (options) =>
+    invoke((_, requestOptions) => execFn.cacheScope(requestOptions), undefined, options, true);
+  return request;
+}
+
+export function sendFailureAlert(title, message, deadlineMs = Infinity) {
+  if (process.env.CI_HOUND_NO_ALERT === "1" || Date.now() >= deadlineMs) {
     return;
   }
   if (process.platform === "win32") {
@@ -946,17 +1123,17 @@ export function sendFailureAlert(title, message) {
     `;
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", psScript], {
       stdio: "ignore",
-      timeout: 6000,
+      timeout: Math.max(1, Math.min(6000, deadlineMs - Date.now())),
     });
   } else if (process.platform === "darwin") {
     spawnSync("osascript", ["-e", `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)} sound name "Basso"`], {
       stdio: "ignore",
-      timeout: 4000,
+      timeout: Math.max(1, Math.min(4000, deadlineMs - Date.now())),
     });
   } else {
     spawnSync("notify-send", ["-u", "critical", title, message], {
       stdio: "ignore",
-      timeout: 4000,
+      timeout: Math.max(1, Math.min(4000, deadlineMs - Date.now())),
     });
   }
 }
@@ -1217,9 +1394,43 @@ export function computeCiHoundPhase({
 }
 
 export async function evaluatePollTick(args, state, execFn = defaultRequest) {
+  execFn = chunkExec(execFn, args.chunkDeadlineMs ?? Infinity);
+  const host = githubHost();
+  const nowMs = Date.now();
+  if (args.respectPollInterval && state.host === host && state.repo === args.repo && state.branch === args.branch &&
+      state.cacheScope && state.cacheScope === args.pollCacheScope &&
+      state.metrics.nextPollAtMs > nowMs && !(state.metrics.cooldownUntilMs > nowMs)) {
+    return {
+      events: [], pollDeferred: true, activeMainRuns: 0,
+      nextIntervalSec: (state.metrics.nextPollAtMs - nowMs) / 1000,
+    };
+  }
+  if (args.respectPollInterval) state.metrics.nextPollAtMs = null;
+  if ((state.host || "github.com") !== host) Object.assign(state, loadState(""));
+  state.host = host;
   state.repo = args.repo;
   state.branch = args.branch;
-  state.metrics.lastPollAt = new Date().toISOString();
+  state.metrics.lastPollAt = new Date(nowMs).toISOString();
+  if (Number.isFinite(state.metrics?.cooldownUntilMs) && state.metrics.cooldownUntilMs > nowMs) {
+    const remainingSec = Math.max(1, Math.ceil((state.metrics.cooldownUntilMs - nowMs) / 1000));
+    state.rateLimited = true;
+    state.metrics.retryAfterSec = remainingSec;
+    return {
+      events: [
+        {
+          type: "RATE_LIMITED",
+          repo: args.repo,
+          retryAfterSec: remainingSec,
+          rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
+        },
+      ],
+      activeMainRuns: 0,
+      activeTargetRuns: 0,
+      rateLimited: true,
+      nextIntervalSec: remainingSec,
+    };
+  }
+  state.metrics.cooldownUntilMs = null;
   state.metrics.rateLimitRemaining = null;
   state.metrics.rateLimitReset = null;
   state.metrics.retryAfterSec = null;
@@ -1227,6 +1438,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
 
   const events = [];
   let tickRateLimited = false;
+  let tickChunkTimedOut = false;
   let tickError = "";
   const failedPoll = (error) => ({
     events: [{ type: "POLL_ERROR", repo: args.repo, error }],
@@ -1236,16 +1448,35 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   });
 
   const commitRes = await ghApiWithEtag(`repos/${args.repo}/commits/${args.branch}`, state, execFn);
-  if (!commitRes.rateLimited && (commitRes.error || !commitRes.data?.sha)) {
+  if (!commitRes.rateLimited && !commitRes.chunkTimedOut && (commitRes.error || !commitRes.data?.sha)) {
     return failedPoll(commitRes.error || "Commit response missing sha");
   }
   if (commitRes.rateLimited) {
     tickRateLimited = true;
   }
+  if (commitRes.chunkTimedOut) {
+    tickChunkTimedOut = true;
+  }
   const pollScope = state.cacheScope;
   const scopeChangedError = "GitHub credentials changed during the poll; retry the watched repositories";
+  const changedScopePoll = (response = {}) => {
+    if (response.rateLimited || tickRateLimited) {
+      state.rateLimited = true;
+      state.metrics.cooldownUntilMs = Date.now() + computeNextPollIntervalSec(args, 0, state.metrics) * 1000;
+      const remainingSec = Math.max(1, (state.metrics.cooldownUntilMs - Date.now()) / 1000);
+      return {
+        events: [{ type: "RATE_LIMITED", repo: args.repo, retryAfterSec: remainingSec,
+          rateLimitRemaining: state.metrics.rateLimitRemaining }],
+        rateLimited: true, activeMainRuns: 0, nextIntervalSec: remainingSec,
+      };
+    }
+    if (response.chunkTimedOut || tickChunkTimedOut) {
+      return { events: [], chunkTimedOut: true, activeMainRuns: 0, nextIntervalSec: args.idleIntervalSec };
+    }
+    return failedPoll(scopeChangedError);
+  };
   const currentSha = commitRes.data?.sha || state.lastMainSha;
-  if (!tickRateLimited && currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
+  if (!tickRateLimited && !tickChunkTimedOut && currentSha && state.lastMainSha && currentSha !== state.lastMainSha) {
     const prevSha = state.lastMainSha;
     state.lastMainSha = currentSha;
     if (args.wakeOnNewCommit) {
@@ -1261,7 +1492,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   }
 
   let branchRunsRes = { data: null };
-  if (!tickRateLimited) {
+  if (!tickRateLimited && !tickChunkTimedOut) {
     branchRunsRes = await ghApiWithEtag(
       `repos/${args.repo}/actions/runs?branch=${encodeURIComponent(args.branch)}&per_page=20`,
       state,
@@ -1269,18 +1500,24 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
     );
     if (branchRunsRes.rateLimited) {
       tickRateLimited = true;
-    } else if (branchRunsRes.error || !Array.isArray(branchRunsRes.data?.workflow_runs)) {
+    } else if (!branchRunsRes.chunkTimedOut && (branchRunsRes.error || !Array.isArray(branchRunsRes.data?.workflow_runs))) {
       return failedPoll(branchRunsRes.error || "Branch workflow inventory unavailable");
+    }
+    if (branchRunsRes.chunkTimedOut) {
+      tickChunkTimedOut = true;
     }
   }
 
   let allRunsRes = { data: null };
-  if (!tickRateLimited) {
+  if (!tickRateLimited && !tickChunkTimedOut) {
     allRunsRes = await ghApiWithEtag(`repos/${args.repo}/actions/runs?per_page=25`, state, execFn);
     if (allRunsRes.rateLimited) {
       tickRateLimited = true;
-    } else if (allRunsRes.error || !Array.isArray(allRunsRes.data?.workflow_runs)) {
+    } else if (!allRunsRes.chunkTimedOut && (allRunsRes.error || !Array.isArray(allRunsRes.data?.workflow_runs))) {
       return failedPoll(allRunsRes.error || "Workflow inventory unavailable");
+    }
+    if (allRunsRes.chunkTimedOut) {
+      tickChunkTimedOut = true;
     }
   }
 
@@ -1304,13 +1541,17 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
     }
   }
   for (const watchId of trackedActiveIds) {
-    if (tickRateLimited) {
+    if (tickRateLimited || tickChunkTimedOut) {
       break;
     }
     if (!runMap.has(watchId)) {
       const watchRes = await ghApiWithEtag(`repos/${args.repo}/actions/runs/${watchId}`, state, execFn);
       if (watchRes.rateLimited) {
         tickRateLimited = true;
+        break;
+      }
+      if (watchRes.chunkTimedOut) {
+        tickChunkTimedOut = true;
         break;
       }
       if (watchRes.data?.id) {
@@ -1320,7 +1561,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
       }
     }
   }
-  if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
+  if (pollScope && state.cacheScope !== pollScope) return changedScopePoll();
   const workflowRuns = [...runMap.values()];
   const { resolveKey: resolveWorkflowKey, eligibleByWorkflow } = selectActiveBranchWorkflowRuns(
     [...Object.values(state.runs || {}), ...workflowRuns],
@@ -1368,7 +1609,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
     let jobs = prevRun?.jobs || [];
     let jobsComplete = true;
     if (needsJobsInspection) {
-      if (tickRateLimited) {
+      if (tickRateLimited || tickChunkTimedOut) {
         if (isActiveTargetRun) {
           activeRunProgress.push({
             id: run.id,
@@ -1383,9 +1624,10 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
         continue;
       }
       const jobsRes = await ghApiWithEtag(`repos/${args.repo}/actions/runs/${run.id}/jobs?per_page=50`, state, execFn);
-      if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
-      if (jobsRes.rateLimited) {
-        tickRateLimited = true;
+      if (pollScope && state.cacheScope !== pollScope) return changedScopePoll(jobsRes);
+      if (jobsRes.rateLimited || jobsRes.chunkTimedOut) {
+        if (jobsRes.rateLimited) tickRateLimited = true;
+        if (jobsRes.chunkTimedOut) tickChunkTimedOut = true;
         if (isActiveTargetRun) {
           activeRunProgress.push({
             id: run.id,
@@ -1412,9 +1654,10 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
             state,
             execFn
           );
-          if (pollScope && state.cacheScope !== pollScope) return failedPoll(scopeChangedError);
-          if (pageRes.rateLimited) {
-            tickRateLimited = true;
+          if (pollScope && state.cacheScope !== pollScope) return changedScopePoll(pageRes);
+          if (pageRes.rateLimited || pageRes.chunkTimedOut) {
+            if (pageRes.rateLimited) tickRateLimited = true;
+            if (pageRes.chunkTimedOut) tickChunkTimedOut = true;
             jobsComplete = false;
             break;
           }
@@ -1433,7 +1676,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
       } else {
         jobsComplete = false;
       }
-      if (!jobsComplete && !tickRateLimited) {
+      if (!jobsComplete && !tickRateLimited && !tickChunkTimedOut) {
         tickError = jobsRes.error || `Incomplete jobs inventory for run ${run.id}`;
       }
       if (run.status === "completed" && jobsComplete && !prevRun?.telemetryRecorded && jobs.length > 0) {
@@ -1579,7 +1822,8 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
         const firstFailed = failedJobs[0];
         sendFailureAlert(
           `${args.repo} ${args.branch} CI Failed`,
-          `${run.name} -> ${firstFailed.name} (${(run.head_sha || "").slice(0, 8)})`
+          `${run.name} -> ${firstFailed.name} (${(run.head_sha || "").slice(0, 8)})`,
+          args.chunkDeadlineMs
         );
         events.push({
           type: "JOB_FAILED",
@@ -1611,7 +1855,8 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
         }
         sendFailureAlert(
           `${args.repo} ${args.branch} Workflow Failed`,
-          `${run.name} (${(run.head_sha || "").slice(0, 8)}) failed: ${run.conclusion}`
+          `${run.name} (${(run.head_sha || "").slice(0, 8)}) failed: ${run.conclusion}`,
+          args.chunkDeadlineMs
         );
         events.push({
           type: "WORKFLOW_FAILED",
@@ -1636,6 +1881,9 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
   const nextIntervalSec = computeNextPollIntervalSec(args, effectiveActiveRuns, state.metrics);
 
   if (tickRateLimited) {
+    if (state.metrics) {
+      state.metrics.cooldownUntilMs = Date.now() + nextIntervalSec * 1000;
+    }
     events.push({
       type: "RATE_LIMITED",
       repo: args.repo,
@@ -1644,7 +1892,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
     });
   } else if (tickError) {
     events.push({ type: "POLL_ERROR", repo: args.repo, error: tickError });
-  } else if (events.length === 0 && args.wakeOnAllGreen) {
+  } else if (!tickChunkTimedOut && events.length === 0 && args.wakeOnAllGreen) {
     if (args.watchRunIds.length > 0) {
       const watchedRecords = args.watchRunIds.map((id) => state.runs[String(id)]).filter(Boolean);
       const allWatchedDone =
@@ -1696,7 +1944,7 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
     sha: displaySha,
     activeRuns: activeRunProgress,
   });
-  const statusPayload = tickRateLimited
+  const statusPayload = tickRateLimited || tickChunkTimedOut
     ? null
     : {
         timestamp: state.metrics.lastPollAt,
@@ -1712,14 +1960,24 @@ export async function evaluatePollTick(args, state, execFn = defaultRequest) {
         rateLimitRemaining: state.metrics?.rateLimitRemaining ?? null,
       };
 
+  if (args.respectPollInterval && !tickRateLimited && !tickChunkTimedOut && !tickError) {
+    state.metrics.nextPollAtMs = Date.now() + nextIntervalSec * 1000;
+  }
   return {
     events,
     activeMainRuns,
     activeTargetRuns: effectiveActiveRuns,
     rateLimited: tickRateLimited,
+    ...(tickChunkTimedOut ? { chunkTimedOut: true } : {}),
     nextIntervalSec,
     ...(statusPayload ? { status: statusPayload } : {}),
   };
+}
+
+function stateDirectory(args) {
+  const host = githubHost();
+  return host === "github.com" ? dirname(args.configFile)
+    : join(dirname(args.configFile), "hosts", host.replace(/:/g, "__"));
 }
 
 export function stateFileForRepo(repo, args) {
@@ -1727,19 +1985,155 @@ export function stateFileForRepo(repo, args) {
     return args.stateFile;
   }
   const safeSlug = normalizeRepoSlug(repo || "default").replace(/[^a-zA-Z0-9._-]+/g, "__");
-  return join(dirname(args.configFile), `${safeSlug}.json`);
+  return join(stateDirectory(args), `${safeSlug}.json`);
 }
 
 export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRequest) {
-  const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
+  execFn = chunkExec(execFn, args.chunkDeadlineMs ?? Infinity);
+  const discoveryStateFile = join(stateDirectory(args), "_discovery.json");
   const discoveryState = loadState(discoveryStateFile);
-  discoveryState.rateLimited = false;
-  if (discoveryState.metrics) {
-    discoveryState.metrics.rateLimitRemaining = null;
-    discoveryState.metrics.rateLimitReset = null;
-    discoveryState.metrics.retryAfterSec = null;
+  const discardGreenProof = () => {
+    const savedSweep = discoveryState.metrics.watchSweep;
+    if (savedSweep) {
+      savedSweep.completed = {};
+      savedSweep.greenEvents = {};
+    }
+  };
+  const host = githubHost();
+  if (discoveryState.host !== host) Object.assign(discoveryState, loadState(""));
+  discoveryState.host = host;
+  discoveryState.chunkTimedOut = false;
+  discoveryState.discoveryScopeChanged = false;
+  const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
+  const selection = {
+    repos: args.explicitRepos.length > 0 ? args.explicitRepos : config?.repos || [],
+    fallbackRepo: args.explicitRepos.length > 0 || args.owner || config?.owner || config?.repos?.length ? "" : args.repo,
+    owner: args.owner || config?.owner || "",
+    visibility: args.visibility || config?.visibility || "all",
+    branch: effectiveBranch,
+    watchRunIds: args.watchRunIds,
+    watchRunsByRepo: args.watchRunsByRepo,
+    wakeOnAllGreen: args.wakeOnAllGreen,
+    wakeOnNewCommit: args.wakeOnNewCommit,
+  };
+  const selectionKey = JSON.stringify(selection);
+  let savedSelectionKey = discoveryState.metrics.targetSelectionKey;
+  if (!savedSelectionKey && discoveryState.metrics.watchScope) {
+    try {
+      const { cacheScope, ...savedSelection } = JSON.parse(discoveryState.metrics.watchScope);
+      savedSelectionKey = JSON.stringify(savedSelection);
+    } catch {}
   }
-  const targetRepos = await resolveTargetRepos(args, config, discoveryState, execFn);
+  const knownRepos = [...new Set(selection.repos.map(normalizeRepoSlug).filter(Boolean))];
+  if (!selection.owner && knownRepos.length === 0 && args.repo) knownRepos.push(normalizeRepoSlug(args.repo));
+  for (const repo of Object.keys(args.watchRunsByRepo || {})) {
+    if (args.explicitRepos.length > 0 && !args.explicitRepos.includes(repo)) {
+      throw new Error(`Watched run repository "${repo}" is not in the explicit --repo/--repos list.`);
+    }
+    if (!knownRepos.includes(repo)) knownRepos.push(repo);
+  }
+  const reportingRepos = savedSelectionKey === selectionKey
+    ? discoveryState.metrics.targetRepos || knownRepos : knownRepos;
+  let credentialScope;
+  const snapshotForRepo = (repo, saved) => {
+    const status = saved.metrics.lastStatus;
+    return credentialScope && saved.cacheScope === credentialScope &&
+      saved.host === host && saved.repo === repo && saved.branch === effectiveBranch &&
+      status?.repo === repo && status.branch === effectiveBranch
+      ? { ...status, previousPhase: status.phase } : null;
+  };
+  const savedSnapshots = (repos) => repos
+    .map((repo) => snapshotForRepo(repo, loadState(stateFileForRepo(repo, args))))
+    .filter(Boolean);
+  try {
+    credentialScope = await execFn.cacheScope?.();
+  } catch (error) {
+    if (!(error instanceof WatchChunkDeadline)) {
+      discardGreenProof();
+      saveState(discoveryStateFile, discoveryState, { deadlineMs: args.chunkDeadlineMs });
+    }
+    const repos = reportingRepos;
+    return {
+      repos, reports: [], statuses: savedSnapshots(repos), nextIntervalSec: args.idleIntervalSec,
+      ...(error instanceof WatchChunkDeadline
+        ? { events: [], chunkTimedOut: true }
+        : { events: [{ type: "POLL_ERROR", error: error.message }], error: error.message }),
+    };
+  }
+  const nowMs = Date.now();
+  if (discoveryState.metrics.repoCooldownUntilMs > nowMs) {
+    const remainingSec = Math.max(1, Math.ceil((discoveryState.metrics.repoCooldownUntilMs - nowMs) / 1000));
+    const repos = reportingRepos;
+    return {
+      repos,
+      events: [{ type: "RATE_LIMITED", retryAfterSec: remainingSec }],
+      statuses: savedSnapshots(repos),
+      reports: [],
+      rateLimited: true,
+      nextIntervalSec: remainingSec,
+    };
+  }
+  if (credentialScope && discoveryState.cacheScope !== credentialScope) {
+    discoveryState.cacheScope = credentialScope;
+    discoveryState.etags = {};
+    discoveryState.runs = {};
+    discoveryState.lastMainSha = "";
+    for (const key of ["discoveryProgress", "watchSweep", "targetRepos", "nextRepo"]) delete discoveryState.metrics[key];
+  }
+  const effectiveMergeMode = args.explicitMergeMode
+    ? args.mergeMode
+    : config?.mergeMode || args.mergeMode || "approval";
+  const resumable = args.mode === "watch";
+  if (!resumable) {
+    for (const key of ["discoveryProgress", "watchSweep", "nextRepo"]) delete discoveryState.metrics[key];
+  }
+  const currentScopeKey = () => JSON.stringify({ ...selection, cacheScope: credentialScope || "" });
+  const scopeKey = currentScopeKey();
+  if (resumable && discoveryState.metrics.watchScope !== scopeKey) {
+    if (discoveryState.metrics.watchScope !== undefined) {
+      delete discoveryState.metrics.discoveryProgress;
+      delete discoveryState.metrics.nextRepo;
+      delete discoveryState.metrics.targetRepos;
+    }
+    discoveryState.metrics.watchScope = scopeKey;
+    delete discoveryState.metrics.watchSweep;
+  }
+  let sweep = resumable
+    ? discoveryState.metrics.watchSweep ??= { repos: null, completed: {}, greenEvents: {} }
+    : { repos: null, completed: {}, greenEvents: {} };
+  let targetRepos = [];
+  if (
+    Number.isFinite(discoveryState.metrics?.cooldownUntilMs) &&
+    discoveryState.metrics.cooldownUntilMs > nowMs &&
+    args.explicitRepos.length === 0 &&
+    Boolean(args.owner || config?.owner)
+  ) {
+    const remainingSec = Math.max(1, Math.ceil((discoveryState.metrics.cooldownUntilMs - nowMs) / 1000));
+    discoveryState.rateLimited = true;
+    discoveryState.metrics.retryAfterSec = remainingSec;
+  } else if (Array.isArray(sweep.repos)) {
+    discoveryState.rateLimited = false;
+    targetRepos = [...sweep.repos];
+  } else {
+    discoveryState.rateLimited = false;
+    if (discoveryState.metrics) {
+      discoveryState.metrics.cooldownUntilMs = null;
+      discoveryState.metrics.rateLimitRemaining = null;
+      discoveryState.metrics.rateLimitReset = null;
+      discoveryState.metrics.retryAfterSec = null;
+    }
+    targetRepos = await resolveTargetRepos(args, config, discoveryState, execFn);
+    if (discoveryState.discoveryScopeChanged) {
+      credentialScope = discoveryState.cacheScope;
+      discoveryState.metrics.watchScope = currentScopeKey();
+      sweep = { repos: null, completed: {}, greenEvents: {} };
+      if (resumable) discoveryState.metrics.watchSweep = sweep;
+    }
+    if (discoveryState.rateLimited && discoveryState.metrics) {
+      const discRetrySec = computeNextPollIntervalSec(args, 0, discoveryState.metrics);
+      discoveryState.metrics.cooldownUntilMs = Date.now() + discRetrySec * 1000;
+    }
+  }
   for (const qualifiedRepo of Object.keys(args.watchRunsByRepo || {})) {
     if (args.explicitRepos.length > 0 && !args.explicitRepos.includes(qualifiedRepo)) {
       throw new Error(
@@ -1750,9 +2144,11 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       targetRepos.push(qualifiedRepo);
     }
   }
-  if (args.owner || config?.owner) {
-    saveState(discoveryStateFile, discoveryState);
+  if (discoveryState.chunkTimedOut) {
+    saveState(discoveryStateFile, discoveryState, { deadlineMs: args.chunkDeadlineMs });
+    return { repos: targetRepos, events: [], statuses: [], reports: [], chunkTimedOut: true, nextIntervalSec: args.idleIntervalSec };
   }
+  if (!discoveryState.rateLimited) sweep.repos = [...targetRepos];
   if (args.explicitStateFile && targetRepos.length > 1) {
     throw new Error("Cannot use a single --state-file when monitoring multiple repositories.");
   }
@@ -1762,10 +2158,6 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     );
   }
 
-  const effectiveBranch = args.explicitBranch ? args.branch : config?.branch || args.branch || "main";
-  const effectiveMergeMode = args.explicitMergeMode
-    ? args.mergeMode
-    : config?.mergeMode || args.mergeMode || "approval";
   const hasAnyWatchedRuns =
     args.watchRunIds.length > 0 || Object.keys(args.watchRunsByRepo || {}).length > 0;
 
@@ -1774,6 +2166,9 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
   const statuses = [];
   let totalActiveMainRuns = 0;
   let anyRateLimited = Boolean(discoveryState.rateLimited);
+  let chunkTimedOut = false;
+  let deferredIntervalSec = Infinity;
+  let inventoryScopeInvalidated = false;
   let minRateLimitRemaining = Number.isFinite(discoveryState.metrics?.rateLimitRemaining)
     ? discoveryState.metrics.rateLimitRemaining
     : null;
@@ -1815,10 +2210,38 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       rateLimitRemaining: discoveryState.metrics?.rateLimitRemaining ?? null,
     });
   } else {
-    const pendingAllGreenEvents = [];
-    for (const repo of targetRepos) {
+    const invalidateChangedResults = () => {
+      // Another watcher or diagnostic poll can supersede a completed chunk's evidence.
+      for (const [repo, proof] of Object.entries(sweep.completed)) {
+        const current = loadState(stateFileForRepo(repo, args));
+        if (proof.sha !== current.lastMainSha || proof.branch !== current.branch ||
+            (proof.cacheScope || "") !== (current.cacheScope || "") ||
+            (credentialScope && proof.cacheScope !== credentialScope) ||
+            proof.pollVersion !== pollVersion(current) ||
+            proof.lastPollAt !== current.metrics.lastPollAt) {
+          delete sweep.completed[repo];
+          delete sweep.greenEvents[repo];
+        }
+      }
+    };
+    invalidateChangedResults();
+    const startIndex = resumable ? Math.max(0, targetRepos.indexOf(discoveryState.metrics.nextRepo)) : 0;
+    const orderedRepos = [...targetRepos.slice(startIndex), ...targetRepos.slice(0, startIndex)]
+      .filter((repo) => !sweep.completed[repo] || args.respectPollInterval &&
+        (loadState(stateFileForRepo(repo, args)).metrics.nextPollAtMs || 0) <= Date.now())
+      .sort((left, right) => Number(Boolean(sweep.completed[left])) - Number(Boolean(sweep.completed[right])));
+    let completedThisTick = 0;
+    for (const repo of orderedRepos) {
+      if (targetRepos.length > 1 &&
+          targetRepos.every((target) => sweep.completed[target] && sweep.greenEvents[target])) break;
+      if (Date.now() >= (args.chunkDeadlineMs ?? Infinity)) {
+        discoveryState.metrics.nextRepo = repo;
+        chunkTimedOut = true;
+        break;
+      }
       const repoStateFile = stateFileForRepo(repo, args);
       const repoState = loadState(repoStateFile);
+      const expectedPollVersion = pollVersion(repoState);
       const qualifiedIds = args.watchRunsByRepo?.[repo] || [];
       const repoWatchRunIds =
         targetRepos.length === 1
@@ -1829,6 +2252,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
         ...args,
         repo,
         branch: effectiveBranch,
+        pollCacheScope: credentialScope,
         mergeMode: effectiveMergeMode,
         stateFile: repoStateFile,
         watchRunIds: repoWatchRunIds,
@@ -1840,16 +2264,33 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
           : args.wakeOnAllGreen,
       };
       const tick = await evaluatePollTick(repoArgs, repoState, execFn);
-      saveState(repoStateFile, repoState);
+      if (tick.pollDeferred) deferredIntervalSec = Math.min(deferredIntervalSec, tick.nextIntervalSec);
+      const changedScope = credentialScope && repoState.cacheScope !== credentialScope;
+      discoveryState.metrics.nextRepo = targetRepos[(targetRepos.indexOf(repo) + 1) % targetRepos.length];
+      if (tick.status) {
+        tick.status.previousPhase = repoState.metrics.lastPhase || "";
+        repoState.metrics.lastPhase = tick.status.phase;
+        repoState.metrics.lastStatus = tick.status;
+      }
+      if (saveState(repoStateFile, repoState, { deadlineMs: args.chunkDeadlineMs, expectedPollVersion }) === false) {
+        allEvents.push({ type: "POLL_ERROR", repo, error: "CI observations superseded by an overlapping poll; retry" });
+        discardGreenProof();
+        break;
+      }
+      delete sweep.greenEvents[repo];
       for (const ev of tick.events) {
+        if (changedScope && /GREEN$/.test(ev.type)) continue;
         if (ev.type === "ALL_GREEN" && targetRepos.length > 1) {
-          pendingAllGreenEvents.push(ev);
+          if (!tick.chunkTimedOut && !tick.rateLimited) sweep.greenEvents[repo] = ev;
         } else {
           allEvents.push(ev);
         }
       }
       if (tick.status) {
         statuses.push(tick.status);
+      } else {
+        const snapshot = snapshotForRepo(repo, repoState);
+        if (snapshot) statuses.push(snapshot);
       }
       totalActiveMainRuns += Math.max(
         tick.activeMainRuns,
@@ -1858,27 +2299,88 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
       );
       mergeRateMetrics(repoState.metrics);
       reports.push(buildOptimizationReport(repoState, effectiveMergeMode));
+      if (changedScope) {
+        credentialScope = repoState.cacheScope || "";
+        discoveryState.cacheScope = credentialScope;
+        discoveryState.metrics.watchScope = currentScopeKey();
+        sweep.completed = {};
+        sweep.greenEvents = {};
+        statuses.length = 0;
+        reports.length = 0;
+        allEvents.length = 0;
+        totalActiveMainRuns = 0;
+        for (const key of ["discoveryProgress", "watchSweep", "targetRepos", "nextRepo"]) delete discoveryState.metrics[key];
+        inventoryScopeInvalidated = true;
+        anyRateLimited ||= Boolean(tick.rateLimited);
+        if (tick.rateLimited) allEvents.push(...tick.events.filter((event) => event.type === "RATE_LIMITED"));
+        if (tick.chunkTimedOut) chunkTimedOut = true;
+        else if (!tick.rateLimited) {
+          allEvents.push({ type: "POLL_ERROR", repo,
+            error: tick.error || "GitHub credentials changed during the watch sweep; refresh repository discovery" });
+        }
+        break;
+      }
+      if (tick.chunkTimedOut) {
+        if (completedThisTick > 0) discoveryState.metrics.nextRepo = repo;
+        else {
+          sweep.completed = {};
+          sweep.greenEvents = {};
+        }
+        chunkTimedOut = true;
+        break;
+      }
       if (tick.rateLimited) {
         anyRateLimited = true;
         break;
       }
+      if (!tick.pollDeferred && !tick.error && !tick.events.some((event) => event.type === "POLL_ERROR")) {
+        sweep.completed[repo] = {
+          sha: repoState.lastMainSha,
+          branch: repoState.branch,
+          cacheScope: repoState.cacheScope || "",
+          lastPollAt: repoState.metrics.lastPollAt,
+          pollVersion: pollVersion(repoState),
+        };
+      }
+      completedThisTick += 1;
     }
+    if (allEvents.some((event) => event.type === "POLL_ERROR")) discardGreenProof();
+    invalidateChangedResults();
+    const sweepComplete = targetRepos.every((repo) => sweep.completed[repo]);
+    const pendingAllGreenEvents = targetRepos.map((repo) => sweep.greenEvents[repo]).filter(Boolean);
     if (
       targetRepos.length > 1 &&
+      sweepComplete &&
       !anyRateLimited &&
+      !chunkTimedOut &&
       totalActiveMainRuns === 0 &&
       allEvents.length === 0 &&
       pendingAllGreenEvents.length === targetRepos.length
     ) {
       allEvents.push(...pendingAllGreenEvents);
     }
+    if (sweepComplete && !chunkTimedOut && !anyRateLimited && resumable) {
+      delete discoveryState.metrics.watchSweep;
+    }
   }
 
-  const nextIntervalSec = computeNextPollIntervalSec(args, totalActiveMainRuns, {
+  for (const snapshot of inventoryScopeInvalidated ? [] : savedSnapshots(targetRepos)) {
+    if (!statuses.some((status) => status.repo === snapshot.repo)) statuses.push(snapshot);
+  }
+  totalActiveMainRuns = Math.max(totalActiveMainRuns, statuses.reduce((total, status) =>
+    total + Math.max(status.activeMainRuns || 0, status.activeRuns?.length || 0), 0));
+  const computedIntervalSec = computeNextPollIntervalSec(args, totalActiveMainRuns, {
     rateLimitRemaining: minRateLimitRemaining,
     rateLimitReset: maxRateLimitReset,
     retryAfterSec: maxRetryAfterSec,
   });
+  const nextIntervalSec = anyRateLimited ? computedIntervalSec : Math.min(computedIntervalSec, deferredIntervalSec);
+  if (!inventoryScopeInvalidated) {
+    discoveryState.metrics.targetRepos = targetRepos;
+    discoveryState.metrics.targetSelectionKey = selectionKey;
+  }
+  if (anyRateLimited) discoveryState.metrics.repoCooldownUntilMs = Date.now() + nextIntervalSec * 1000;
+  saveState(discoveryStateFile, discoveryState, { deadlineMs: args.chunkDeadlineMs });
 
   return {
     repos: targetRepos,
@@ -1888,6 +2390,7 @@ export async function evaluateMultiRepoPollTick(args, config, execFn = defaultRe
     nextIntervalSec,
     statuses,
     reports,
+    ...(chunkTimedOut ? { chunkTimedOut: true } : {}),
   };
 }
 
@@ -1895,141 +2398,180 @@ async function sleepSeconds(sec) {
   await new Promise((resolvePromise) => setTimeout(resolvePromise, sec * 1000));
 }
 
-export async function runCli(argv = process.argv.slice(2)) {
+export async function runCli(argv = process.argv.slice(2), services = {}) {
   const args = parseArgs(argv);
+  args.respectPollInterval = args.mode === "watch";
+  const execFn = services.execFn || defaultRequest;
+  const sleep = services.sleep || sleepSeconds;
+  const watchStartedAtMs = Date.now();
+  if (args.mode === "watch" && args.maxWaitSec > 0) {
+    args.chunkDeadlineMs = watchStartedAtMs + args.maxWaitSec * 1000;
+  }
   const emit = createEventWriter(args.eventsFile, "ci-hound");
   const heartbeat = args.eventsFile ? setInterval(() => emit({
     status: { repo: args.repo, phase: "polling", summary: "Watcher active; awaiting GitHub observations" },
   }), 60000) : null;
   heartbeat?.unref();
   try {
-    const existingConfig = loadConfig(args.configFile);
+  const existingConfig = loadConfig(args.configFile);
 
-    if (args.mode === "setup") {
-      const updatedConfig = applySetupConfig(args, existingConfig);
-      saveConfig(args.configFile, updatedConfig);
-      const discoveryStateFile = join(dirname(args.configFile), "_discovery.json");
-      const discoveryState = loadState(discoveryStateFile);
-      const resolvedRepos = await resolveTargetRepos(
-        { ...args, explicitRepos: [] },
-        updatedConfig,
-        discoveryState
+  if (args.mode === "setup") {
+    const updatedConfig = applySetupConfig(args, existingConfig);
+    saveConfig(args.configFile, updatedConfig);
+    const discoveryStateFile = join(stateDirectory(args), "_discovery.json");
+    const discoveryState = loadState(discoveryStateFile);
+    const host = githubHost();
+    if (discoveryState.host !== host) Object.assign(discoveryState, loadState(""));
+    discoveryState.host = host;
+    for (const key of ["discoveryProgress", "watchSweep", "nextRepo"]) delete discoveryState.metrics[key];
+    const resolvedRepos = await resolveTargetRepos(
+      { ...args, explicitRepos: [] },
+      updatedConfig,
+      discoveryState,
+      execFn
+    );
+    if (updatedConfig.owner) {
+      saveState(discoveryStateFile, discoveryState);
+    }
+    console.log(
+      JSON.stringify(
+        {
+          mode: "setup",
+          configFile: args.configFile,
+          config: updatedConfig,
+          resolvedRepos,
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  const hasOwnerScope = Boolean(args.owner || existingConfig?.owner);
+
+  if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
+    const multi = await evaluateMultiRepoPollTick(args, existingConfig, execFn);
+    emit(multi);
+    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
+      console.error(
+        "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
       );
-      if (updatedConfig.owner) {
-        saveState(discoveryStateFile, discoveryState);
-      }
-      console.log(
-        JSON.stringify(
-          {
-            mode: "setup",
-            configFile: args.configFile,
-            config: updatedConfig,
-            resolvedRepos,
+      process.exit(1);
+    }
+    console.log(
+      JSON.stringify(
+        {
+          mode: args.mode,
+          repos: multi.repos,
+          tick: {
+            events: multi.events,
+            activeMainRuns: multi.activeMainRuns,
+            rateLimited: multi.rateLimited,
+            nextIntervalSec: multi.nextIntervalSec,
+            statuses: multi.statuses,
           },
-          null,
-          2
-        )
+          report: multi.reports.length === 1 ? multi.reports[0] : multi.reports,
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
+
+  const lastPhaseByRepo = new Map();
+  const lastSummaryByRepo = new Map();
+  let lastEmitMs = 0;
+  let polls = 0;
+  while (true) {
+    polls += 1;
+    const multi = await evaluateMultiRepoPollTick(args, existingConfig, execFn);
+    emit(multi);
+    if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited && !multi.chunkTimedOut) {
+      console.error(
+        "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
       );
+      process.exit(1);
+    }
+    const terminalEvents = multi.events.filter((e) => e.type !== "RATE_LIMITED");
+    if (terminalEvents.length > 0) {
+      console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
       return;
     }
-
-    const hasOwnerScope = Boolean(args.owner || existingConfig?.owner);
-
-    if (args.mode === "status" || args.mode === "optimize" || args.mode === "once") {
-      const multi = await evaluateMultiRepoPollTick(args, existingConfig);
-      emit(multi);
-      if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
-        console.error(
-          "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
-        );
-        process.exit(1);
+    const phaseChanges = [];
+    let summaryChanged = false;
+    for (const st of multi.statuses || []) {
+      const prevPhase = lastPhaseByRepo.get(st.repo) || st.previousPhase;
+      if (prevPhase && prevPhase !== st.phase) {
+        phaseChanges.push({
+          type: "PHASE_CHANGED",
+          timestamp: st.timestamp,
+          repo: st.repo,
+          previousPhase: prevPhase,
+          phase: st.phase,
+          summary: st.summary,
+        });
       }
-      console.log(
-        JSON.stringify(
-          {
-            mode: args.mode,
-            repos: multi.repos,
-            tick: {
-              events: multi.events,
-              activeMainRuns: multi.activeMainRuns,
-              rateLimited: multi.rateLimited,
-              nextIntervalSec: multi.nextIntervalSec,
-              statuses: multi.statuses,
-            },
-            report: multi.reports.length === 1 ? multi.reports[0] : multi.reports,
-          },
-          null,
-          2
-        )
-      );
-      return;
+      const prevSummary = lastSummaryByRepo.get(st.repo);
+      if (prevSummary && prevSummary !== st.summary) {
+        summaryChanged = true;
+      }
+      lastPhaseByRepo.set(st.repo, st.phase);
+      lastSummaryByRepo.set(st.repo, st.summary);
     }
-
-    const lastPhaseByRepo = new Map();
-    const lastSummaryByRepo = new Map();
-    let lastEmitMs = 0;
-    let polls = 0;
-    while (true) {
-      polls += 1;
-      const multi = await evaluateMultiRepoPollTick(args, existingConfig);
-      emit(multi);
-      if (multi.repos.length === 0 && !hasOwnerScope && !multi.rateLimited) {
-        console.error(
-          "Error: could not determine GitHub repository. Pass --repo <owner/repo> or run `setup` first."
-        );
-        process.exit(1);
-      }
-      const terminalEvents = multi.events.filter((e) => e.type !== "RATE_LIMITED");
-      if (terminalEvents.length > 0) {
-        console.log(JSON.stringify({ repos: multi.repos, events: terminalEvents }, null, 2));
-        return;
-      }
-      const phaseChanges = [];
-      let summaryChanged = false;
-      for (const st of multi.statuses || []) {
-        const prevPhase = lastPhaseByRepo.get(st.repo);
-        if (prevPhase && prevPhase !== st.phase) {
-          phaseChanges.push({
-            type: "PHASE_CHANGED",
-            timestamp: st.timestamp,
-            repo: st.repo,
-            previousPhase: prevPhase,
-            phase: st.phase,
-            summary: st.summary,
-          });
-        }
-        const prevSummary = lastSummaryByRepo.get(st.repo);
-        if (prevSummary && prevSummary !== st.summary) summaryChanged = true;
-        lastPhaseByRepo.set(st.repo, st.phase);
-        lastSummaryByRepo.set(st.repo, st.summary);
-      }
-      const nowMs = Date.now();
-      if (shouldEmitWatchStatus({
+    const nowMs = Date.now();
+    if (
+      shouldEmitWatchStatus({
         polls,
         phaseChangesCount: phaseChanges.length,
         summaryChanged,
         nowMs,
         lastEmitMs,
-      })) {
-        lastEmitMs = nowMs;
+      })
+    ) {
+      lastEmitMs = nowMs;
+      const progress = {
+            repos: multi.repos,
+            events: phaseChanges,
+            statuses: multi.statuses,
+      };
+      console.log(JSON.stringify(progress, null, 2));
+    }
+    if (args.maxPolls > 0 && polls >= args.maxPolls) {
+      console.log(JSON.stringify({ repos: multi.repos, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
+      return;
+    }
+    if (args.maxWaitSec > 0) {
+      const elapsedSec = Math.floor((Date.now() - watchStartedAtMs) / 1000);
+      if (multi.chunkTimedOut || elapsedSec + multi.nextIntervalSec >= args.maxWaitSec) {
+        const remainingWaitSec = Math.max(0, (args.chunkDeadlineMs - Date.now()) / 1000);
+        if (remainingWaitSec > 0) {
+          await sleep(remainingWaitSec);
+        }
+        emit({ events: [{ type: "WATCH_CHUNK_TIMEOUT" }], statuses: multi.statuses });
         console.log(
           JSON.stringify(
             {
               repos: multi.repos,
-              events: phaseChanges,
+              events: [
+                {
+                  type: "WATCH_CHUNK_TIMEOUT",
+                  elapsedSec: Math.floor((Date.now() - watchStartedAtMs) / 1000),
+                  maxWaitSec: args.maxWaitSec,
+                },
+              ],
               statuses: multi.statuses,
             },
             null,
             2
           )
         );
-      }
-      if (args.maxPolls > 0 && polls >= args.maxPolls) {
-        console.log(JSON.stringify({ repos: multi.repos, events: [{ type: "MAX_POLLS_REACHED" }] }, null, 2));
         return;
       }
-      await sleepSeconds(multi.nextIntervalSec);
     }
+    await sleep(multi.nextIntervalSec);
+  }
   } finally {
     clearInterval(heartbeat);
   }

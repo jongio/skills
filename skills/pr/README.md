@@ -140,6 +140,68 @@ replace resolving addressed bot threads or the existing review and merge gates.
 
 ## Review and merge gates
 
+### Bounded watch chunks
+
+Both direct `pr` and `go`-routed PR monitoring use the same watcher. `watch`
+budgets API requests and sleeps to 540 seconds by default. A shorter positive
+`COPILOT_TASK_WAIT_TIMEOUT_SECONDS` reduces that budget: subtract 60 seconds
+above 60, otherwise use half the host wait. `--max-wait-sec <non-negative integer>`
+overrides the budget; `0` disables chunking. `once` and `request-copilot` do not
+chunk. Local startup and state writes add small overhead; explicit overrides
+must leave room below the host's deadline.
+
+`WATCH_CHUNK_TIMEOUT` is a clean rotation, not readiness. Report the last status
+and re-arm the same watch with the same repository, head pins, reviewer policy
+and watchlist. SDK requests, credential resolution and automatic review
+retries cannot start beyond the chunk deadline. Interrupted multi-PR sweeps
+resume at the saved next PR. Persisted state under
+`$COPILOT_HOME/pr-watch` (default `~/.copilot/pr-watch`) retains phases,
+snapshots, comment cursors, ETags, retry counters and repository cooldowns.
+Disjoint watchlists keep independent continuation cursors, keyed to their ordered
+PRs and head pins, so another list cannot restart an interrupted target.
+An active cooldown prevents API calls even in a newly launched chunk.
+Cached status is reused only after verifying the current credential identity.
+Changed or unavailable identities discard cached observations, not retry budgets
+or an unexpired shared cooldown.
+Legacy observations without their own identity receipt are also unverified until
+a fresh observation is available; a newer request scope cannot relabel old status.
+Cancelled SDK responses retain their observed identity for invalidation, without
+an extra lookup after expiry. Same-identity chunk expiry remains resumable.
+Session saves read existing state under the lock without an existence probe.
+Only `ENOENT` permits new state; other read errors leave shared quota and peers intact.
+An interrupted reviewer request still consumes its persisted retry attempt,
+preventing uncertain submission outcomes from bypassing the retry limit.
+Running watchers also reload the shared deadline before each poll, so another
+PR's newly observed backoff is honored without restarting.
+Rounded remaining seconds control waiting only; repeated short chunks preserve
+the original absolute deadline and resume once it expires, without bypassing
+legitimate unexpired quota.
+Re-arming also retains each PR's ordinary next-poll time: short chunks wait
+without replaying readiness events. A newly requested head and `once` still poll
+fresh rather than inheriting the earlier head's interval.
+
+Session state is scoped to the validated GitHub host. Public `github.com` keeps
+the legacy repository filename; other hosts use `pr-watch/hosts/<host>/` and do
+not import unqualified public-GitHub cursors or cooldowns. Malformed session
+data, host mismatches, invalid cooldowns and invalid retry counters stop the
+watcher rather than silently resetting its feedback/retry proof.
+Multi-PR watches flush completed-prefix retry/cursor state before reporting a
+later PR's API error, so a failed sibling poll cannot reset an already consumed
+review attempt.
+
+After handling comments, use `--since-comment-id <id>` for the primary PR, or
+`--since-comment-id <pr>:<id>` for a specific PR in `--prs`; do not advance other
+PRs' cursors. Single-item `--prs` lists honor their scoped cursor in `once` as well as `watch`,
+with the scoped value taking precedence over a scalar primary-PR cursor.
+Use one active watcher per PR. Writes for different PRs in a
+repository are serialized and atomically merged; persistence/lock failures
+stop the watcher rather than silently discarding state. A stale lock requires
+inspection of its recorded process ID before manual recovery.
+Transient lock-open contention is retried only within the existing acquisition
+budget; permanent denial still stops with its original cause.
+
+### Review completion
+
 Copilot review is expected by default. Request or re-request Copilot via
 `node scripts/pr-watch-daemon.mjs request-copilot --repo <owner/repo> --pr <number> --head <full-head-OID>`
 so superseded `Running Copilot Code Review` runs on the PR branch are cancelled

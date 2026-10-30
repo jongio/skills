@@ -2075,6 +2075,11 @@ test("evaluatePrPollTick supports ETag 304 caching, adaptive intervals, and rate
   assert.equal(multiTick.statuses.length, 2);
   assert.equal(multiTick.statuses[0].pr, 178);
   assert.equal(multiTick.statuses[1].pr, 179);
+  assert.equal(parsePrWatchArgs(["watch", "--repo", "jongio/skills", "--pr", "178"], {}).maxWaitSec, 540);
+  assert.equal(
+    parsePrWatchArgs(["watch", "--repo", "jongio/skills", "--pr", "178", "--max-wait-sec", "0"]).maxWaitSec,
+    0
+  );
 
   // action_required workflow runs surface actionRequiredRuns with approval/rerun remediation,
   // and shouldEmitPrWatchStatus suppresses unchanged ticks until 60s heartbeat

@@ -24,3 +24,15 @@ Continuously monitor GitHub Actions workflows with a zero-token ETag-cached back
 /ci-hound optimize
 /ci-hound stop
 ```
+
+`watch` runs in bounded chunks (540 seconds by default, reduced for shorter
+`COPILOT_TASK_WAIT_TIMEOUT_SECONDS`). `--max-wait-sec <non-negative integer>`
+overrides the API/sleep budget; `0` disables chunking. On `WATCH_CHUNK_TIMEOUT`,
+report status and re-arm the same full watchlist and options. Requests and
+fallback share the remaining deadline; discovery progress, next-repository
+cursor, phases and cooldowns persist. Incomplete polls cannot report green,
+and rotation neither changes delivery policy nor authorizes a merge.
+Owner inventory and completed repository results survive until the logical
+sweep finishes. Aggregate green requires every target in that sweep; changed
+scope or superseding saved head/poll identities invalidate carried results.
+Cooldown rotations retain the last completed status snapshots without API calls.

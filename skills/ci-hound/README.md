@@ -49,6 +49,76 @@ node skills/ci-hound/scripts/ci-hound-daemon.mjs status
 node skills/ci-hound/scripts/ci-hound-daemon.mjs optimize
 ```
 
+## Bounded watch chunks
+
+`watch` budgets API requests and sleeps to 540 seconds by default, leaving
+60 seconds below the default 600-second host wait. A shorter positive
+`COPILOT_TASK_WAIT_TIMEOUT_SECONDS` reduces the budget: subtract 60 seconds
+above 60, otherwise use half the host wait. Override it with
+`--max-wait-sec <non-negative integer>`; `0` disables chunking. `setup`, `status`,
+`optimize` and `once` do not chunk. Local startup/state writes add overhead;
+explicit overrides must leave room below the host deadline.
+
+On `WATCH_CHUNK_TIMEOUT`, report the last status and immediately re-arm the
+same command, retaining the full repository watchlist and options. API requests,
+discovery, SDK retries and credential resolution are bounded by the remaining budget. Saved discovery
+pagination, next-repository cursor, phases, caches and shared rate-limit
+cooldowns continue across restarts. An incomplete poll never reports green.
+The normal interval or remaining cooldown is still respected, so re-arming
+does not become tight polling. Rotation does not change delivery or merge policy.
+
+Owner discovery inventory is retained until its logical repository sweep finishes,
+then refreshed for the next sweep. Completed repositories are not repeatedly
+polled ahead of an interrupted target. Multi-repository `ALL_GREEN` requires a
+completed green result for every target in that same logical sweep; changed
+watch scope or superseding saved head/poll/credential identities invalidate carried results.
+`once`, `status` and `optimize` still poll fresh rather than reusing a partial
+watch sweep. Cooldown chunks report saved status snapshots without API calls.
+
+Discovery pages are bound to their observed SDK credential identity. A refresh
+during discovery restarts every owner collection at page one; completed or
+partial saved pages without a verified scope are discarded. Quota backoffs and
+genuine API errors remain distinct from clean chunk expiry, including when a
+deadline interrupts paginated job inspection.
+Explicit `once`, `status` and `optimize` owner queries discard partial watch
+discovery state before fetching a fresh inventory; normal watch chunk
+continuations still retain their scoped progress.
+CI observations and backoff are host-scoped, including an explicit state file:
+switching its validated host discards the previous host's observations before
+applying cooldown. Shared-backoff output reports the current requested targets,
+not an unrelated earlier watchlist.
+State saves serialize read/merge/rename within the caller's remaining budget,
+preserving validated same-host unexpired cooldowns, never another identity's
+cached payload. Repository publication also compares the observation read before
+polling: older writers cannot replace newer results, and ambiguous simultaneous
+observations discard green proof rather than guessing an order.
+Only a genuinely missing state file initializes fresh state;
+other read or JSON errors stop polling without replacing the file. Resolve the
+reported read/parse problem before re-arming rather than discarding saved quota.
+Current SDK identity is verified before cached status is
+returned, including during quota; verification does not make an API poll.
+Cached snapshots also must match the requested host, repository and branch,
+including inherited cooldowns when an explicit state file is reused.
+Ordinary next-poll times also survive re-arming, scoped to the same host,
+repository, branch and credential identity. Waiting never replays green events;
+diagnostic `once`, `status` and `optimize` calls remain fresh.
+An idle peer's ordinary interval does not suppress another target once its own
+poll is due. An observed credential change also discards old snapshots, phases
+and ordinary timing alongside the credential-scoped response cache.
+If identity changes during a response, including deadline cancellation, fallbacks cannot reuse the
+previous identity's cached body. A sweep also discards previously collected
+peer statuses and reports; recovery observes those peers under the new identity.
+Workflow and paginated-job scope changes preserve observed quota or clean chunk
+expiry instead of replacing those outcomes with a generic poll error.
+Outstanding sweep members precede optional due-peer refreshes; a completed
+passing sweep is evaluated before those refreshes can consume the next chunk.
+A hard poll error discards held completion/green proof, not the repository
+inventory or continuation cursor. Previously passing peers must be observed
+again before recovery can release aggregate green.
+If one target consumes a whole fresh chunk without completing, held completion
+proof is discarded before rotating to its peers. A stalled target therefore
+cannot freeze their observations or later promote their old green snapshots.
+
 ## GitHub transport and degraded state
 
 The daemon ships a locked, self-contained Octokit runtime. End users do not need
