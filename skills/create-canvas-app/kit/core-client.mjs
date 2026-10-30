@@ -73,13 +73,15 @@ export function pollWhileVisible(tick, seconds, { whenVisible = true, immediate 
  * @param {typeof EventSource} [opts.EventSourceImpl]                override the SSE impl (tests); defaults to the global
  * @returns {{invoke:Function, refresh:Function, get state():any, get connected():boolean}}
  */
-export function connectCanvas({ onState, onConnected, EventSourceImpl } = {}) {
+export function connectCanvas({ onState, onConnected, EventSourceImpl,
+  capability = new URLSearchParams(globalThis.location?.search || "").get("capability") } = {}) {
   let state = null;
   let connected = false;
   const ES = EventSourceImpl || (typeof EventSource !== "undefined" ? EventSource : null);
+  const endpoint = (name) => `./${name}${capability ? `?capability=${encodeURIComponent(capability)}` : ""}`;
 
   async function invoke(actionName, input) {
-    const res = await fetch("./action", {
+    const res = await fetch(endpoint("action"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ actionName, input: input ?? {} }),
@@ -93,14 +95,14 @@ export function connectCanvas({ onState, onConnected, EventSourceImpl } = {}) {
 
   async function refresh() {
     try {
-      state = await (await fetch("./state")).json();
+      state = await (await fetch(endpoint("state"))).json();
       onState?.(state, connected);
     } catch { /* offline; SSE will recover */ }
   }
 
   function connect() {
     if (!ES) return; // no EventSource (e.g. a non-browser host); refresh() still works
-    const es = new ES("./events");
+    const es = new ES(endpoint("events"));
     es.onmessage = (e) => {
       let next;
       try {

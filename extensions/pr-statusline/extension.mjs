@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { collect } from "./collector.mjs";
 import { requestedGitHubEnvironment } from "../github-transport.mjs";
+import { notifySessionTracking } from "../github-refresh.mjs";
 import { configHome } from "./tracker.mjs";
 import { createSessionAttention, runAttentionCommand } from "./attention.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
@@ -31,9 +32,19 @@ const { firstRun } = ensurePluginStatuslineRegistered("pr-statusline", dirname(f
 
 let collector;
 let attention;
-function manage(action, reference, invocation) {
+async function manage(action, reference, invocation) {
 	if (!collector) throw new Error("PR statusline is still loading.");
-	return collector.manage(action, reference, invocation?.toolCallId);
+	const prs = collector.manage(action, reference, invocation?.toolCallId);
+	if (["add", "remove", "clear"].includes(action)) await notifySessionTracking(session, "prs");
+	return prs;
+}
+
+async function manageIssues(action, reference) {
+	const tracker = new IssueTracker(session.sessionId, syncIssues({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
+	const issues = tracker.manage(action, reference);
+	writeIssueState(tracker.snapshot());
+	if (["add", "remove", "clear"].includes(action)) await notifySessionTracking(session, "issues");
+	return issues;
 }
 
 function manageAgents(action, id) {
@@ -53,6 +64,7 @@ async function updateSession(action, name) {
 	const payload = { session_id: session.sessionId };
 	const result = action === "clear" ? clearSessionStatusline(payload) : await refreshSessionStatusline(payload);
 	collector.reload();
+	await notifySessionTracking(session, "all");
 	return result;
 }
 
@@ -112,7 +124,7 @@ const configuration = {
 			handler: async ({ args }) => {
 				try {
 					const [action = "list", reference] = args.trim().split(/\s+/);
-					const prs = manage(action, reference);
+					const prs = await manage(action, reference);
 					await session.log(prs.length ? prs.map((pr) => `${pr.label}: ${pr.url}`).join("\n") : "No tracked session PRs.");
 				} catch (error) {
 					await session.log(`Usage: /session-prs [list | add <pr> | remove <pr> | clear] (${error.message})`);
@@ -125,9 +137,7 @@ const configuration = {
 			handler: async ({ args }) => {
 				try {
 					const [action = "list", reference] = args.trim().split(/\s+/);
-					const tracker = new IssueTracker(session.sessionId, syncIssues({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
-					const issues = tracker.manage(action, reference);
-					writeIssueState(tracker.snapshot());
+					const issues = await manageIssues(action, reference);
 					await session.log(issues.length ? issues.map((i) => `${i.label}: ${i.url}`).join("\n") : "No tracked session issues.");
 				} catch (error) {
 					await session.log(`Usage: /session-issues [list | add <issue> | remove <issue> | clear] (${error.message})`);
@@ -220,7 +230,7 @@ const configuration = {
 				required: ["action"],
 				additionalProperties: false,
 			},
-			handler: ({ action, reference }, invocation) => JSON.stringify(manage(action, reference, invocation)),
+			handler: async ({ action, reference }, invocation) => JSON.stringify(await manage(action, reference, invocation)),
 		},
 		{
 			name: "session_issues",
@@ -234,12 +244,7 @@ const configuration = {
 				required: ["action"],
 				additionalProperties: false,
 			},
-			handler: ({ action, reference }) => {
-				const tracker = new IssueTracker(session.sessionId, syncIssues({ session_id: session.sessionId }, { fetchIssueStatus: false }).state);
-				const issues = tracker.manage(action, reference);
-				writeIssueState(tracker.snapshot());
-				return JSON.stringify(issues);
-			},
+			handler: async ({ action, reference }) => JSON.stringify(await manageIssues(action, reference)),
 		},
 	],
 };

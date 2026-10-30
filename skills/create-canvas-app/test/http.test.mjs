@@ -295,6 +295,48 @@ async function main() {
     assert.equal(after.body.agentError, null, "a successful handoff clears the prior error");
   });
 
+  await test("opt-in capabilities protect private state, SSE and actions with Host/Origin checks", async () => {
+    const secure = createCanvasRuntime({ ...canvasConfig, requireCapability: true, statusLine: undefined,
+      loadState: undefined, saveState: undefined, createInitialState: () => ({ secret: "session-private" }) });
+    try {
+      const panel = await secure.openInstance({ instanceId: "private", input: {}, ctx: {} });
+      const endpoint = (path) => {
+        const target = new URL(path, panel.url);
+        target.search = new URL(panel.url).search;
+        return target;
+      };
+      for (const path of ["/state", "/events", "/action"]) {
+        const response = await fetch(new URL(path, panel.url), { method: path === "/action" ? "POST" : "GET" });
+        assert.equal(response.status, 403, path);
+        assert.doesNotMatch(await response.text(), /session-private/);
+      }
+      const state = await fetch(endpoint("/state"));
+      assert.equal(state.headers.get("referrer-policy"), "no-referrer");
+      assert.deepEqual(await state.json(), { secret: "session-private" });
+      const malformed = endpoint("/state");
+      malformed.searchParams.set("capability", "\u00e9".repeat(64));
+      assert.equal((await fetch(malformed)).status, 403);
+      assert.equal((await fetch(endpoint("/state"), { headers: { Origin: "https://foreign.invalid" } })).status, 403);
+      const wrongHost = await new Promise((resolve, reject) => {
+        http.get(endpoint("/state"), { headers: { Host: "foreign.invalid" } }, (response) => {
+          response.resume();
+          resolve(response.statusCode);
+        }).on("error", reject);
+      });
+      assert.equal(wrongHost, 403);
+      const stream = await fetch(endpoint("/events"));
+      assert.equal(stream.status, 200);
+      await stream.body.cancel();
+      const sibling = await secure.openInstance({ instanceId: "sibling", input: {}, ctx: {} });
+      const foreign = new URL("/state", sibling.url);
+      foreign.search = new URL(panel.url).search;
+      assert.equal((await fetch(foreign)).status, 403);
+      await secure.closeInstance("private");
+      const reopened = await secure.openInstance({ instanceId: "private", input: {}, ctx: {} });
+      assert.notEqual(new URL(reopened.url).search, new URL(panel.url).search);
+    } finally { await secure.shutdown(); }
+  });
+
   await runtime.shutdown();
   await rm(home, { recursive: true, force: true });
   console.log(`\n${passed} checks passed`);

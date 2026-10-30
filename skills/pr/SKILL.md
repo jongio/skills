@@ -10,7 +10,7 @@ metadata:
 
 Run this end-to-end checklist for the given context, current directory, or worktree. The bundled watcher uses async Octokit; failed/stale reads never satisfy head-pinned gates. Optional `--events-file <session-subscription-file>` adds progress notifications only, never model turns, repairs, or merge consent.
 
-Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits.
+Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits. When `go` supplies board/goal identity, continue the optional [session progress reporting](references/session-progress.md) through delivery; missing canvas support never replaces or blocks the delivery gates.
 
 For long-running work, launch `scripts/pr-watch-daemon.mjs` in an async background shell (never a 1-minute recurring prompt schedule that bloats context) and report the stage, elapsed time, last meaningful result, and next event at least every 60 seconds while execution is active, using host notifications or scheduling rather than tight polling. Distinguish running commands, external review/CI waits, and blocked approval/input. When blocked, state the exact decision needed and that execution is paused; resume only after that decision. Do not describe wall-clock time as active execution or invent an ETA. If a stage exceeds its documented runtime budget or stalls without progress, inspect the bounded stage evidence and surface the blocker; do not restart expensive checks, weaken gates, or redesign the workflow without authorization.
 

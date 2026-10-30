@@ -10,7 +10,7 @@ description: >-
   Do NOT use for non-canvas extensions (plain agent tools) or for shipping web
   apps unrelated to Copilot canvases.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # Create Canvas App
@@ -82,6 +82,11 @@ web/app.mjs     ── your Preact view
 - **Live updates are automatic.** The kit serves `GET /state`, `GET /events`
   (SSE), and `POST /action`. `mountCanvas` wires them up; every state change fans
   out to all open panels.
+- **Sensitive session data needs a capability.** Set `requireCapability: true`
+  in the canvas config for private plans or reports. The runtime returns a
+  per-panel capability URL; the client carries it on state/SSE/action requests
+  and the server checks Host/Origin. Preserve that URL's query string; never
+  publish it or persist it as evidence. Assets remain separate from private data.
 - **`server.mjs` is SDK-free** so the whole runtime is testable with plain Node
   HTTP (see `test/http.test.mjs`). Keep SDK calls in `extension.mjs` only.
 

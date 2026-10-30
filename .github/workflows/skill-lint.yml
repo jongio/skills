@@ -20,6 +20,9 @@ on:
       # cross-link or a deleted reference reaches main unchecked.
       - "skills/**/references/**"
       - "skills/**/scripts/**"
+      - "skills/**/runtime/**"
+      - "skills/**/com.github.copilot/**"
+      - "skills/create-canvas-app/kit/**"
       - "runtime/**"
       - "extensions/**"
       - "docs/specs/git-tidy/**"
@@ -106,10 +109,18 @@ jobs:
               DIRS=$(all_skill_dirs)
             else
               DIRS=$(printf '%s\n' "$CHANGED" \
-                | grep -E '^skills/[^/]+/(SKILL\.md|package(-lock)?\.json|\.npmrc|.*\.ya?ml|evals/|test/|references/|scripts/)' \
+                | grep -E '^skills/[^/]+/(SKILL\.md|package(-lock)?\.json|\.npmrc|.*\.ya?ml|evals/|test/|references/|scripts/|runtime/|com\.github\.copilot/)' \
                 | sed 's|^\(skills/[^/]*\)/.*|\1|' | sort -u || true)
               if grep -Eq '^docs/specs/git-tidy/' <<< "$CHANGED"; then
                 DIRS=$(printf '%s\n%s\n' "$DIRS" "skills/git-tidy" \
+                  | sed '/^$/d' | sort -u)
+              fi
+              if grep -Eq '^com\.github\.copilot/extensions/session-progress/' <<< "$CHANGED"; then
+                DIRS=$(printf '%s\n%s\n' "$DIRS" "skills/create-session-board-canvas" \
+                  | sed '/^$/d' | sort -u)
+              fi
+              if grep -Eq '^skills/create-canvas-app/kit/' <<< "$CHANGED"; then
+                DIRS=$(printf '%s\n%s\n%s\n' "$DIRS" "skills/create-canvas-app" "skills/create-session-board-canvas" \
                   | sed '/^$/d' | sort -u)
               fi
             fi

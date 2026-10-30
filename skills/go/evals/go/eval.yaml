@@ -14,6 +14,30 @@ scoring:
   threshold: 0.875
 
 stimuli:
+  - name: session-board-default-and-fallback
+    prompt: >-
+      Load go first. Explain the default progress-board behavior for a fresh go
+      invocation, delegation to a tool-capable agent and a read-only agent, and
+      the pr handoff. Then explain the behavior when canvas support is missing.
+      Explain only; do not run shell commands, canvas tools, or perform writes.
+    rubric:
+      - Invokes or describes create-session-board-canvas after resolving worktree choice and reuses a session-scoped goal/board.
+      - Delegates canonical task IDs and reporting context, relaying restricted-agent results without permission changes.
+      - Primary verifies completion before updating canonical tasks and carries board identity into pr.
+      - Missing canvas support uses disclosed text progress without waiving tests, reviews, or merge approval.
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if all rubric items are met without performing writes.
+            Score 1 for blocking go solely on canvas support, marking task
+            completion from agent success alone, or weakening merge gates.
+      - type: skill-invocation
+        config:
+          required: [go]
+
   - name: plan-to-merge
     prompt: >-
       Load the go skill first, then use go to explain how you would fix a parser
