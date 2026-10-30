@@ -19,6 +19,10 @@ revisions, known agents, task IDs and report sequences. UI actions are read-only
 
 Primary may supply `agentId` to relay an observed restricted agent's report.
 The tool records that provenance. A subagent cannot report as another agent.
+Lifecycle completion/failure events may carry only their spawning tool-call ID.
+They update a previously observed runtime worker through its retained call
+correlation, including after reconnect. Unknown or ambiguous calls do not
+invent agent identities or accept canonical task completion.
 Report states: `working`, `blocked`, `result_ready`, `failed`, `cancelled`.
 There is deliberately no report state named `done`.
 Keep one latest report per actor/task/goal; do not truncate live blockers or

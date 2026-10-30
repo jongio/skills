@@ -11,7 +11,10 @@ function assertSafeDestination(home, file) {
   let current = resolve(home);
   for (const component of ["extensions", "session-progress", "extension.mjs"]) {
     current = join(current, component);
-    if (existsSync(current) && lstatSync(current).isSymbolicLink()) throw new Error("Refusing symlinked loader destination");
+    let entry;
+    try { entry = lstatSync(current); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    if (entry?.isSymbolicLink()) throw new Error("Refusing symlinked loader destination");
   }
   if (!file.startsWith(resolve(home) + sep)) throw new Error("Invalid loader destination");
 }

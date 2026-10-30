@@ -32,6 +32,8 @@ stored in each session workspace at `files\session-progress\board.json`
 as long as that session and survives panel reopening and extension reload.
 Re-run setup after moving/reinstalling a plain skill; never overwrite an
 unowned loader. No per-session runtime copies, global daemon, or remote store.
+Dangling loader and ancestor symlinks are refused, including at approval
+revalidation; a missing link target is not an absent, replaceable loader.
 
 ## Sources and reporting
 

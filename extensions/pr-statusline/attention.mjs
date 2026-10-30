@@ -1,6 +1,6 @@
 import { spawn as spawnProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, watchFile, unwatchFile, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -278,6 +278,11 @@ export function createSessionAttention({
 	function reload({ explicitDisable = false, fromWatch = false } = {}) {
 		try {
 			const { config: next, revision } = readAttentionSettings(home);
+			if (fromWatch && revision === appliedRevision) return;
+			if (fromWatch) {
+				failed = false;
+				lastError = null;
+			}
 			if (!next.enabled && (explicitDisable || config.enabled || (fromWatch && revision !== appliedRevision))) {
 				preview = null;
 				activePreview = null;
@@ -294,13 +299,11 @@ export function createSessionAttention({
 	}
 	reload();
 	const onConfigChange = () => {
-		if (!stopped) {
-			failed = false;
-			lastError = null;
-			reload({ fromWatch: true });
-		}
+		if (!stopped) reload({ fromWatch: true });
 	};
-	if (watch) watchFile(attentionConfigPath(home), { persistent: false, interval: 1000 }, onConfigChange);
+	// A metadata watch can miss a replacement between the initial read and its first sample.
+	const preferencesTimer = watch ? setInterval(onConfigChange, 1000) : null;
+	preferencesTimer?.unref();
 
 	return {
 		observe(event) {
@@ -341,7 +344,7 @@ export function createSessionAttention({
 		stop() {
 			stopped = true;
 			preview = null;
-			if (watch) unwatchFile(attentionConfigPath(home), onConfigChange);
+			if (preferencesTimer) clearInterval(preferencesTimer);
 			stopChild();
 		},
 	};

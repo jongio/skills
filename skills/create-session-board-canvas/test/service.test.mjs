@@ -219,6 +219,54 @@ test("drafts never become canonical and lifecycle events do not accept results",
   assert.equal(service.snapshot().revision, rev);
 });
 
+for (const [type, cancelled, expected] of [
+  ["subagent.completed", false, "result_ready"],
+  ["subagent.completed", true, "cancelled"],
+  ["subagent.failed", false, "failed"],
+]) {
+  test(`parent-call-only ${expected} events update the observed runtime worker without accepting tasks`, async () => {
+    const { service, saved } = await fixture([task("a")]);
+    await goal(service, "g", ["a"]);
+    await service.observe({ id: "started", type: "subagent.started", agentId: "worker",
+      data: { toolCallId: "parent-call", agentDisplayName: "Observed worker" } });
+    await service.observe({ id: "other-started", type: "subagent.started", agentId: "other-worker",
+      data: { toolCallId: "other-parent-call", agentDisplayName: "Other worker" } });
+    await service.update({ action: "assign", agentId: "worker", taskIds: ["a"] }, primary);
+    const resumed = await createProgressService({
+      sessionId: saved().sessionId,
+      store: { load: async () => structuredClone(saved()), save: async () => {} },
+      readSources: async () => ({ plan: {}, rows: [task("a")], dependencies: [] }),
+    });
+    const event = { id: "finished", type, data: { toolCallId: "parent-call", cancelled } };
+    await resumed.observe(event);
+    const state = resumed.snapshot();
+    assert.equal(state.agents.find((entry) => entry.id === "worker").state, expected);
+    assert.equal(state.agents.find((entry) => entry.id === "other-worker").state, "working");
+    assert.equal(state.agents.length, 3);
+    assert.deepEqual(state.agents.find((entry) => entry.id === "worker").taskIds, ["a"]);
+    assert.equal(state.tasks[0].status, "pending");
+    assert.equal(state.metrics.percent, 0);
+    const revision = state.revision;
+    await resumed.observe(event);
+    await resumed.observe({ id: "unknown", type, data: { toolCallId: "unobserved-call" } });
+    assert.equal(resumed.snapshot().revision, revision);
+  });
+}
+
+test("ambiguous parent calls cannot replace actual runtime worker identity", async () => {
+  const { service } = await fixture([]);
+  for (const id of ["first", "second"]) {
+    await service.observe({ id: `start-${id}`, type: "subagent.started", agentId: id,
+      data: { toolCallId: "shared-call" } });
+  }
+  const before = service.snapshot();
+  await service.observe({ id: "ambiguous", type: "subagent.completed", data: { toolCallId: "shared-call" } });
+  assert.deepEqual(service.snapshot(), before);
+  await service.observe({ id: "explicit", type: "subagent.completed", agentId: "first", data: { toolCallId: "shared-call" } });
+  assert.equal(service.snapshot().agents.find((entry) => entry.id === "first").state, "result_ready");
+  assert.equal(service.snapshot().agents.find((entry) => entry.id === "second").state, "working");
+});
+
 test("operator attention is explicit and independent of blocked tasks and cross-agent dependencies", async () => {
   const { service } = await fixture([task("a", "blocked"), task("b")], [{ todoId: "b", dependsOn: "a" }]);
   await goal(service);

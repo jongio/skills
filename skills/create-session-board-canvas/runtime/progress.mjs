@@ -393,14 +393,16 @@ export async function createProgressService({ sessionId, readSources, store, onC
       });
     }
     if (!/^subagent\.(started|completed|failed)$/.test(event.type)) return;
-    const id = event.agentId || data.agentId;
-    if (!id) return;
     return queue(async () => {
       const key = `event:${event.id}`;
       if (event.id && state.seen.includes(key)) return;
+      const linked = data.toolCallId ? state.agents.filter((member) => member.toolCallId === data.toolCallId) : [];
+      const id = event.agentId || data.agentId || (linked.length === 1 ? linked[0].id : null);
+      if (!id) return;
       const next = clone(state);
       const member = agent(next, id, String(data.agentDisplayName || data.agentName || id).slice(0, 200));
       if (member.updatedAt && event.timestamp && event.timestamp < member.updatedAt) return;
+      if (data.toolCallId) member.toolCallId = data.toolCallId;
       member.state = event.type === "subagent.started" ? "working" :
         event.type === "subagent.failed" ? "failed" : data.cancelled ? "cancelled" : "result_ready";
       member.updatedAt = event.timestamp || clock();
