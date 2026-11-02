@@ -10,7 +10,7 @@ Issue reconciliation belongs to `pr`; do not duplicate it in callers or the revi
 - Record each issue's acceptance criteria, merged changes (or the proposed changes before merge), validation evidence, current state, and disposition: fully resolved, partially resolved, reference-only, or unknown. A mere mention is not delivery evidence or permission to close an issue.
 - Before merge, persist the repository-qualified inventory and scope rationale in a neutral PR body section or PR comment, including task-only and handoff-only associations, dispositions, and evidence links. Preserve the PR template and existing content; explicitly record an empty inventory when applicable. Reuse or update the existing inventory rather than posting duplicates, and read back the persisted inventory to verify it is complete. If persistence or verification fails, pause merge and report the blocker so a fresh resumption cannot silently lose the association.
 - Fully resolved means all acceptance criteria are met with evidence, including any required rollout or follow-up outside the PR. Partially resolved means some delivered work is established but requirements remain; reference-only issues receive no mutations. Unknown means evidence or access is insufficient: do not close; record the blocker and request a user decision only when necessary.
-- Remove misleading closing keywords or automatic closing links for partially resolved, unknown, or reference-only issues before merging, preserving neutral references and the PR template. Inspect the proposed squash/merge message and applicable commit closing keywords too; do not rewrite shared history without authorization. If an automatic closure cannot safely be prevented, pause merge for a decision rather than knowingly closing incomplete or out-of-scope work.
+- Remove misleading closing keywords or automatic closing links for partially resolved, unknown, or reference-only issues before merging, preserving neutral references and the PR template. Never pair `close`/`closes`/`closed`, `fix`/`fixes`/`fixed`, or `resolve`/`resolves`/`resolved` directly with `#N` or an issue URL even in negated prose (such as `does not close #N` or `will not fix #N`), because GitHub's parser ignores negation and still auto-closes the issue on merge. Inspect the proposed squash/merge message and applicable commit closing keywords too; do not rewrite shared history without authorization. If an automatic closure cannot safely be prevented, pause merge for a decision rather than knowingly closing incomplete or out-of-scope work.
 - A non-default base or a missing closing link can mean no automatic closure; neither proves the issue is unrelated or fully resolved. An unavailable or incomplete inventory is not evidence of no related issues: report the discovery gap, without inventing issue identities or waiving existing gates.
 
 ## After confirmed merge: reconcile
@@ -32,10 +32,11 @@ on every command, and pass Markdown through `--body-file` or a safe literal.
 | Unknown | Do not close or claim completion. If delivered progress is known, post only that verified progress and the unresolved evidence gap; otherwise report the blocker without speculative issue edits. Reconciliation remains pending until the disposition is established. |
 | Reference-only | Preserve the issue unchanged; record why it is outside the PR's delivery scope. |
 
-If a partially resolved issue was automatically closed by this merged PR, inspect the
-closure event and current state, then reopen with the remaining-work evidence and
-progress update. For an unrelated or intentional closure, do not reopen automatically:
-obtain a user decision before reopening or changing that disposition.
+If a partially resolved, unknown, or reference-only issue was automatically closed by
+this merged PR, inspect the closure event and current state, then reopen with the
+remaining-work or scope evidence and progress update. For an unrelated or intentional
+closure, do not reopen automatically: obtain a user decision before reopening or
+changing that disposition.
 
 Re-read the issue state and comments after each action to verify the intended result
 persisted. Fully resolved issues must be closed; partial issues must be open with the

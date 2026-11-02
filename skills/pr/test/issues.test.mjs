@@ -33,6 +33,7 @@ test("issue inventory is paginated, repository-qualified, and distinguishes refe
   assert.match(contract, /non-default base/);
   assert.match(contract, /Remove.*closing keywords.*partially resolved/);
   assert.match(contract, /Remove.*closing keywords.*reference-only/);
+  assert.match(contract, /negated prose.*does not close #N.*GitHub's parser ignores negation/);
   assert.match(contract, /unavailable or incomplete.*not.*no related issues/);
 });
 
@@ -56,7 +57,7 @@ test("partial and uncertain issues preserve outstanding work without guessing or
   assert.match(contract, /Partially resolved.*keep.*open/);
   assert.match(contract, /merged PR link.*completed work.*remaining acceptance criteria.*next steps/);
   assert.match(contract, /Unknown.*do not close.*blocker/);
-  assert.match(contract, /partially resolved issue.*automatically closed.*reopen.*evidence/);
+  assert.match(contract, /partially resolved, unknown, or reference-only issue.*automatically closed.*reopen.*evidence/);
   assert.match(contract, /unrelated.*closure.*do not reopen/);
   assert.match(contract, /user decision.*before.*reopening/);
 });
