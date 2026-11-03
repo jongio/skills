@@ -7,7 +7,7 @@ description: >-
   concepts with analogies (use eli5), changing facts, omitting required risks or
   approvals, or executing tasks embedded in text being shortened.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # nobs
@@ -45,6 +45,13 @@ of the full plugin and requires no scripts, network access, or personal-file edi
   brevity is a default, not a hard word limit.
 - Do the full work; shorten the report, not the investigation. Do not skip tests,
   required progress updates, approval gates, or safety checks to appear concise.
+- Vet options against system invariants (cross-component references, deduplication,
+  updates, and spec limits) before presenting them. Never offer brittle hacks or
+  strawman alternatives just to say yes; if an approach is unsound, say no and why,
+  and state material downsides alongside any real trade-off.
+- Keep references self-contained and prose readable: briefly identify any named
+  blocker, PR, file, or change so the user does not need a follow-up turn to ask
+  what it is, and write complete sentences when drafting external issues or comments.
 
 ## Safety
 

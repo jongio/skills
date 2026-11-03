@@ -186,3 +186,91 @@ stimuli:
             Score 5 only if the rewrite preserves the credentials failure and
             renewal-before-retry requirement and the final answer is exactly off.
             Score 1 if the rewrite claims a retry happened or resets the mode.
+
+  - name: reject-unsound-option
+    prompt: >-
+      Load the nobs skill first, then use nobs to answer this question about the
+      supplied context: "Skills in this collection invoke each other by exact
+      name (go calls pr, pr calls test-doctor and doc-doctor), and raw global
+      skill folders ignore plugin.json and load before plugins. Should we
+      namespace raw global installs by rewriting each skill's SKILL.md name to
+      prefix-name?"
+    rubric:
+      - Directly rejects rewriting SKILL.md names in raw global folders instead of presenting it as a viable option.
+      - States that rewriting names breaks cross-skill handoffs (or causes duplicate loading alongside the plugin).
+    graders:
+      - type: skill-invocation
+        config:
+          required: [nobs]
+      - type: prompt
+        name: rejects-unsound-workaround
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the final answer is concise, directly says no (or
+            recommends against rewriting SKILL.md names), and explains that
+            rewriting names breaks exact-name cross-skill handoffs such as go
+            calling pr/test-doctor/doc-doctor (or causes duplicate loading
+            when the plugin is also present). Score 1 if it presents rewriting
+            SKILL.md names as a recommended or viable option without rejecting it.
+
+  - name: self-contained-blocker-context
+    prompt: >-
+      Load the nobs skill first, then use nobs to shorten this status update
+      without leaving dangling nouns: "We built the Windows VSIX package and it
+      compiled cleanly. However, we have not published it because of the VSIX
+      Canvas blocker, specifically that packaged VSIX builds omit the runtime
+      canvas bundle assets required to open the panel, which is tracked in
+      PR #442."
+    rubric:
+      - Keeps the build success and unpublished status.
+      - Identifies what the VSIX Canvas blocker actually is (missing runtime canvas bundle assets) and references PR #442 so no follow-up question is needed.
+    graders:
+      - type: skill-invocation
+        config:
+          required: [nobs]
+      - type: prompt
+        name: preserves-blocker-definition-and-pr
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the final answer is at most 55 words and preserves
+            all four facts: Windows VSIX built cleanly, not published, the
+            blocker is that packaged VSIX builds omit runtime canvas bundle
+            assets needed to open the panel (not just the bare phrase "VSIX
+            Canvas blocker"), and it is tracked in PR #442. Score 1 if it drops
+            the explanation of what the blocker is or omits PR #442.
+
+  - name: coherent-external-comment
+    prompt: >-
+      Load the nobs skill first, then use nobs to draft a concise GitHub issue
+      comment from these notes without reducing them to telegraphic fragments:
+      "We are keeping repository write access unchanged so only @jongio can
+      publish releases manually. We also enabled secret scanning and push
+      protection, and we left Discussions disabled until the public support
+      channel is finalized."
+    rubric:
+      - Uses complete, readable sentences suitable for a GitHub issue comment.
+      - Preserves all three decisions (no new write access with @jongio manual publishing only, secret scanning and push protection enabled, and Discussions left disabled until the support channel is finalized).
+    graders:
+      - type: skill-invocation
+        config:
+          required: [nobs]
+      - type: prompt
+        name: readable-issue-comment-sentences
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the final answer is at most 60 words, is written in
+            complete, coherent sentences (not telegraphic fragments like "Write
+            access: none. Secret scanning: on."), and preserves all three
+            decisions: write access unchanged with manual publishing restricted
+            to @jongio, secret scanning and push protection enabled, and
+            Discussions kept disabled until the support channel is finalized.
+            Score 1 if any decision is dropped or the comment is reduced to
+            clipped, non-sentence fragments.
+
+
