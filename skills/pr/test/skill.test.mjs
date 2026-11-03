@@ -172,6 +172,10 @@ test("owns documentation preflight with identity-bound reuse and missing-skill b
   assert.match(skill, /this check belongs here, not in `go`/);
   assert.match(skill, /same worktree, base, changeset, and scope; rerun checks invalidated by later edits/);
   assert.match(skill, /Reuse matching passing evidence.*rerun only when invalidated/);
+  assert.match(skill, /Doc-only edits here do not invalidate passing code-review or `test-doctor` evidence/);
+  assert.match(skill, /Reuse passing `go`\/`test-doctor` evidence under the identity rule above/);
+  assert.match(skill, /forbidding sub-agent test\/lint\/build execution/);
+  assert.match(skill, /without repeating `rubber-duck` loops/);
   assert.match(skill, /If unavailable, stop and prompt to install.*--skill doc-doctor/);
 });
 

@@ -25,7 +25,7 @@ controls and uses the existing PR workflow for CI; no extra poller is created.
 Unknown tracking remains explicit. Wrong-head and out-of-order CI updates cannot
 overwrite verified snapshots.
 
-`go` opens/reuses the board by default and carries reporting through `pr`.
+When explicitly requested during `go`, it opens/reuses the board and carries reporting through `pr`; `go` does not create the board by default when not requested.
 Missing canvas support uses text progress without weakening execution gates.
 Plain skill-only installs need the approved thin-loader setup described in
 the skill README; plugin installs discover the extension automatically.

@@ -53,11 +53,14 @@ test("published go usage documents the worktree default and explicit stay option
 test("plans, tests, implements, and reviews before invoking pr without copying its delivery logic", () => {
   assert.ok(skill.split("\n").length <= 60, "keep SKILL.md short and sweet");
   assert.match(skill, /^1\..*plan[\s\S]*^2\..*Invoke `test-doctor fix`[\s\S]*^3\..*Implement[\s\S]*^4\..*Review[\s\S]*^5\..*Invoke `jongio\/pr`/m);
-  assert.match(skill, /`rubber-duck` sub-agent review.*different model family than the currently active model/);
+  assert.match(skill, /run only targeted test files covering the touched scope rather than whole-repository suites before final verification/);
+  assert.match(skill, /one bounded, read-only `rubber-duck` sub-agent review.*different model family than the currently active model/);
+  assert.match(skill, /forbid sub-agent test, lint, typecheck, or build execution/);
+  assert.match(skill, /without|rather than repeating `rubber-duck` loops/);
   assert.match(pr, /Reuse passing `go` Step 4 review evidence under the identity rule.*cross-model `rubber-duck` sub-agent review.*when invoked directly without `go`/);
   assert.match(skill, /passing test\/review evidence/);
   assert.doesNotMatch(skill, /git (?:commit|push|rebase)|gh pr (?:create|merge)|--auto/);
-  assert.match(pr, /Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits\./);
+  assert.match(pr, /Reuse passing preflight evidence only for the same worktree, base, changeset, and scope; rerun checks invalidated by later edits/);
 });
 
 test("preserves approvals, reports missing dependencies, and verifies actual completion", () => {
@@ -120,8 +123,9 @@ test("catalog body has a copyable install command with every required skill", as
   assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill go --skill test-doctor --skill pr --skill doc-doctor --skill create-session-board-canvas -g --agent github-copilot\r?\n```/);
 });
 
-test("each go invocation opens the optional board and carries identity through delivery", () => {
-  assert.match(skill, /For every invocation.*after resolving the worktree choice.*invoke `create-session-board-canvas`/);
+test("go opens the optional session board only when explicitly requested and carries identity through delivery", () => {
+  assert.match(skill, /Only when the user explicitly asks for the session board\/canvas, invoke `create-session-board-canvas` after resolving the worktree choice/);
+  assert.match(skill, /do not create or open it by default/);
   assert.match(skill, /text fallback.*does not block `go`/);
   assert.match(skill, /board\/goal identity when available/);
   assert.match(pr, /optional.*session progress reporting.*through delivery/);

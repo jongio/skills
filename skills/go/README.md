@@ -9,18 +9,22 @@ npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill d
 ```
 
 Invoke `/go <context>` with an issue, conversation, code, or error.
-`go` plans, tests with Test Doctor, implements, and reviews/fixes (including a
-cross-model `rubber-duck` sub-agent review using a different model family than
-the active model when sub-agent model selection is available); `pr` reuses
+`go` plans, runs targeted regression tests with Test Doctor before implementation,
+implements, and reviews/fixes (including one bounded, read-only cross-model
+`rubber-duck` sub-agent review using a different model family than the active
+model when sub-agent model selection is available, supplying the diff/test
+summary and forbidding sub-agent test/lint/build execution); `pr` reuses
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
 Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
 
-Each invocation opens or reuses the session progress canvas: kanban, actual
-primary/subagent team, canonical task percentage, blockers, and delivery status.
+When explicitly requested by the user, `go` opens or reuses the session progress
+canvas (`create-session-board-canvas`): kanban, actual primary/subagent team,
+canonical task percentage, blockers, and delivery status. It does not create or
+open the session board by default when not requested.
 One shared runtime bundle keeps session data isolated and retains goal history.
 Agents report work and results; primary verifies before marking tasks done.
 Missing canvas support uses a disclosed text fallback and does not block `go`.
-The same board continues through the `pr` handoff, including approval waits.
+When active, the same board continues through the `pr` handoff, including approval waits.
 
 Scope follows affected user journeys and their shared behavior owner, not just
 edited files. Test Doctor checks equivalent entry points against one intended

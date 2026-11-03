@@ -14,11 +14,12 @@ install:
 Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge.
 
 Requires `test-doctor` and `pr`, plus `doc-doctor` for PR preflight; install those skills too, or choose the full collection above.
-Before handing off to `pr`, `go` reviews the final diff and runs a cross-model `rubber-duck` sub-agent review using a different model family than the active model when available.
+Before handing off to `pr`, `go` reviews the final diff and runs one bounded, read-only cross-model `rubber-duck` sub-agent review using a different model family than the active model when available (supplying the diff/test summary and forbidding sub-agent test/lint/build execution).
 Only `pr` runs the documentation pass; `go` does not duplicate it.
 
-Each invocation opens/reuses a session progress canvas with live kanban,
-primary/subagent reports, task percentage, blockers, and delivery status.
+When explicitly requested by the user, `go` opens/reuses a session progress
+canvas with live kanban, primary/subagent reports, task percentage, blockers,
+and delivery status; it is not created by default when not requested.
 Install `create-session-board-canvas` for the board. Its runtime/assets are
 shared, but each session's data and goal history stay isolated. Missing canvas
 support uses a disclosed text fallback; all execution and merge gates remain.
