@@ -161,26 +161,42 @@ copilot plugin install create-canvas-app@jongio-skills
 
    ![create-canvas-app installed and enabled](docs/images/app-installed.png)
 
-### Option 2: Skills CLI (`npx skills`)
+### Option 2: Cross-Platform Plugin Installer (One-Liner)
 
-For hosts that use the standalone [`vercel-labs/skills`](https://github.com/vercel-labs/skills) CLI (`skills.sh`):
+Installing raw skills into `~/.agents/skills`, `~/.copilot/skills`, or `~/.claude/skills` (for example with `npx skills add jongio/skills --all -g`) registers un-namespaced slash commands that shadow installed plugins and collide with built-in `/pr` in Copilot CLI. Use the root installer to clean conflicting raw folders and run the native plugin install (`jongio-skills@jongio-skills`) across detected platform CLIs (`copilot`, `claude`, and `gemini`):
+
+```powershell
+# Windows (PowerShell one-liner)
+irm https://raw.githubusercontent.com/jongio/skills/main/install.ps1 | iex
+
+# Or from a local checkout:
+.\install.ps1 -DryRun
+.\install.ps1
+```
+
+```bash
+# macOS & Linux (Bash one-liner)
+curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install.sh | bash
+
+# Or from a local checkout:
+./install.sh --dry-run
+./install.sh
+```
+
+### Option 3: Skills CLI (`npx skills`, Project Scope)
+
+For project-scoped installs or single non-colliding skills with [`vercel-labs/skills`](https://github.com/vercel-labs/skills) (`skills.sh`):
 
 ```sh
 # List the skills available in this repo:
 npx skills add jongio/skills --list
 
-# Install one skill globally for GitHub Copilot:
-npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot
-
-# Install into the current project instead of globally (drop -g):
+# Install into the current project (recommended over -g to avoid ~/.agents/skills plugin shadowing):
 npx skills add jongio/skills --skill create-canvas-app
-
-# Install every skill in the repo:
 npx skills add jongio/skills --all
 ```
 
 After any install, reload skills with `/skills reload` or start a new session.
-Each skill is then available as `/<skill-name>` (e.g. `/create-canvas-app`).
 
 ### App and editor support
 
