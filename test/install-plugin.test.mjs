@@ -79,7 +79,10 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
       staleDirect,
     ]) {
       mkdirSync(dir, { recursive: true });
-      writeFileSync(path.join(dir, "SKILL.md"), "---\nname: custom\n---\nHand-authored skill.\n");
+      writeFileSync(
+        path.join(dir, "SKILL.md"),
+        "---\nname: custom\n---\nHand-authored skill mentioning https://github.com/jongio/skills.\n",
+      );
     }
     // Give copilotGo and claudeNobs real jongio/skills provenance via canonical SKILL.md content
     writeFileSync(
@@ -143,7 +146,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     assert.equal(existsSync(claudeNobs), false, "~/.claude/skills/nobs must be removed");
     assert.equal(existsSync(staleDirect), false, "stale _direct/skills plugin copy must be removed");
 
-    // Hand-written skill with colliding directory name but no jongio/skills provenance preserved
+    // Hand-written skill with colliding directory name (even if it mentions jongio/skills) preserved
     assert.equal(existsSync(claudeHandwrittenPr), true, "unverified ~/.claude/skills/pr must be preserved");
 
     // Unrelated user skills preserved
@@ -227,20 +230,24 @@ test("cleanOnly mode removes conflicting raw skills without running plugin comma
   withTempHome((home) => {
     const agentsPr = path.join(home, ".agents", "skills", "pr");
     const foreignGo = path.join(home, ".agents", "skills", "go");
+    const privateRepoRetro = path.join(home, ".agents", "skills", "retro");
     mkdirSync(agentsPr, { recursive: true });
     mkdirSync(foreignGo, { recursive: true });
+    mkdirSync(privateRepoRetro, { recursive: true });
     writeFileSync(path.join(agentsPr, "SKILL.md"), "---\nname: pr\n---\n");
     writeFileSync(
       path.join(foreignGo, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
     );
+    writeFileSync(path.join(privateRepoRetro, "SKILL.md"), "---\nname: retro\n---\n");
     writeFileSync(
       path.join(home, ".agents", ".skill-lock.json"),
       JSON.stringify({
         version: 3,
         skills: {
-          pr: { source: "jongio/skills", sourceType: "github" },
+          pr: { source: "jongio/skills", sourceUrl: "https://github.com/jongio/skills.git" },
           go: { source: "other-owner/other-repo", sourceType: "github" },
+          retro: { source: "jongio/skills-private", sourceUrl: "https://github.com/jongio/skills-private.git" },
         },
       }),
     );
@@ -259,8 +266,40 @@ test("cleanOnly mode removes conflicting raw skills without running plugin comma
 
     assert.equal(existsSync(agentsPr), false, "jongio/skills pr must be removed");
     assert.equal(existsSync(foreignGo), true, "foreign-owned go skill must be preserved");
+    assert.equal(existsSync(privateRepoRetro), true, "prefix-colliding jongio/skills-private skill must be preserved");
     assert.equal(calls.length, 0, "cleanOnly must not invoke plugin CLIs");
     assert.equal(result.pluginActions.length, 0);
+  });
+});
+
+test("preserves ~/.agents/skills when a direct shared consumer (~/.codex) is present unless cleanShared is enabled", () => {
+  withTempHome((home) => {
+    const agentsPr = path.join(home, ".agents", "skills", "pr");
+    mkdirSync(agentsPr, { recursive: true });
+    mkdirSync(path.join(home, ".codex"), { recursive: true });
+    writeFileSync(
+      path.join(agentsPr, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "pr", "SKILL.md"), "utf8"),
+    );
+
+    applyPluginInstall({
+      home,
+      repoRoot: REPO_ROOT,
+      platforms: ["copilot"],
+      availableClis: new Set(["copilot"]),
+      commandRunner: () => ({ status: 0, stdout: "ok", stderr: "" }),
+    });
+    assert.equal(existsSync(agentsPr), true, "shared ~/.agents/skills/pr must be preserved when ~/.codex exists");
+
+    applyPluginInstall({
+      home,
+      repoRoot: REPO_ROOT,
+      platforms: ["copilot"],
+      cleanShared: true,
+      availableClis: new Set(["copilot"]),
+      commandRunner: () => ({ status: 0, stdout: "ok", stderr: "" }),
+    });
+    assert.equal(existsSync(agentsPr), false, "cleanShared: true removes ~/.agents/skills/pr");
   });
 });
 

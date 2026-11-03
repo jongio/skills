@@ -51,6 +51,12 @@ export const PLATFORM_TARGETS = Object.freeze([
 
 const SUPPORTED_PLATFORMS = new Set(PLATFORM_TARGETS.map((target) => target.id));
 
+const DIRECT_SHARED_AGENTS_CONSUMERS = Object.freeze([
+  [".codex"],
+  [".amp"],
+  [".config", "amp"],
+]);
+
 const OTHER_CONSUMER_SKILL_DIRS = Object.freeze([
   [".codex", "skills"],
   [".cursor", "skills"],
@@ -106,6 +112,7 @@ function splitListValues(raw, flagName) {
 export function parseInstallPluginArgs(argv = []) {
   const options = {
     cleanOnly: false,
+    cleanShared: false,
     dryRun: false,
     help: false,
     json: false,
@@ -118,6 +125,8 @@ export function parseInstallPluginArgs(argv = []) {
       options.help = true;
     } else if (arg === "--clean-only") {
       options.cleanOnly = true;
+    } else if (arg === "--clean-shared") {
+      options.cleanShared = true;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
     } else if (arg === "--json") {
@@ -175,6 +184,21 @@ function normalizeLf(text) {
   return String(text ?? "").replaceAll("\r\n", "\n").trim();
 }
 
+function isExactRepoSourceUrl(sourceUrl, repoSlug) {
+  if (typeof sourceUrl !== "string") return false;
+  const normalized = sourceUrl
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .toLowerCase();
+  const expectedSlug = repoSlug.toLowerCase();
+  return (
+    normalized === `https://github.com/${expectedSlug}` ||
+    normalized === `ssh://git@github.com/${expectedSlug}` ||
+    normalized === `git@github.com:${expectedSlug}`
+  );
+}
+
 function hasPositiveJongioProvenance({
   kind,
   candidateDir,
@@ -198,7 +222,7 @@ function hasPositiveJongioProvenance({
         return true;
       }
     } catch {
-      // Fall through to content provenance check
+      // Fall through to canonical SKILL.md byte/normalized content check
     }
   }
 
@@ -211,23 +235,28 @@ function hasPositiveJongioProvenance({
   try {
     const candidateContent = normalizeLf(readFileSync(candidateSkillMd, "utf8"));
     const canonicalContent = normalizeLf(readFileSync(canonicalSkillMd, "utf8"));
-    if (candidateContent === canonicalContent) return true;
-
-    const candidateLicense = join(candidateDir, "LICENSE");
-    if (existsSync(candidateLicense)) {
-      const licenseText = readFileSync(candidateLicense, "utf8");
-      if (/Jon Gallant/i.test(licenseText)) return true;
-    }
-
-    if (candidateContent.includes("jongio/skills")) return true;
+    return candidateContent === canonicalContent;
   } catch {
     return false;
   }
-
-  return false;
 }
 
-function isSharedAgentSkillReferencedElsewhere(agentSkillPath, resolvedHome, activeCleanupPlatforms) {
+function isSharedAgentSkillReferencedElsewhere(
+  agentSkillPath,
+  resolvedHome,
+  activeCleanupPlatforms,
+  cleanShared,
+) {
+  if (cleanShared) return false;
+
+  // Preserve ~/.agents/skills entries when a direct shared-root consumer (such as Codex)
+  // is present on the machine unless explicit --clean-shared / --clean-only consent is given.
+  for (const segments of DIRECT_SHARED_AGENTS_CONSUMERS) {
+    if (existsSync(join(resolvedHome, ...segments))) {
+      return true;
+    }
+  }
+
   let targetRealPath;
   try {
     targetRealPath = realpathSync(agentSkillPath);
@@ -241,6 +270,9 @@ function isSharedAgentSkillReferencedElsewhere(agentSkillPath, resolvedHome, act
   }
   if (!activeCleanupPlatforms.has("copilot")) {
     consumerRoots.push(join(resolvedHome, ".copilot", "skills"));
+  }
+  if (!activeCleanupPlatforms.has("gemini")) {
+    consumerRoots.push(join(resolvedHome, ".gemini", "skills"));
   }
 
   const skillName = dirname(agentSkillPath) ? agentSkillPath.slice(dirname(agentSkillPath).length + 1) : "";
@@ -264,6 +296,7 @@ export function planPluginInstall(options = {}) {
     repoSlug = REPO_SLUG,
     platforms = null,
     cleanOnly = false,
+    cleanShared = false,
     availableClis = null,
   } = options;
 
@@ -308,13 +341,15 @@ export function planPluginInstall(options = {}) {
       const parsed = JSON.parse(readFileSync(lockPath, "utf8"));
       if (parsed && typeof parsed.skills === "object" && parsed.skills !== null) {
         for (const [key, entry] of Object.entries(parsed.skills)) {
-          const isRepoMatch =
-            entry?.source === repoSlug ||
-            (typeof entry?.sourceUrl === "string" && entry.sourceUrl.includes(`github.com/${repoSlug}`));
-          if (isRepoMatch) {
-            lockOwnedNames.add(key);
-          } else if (entry?.source && entry.source !== repoSlug) {
+          const sourceMatches = entry?.source === repoSlug;
+          const urlMatches = isExactRepoSourceUrl(entry?.sourceUrl, repoSlug);
+          const hasExplicitDifferentSource =
+            (typeof entry?.source === "string" && entry.source !== repoSlug) ||
+            (typeof entry?.sourceUrl === "string" && !urlMatches);
+          if (hasExplicitDifferentSource) {
             foreignOwnedNames.add(key);
+          } else if (sourceMatches || urlMatches) {
+            lockOwnedNames.add(key);
           }
         }
       }
@@ -359,7 +394,12 @@ export function planPluginInstall(options = {}) {
       }
       if (
         kind === "agents" &&
-        isSharedAgentSkillReferencedElsewhere(candidatePath, resolvedHome, activeCleanupPlatforms)
+        isSharedAgentSkillReferencedElsewhere(
+          candidatePath,
+          resolvedHome,
+          activeCleanupPlatforms,
+          cleanOnly || cleanShared,
+        )
       ) {
         preservedAgentSkills.add(entry.name);
         continue;
@@ -515,6 +555,7 @@ async function main() {
   const result = applyPluginInstall({
     dryRun: parsed.dryRun,
     cleanOnly: parsed.cleanOnly,
+    cleanShared: parsed.cleanShared,
     platforms: parsed.platforms.length > 0 ? parsed.platforms : null,
   });
 
