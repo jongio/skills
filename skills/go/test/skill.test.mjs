@@ -56,7 +56,7 @@ test("plans, tests, implements, and reviews before invoking pr without copying i
   assert.match(skill, /run only targeted test files covering the touched scope rather than whole-repository suites before final verification/);
   assert.match(skill, /one bounded, read-only `rubber-duck` sub-agent review.*different model family than the currently active model/);
   assert.match(skill, /forbid sub-agent test, lint, typecheck, or build execution/);
-  assert.match(skill, /without|rather than repeating `rubber-duck` loops/);
+  assert.match(skill, /(?:without|rather than) repeating `rubber-duck` loops/);
   assert.match(pr, /Reuse passing `go` Step 4 review evidence under the identity rule.*cross-model `rubber-duck` sub-agent review.*when invoked directly without `go`/);
   assert.match(skill, /passing test\/review evidence/);
   assert.doesNotMatch(skill, /git (?:commit|push|rebase)|gh pr (?:create|merge)|--auto/);
