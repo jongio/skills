@@ -1,7 +1,9 @@
 # Session progress in go
 
-After resolving worktree choice and before substantial execution, invoke
-`create-session-board-canvas`. Reuse its loaded provider and stable panel
+Only when the user explicitly requests a session board/canvas, after resolving
+worktree choice and before substantial execution, invoke
+`create-session-board-canvas`. Do not invoke or open it by default when not
+requested. Reuse its loaded provider and stable panel
 handle. If the skill/provider/canvas support is missing or setup is declined,
 state that once and continue with canonical tasks and a text progress view.
 This optional presentation fallback does not waive required implementation,

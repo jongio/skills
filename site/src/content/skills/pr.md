@@ -15,8 +15,10 @@ A concise checklist workflow for taking changes from local commit and preflight 
 
 Requires `test-doctor` and `doc-doctor`. PR preflight owns the documentation pass,
 including when called by `go`, and reuses matching passing evidence (including
-`go` Step 4's diff + cross-model `rubber-duck` sub-agent review, or running both
-when invoked directly without `go`).
+`go`/`test-doctor` test evidence and `go` Step 4's diff + bounded, read-only
+cross-model `rubber-duck` sub-agent review, or running them when invoked directly
+without `go`; documentation-only `doc-doctor` edits do not invalidate passing
+code-review or `test-doctor` evidence).
 
 Preserves the PR template and records exact validation commands and results.
 Expects Copilot review unless an explicitly authorized, verified private-owner

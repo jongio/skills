@@ -39,7 +39,7 @@ read-only view for the user; primary and subagents report through `session_progr
 4. Open `session-progress` with `input: {}` and the stable
    `instanceId: "session-progress"`. Focus/reuse that panel instead of creating
    duplicates. Respect a manually closed panel within the invocation; reopen
-   only when requested or on a new `go` invocation.
+   only when explicitly requested.
 5. Follow the [reporting contract](references/reporting.md): primary configures
    goals, assignments and delivery phases; every tool-capable agent reports its
    work/blockers/results. Pass task IDs and this contract when delegating.
