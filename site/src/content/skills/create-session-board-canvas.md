@@ -6,7 +6,7 @@ repoPath: skills/create-session-board-canvas
 thumb: images/thumb-create-session-board-canvas.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill create-session-board-canvas -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill create-session-board-canvas"
 ---
 
 ## What it does

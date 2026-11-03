@@ -140,7 +140,7 @@ repoPath: skills/${manifest.name}
 thumb: images/thumb-${manifest.name}.png
 install:
   - label: Install for GitHub Copilot
-    cmd: ${JSON.stringify(`npx skills add ${repository} --skill ${manifest.name} -g --agent github-copilot`)}
+    cmd: ${JSON.stringify(`npx skills add ${repository} --skill ${manifest.name}`)}
 ---
 
 ## What it does

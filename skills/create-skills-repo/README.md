@@ -7,7 +7,7 @@ functional example skill, and an optional catalog.
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill create-skills-repo -g --agent github-copilot
+npx skills add jongio/skills --skill create-skills-repo
 ```
 
 Reload skills, then ask:

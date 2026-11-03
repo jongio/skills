@@ -13,10 +13,10 @@ drive: dashboards, editors, trackers, boards, document previews.
 
 ## Quickstart
 
-**1. Install the skill** (global, for GitHub Copilot):
+**1. Install the skill**:
 
 ```sh
-npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot
+npx skills add jongio/skills --skill create-canvas-app
 ```
 
 **2. Reload skills** — run `/skills reload`, or start a new session.

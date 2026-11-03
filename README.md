@@ -163,7 +163,7 @@ copilot plugin install create-canvas-app@jongio-skills
 
 ### Option 2: Cross-Platform Plugin Installer (One-Liner)
 
-Installing raw skills into `~/.agents/skills`, `~/.copilot/skills`, `~/.claude/skills`, or `~/.codex/skills` (for example with `npx skills add jongio/skills --all -g`) registers un-namespaced slash commands that shadow installed plugins and collide with built-in `/pr` in Copilot CLI. Use the root installer to clean conflicting raw folders and run the native plugin install (`jongio-skills`) across detected platform CLIs (`copilot`, `claude`, `codex`, and `gemini`):
+Installing raw skills into `~/.agents/skills`, `~/.copilot/skills`, `~/.claude/skills`, or `~/.codex/skills` (for example with `npx skills add jongio/skills --all -g`) registers un-namespaced slash commands that shadow installed plugins and collide with built-in `/pr` in Copilot CLI. Use the root installer to clean conflicting raw folders and run the native plugin install (`jongio-skills@jongio-skills` / `codex plugin add jongio-skills`) across detected platform CLIs (`copilot`, `claude`, `codex`, and `gemini`):
 
 ```powershell
 # Windows (PowerShell one-liner)
@@ -181,6 +181,22 @@ curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install.sh | bas
 # Or from a local checkout:
 ./install.sh --dry-run
 ./install.sh
+```
+
+Or run each agent's native CLI plugin commands directly:
+
+```sh
+# GitHub Copilot CLI
+copilot plugin marketplace add jongio/skills && copilot plugin install jongio-skills@jongio-skills
+
+# Claude Code
+claude plugin marketplace add jongio/skills && claude plugin install jongio-skills@jongio-skills
+
+# Codex CLI
+codex plugin marketplace add jongio/skills && codex plugin add jongio-skills
+
+# Gemini CLI
+gemini extensions install https://github.com/jongio/skills --consent
 ```
 
 ### Option 3: Skills CLI (`npx skills`, Project Scope)

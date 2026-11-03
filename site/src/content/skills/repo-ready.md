@@ -7,7 +7,7 @@ thumb: images/thumb-repo-ready.png
 order: 5
 install:
   - label: Install for GitHub Copilot
-    cmd: npx skills add jongio/skills --skill repo-ready -g --agent github-copilot
+    cmd: npx skills add jongio/skills --skill repo-ready
   - label: Install from the plugin marketplace
     cmd: copilot plugin install repo-ready@jongio-skills
 ---

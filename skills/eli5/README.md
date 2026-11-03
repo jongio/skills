@@ -17,7 +17,7 @@ when context is missing.
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill eli5 -g --agent github-copilot
+npx skills add jongio/skills --skill eli5
 ```
 
 Or install it from the Copilot plugin marketplace:

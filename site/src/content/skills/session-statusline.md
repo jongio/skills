@@ -6,7 +6,7 @@ repoPath: skills/session-statusline
 thumb: images/thumb-session-statusline.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill session-statusline -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill session-statusline"
 ---
 
 ## What it does

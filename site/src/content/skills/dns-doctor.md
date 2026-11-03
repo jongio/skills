@@ -7,7 +7,7 @@ thumb: images/thumb-dns-doctor.png
 order: 7
 install:
   - label: Install for GitHub Copilot
-    cmd: npx skills add jongio/skills --skill dns-doctor -g --agent github-copilot
+    cmd: npx skills add jongio/skills --skill dns-doctor
   - label: Install from the plugin marketplace
     cmd: copilot plugin marketplace add jongio/skills && copilot plugin install dns-doctor@jongio-skills
 ---

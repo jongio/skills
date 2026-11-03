@@ -6,7 +6,7 @@ repoPath: skills/backlog-groom
 thumb: images/thumb-backlog-groom.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill backlog-groom -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill backlog-groom"
 ---
 
 ## What it does

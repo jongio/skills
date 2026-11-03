@@ -10,9 +10,11 @@ interface Props {
   thumb: string;
 }
 const { href, skillId, title, tagline, thumb } = Astro.props;
-// The install command uses the skill id, not the display title. The title is
-// human-readable and may differ from the id it is installed by.
-const install = `/plugin install ${skillId}@jongio-skills`;
+// The install command uses the skill id, not the display title. For `pr`, use
+// the aggregate plugin so it is namespaced as /jongio-skills:pr rather than
+// colliding with built-in /pr.
+const install =
+  skillId === "pr" ? "/plugin install jongio-skills@jongio-skills" : `/plugin install ${skillId}@jongio-skills`;
 // Lowercased haystack the client-side search filters against.
 const search = `${title} ${tagline}`.toLowerCase();
 ---

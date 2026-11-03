@@ -7,7 +7,7 @@ thumb: images/thumb-git-tidy.png
 order: 10
 install:
   - label: Install for GitHub Copilot
-    cmd: npx skills add jongio/skills --skill git-tidy -g --agent github-copilot
+    cmd: npx skills add jongio/skills --skill git-tidy
   - label: Install from the plugin marketplace
     cmd: copilot plugin marketplace add jongio/skills && copilot plugin install git-tidy@jongio-skills
 ---

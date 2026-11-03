@@ -6,7 +6,7 @@ repoPath: skills/test-doctor
 thumb: images/thumb-test-doctor.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill test-doctor -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill test-doctor"
 ---
 
 ## What it does

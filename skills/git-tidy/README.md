@@ -68,7 +68,7 @@ Each mutation keeps its own approval and fresh revalidation.
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill git-tidy -g --agent github-copilot
+npx skills add jongio/skills --skill git-tidy
 ```
 
 Or install it from the Copilot plugin marketplace:

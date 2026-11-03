@@ -31,10 +31,7 @@ and existing-business screen.
 ### As a Copilot skill (recommended)
 
 ```sh
-# Install just this skill (global, for GitHub Copilot):
-npx skills add jongio/skills --skill naming-is-hard -g --agent github-copilot
-
-# Into the current project instead (drop -g):
+# Install just this skill into the current project:
 npx skills add jongio/skills --skill naming-is-hard
 ```
 

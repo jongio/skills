@@ -5,9 +5,9 @@ import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 export const CREATE_SKILL_INSTALL_GUIDANCE =
-  "Install create-skill with: npx skills add jongio/skills --skill create-skill -g --agent github-copilot";
+  "Install create-skill with: npx skills add jongio/skills --skill create-skill";
 export const CATALOG_INSTALL_GUIDANCE =
-  "Install create-gh-pages-site with: npx skills add jongio/skills --skill create-gh-pages-site -g --agent github-copilot";
+  "Install create-gh-pages-site with: npx skills add jongio/skills --skill create-gh-pages-site";
 
 function dependencyError(message) {
   const error = new Error(message);
