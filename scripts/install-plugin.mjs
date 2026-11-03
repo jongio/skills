@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -383,11 +383,31 @@ export function planPluginInstall(options = {}) {
     scopedRoots.push({ kind: "agents", path: join(resolvedHome, ".agents", "skills") });
   }
 
+  let realRepoRoot = resolvedRepoRoot;
+  try {
+    realRepoRoot = realpathSync(resolvedRepoRoot);
+  } catch {
+    // Keep resolved path fallback
+  }
+
   const agentsSkillsDir = join(resolvedHome, ".agents", "skills");
   for (const { kind, path: rawRoot } of scopedRoots) {
     if (!existsSync(rawRoot)) continue;
+    // Never descend into a symlinked/junctioned skill root to delete non-symlink subdirectories,
+    // which could otherwise delete directories inside a linked repository checkout.
+    if (isLeafSymlink(rawRoot)) continue;
     for (const entry of readdirSync(rawRoot, { withFileTypes: true })) {
       const candidatePath = join(rawRoot, entry.name);
+      if (!isLeafSymlink(candidatePath)) {
+        try {
+          const candidateReal = realpathSync(candidatePath);
+          if (candidateReal === realRepoRoot || candidateReal.startsWith(`${realRepoRoot}${sep}`)) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
+      }
       if (
         !hasPositiveJongioProvenance({
           kind,
