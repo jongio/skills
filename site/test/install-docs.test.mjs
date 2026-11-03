@@ -45,6 +45,20 @@ test("site pages and skill catalog entries never recommend -g --agent github-cop
       `skills/${entry.name}/README.md must not recommend -g --agent github-copilot`,
     );
   }
+
+  const skillCard = read("site/src/components/SkillCard.astro");
+  assert.match(
+    skillCard,
+    /skillId === "pr"\s*\?\s*"\/plugin install jongio-skills@jongio-skills"\s*:\s*`\/plugin install \$\{skillId\}@jongio-skills`/,
+    "SkillCard.astro must copy the aggregate plugin install command for pr and individual plugin commands for other skills",
+  );
+
+  const slugPage = read("site/src/pages/catalog/[slug].astro");
+  assert.match(
+    slugPage,
+    /skill\.id !== "pr"\s*\?/,
+    "catalog/[slug].astro must gate single-skill plugin install on skill.id !== 'pr'",
+  );
 });
 
 test("site install sections document the cross-platform one-liner and native CLI plugin commands", () => {
