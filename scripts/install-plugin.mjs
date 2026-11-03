@@ -444,10 +444,17 @@ export function planPluginInstall(options = {}) {
     }
   }
 
-  // Only prune lockfile entries when .agents/skills is in scope and the entry is not still needed
-  const lockPrunedKeys = activeCleanupPlatforms.has("copilot")
-    ? [...lockOwnedNames].filter((key) => !preservedAgentSkills.has(key))
-    : [];
+  // Only prune lockfile entries when .agents/skills is in scope, not a symlinked root,
+  // and the shared skill directory is either scheduled for removal or already absent.
+  const cleanupPathSet = new Set(cleanupPaths);
+  const lockPrunedKeys =
+    activeCleanupPlatforms.has("copilot") && !isLeafSymlink(agentsSkillsDir)
+      ? [...lockOwnedNames].filter((key) => {
+          if (preservedAgentSkills.has(key)) return false;
+          const sharedSkillPath = join(agentsSkillsDir, key);
+          return cleanupPathSet.has(sharedSkillPath) || !existsSync(sharedSkillPath);
+        })
+      : [];
 
   // Also check for a stale _direct/skills copy of jongio-skills in Copilot CLI when copilot is in scope
   if (activeCleanupPlatforms.has("copilot")) {
