@@ -12,7 +12,7 @@
       "name": "jongio-skills",
       "source": "./",
       "description": "Install the complete Jon Gallant skills collection as one plugin.",
-      "version": "2.1.5"
+      "version": "2.1.6"
     },
     {
       "name": "statuslines",
