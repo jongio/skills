@@ -26,6 +26,11 @@ test("nobs preserves explicit opt-outs, completeness, and safety", () => {
   assert.match(rule, /approval/);
   assert.match(rule, /shorten the report, not the investigation/i);
   assert.match(rule, /explicit.*detail/i);
+  assert.match(rule, /Vet options against system invariants/i);
+  assert.match(rule, /Never offer brittle hacks or\s+strawman alternatives/i);
+  assert.match(rule, /state material downsides alongside any real trade-off/i);
+  assert.match(rule, /Keep references self-contained and prose readable/i);
+  assert.match(rule, /follow-up turn/i);
   assert.doesNotMatch(rule, /Never edit personal instruction files/i);
   assert.match(rule, /Do not persist nobs preferences/i);
 });

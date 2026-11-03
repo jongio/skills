@@ -27,5 +27,7 @@ CLI. The standalone skill is on demand; it does not install the automatic rule.
 Say `nobs off` to opt out for the conversation. Persistent opt-out is unsupported;
 a new conversation starts with the default on again while the full plugin is enabled.
 
-Essential facts, risks, blockers, and uncertainty stay visible. Requests for
-detail and required output formats override brevity.
+Essential facts, risks, blockers, and uncertainty stay visible. Named blockers
+and changes include enough context to stand on their own, and unsound hacks are
+rejected rather than offered as filler options. Requests for detail and required
+output formats override brevity.

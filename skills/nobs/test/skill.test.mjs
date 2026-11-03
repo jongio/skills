@@ -29,4 +29,7 @@ test("every capability stimulus requires actual nobs invocation", async () => {
   }
   assert.match(spec, /skill-invocation: 0\.2/);
   assert.match(spec, /^  threshold: 0\.84$/m);
+  assert.match(spec, /- name: reject-unsound-option/);
+  assert.match(spec, /- name: self-contained-blocker-context/);
+  assert.match(spec, /- name: coherent-external-comment/);
 });

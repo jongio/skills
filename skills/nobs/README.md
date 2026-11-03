@@ -26,6 +26,9 @@ embedded in the content.
 
 The default is 1-3 sentences when sufficient, not a hard limit. Risks, blockers,
 uncertainty, required formats, and explicit requests for detail take precedence.
+Named blockers, PRs, files, and changes stay self-contained so they do not force
+a follow-up question, and unsound workarounds are rejected upfront rather than
+offered as strawman options.
 Turning the mode off restores normal response style; it does not force verbosity.
 
 ## Default-on plugin rule
