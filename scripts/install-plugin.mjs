@@ -176,7 +176,9 @@ function normalizeLf(text) {
 }
 
 function hasPositiveJongioProvenance({
+  kind,
   candidateDir,
+  agentsSkillsDir,
   skillName,
   resolvedRepoRoot,
   canonicalSet,
@@ -184,7 +186,22 @@ function hasPositiveJongioProvenance({
   foreignOwnedNames,
 }) {
   if (foreignOwnedNames.has(skillName)) return false;
-  if (lockOwnedNames.has(skillName)) return true;
+
+  // .agents/.skill-lock.json only establishes provenance for ~/.agents/skills/<name>
+  // or symlinks pointing into ~/.agents/skills/<name>, never an independent hand-written
+  // directory in ~/.claude/skills or ~/.copilot/skills.
+  if (lockOwnedNames.has(skillName)) {
+    if (kind === "agents") return true;
+    try {
+      const stat = lstatSync(candidateDir);
+      if (stat.isSymbolicLink() && realpathSync(candidateDir).startsWith(agentsSkillsDir)) {
+        return true;
+      }
+    } catch {
+      // Fall through to content provenance check
+    }
+  }
+
   if (!canonicalSet.has(skillName)) return false;
 
   const candidateSkillMd = join(candidateDir, "SKILL.md");
@@ -321,13 +338,16 @@ export function planPluginInstall(options = {}) {
     scopedRoots.push({ kind: "agents", path: join(resolvedHome, ".agents", "skills") });
   }
 
+  const agentsSkillsDir = join(resolvedHome, ".agents", "skills");
   for (const { kind, path: rawRoot } of scopedRoots) {
     if (!existsSync(rawRoot)) continue;
     for (const entry of readdirSync(rawRoot, { withFileTypes: true })) {
       const candidatePath = join(rawRoot, entry.name);
       if (
         !hasPositiveJongioProvenance({
+          kind,
           candidateDir: candidatePath,
+          agentsSkillsDir,
           skillName: entry.name,
           resolvedRepoRoot,
           canonicalSet,
