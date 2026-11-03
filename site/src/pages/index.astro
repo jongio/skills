@@ -88,7 +88,7 @@ const skills = (await getCollection("skills")).sort(
     <h2>Install</h2>
     <p class="muted">Install the namespaced plugin globally across your coding agents, or install individual skills into a project.</p>
     <h3>1 · Cross-platform one-liner (Copilot, Claude, Codex &amp; Gemini CLIs)</h3>
-    <p class="muted">Installs the native plugin in every detected CLI and removes conflicting raw copies from <code>~/.copilot/skills</code>, <code>~/.claude/skills</code>, and <code>~/.agents/skills</code> so <code>/jongio-skills:pr</code> never collides with built-in <code>/pr</code>:</p>
+    <p class="muted">Installs the native plugin in every detected CLI and removes conflicting raw copies from <code>~/.copilot/skills</code>, <code>~/.claude/skills</code>, and <code>~/.agents/skills</code> so <code>/jongio-skills:pr</code> never collides with built-in <code>/pr</code>. Shared <code>~/.agents/skills</code> and <code>~/.codex/skills</code> entries are preserved when another consumer (such as Codex IDE or Cline) is present; pass <code>-CleanShared</code> / <code>--clean-shared</code> in a local checkout only if those non-plugin hosts no longer need the raw skills:</p>
     <p class="muted">Windows (PowerShell):</p>
     <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install.ps1 | iex</code></pre>
     <p class="muted">macOS &amp; Linux (Bash):</p>

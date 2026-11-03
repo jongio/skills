@@ -58,7 +58,7 @@ import Layout from "../layouts/Layout.astro";
   <section class="card">
     <h2>Install</h2>
     <p><strong>1 · Cross-platform one-liner (Copilot, Claude, Codex &amp; Gemini CLIs):</strong></p>
-    <p class="muted">Installs the native plugin in every detected CLI and removes conflicting raw copies from <code>~/.copilot/skills</code>, <code>~/.claude/skills</code>, and <code>~/.agents/skills</code>:</p>
+    <p class="muted">Installs the native plugin in every detected CLI and removes conflicting raw copies from <code>~/.copilot/skills</code>, <code>~/.claude/skills</code>, and <code>~/.agents/skills</code> (shared <code>~/.agents/skills</code> and <code>~/.codex/skills</code> entries are preserved when another consumer such as Codex IDE or Cline is present unless <code>-CleanShared</code> / <code>--clean-shared</code> is passed in a local checkout, since non-plugin hosts may still need those raw skills):</p>
     <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install.ps1 | iex</code></pre>
     <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install.sh | bash</code></pre>
     <p><strong>2 · Per-agent native plugin install (global &amp; namespaced):</strong></p>
