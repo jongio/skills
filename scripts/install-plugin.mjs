@@ -53,6 +53,7 @@ const SUPPORTED_PLATFORMS = new Set(PLATFORM_TARGETS.map((target) => target.id))
 
 const DIRECT_SHARED_AGENTS_CONSUMERS = Object.freeze([
   [".codex"],
+  [".cline"],
   [".amp"],
   [".config", "amp"],
 ]);
@@ -199,6 +200,23 @@ function isExactRepoSourceUrl(sourceUrl, repoSlug) {
   );
 }
 
+function resolvesToExactSharedSkill(candidateDir, agentsSkillsDir, skillName) {
+  const sharedSkillPath = join(agentsSkillsDir, skillName);
+  try {
+    return realpathSync(candidateDir) === realpathSync(sharedSkillPath);
+  } catch {
+    return resolve(candidateDir) === resolve(sharedSkillPath);
+  }
+}
+
+function isLeafSymlink(candidatePath) {
+  try {
+    return lstatSync(candidatePath).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 function hasPositiveJongioProvenance({
   kind,
   candidateDir,
@@ -209,21 +227,14 @@ function hasPositiveJongioProvenance({
   lockOwnedNames,
   foreignOwnedNames,
 }) {
-  if (foreignOwnedNames.has(skillName)) return false;
+  const pointsToSharedSkill =
+    kind === "agents" || resolvesToExactSharedSkill(candidateDir, agentsSkillsDir, skillName);
 
-  // .agents/.skill-lock.json only establishes provenance for ~/.agents/skills/<name>
-  // or symlinks pointing into ~/.agents/skills/<name>, never an independent hand-written
-  // directory in ~/.claude/skills or ~/.copilot/skills.
-  if (lockOwnedNames.has(skillName)) {
-    if (kind === "agents") return true;
-    try {
-      const stat = lstatSync(candidateDir);
-      if (stat.isSymbolicLink() && realpathSync(candidateDir).startsWith(agentsSkillsDir)) {
-        return true;
-      }
-    } catch {
-      // Fall through to canonical SKILL.md byte/normalized content check
-    }
+  // .agents/.skill-lock.json ownership (both foreign and jongio/skills) applies only
+  // to ~/.agents/skills/<skillName> and candidates that resolve to that exact path.
+  if (pointsToSharedSkill) {
+    if (foreignOwnedNames.has(skillName)) return false;
+    if (lockOwnedNames.has(skillName)) return true;
   }
 
   if (!canonicalSet.has(skillName)) return false;
@@ -249,7 +260,7 @@ function isSharedAgentSkillReferencedElsewhere(
 ) {
   if (cleanShared) return false;
 
-  // Preserve ~/.agents/skills entries when a direct shared-root consumer (such as Codex)
+  // Preserve ~/.agents/skills entries when a direct shared-root consumer (such as Codex or Cline)
   // is present on the machine unless explicit --clean-shared / --clean-only consent is given.
   for (const segments of DIRECT_SHARED_AGENTS_CONSUMERS) {
     if (existsSync(join(resolvedHome, ...segments))) {
@@ -279,8 +290,7 @@ function isSharedAgentSkillReferencedElsewhere(
   for (const root of consumerRoots) {
     const candidate = join(root, skillName);
     try {
-      const stat = lstatSync(candidate);
-      if (stat.isSymbolicLink() && realpathSync(candidate) === targetRealPath) {
+      if (realpathSync(candidate) === targetRealPath) {
         return true;
       }
     } catch {
@@ -392,10 +402,13 @@ export function planPluginInstall(options = {}) {
       ) {
         continue;
       }
+      const mutatesSharedDirectory =
+        (kind === "agents" || resolvesToExactSharedSkill(candidatePath, agentsSkillsDir, entry.name)) &&
+        !isLeafSymlink(candidatePath);
       if (
-        kind === "agents" &&
+        mutatesSharedDirectory &&
         isSharedAgentSkillReferencedElsewhere(
-          candidatePath,
+          join(agentsSkillsDir, entry.name),
           resolvedHome,
           activeCleanupPlatforms,
           cleanOnly || cleanShared,
@@ -404,7 +417,9 @@ export function planPluginInstall(options = {}) {
         preservedAgentSkills.add(entry.name);
         continue;
       }
-      cleanupPaths.push(candidatePath);
+      if (!cleanupPaths.includes(candidatePath)) {
+        cleanupPaths.push(candidatePath);
+      }
     }
   }
 

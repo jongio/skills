@@ -272,14 +272,32 @@ test("cleanOnly mode removes conflicting raw skills without running plugin comma
   });
 });
 
-test("preserves ~/.agents/skills when a direct shared consumer (~/.codex) is present unless cleanShared is enabled", () => {
+test("preserves ~/.agents/skills when a direct shared consumer (~/.codex or ~/.cline) is present unless cleanShared is enabled, and scopes foreign lock ownership to ~/.agents/skills", () => {
   withTempHome((home) => {
     const agentsPr = path.join(home, ".agents", "skills", "pr");
+    const foreignAgentsGo = path.join(home, ".agents", "skills", "go");
+    const independentCopilotGo = path.join(home, ".copilot", "skills", "go");
     mkdirSync(agentsPr, { recursive: true });
-    mkdirSync(path.join(home, ".codex"), { recursive: true });
+    mkdirSync(foreignAgentsGo, { recursive: true });
+    mkdirSync(independentCopilotGo, { recursive: true });
+    mkdirSync(path.join(home, ".cline"), { recursive: true });
     writeFileSync(
       path.join(agentsPr, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "pr", "SKILL.md"), "utf8"),
+    );
+    writeFileSync(path.join(foreignAgentsGo, "SKILL.md"), "---\nname: go\n---\nForeign go skill.\n");
+    writeFileSync(
+      path.join(independentCopilotGo, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
+    );
+    writeFileSync(
+      path.join(home, ".agents", ".skill-lock.json"),
+      JSON.stringify({
+        version: 3,
+        skills: {
+          go: { source: "other-owner/other-repo", sourceType: "github" },
+        },
+      }),
     );
 
     applyPluginInstall({
@@ -289,7 +307,13 @@ test("preserves ~/.agents/skills when a direct shared consumer (~/.codex) is pre
       availableClis: new Set(["copilot"]),
       commandRunner: () => ({ status: 0, stdout: "ok", stderr: "" }),
     });
-    assert.equal(existsSync(agentsPr), true, "shared ~/.agents/skills/pr must be preserved when ~/.codex exists");
+    assert.equal(existsSync(agentsPr), true, "shared ~/.agents/skills/pr must be preserved when ~/.cline exists");
+    assert.equal(existsSync(foreignAgentsGo), true, "foreign ~/.agents/skills/go must be preserved");
+    assert.equal(
+      existsSync(independentCopilotGo),
+      false,
+      "independent canonical ~/.copilot/skills/go must be cleaned even when ~/.agents/skills/go is foreign-owned",
+    );
 
     applyPluginInstall({
       home,
@@ -300,6 +324,7 @@ test("preserves ~/.agents/skills when a direct shared consumer (~/.codex) is pre
       commandRunner: () => ({ status: 0, stdout: "ok", stderr: "" }),
     });
     assert.equal(existsSync(agentsPr), false, "cleanShared: true removes ~/.agents/skills/pr");
+    assert.equal(existsSync(foreignAgentsGo), true, "foreign ~/.agents/skills/go remains preserved");
   });
 });
 
