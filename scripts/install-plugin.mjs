@@ -403,8 +403,9 @@ export function planPluginInstall(options = {}) {
         continue;
       }
       const mutatesSharedDirectory =
-        (kind === "agents" || resolvesToExactSharedSkill(candidatePath, agentsSkillsDir, entry.name)) &&
-        !isLeafSymlink(candidatePath);
+        kind === "agents" ||
+        (resolvesToExactSharedSkill(candidatePath, agentsSkillsDir, entry.name) &&
+          !isLeafSymlink(candidatePath));
       if (
         mutatesSharedDirectory &&
         isSharedAgentSkillReferencedElsewhere(
