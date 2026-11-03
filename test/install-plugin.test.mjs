@@ -66,8 +66,6 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     const claudeNobs = path.join(home, ".claude", "skills", "nobs");
     const claudeHandwrittenPr = path.join(home, ".claude", "skills", "pr");
     const claudeUnrelated = path.join(home, ".claude", "skills", "playwright-cli");
-    const codexRetro = path.join(home, ".codex", "skills", "retro");
-    const codexUnrelated = path.join(home, ".codex", "skills", "custom-codex");
     const staleDirect = path.join(home, ".copilot", "installed-plugins", "_direct", "skills");
 
     for (const dir of [
@@ -78,8 +76,6 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
       claudeNobs,
       claudeHandwrittenPr,
       claudeUnrelated,
-      codexRetro,
-      codexUnrelated,
       staleDirect,
     ]) {
       mkdirSync(dir, { recursive: true });
@@ -88,7 +84,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
         "---\nname: custom\n---\nHand-authored skill mentioning https://github.com/jongio/skills.\n",
       );
     }
-    // Give copilotGo, claudeNobs, and codexRetro real jongio/skills provenance via canonical SKILL.md content
+    // Give copilotGo and claudeNobs real jongio/skills provenance via canonical SKILL.md content
     writeFileSync(
       path.join(copilotGo, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
@@ -96,10 +92,6 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     writeFileSync(
       path.join(claudeNobs, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "nobs", "SKILL.md"), "utf8"),
-    );
-    writeFileSync(
-      path.join(codexRetro, "SKILL.md"),
-      readFileSync(path.join(REPO_ROOT, "skills", "retro", "SKILL.md"), "utf8"),
     );
     writeFileSync(path.join(staleDirect, "plugin.json"), JSON.stringify({ name: "jongio-skills", version: "2.0.0" }));
 
@@ -152,7 +144,6 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     assert.equal(existsSync(agentsPr), false, "~/.agents/skills/pr must be removed");
     assert.equal(existsSync(copilotGo), false, "~/.copilot/skills/go must be removed");
     assert.equal(existsSync(claudeNobs), false, "~/.claude/skills/nobs must be removed");
-    assert.equal(existsSync(codexRetro), false, "~/.codex/skills/retro must be removed");
     assert.equal(existsSync(staleDirect), false, "stale _direct/skills plugin copy must be removed");
 
     // Hand-written skill with colliding directory name (even if it mentions jongio/skills) preserved
@@ -162,7 +153,6 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     assert.equal(existsSync(agentsUnrelated), true, "unrelated ~/.agents/skills/microsoft-foundry must be preserved");
     assert.equal(existsSync(copilotUnrelated), true, "unrelated ~/.copilot/skills/azd-app must be preserved");
     assert.equal(existsSync(claudeUnrelated), true, "unrelated ~/.claude/skills/playwright-cli must be preserved");
-    assert.equal(existsSync(codexUnrelated), true, "unrelated ~/.codex/skills/custom-codex must be preserved");
 
     // Lockfile cleaned of jongio/skills entries while keeping microsoft-foundry
     const updatedLock = JSON.parse(readFileSync(lockPath, "utf8"));
@@ -284,15 +274,16 @@ test("cleanOnly mode removes conflicting raw skills without running plugin comma
   });
 });
 
-test("preserves ~/.agents/skills when a direct shared consumer (~/.codex or ~/.cline) is present unless cleanShared is enabled, and scopes foreign lock ownership to ~/.agents/skills", () => {
+test("preserves ~/.agents/skills and ~/.codex/skills when Codex IDE or unmigrated Copilot is present unless cleanShared is enabled", () => {
   withTempHome((home) => {
     const agentsPr = path.join(home, ".agents", "skills", "pr");
     const foreignAgentsGo = path.join(home, ".agents", "skills", "go");
     const independentCopilotGo = path.join(home, ".copilot", "skills", "go");
+    const codexRetro = path.join(home, ".codex", "skills", "retro");
     mkdirSync(agentsPr, { recursive: true });
     mkdirSync(foreignAgentsGo, { recursive: true });
     mkdirSync(independentCopilotGo, { recursive: true });
-    mkdirSync(path.join(home, ".cline"), { recursive: true });
+    mkdirSync(codexRetro, { recursive: true });
     writeFileSync(
       path.join(agentsPr, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "pr", "SKILL.md"), "utf8"),
@@ -301,6 +292,10 @@ test("preserves ~/.agents/skills when a direct shared consumer (~/.codex or ~/.c
     writeFileSync(
       path.join(independentCopilotGo, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
+    );
+    writeFileSync(
+      path.join(codexRetro, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "retro", "SKILL.md"), "utf8"),
     );
     writeFileSync(
       path.join(home, ".agents", ".skill-lock.json"),
@@ -312,14 +307,16 @@ test("preserves ~/.agents/skills when a direct shared consumer (~/.codex or ~/.c
       }),
     );
 
+    // 1. Copilot + Codex CLI install preserves ~/.codex/skills and ~/.agents/skills for Codex IDE unless cleanShared is set
     applyPluginInstall({
       home,
       repoRoot: REPO_ROOT,
-      platforms: ["copilot"],
-      availableClis: new Set(["copilot"]),
+      platforms: ["copilot", "codex"],
+      availableClis: new Set(["copilot", "codex"]),
       commandRunner: () => ({ status: 0, stdout: "ok", stderr: "" }),
     });
-    assert.equal(existsSync(agentsPr), true, "shared ~/.agents/skills/pr must be preserved when ~/.cline exists");
+    assert.equal(existsSync(agentsPr), true, "shared ~/.agents/skills/pr must be preserved when ~/.codex exists");
+    assert.equal(existsSync(codexRetro), true, "~/.codex/skills/retro must be preserved for Codex IDE without cleanShared");
     assert.equal(existsSync(foreignAgentsGo), true, "foreign ~/.agents/skills/go must be preserved");
     assert.equal(
       existsSync(independentCopilotGo),
@@ -327,6 +324,8 @@ test("preserves ~/.agents/skills when a direct shared consumer (~/.codex or ~/.c
       "independent canonical ~/.copilot/skills/go must be cleaned even when ~/.agents/skills/go is foreign-owned",
     );
 
+    // 2. Remove .codex so only ~/.copilot exists; a codex-only cleanShared=false run must still preserve ~/.agents/skills for unmigrated Copilot
+    rmSync(path.join(home, ".codex"), { recursive: true, force: true });
     applyPluginInstall({
       home,
       repoRoot: REPO_ROOT,
@@ -337,18 +336,25 @@ test("preserves ~/.agents/skills when a direct shared consumer (~/.codex or ~/.c
     assert.equal(
       existsSync(agentsPr),
       true,
-      "shared ~/.agents/skills/pr must be preserved during codex-only migration when ~/.copilot exists",
+      "shared ~/.agents/skills/pr must be preserved during codex-only migration when ~/.copilot exists without .codex/.cline",
     );
 
+    // 3. Re-create ~/.codex/skills/retro and verify cleanShared: true cleans both ~/.agents/skills/pr and ~/.codex/skills/retro
+    mkdirSync(codexRetro, { recursive: true });
+    writeFileSync(
+      path.join(codexRetro, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "retro", "SKILL.md"), "utf8"),
+    );
     applyPluginInstall({
       home,
       repoRoot: REPO_ROOT,
-      platforms: ["copilot"],
+      platforms: ["copilot", "codex"],
       cleanShared: true,
-      availableClis: new Set(["copilot"]),
+      availableClis: new Set(["copilot", "codex"]),
       commandRunner: () => ({ status: 0, stdout: "ok", stderr: "" }),
     });
     assert.equal(existsSync(agentsPr), false, "cleanShared: true removes ~/.agents/skills/pr");
+    assert.equal(existsSync(codexRetro), false, "cleanShared: true removes ~/.codex/skills/retro");
     assert.equal(existsSync(foreignAgentsGo), true, "foreign ~/.agents/skills/go remains preserved");
   });
 });

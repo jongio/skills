@@ -61,6 +61,7 @@ export const PLATFORM_TARGETS = Object.freeze([
 const SUPPORTED_PLATFORMS = new Set(PLATFORM_TARGETS.map((target) => target.id));
 
 const DIRECT_SHARED_AGENTS_CONSUMERS = Object.freeze([
+  [".codex"],
   [".cline"],
   [".amp"],
   [".config", "amp"],
@@ -68,6 +69,7 @@ const DIRECT_SHARED_AGENTS_CONSUMERS = Object.freeze([
 ]);
 
 const OTHER_CONSUMER_SKILL_DIRS = Object.freeze([
+  [".codex", "skills"],
   [".cursor", "skills"],
   [".codeium", "windsurf", "skills"],
   [".cline", "skills"],
@@ -271,10 +273,7 @@ function isSharedAgentSkillReferencedElsewhere(
   if (cleanShared) return false;
 
   // Preserve ~/.agents/skills entries when an unmigrated direct shared-root consumer
-  // (such as Codex, Copilot, Cline, Amp, or Pi) is present on the machine.
-  if (!activeCleanupPlatforms.has("codex") && existsSync(join(resolvedHome, ".codex"))) {
-    return true;
-  }
+  // (such as Codex IDE/CLI, Copilot, Cline, Amp, or Pi) is present on the machine.
   if (!activeCleanupPlatforms.has("copilot") && existsSync(resolvedCopilotHome)) {
     return true;
   }
@@ -297,9 +296,6 @@ function isSharedAgentSkillReferencedElsewhere(
   }
   if (!activeCleanupPlatforms.has("copilot")) {
     consumerRoots.push(join(resolvedCopilotHome, "skills"));
-  }
-  if (!activeCleanupPlatforms.has("codex")) {
-    consumerRoots.push(join(resolvedHome, ".codex", "skills"));
   }
   if (!activeCleanupPlatforms.has("gemini")) {
     consumerRoots.push(join(resolvedHome, ".gemini", "skills"));
@@ -390,7 +386,9 @@ export function planPluginInstall(options = {}) {
   const cleanupPaths = [];
   const preservedAgentSkills = new Set();
 
-  // Platform-specific raw skill roots
+  // Platform-specific raw skill roots. Because the Codex IDE extension supports
+  // standalone skills only (not plugins), ~/.codex/skills is only cleaned when
+  // explicit --clean-only or --clean-shared consent is given.
   const scopedRoots = [];
   if (activeCleanupPlatforms.has("copilot")) {
     scopedRoots.push({ kind: "copilot", path: join(resolvedCopilotHome, "skills") });
@@ -398,10 +396,10 @@ export function planPluginInstall(options = {}) {
   if (activeCleanupPlatforms.has("claude")) {
     scopedRoots.push({ kind: "claude", path: join(resolvedHome, ".claude", "skills") });
   }
-  if (activeCleanupPlatforms.has("codex")) {
+  if (activeCleanupPlatforms.has("codex") && (cleanOnly || cleanShared)) {
     scopedRoots.push({ kind: "codex", path: join(resolvedHome, ".codex", "skills") });
   }
-  if (activeCleanupPlatforms.has("copilot") || activeCleanupPlatforms.has("codex")) {
+  if (activeCleanupPlatforms.has("copilot") || (activeCleanupPlatforms.has("codex") && (cleanOnly || cleanShared))) {
     scopedRoots.push({ kind: "agents", path: join(resolvedHome, ".agents", "skills") });
   }
 
