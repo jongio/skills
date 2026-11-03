@@ -163,7 +163,7 @@ copilot plugin install create-canvas-app@jongio-skills
 
 ### Option 2: Cross-Platform Plugin Installer (One-Liner)
 
-Installing raw skills into `~/.agents/skills`, `~/.copilot/skills`, or `~/.claude/skills` (for example with `npx skills add jongio/skills --all -g`) registers un-namespaced slash commands that shadow installed plugins and collide with built-in `/pr` in Copilot CLI. Use the root installer to clean conflicting raw folders and run the native plugin install (`jongio-skills@jongio-skills`) across detected platform CLIs (`copilot`, `claude`, and `gemini`):
+Installing raw skills into `~/.agents/skills`, `~/.copilot/skills`, `~/.claude/skills`, or `~/.codex/skills` (for example with `npx skills add jongio/skills --all -g`) registers un-namespaced slash commands that shadow installed plugins and collide with built-in `/pr` in Copilot CLI. Use the root installer to clean conflicting raw folders and run the native plugin install (`jongio-skills`) across detected platform CLIs (`copilot`, `claude`, `codex`, and `gemini`):
 
 ```powershell
 # Windows (PowerShell one-liner)
