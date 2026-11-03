@@ -16,9 +16,17 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 function withTempHome(fn) {
   const raw = mkdtempSync(path.join(tmpdir(), "install-plugin-test-"));
   const home = realpathSync.native ? realpathSync.native(raw) : realpathSync(raw);
+  const hadCopilotHome = Object.prototype.hasOwnProperty.call(process.env, "COPILOT_HOME");
+  const prevCopilotHome = process.env.COPILOT_HOME;
+  process.env.COPILOT_HOME = path.join(home, ".copilot");
   try {
     return fn(home);
   } finally {
+    if (hadCopilotHome) {
+      process.env.COPILOT_HOME = prevCopilotHome;
+    } else {
+      delete process.env.COPILOT_HOME;
+    }
     rmSync(home, { recursive: true, force: true });
   }
 }
@@ -49,20 +57,39 @@ test("parseInstallPluginArgs rejects unknown flags and unsupported platforms", (
   assert.throws(() => parseInstallPluginArgs(["--platform", "unknown-cli"]), /Unsupported platform/);
 });
 
-test("applyPluginInstall removes conflicting raw skill copies and runs native plugin CLIs for copilot, claude, and gemini", () => {
+test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and removes conflicting raw skill copies", () => {
   withTempHome((home) => {
     const agentsPr = path.join(home, ".agents", "skills", "pr");
     const agentsUnrelated = path.join(home, ".agents", "skills", "microsoft-foundry");
     const copilotGo = path.join(home, ".copilot", "skills", "go");
     const copilotUnrelated = path.join(home, ".copilot", "skills", "azd-app");
     const claudeNobs = path.join(home, ".claude", "skills", "nobs");
+    const claudeHandwrittenPr = path.join(home, ".claude", "skills", "pr");
     const claudeUnrelated = path.join(home, ".claude", "skills", "playwright-cli");
     const staleDirect = path.join(home, ".copilot", "installed-plugins", "_direct", "skills");
 
-    for (const dir of [agentsPr, agentsUnrelated, copilotGo, copilotUnrelated, claudeNobs, claudeUnrelated, staleDirect]) {
+    for (const dir of [
+      agentsPr,
+      agentsUnrelated,
+      copilotGo,
+      copilotUnrelated,
+      claudeNobs,
+      claudeHandwrittenPr,
+      claudeUnrelated,
+      staleDirect,
+    ]) {
       mkdirSync(dir, { recursive: true });
-      writeFileSync(path.join(dir, "SKILL.md"), "---\nname: test\n---\n");
+      writeFileSync(path.join(dir, "SKILL.md"), "---\nname: custom\n---\nHand-authored skill.\n");
     }
+    // Give copilotGo and claudeNobs real jongio/skills provenance via canonical SKILL.md content
+    writeFileSync(
+      path.join(copilotGo, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
+    );
+    writeFileSync(
+      path.join(claudeNobs, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "nobs", "SKILL.md"), "utf8"),
+    );
     writeFileSync(path.join(staleDirect, "plugin.json"), JSON.stringify({ name: "jongio-skills", version: "2.0.0" }));
 
     const lockPath = path.join(home, ".agents", ".skill-lock.json");
@@ -84,6 +111,8 @@ test("applyPluginInstall removes conflicting raw skill copies and runs native pl
 
     const calls = [];
     const mockRunner = (cmd, args) => {
+      // Verify cleanup has not occurred yet while plugin commands are running
+      assert.equal(existsSync(agentsPr), true, "cleanup must be deferred until native plugin commands succeed");
       calls.push([cmd, ...args]);
       return { status: 0, stdout: "ok", stderr: "" };
     };
@@ -108,11 +137,14 @@ test("applyPluginInstall removes conflicting raw skill copies and runs native pl
       commandRunner: mockRunner,
     });
 
-    // Conflicting jongio/skills removed from raw personal folders
+    // Provenance-verified jongio/skills removed from raw personal folders
     assert.equal(existsSync(agentsPr), false, "~/.agents/skills/pr must be removed");
     assert.equal(existsSync(copilotGo), false, "~/.copilot/skills/go must be removed");
     assert.equal(existsSync(claudeNobs), false, "~/.claude/skills/nobs must be removed");
     assert.equal(existsSync(staleDirect), false, "stale _direct/skills plugin copy must be removed");
+
+    // Hand-written skill with colliding directory name but no jongio/skills provenance preserved
+    assert.equal(existsSync(claudeHandwrittenPr), true, "unverified ~/.claude/skills/pr must be preserved");
 
     // Unrelated user skills preserved
     assert.equal(existsSync(agentsUnrelated), true, "unrelated ~/.agents/skills/microsoft-foundry must be preserved");
@@ -125,14 +157,69 @@ test("applyPluginInstall removes conflicting raw skill copies and runs native pl
     assert.equal(Object.hasOwn(updatedLock.skills, "custom-jongio"), false);
     assert.equal(Object.hasOwn(updatedLock.skills, "microsoft-foundry"), true);
 
-    // Native plugin CLIs invoked for copilot, claude, and gemini
+    // Native plugin CLIs invoked for copilot, claude, and gemini (with --consent)
     assert.deepEqual(calls, [
       ["copilot", "plugin", "marketplace", "add", "jongio/skills"],
       ["copilot", "plugin", "install", "jongio-skills@jongio-skills"],
       ["claude", "plugin", "marketplace", "add", "jongio/skills"],
       ["claude", "plugin", "install", "jongio-skills@jongio-skills"],
-      ["gemini", "extensions", "install", "https://github.com/jongio/skills"],
+      ["gemini", "extensions", "install", "https://github.com/jongio/skills", "--consent"],
     ]);
+  });
+});
+
+test("platform-scoped install only cleans targeted platforms and preserves skills on failure or when no CLI is available", () => {
+  withTempHome((home) => {
+    const copilotGo = path.join(home, ".copilot", "skills", "go");
+    const claudeNobs = path.join(home, ".claude", "skills", "nobs");
+    mkdirSync(copilotGo, { recursive: true });
+    mkdirSync(claudeNobs, { recursive: true });
+    writeFileSync(
+      path.join(copilotGo, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
+    );
+    writeFileSync(
+      path.join(claudeNobs, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "nobs", "SKILL.md"), "utf8"),
+    );
+
+    // 1. No CLI detected without --clean-only refuses to delete skills
+    assert.throws(
+      () =>
+        applyPluginInstall({
+          home,
+          repoRoot: REPO_ROOT,
+          availableClis: new Set(),
+        }),
+      /No target platform CLIs detected/,
+    );
+    assert.equal(existsSync(copilotGo), true);
+    assert.equal(existsSync(claudeNobs), true);
+
+    // 2. Failed CLI install leaves existing skills untouched
+    assert.throws(
+      () =>
+        applyPluginInstall({
+          home,
+          repoRoot: REPO_ROOT,
+          platforms: ["copilot"],
+          availableClis: new Set(["copilot", "claude"]),
+          commandRunner: () => ({ status: 1, stdout: "", stderr: "network error" }),
+        }),
+      /Plugin command failed/,
+    );
+    assert.equal(existsSync(copilotGo), true, "failed install must not delete copilot skills");
+
+    // 3. Targeting only --platform copilot cleans copilot but leaves claude untouched
+    applyPluginInstall({
+      home,
+      repoRoot: REPO_ROOT,
+      platforms: ["copilot"],
+      availableClis: new Set(["copilot", "claude"]),
+      commandRunner: () => ({ status: 0, stdout: "ok", stderr: "" }),
+    });
+    assert.equal(existsSync(copilotGo), false, "migrated copilot skill must be cleaned");
+    assert.equal(existsSync(claudeNobs), true, "untargeted claude skill must be preserved");
   });
 });
 
@@ -143,7 +230,10 @@ test("cleanOnly mode removes conflicting raw skills without running plugin comma
     mkdirSync(agentsPr, { recursive: true });
     mkdirSync(foreignGo, { recursive: true });
     writeFileSync(path.join(agentsPr, "SKILL.md"), "---\nname: pr\n---\n");
-    writeFileSync(path.join(foreignGo, "SKILL.md"), "---\nname: go\n---\n");
+    writeFileSync(
+      path.join(foreignGo, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
+    );
     writeFileSync(
       path.join(home, ".agents", ".skill-lock.json"),
       JSON.stringify({

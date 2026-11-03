@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -42,12 +44,22 @@ export const PLATFORM_TARGETS = Object.freeze([
     cli: "gemini",
     label: "Gemini CLI",
     commands: (repoSlug) => [
-      ["gemini", ["extensions", "install", `https://github.com/${repoSlug}`]],
+      ["gemini", ["extensions", "install", `https://github.com/${repoSlug}`, "--consent"]],
     ],
   },
 ]);
 
 const SUPPORTED_PLATFORMS = new Set(PLATFORM_TARGETS.map((target) => target.id));
+
+const OTHER_CONSUMER_SKILL_DIRS = Object.freeze([
+  [".codex", "skills"],
+  [".cursor", "skills"],
+  [".codeium", "windsurf", "skills"],
+  [".cline", "skills"],
+  [".roo", "skills"],
+  [".config", "goose", "skills"],
+  [".config", "opencode", "skills"],
+]);
 
 function atomicWriteText(filePath, content) {
   mkdirSync(dirname(filePath), { recursive: true });
@@ -159,76 +171,100 @@ function defaultCommandRunner(cmd, args) {
   };
 }
 
-export function planPluginInstall({
-  home = homedir(),
-  copilotHome = process.env.COPILOT_HOME || join(home, ".copilot"),
-  repoRoot = REPO_ROOT,
-  repoSlug = REPO_SLUG,
-  platforms = null,
-  cleanOnly = false,
-  availableClis = null,
-} = {}) {
-  const resolvedHome = resolve(home);
-  const resolvedCopilotHome = resolve(copilotHome);
-  const canonicalSkills = discoverCanonicalSkills(repoRoot);
+function normalizeLf(text) {
+  return String(text ?? "").replaceAll("\r\n", "\n").trim();
+}
+
+function hasPositiveJongioProvenance({
+  candidateDir,
+  skillName,
+  resolvedRepoRoot,
+  canonicalSet,
+  lockOwnedNames,
+  foreignOwnedNames,
+}) {
+  if (foreignOwnedNames.has(skillName)) return false;
+  if (lockOwnedNames.has(skillName)) return true;
+  if (!canonicalSet.has(skillName)) return false;
+
+  const candidateSkillMd = join(candidateDir, "SKILL.md");
+  const canonicalSkillMd = join(resolvedRepoRoot, "skills", skillName, "SKILL.md");
+  if (!existsSync(candidateSkillMd) || !existsSync(canonicalSkillMd)) return false;
+
+  try {
+    const candidateContent = normalizeLf(readFileSync(candidateSkillMd, "utf8"));
+    const canonicalContent = normalizeLf(readFileSync(canonicalSkillMd, "utf8"));
+    if (candidateContent === canonicalContent) return true;
+
+    const candidateLicense = join(candidateDir, "LICENSE");
+    if (existsSync(candidateLicense)) {
+      const licenseText = readFileSync(candidateLicense, "utf8");
+      if (/Jon Gallant/i.test(licenseText)) return true;
+    }
+
+    if (candidateContent.includes("jongio/skills")) return true;
+  } catch {
+    return false;
+  }
+
+  return false;
+}
+
+function isSharedAgentSkillReferencedElsewhere(agentSkillPath, resolvedHome, activeCleanupPlatforms) {
+  let targetRealPath;
+  try {
+    targetRealPath = realpathSync(agentSkillPath);
+  } catch {
+    return false;
+  }
+
+  const consumerRoots = [...OTHER_CONSUMER_SKILL_DIRS.map((segments) => join(resolvedHome, ...segments))];
+  if (!activeCleanupPlatforms.has("claude")) {
+    consumerRoots.push(join(resolvedHome, ".claude", "skills"));
+  }
+  if (!activeCleanupPlatforms.has("copilot")) {
+    consumerRoots.push(join(resolvedHome, ".copilot", "skills"));
+  }
+
+  const skillName = dirname(agentSkillPath) ? agentSkillPath.slice(dirname(agentSkillPath).length + 1) : "";
+  for (const root of consumerRoots) {
+    const candidate = join(root, skillName);
+    try {
+      const stat = lstatSync(candidate);
+      if (stat.isSymbolicLink() && realpathSync(candidate) === targetRealPath) {
+        return true;
+      }
+    } catch {
+      // Ignore missing or broken links
+    }
+  }
+  return false;
+}
+
+export function planPluginInstall(options = {}) {
+  const {
+    repoRoot = REPO_ROOT,
+    repoSlug = REPO_SLUG,
+    platforms = null,
+    cleanOnly = false,
+    availableClis = null,
+  } = options;
+
+  const explicitHome = options.home !== undefined;
+  const resolvedHome = resolve(options.home ?? homedir());
+  const resolvedCopilotHome = resolve(
+    options.copilotHome ??
+      (explicitHome
+        ? join(resolvedHome, ".copilot")
+        : process.env.COPILOT_HOME || join(resolvedHome, ".copilot")),
+  );
+  const resolvedRepoRoot = resolve(repoRoot);
+  const canonicalSkills = discoverCanonicalSkills(resolvedRepoRoot);
   const canonicalSet = new Set(canonicalSkills);
   const platformFilter = platforms && platforms.length > 0 ? new Set(platforms) : null;
   const detectedClis = availableClis ?? detectAvailableClis();
 
-  // 1. Identify raw global skill folders that shadow installed plugins or collide with built-in /pr
-  const rawRoots = [
-    join(resolvedHome, ".agents", "skills"),
-    join(resolvedCopilotHome, "skills"),
-    join(resolvedHome, ".claude", "skills"),
-  ];
-  const lockPath = join(resolvedHome, ".agents", ".skill-lock.json");
-  const lockOwnedNames = new Set();
-  const foreignOwnedNames = new Set();
-  const lockPrunedKeys = [];
-  if (existsSync(lockPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(lockPath, "utf8"));
-      if (parsed && typeof parsed.skills === "object" && parsed.skills !== null) {
-        for (const [key, entry] of Object.entries(parsed.skills)) {
-          if (entry?.source === repoSlug || (canonicalSet.has(key) && !entry?.source)) {
-            lockOwnedNames.add(key);
-            lockPrunedKeys.push(key);
-          } else if (entry?.source && entry.source !== repoSlug) {
-            foreignOwnedNames.add(key);
-          }
-        }
-      }
-    } catch {
-      // Ignore unreadable lockfile during scan
-    }
-  }
-
-  const cleanupPaths = [];
-  for (const rawRoot of rawRoots) {
-    if (!existsSync(rawRoot)) continue;
-    for (const entry of readdirSync(rawRoot, { withFileTypes: true })) {
-      if (foreignOwnedNames.has(entry.name)) continue;
-      if (canonicalSet.has(entry.name) || lockOwnedNames.has(entry.name)) {
-        cleanupPaths.push(join(rawRoot, entry.name));
-      }
-    }
-  }
-
-  // Also check for a stale _direct/skills copy of jongio-skills in Copilot CLI
-  const staleDirectPlugin = join(resolvedCopilotHome, "installed-plugins", "_direct", "skills");
-  const staleDirectManifest = join(staleDirectPlugin, "plugin.json");
-  if (existsSync(staleDirectManifest)) {
-    try {
-      const manifest = JSON.parse(readFileSync(staleDirectManifest, "utf8"));
-      if (manifest?.name === "jongio-skills") {
-        cleanupPaths.push(staleDirectPlugin);
-      }
-    } catch {
-      // Ignore unreadable manifest
-    }
-  }
-
-  // 2. Plan native plugin installs for each detected platform CLI
+  // 1. Plan native plugin installs for each detected & selected platform CLI first
   const pluginActions = [];
   if (!cleanOnly) {
     for (const target of PLATFORM_TARGETS) {
@@ -242,11 +278,103 @@ export function planPluginInstall({
     }
   }
 
+  // Only clean raw skill folders for platforms that are actively being migrated (or selected in --clean-only)
+  const activeCleanupPlatforms = cleanOnly
+    ? platformFilter ?? new Set(SUPPORTED_PLATFORMS)
+    : new Set(pluginActions.map((action) => action.platform));
+
+  const lockPath = join(resolvedHome, ".agents", ".skill-lock.json");
+  const lockOwnedNames = new Set();
+  const foreignOwnedNames = new Set();
+  if (existsSync(lockPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(lockPath, "utf8"));
+      if (parsed && typeof parsed.skills === "object" && parsed.skills !== null) {
+        for (const [key, entry] of Object.entries(parsed.skills)) {
+          const isRepoMatch =
+            entry?.source === repoSlug ||
+            (typeof entry?.sourceUrl === "string" && entry.sourceUrl.includes(`github.com/${repoSlug}`));
+          if (isRepoMatch) {
+            lockOwnedNames.add(key);
+          } else if (entry?.source && entry.source !== repoSlug) {
+            foreignOwnedNames.add(key);
+          }
+        }
+      }
+    } catch {
+      // Unreadable lockfile does not grant deletion provenance
+    }
+  }
+
+  const cleanupPaths = [];
+  const preservedAgentSkills = new Set();
+
+  // Platform-specific raw skill roots
+  const scopedRoots = [];
+  if (activeCleanupPlatforms.has("copilot")) {
+    scopedRoots.push({ kind: "copilot", path: join(resolvedCopilotHome, "skills") });
+  }
+  if (activeCleanupPlatforms.has("claude")) {
+    scopedRoots.push({ kind: "claude", path: join(resolvedHome, ".claude", "skills") });
+  }
+  if (activeCleanupPlatforms.has("copilot")) {
+    scopedRoots.push({ kind: "agents", path: join(resolvedHome, ".agents", "skills") });
+  }
+
+  for (const { kind, path: rawRoot } of scopedRoots) {
+    if (!existsSync(rawRoot)) continue;
+    for (const entry of readdirSync(rawRoot, { withFileTypes: true })) {
+      const candidatePath = join(rawRoot, entry.name);
+      if (
+        !hasPositiveJongioProvenance({
+          candidateDir: candidatePath,
+          skillName: entry.name,
+          resolvedRepoRoot,
+          canonicalSet,
+          lockOwnedNames,
+          foreignOwnedNames,
+        })
+      ) {
+        continue;
+      }
+      if (
+        kind === "agents" &&
+        isSharedAgentSkillReferencedElsewhere(candidatePath, resolvedHome, activeCleanupPlatforms)
+      ) {
+        preservedAgentSkills.add(entry.name);
+        continue;
+      }
+      cleanupPaths.push(candidatePath);
+    }
+  }
+
+  // Only prune lockfile entries when .agents/skills is in scope and the entry is not still needed
+  const lockPrunedKeys = activeCleanupPlatforms.has("copilot")
+    ? [...lockOwnedNames].filter((key) => !preservedAgentSkills.has(key))
+    : [];
+
+  // Also check for a stale _direct/skills copy of jongio-skills in Copilot CLI when copilot is in scope
+  if (activeCleanupPlatforms.has("copilot")) {
+    const staleDirectPlugin = join(resolvedCopilotHome, "installed-plugins", "_direct", "skills");
+    const staleDirectManifest = join(staleDirectPlugin, "plugin.json");
+    if (existsSync(staleDirectManifest)) {
+      try {
+        const manifest = JSON.parse(readFileSync(staleDirectManifest, "utf8"));
+        if (manifest?.name === "jongio-skills") {
+          cleanupPaths.push(staleDirectPlugin);
+        }
+      } catch {
+        // Ignore unreadable manifest
+      }
+    }
+  }
+
   return {
     home: resolvedHome,
     copilotHome: resolvedCopilotHome,
-    repoRoot: resolve(repoRoot),
+    repoRoot: resolvedRepoRoot,
     repoSlug,
+    cleanOnly,
     cleanupPaths,
     lockPath: lockPrunedKeys.length > 0 ? lockPath : null,
     lockPrunedKeys,
@@ -268,24 +396,13 @@ export function applyPluginInstall({
     };
   }
 
-  for (const targetPath of plan.cleanupPaths) {
-    rmSync(targetPath, { recursive: true, force: true });
+  if (!plan.cleanOnly && plan.pluginActions.length === 0) {
+    throw new Error(
+      "No target platform CLIs detected or selected; install copilot, claude, or gemini CLI first, or pass --clean-only to remove conflicting raw skills.",
+    );
   }
 
-  if (plan.lockPath && plan.lockPrunedKeys.length > 0 && existsSync(plan.lockPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(plan.lockPath, "utf8"));
-      if (parsed && typeof parsed.skills === "object" && parsed.skills !== null) {
-        for (const key of plan.lockPrunedKeys) {
-          delete parsed.skills[key];
-        }
-        atomicWriteText(plan.lockPath, `${JSON.stringify(parsed, null, 2)}\n`);
-      }
-    } catch {
-      // Best-effort lockfile cleanup
-    }
-  }
-
+  // Run native plugin installations FIRST so a failed install never leaves existing skills deleted
   const commandResults = [];
   for (const action of plan.pluginActions) {
     for (const [cmd, args] of action.commands) {
@@ -305,6 +422,25 @@ export function applyPluginInstall({
     }
   }
 
+  // Only clean conflicting raw skill paths and lock entries after native plugin installs succeed
+  for (const targetPath of plan.cleanupPaths) {
+    rmSync(targetPath, { recursive: true, force: true });
+  }
+
+  if (plan.lockPath && plan.lockPrunedKeys.length > 0 && existsSync(plan.lockPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(plan.lockPath, "utf8"));
+      if (parsed && typeof parsed.skills === "object" && parsed.skills !== null) {
+        for (const key of plan.lockPrunedKeys) {
+          delete parsed.skills[key];
+        }
+        atomicWriteText(plan.lockPath, `${JSON.stringify(parsed, null, 2)}\n`);
+      }
+    } catch {
+      // Best-effort lockfile cleanup
+    }
+  }
+
   return {
     dryRun: false,
     ...plan,
@@ -316,13 +452,6 @@ function formatSummary(result) {
   const modeLabel = result.dryRun ? "[DRY RUN] " : "";
   const lines = [`${modeLabel}jongio/skills plugin installer`];
 
-  if (result.cleanupPaths.length > 0) {
-    lines.push(`\nRemoved conflicting raw skill paths (${result.cleanupPaths.length}):`);
-    for (const item of result.cleanupPaths) lines.push(`  - ${item}`);
-  } else {
-    lines.push("\nNo conflicting raw skill paths in ~/.agents/skills, ~/.copilot/skills, or ~/.claude/skills.");
-  }
-
   if (result.pluginActions.length > 0) {
     lines.push("\nPlatform plugin installs:");
     for (const action of result.pluginActions) {
@@ -330,6 +459,13 @@ function formatSummary(result) {
     }
   } else {
     lines.push("\nNo target platform CLIs selected or detected.");
+  }
+
+  if (result.cleanupPaths.length > 0) {
+    lines.push(`\nRemoved conflicting raw skill paths (${result.cleanupPaths.length}):`);
+    for (const item of result.cleanupPaths) lines.push(`  - ${item}`);
+  } else {
+    lines.push("\nNo conflicting raw skill paths in ~/.agents/skills, ~/.copilot/skills, or ~/.claude/skills.");
   }
 
   return lines.join("\n");
@@ -342,8 +478,8 @@ async function main() {
       [
         "Usage: node scripts/install-plugin.mjs [options]",
         "",
-        "Cleans conflicting raw global skill copies (~/.agents/skills, ~/.copilot/skills, ~/.claude/skills)",
-        "and installs the jongio-skills plugin across detected coding agent CLIs (copilot, claude, gemini).",
+        "Installs the jongio-skills plugin across detected coding agent CLIs (copilot, claude, gemini)",
+        "and cleans conflicting raw global skill copies (~/.agents/skills, ~/.copilot/skills, ~/.claude/skills).",
         "",
         "Options:",
         "  --platform <id[,...]> Target specific platform CLI(s): copilot, claude, gemini (alias: --agent)",
