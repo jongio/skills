@@ -40,6 +40,15 @@ export const PLATFORM_TARGETS = Object.freeze([
     ],
   },
   {
+    id: "codex",
+    cli: "codex",
+    label: "Codex CLI",
+    commands: (repoSlug) => [
+      ["codex", ["plugin", "marketplace", "add", repoSlug]],
+      ["codex", ["plugin", "add", "jongio-skills"]],
+    ],
+  },
+  {
     id: "gemini",
     cli: "gemini",
     label: "Gemini CLI",
@@ -52,14 +61,13 @@ export const PLATFORM_TARGETS = Object.freeze([
 const SUPPORTED_PLATFORMS = new Set(PLATFORM_TARGETS.map((target) => target.id));
 
 const DIRECT_SHARED_AGENTS_CONSUMERS = Object.freeze([
-  [".codex"],
   [".cline"],
   [".amp"],
   [".config", "amp"],
+  [".pi"],
 ]);
 
 const OTHER_CONSUMER_SKILL_DIRS = Object.freeze([
-  [".codex", "skills"],
   [".cursor", "skills"],
   [".codeium", "windsurf", "skills"],
   [".cline", "skills"],
@@ -171,6 +179,7 @@ export function detectAvailableClis(candidates = PLATFORM_TARGETS.map((target) =
 function defaultCommandRunner(cmd, args) {
   const result = spawnSync(cmd, args, {
     encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
     shell: process.platform === "win32",
   });
@@ -255,13 +264,20 @@ function hasPositiveJongioProvenance({
 function isSharedAgentSkillReferencedElsewhere(
   agentSkillPath,
   resolvedHome,
+  resolvedCopilotHome,
   activeCleanupPlatforms,
   cleanShared,
 ) {
   if (cleanShared) return false;
 
-  // Preserve ~/.agents/skills entries when a direct shared-root consumer (such as Codex or Cline)
-  // is present on the machine unless explicit --clean-shared / --clean-only consent is given.
+  // Preserve ~/.agents/skills entries when an unmigrated direct shared-root consumer
+  // (such as Codex, Copilot, Cline, Amp, or Pi) is present on the machine.
+  if (!activeCleanupPlatforms.has("codex") && existsSync(join(resolvedHome, ".codex"))) {
+    return true;
+  }
+  if (!activeCleanupPlatforms.has("copilot") && existsSync(resolvedCopilotHome)) {
+    return true;
+  }
   for (const segments of DIRECT_SHARED_AGENTS_CONSUMERS) {
     if (existsSync(join(resolvedHome, ...segments))) {
       return true;
@@ -280,7 +296,10 @@ function isSharedAgentSkillReferencedElsewhere(
     consumerRoots.push(join(resolvedHome, ".claude", "skills"));
   }
   if (!activeCleanupPlatforms.has("copilot")) {
-    consumerRoots.push(join(resolvedHome, ".copilot", "skills"));
+    consumerRoots.push(join(resolvedCopilotHome, "skills"));
+  }
+  if (!activeCleanupPlatforms.has("codex")) {
+    consumerRoots.push(join(resolvedHome, ".codex", "skills"));
   }
   if (!activeCleanupPlatforms.has("gemini")) {
     consumerRoots.push(join(resolvedHome, ".gemini", "skills"));
@@ -379,7 +398,10 @@ export function planPluginInstall(options = {}) {
   if (activeCleanupPlatforms.has("claude")) {
     scopedRoots.push({ kind: "claude", path: join(resolvedHome, ".claude", "skills") });
   }
-  if (activeCleanupPlatforms.has("copilot")) {
+  if (activeCleanupPlatforms.has("codex")) {
+    scopedRoots.push({ kind: "codex", path: join(resolvedHome, ".codex", "skills") });
+  }
+  if (activeCleanupPlatforms.has("copilot") || activeCleanupPlatforms.has("codex")) {
     scopedRoots.push({ kind: "agents", path: join(resolvedHome, ".agents", "skills") });
   }
 
@@ -431,6 +453,7 @@ export function planPluginInstall(options = {}) {
         isSharedAgentSkillReferencedElsewhere(
           join(agentsSkillsDir, entry.name),
           resolvedHome,
+          resolvedCopilotHome,
           activeCleanupPlatforms,
           cleanOnly || cleanShared,
         )
@@ -448,7 +471,8 @@ export function planPluginInstall(options = {}) {
   // and the shared skill directory is either scheduled for removal or already absent.
   const cleanupPathSet = new Set(cleanupPaths);
   const lockPrunedKeys =
-    activeCleanupPlatforms.has("copilot") && !isLeafSymlink(agentsSkillsDir)
+    (activeCleanupPlatforms.has("copilot") || activeCleanupPlatforms.has("codex")) &&
+    !isLeafSymlink(agentsSkillsDir)
       ? [...lockOwnedNames].filter((key) => {
           if (preservedAgentSkills.has(key)) return false;
           const sharedSkillPath = join(agentsSkillsDir, key);
@@ -501,7 +525,7 @@ export function applyPluginInstall({
 
   if (!plan.cleanOnly && plan.pluginActions.length === 0) {
     throw new Error(
-      "No target platform CLIs detected or selected; install copilot, claude, or gemini CLI first, or pass --clean-only to remove conflicting raw skills.",
+      "No target platform CLIs detected or selected; install copilot, claude, codex, or gemini CLI first, or pass --clean-only to remove conflicting raw skills.",
     );
   }
 
@@ -568,7 +592,9 @@ function formatSummary(result) {
     lines.push(`\nRemoved conflicting raw skill paths (${result.cleanupPaths.length}):`);
     for (const item of result.cleanupPaths) lines.push(`  - ${item}`);
   } else {
-    lines.push("\nNo conflicting raw skill paths in ~/.agents/skills, ~/.copilot/skills, or ~/.claude/skills.");
+    lines.push(
+      "\nNo conflicting raw skill paths in ~/.agents/skills, ~/.copilot/skills, ~/.claude/skills, or ~/.codex/skills.",
+    );
   }
 
   return lines.join("\n");
@@ -581,12 +607,13 @@ async function main() {
       [
         "Usage: node scripts/install-plugin.mjs [options]",
         "",
-        "Installs the jongio-skills plugin across detected coding agent CLIs (copilot, claude, gemini)",
-        "and cleans conflicting raw global skill copies (~/.agents/skills, ~/.copilot/skills, ~/.claude/skills).",
+        "Installs the jongio-skills plugin across detected coding agent CLIs (copilot, claude, codex, gemini)",
+        "and cleans conflicting raw global skill copies (~/.agents/skills, ~/.copilot/skills, ~/.claude/skills, ~/.codex/skills).",
         "",
         "Options:",
-        "  --platform <id[,...]> Target specific platform CLI(s): copilot, claude, gemini (alias: --agent)",
+        "  --platform <id[,...]> Target specific platform CLI(s): copilot, claude, codex, gemini (alias: --agent)",
         "  --clean-only          Only remove conflicting raw global skill copies",
+        "  --clean-shared        Allow removing shared ~/.agents/skills entries even if unmigrated consumers exist",
         "  --dry-run             Preview planned cleanup and native CLI plugin commands without executing",
         "  --json                Emit machine-readable JSON output",
         "  -h, --help            Show this help message",

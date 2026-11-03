@@ -2,6 +2,7 @@
 param(
 	[string[]]$Platform,
 	[switch]$CleanOnly,
+	[switch]$CleanShared,
 	[switch]$DryRun,
 	[switch]$Json,
 	[switch]$Help
@@ -16,6 +17,7 @@ if ($Platform) {
 	foreach ($p in $Platform) { $forwardArgs += @('--platform', $p) }
 }
 if ($CleanOnly) { $forwardArgs += '--clean-only' }
+if ($CleanShared) { $forwardArgs += '--clean-shared' }
 if ($DryRun) { $forwardArgs += '--dry-run' }
 if ($Json) { $forwardArgs += '--json' }
 if ($Help) { $forwardArgs += '--help' }

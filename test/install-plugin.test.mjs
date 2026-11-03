@@ -43,13 +43,13 @@ test("parseInstallPluginArgs parses flags and repeatable platforms", () => {
   const parsed = parseInstallPluginArgs([
     "--dry-run",
     "--platform",
-    "copilot,claude",
+    "copilot,claude,codex",
     "--agent=gemini",
     "--json",
   ]);
   assert.equal(parsed.dryRun, true);
   assert.equal(parsed.json, true);
-  assert.deepEqual(parsed.platforms, ["copilot", "claude", "gemini"]);
+  assert.deepEqual(parsed.platforms, ["copilot", "claude", "codex", "gemini"]);
 });
 
 test("parseInstallPluginArgs rejects unknown flags and unsupported platforms", () => {
@@ -66,6 +66,8 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     const claudeNobs = path.join(home, ".claude", "skills", "nobs");
     const claudeHandwrittenPr = path.join(home, ".claude", "skills", "pr");
     const claudeUnrelated = path.join(home, ".claude", "skills", "playwright-cli");
+    const codexRetro = path.join(home, ".codex", "skills", "retro");
+    const codexUnrelated = path.join(home, ".codex", "skills", "custom-codex");
     const staleDirect = path.join(home, ".copilot", "installed-plugins", "_direct", "skills");
 
     for (const dir of [
@@ -76,6 +78,8 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
       claudeNobs,
       claudeHandwrittenPr,
       claudeUnrelated,
+      codexRetro,
+      codexUnrelated,
       staleDirect,
     ]) {
       mkdirSync(dir, { recursive: true });
@@ -84,7 +88,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
         "---\nname: custom\n---\nHand-authored skill mentioning https://github.com/jongio/skills.\n",
       );
     }
-    // Give copilotGo and claudeNobs real jongio/skills provenance via canonical SKILL.md content
+    // Give copilotGo, claudeNobs, and codexRetro real jongio/skills provenance via canonical SKILL.md content
     writeFileSync(
       path.join(copilotGo, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
@@ -92,6 +96,10 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     writeFileSync(
       path.join(claudeNobs, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "nobs", "SKILL.md"), "utf8"),
+    );
+    writeFileSync(
+      path.join(codexRetro, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "retro", "SKILL.md"), "utf8"),
     );
     writeFileSync(path.join(staleDirect, "plugin.json"), JSON.stringify({ name: "jongio-skills", version: "2.0.0" }));
 
@@ -123,7 +131,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     const dryResult = applyPluginInstall({
       home,
       repoRoot: REPO_ROOT,
-      availableClis: new Set(["copilot", "claude", "gemini"]),
+      availableClis: new Set(["copilot", "claude", "codex", "gemini"]),
       dryRun: true,
       commandRunner: mockRunner,
     });
@@ -135,7 +143,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     applyPluginInstall({
       home,
       repoRoot: REPO_ROOT,
-      availableClis: new Set(["copilot", "claude", "gemini"]),
+      availableClis: new Set(["copilot", "claude", "codex", "gemini"]),
       dryRun: false,
       commandRunner: mockRunner,
     });
@@ -144,6 +152,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     assert.equal(existsSync(agentsPr), false, "~/.agents/skills/pr must be removed");
     assert.equal(existsSync(copilotGo), false, "~/.copilot/skills/go must be removed");
     assert.equal(existsSync(claudeNobs), false, "~/.claude/skills/nobs must be removed");
+    assert.equal(existsSync(codexRetro), false, "~/.codex/skills/retro must be removed");
     assert.equal(existsSync(staleDirect), false, "stale _direct/skills plugin copy must be removed");
 
     // Hand-written skill with colliding directory name (even if it mentions jongio/skills) preserved
@@ -153,6 +162,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     assert.equal(existsSync(agentsUnrelated), true, "unrelated ~/.agents/skills/microsoft-foundry must be preserved");
     assert.equal(existsSync(copilotUnrelated), true, "unrelated ~/.copilot/skills/azd-app must be preserved");
     assert.equal(existsSync(claudeUnrelated), true, "unrelated ~/.claude/skills/playwright-cli must be preserved");
+    assert.equal(existsSync(codexUnrelated), true, "unrelated ~/.codex/skills/custom-codex must be preserved");
 
     // Lockfile cleaned of jongio/skills entries while keeping microsoft-foundry
     const updatedLock = JSON.parse(readFileSync(lockPath, "utf8"));
@@ -160,12 +170,14 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     assert.equal(Object.hasOwn(updatedLock.skills, "custom-jongio"), false);
     assert.equal(Object.hasOwn(updatedLock.skills, "microsoft-foundry"), true);
 
-    // Native plugin CLIs invoked for copilot, claude, and gemini (with --consent)
+    // Native plugin CLIs invoked for copilot, claude, codex, and gemini (with --consent)
     assert.deepEqual(calls, [
       ["copilot", "plugin", "marketplace", "add", "jongio/skills"],
       ["copilot", "plugin", "install", "jongio-skills@jongio-skills"],
       ["claude", "plugin", "marketplace", "add", "jongio/skills"],
       ["claude", "plugin", "install", "jongio-skills@jongio-skills"],
+      ["codex", "plugin", "marketplace", "add", "jongio/skills"],
+      ["codex", "plugin", "add", "jongio-skills"],
       ["gemini", "extensions", "install", "https://github.com/jongio/skills", "--consent"],
     ]);
   });
@@ -318,6 +330,19 @@ test("preserves ~/.agents/skills when a direct shared consumer (~/.codex or ~/.c
     applyPluginInstall({
       home,
       repoRoot: REPO_ROOT,
+      platforms: ["codex"],
+      availableClis: new Set(["copilot", "codex"]),
+      commandRunner: () => ({ status: 0, stdout: "ok", stderr: "" }),
+    });
+    assert.equal(
+      existsSync(agentsPr),
+      true,
+      "shared ~/.agents/skills/pr must be preserved during codex-only migration when ~/.copilot exists",
+    );
+
+    applyPluginInstall({
+      home,
+      repoRoot: REPO_ROOT,
       platforms: ["copilot"],
       cleanShared: true,
       availableClis: new Set(["copilot"]),
@@ -333,5 +358,5 @@ test("wrapper scripts exist and forward to scripts/install-plugin.mjs", () => {
   const sh = readFileSync(path.join(REPO_ROOT, "install.sh"), "utf8");
   assert.match(ps1, /install-plugin\.mjs/);
   assert.match(sh, /install-plugin\.mjs/);
-  assert.equal(PLATFORM_TARGETS.length, 3);
+  assert.equal(PLATFORM_TARGETS.length, 4);
 });
