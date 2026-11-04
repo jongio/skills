@@ -264,50 +264,99 @@ export function isErroredCopilotReview(review) {
   return Boolean(review && typeof review.body === "string" && ERRORED_COPILOT_REVIEW_RE.test(review.body));
 }
 
-function extractBodyConcerns(body, fallbackHeadline, resolvedCommentIds = new Set()) {
-  const bodyWithoutResolvedDetails = body.replace(
-    /<details[^>]*>\s*<summary>\s*<strong>\s*\d+\s+resolved since last review\s*<\/strong>\s*<\/summary>[\s\S]*?<\/details>/gi,
+function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
+  const concerns = [];
+  const source = body.replace(
+    /<summary>\s*<strong>\s*\d+\s+(?:open issues?|resolved since last review)\s*<\/strong>\s*<\/summary>/gi,
     ""
   );
-  const concerns = [];
-  let hadInlineLinks = false;
-  for (const match of bodyWithoutResolvedDetails.matchAll(
-    /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
-  )) {
-    hadInlineLinks = true;
-    const title = match[1].trim();
-    const commentId = Number.parseInt(match[2], 10);
-    if (resolvedCommentIds.has(commentId)) {
-      continue;
+  const cards = [];
+  const parents = [];
+  const residual = [];
+  let activeCard = null;
+  let headings = [];
+  let cursor = 0;
+  const context = () => headings.filter(Boolean).join("\n");
+  const appendResidual = text => {
+    const previous = residual.at(-1);
+    if (previous?.context === context()) previous.parts.push(text);
+    else residual.push({ context: context(), parts: [text] });
+  };
+  const append = text => activeCard ? activeCard.evidence.push(text) : appendResidual(text);
+  const boundaries = /<details\b[^>]*>|<\/details\s*>|<summary>[\s\S]*?<\/summary>|^#{1,6}\s+.+$|^[ \t]*[-*]\s+[^\n]*#discussion_r\d+[^\n]*/gim;
+  for (const match of source.matchAll(boundaries)) {
+    append(source.slice(cursor, match.index));
+    const token = match[0];
+    if (/^<details\b/i.test(token)) {
+      parents.push({ card: activeCard, headings: [...headings] });
+      activeCard = null;
+    } else if (/^<\/details/i.test(token)) {
+      const parent = parents.pop();
+      activeCard = parent?.card ?? null;
+      headings = parent?.headings ?? headings;
+    } else if (/^<summary>/i.test(token)) {
+      const title = token.match(/<\/picture>\s*([^<\n]+)/i)?.[1]?.trim();
+      activeCard = title ? { text: title, evidence: [], context: context(), bounded: parents.length > 0 } : null;
+      if (activeCard) cards.push(activeCard);
+      else appendResidual(token);
+    } else if (/^#/.test(token) && activeCard?.bounded) {
+      activeCard.evidence.push(token);
+    } else {
+      activeCard = null;
+      if (/^#/.test(token)) {
+        const level = token.match(/^#+/)[0].length;
+        headings = headings.slice(0, level - 1);
+        if (!/Needs a closer look|Changes recommended|No open issues|Looks good|Ready to merge/i.test(token)) {
+          headings[level - 1] = token.trim();
+        }
+      } else {
+        appendResidual(token);
+      }
     }
-    if (title && !concerns.includes(title)) {
-      concerns.push(title);
-    }
+    cursor = match.index + token.length;
   }
-  for (const match of bodyWithoutResolvedDetails.matchAll(
-    /<summary>[\s\S]*?<\/picture>\s*([^<\n]+)<\/summary>/gi
-  )) {
-    const title = match[1].trim();
-    if (title && !concerns.includes(title)) {
-      concerns.push(title);
-    }
+  append(source.slice(cursor));
+  for (const card of cards) {
+    concerns.push({
+      text: card.text,
+      evidence: card.evidence.join("").replace(/\s+/g, " ").trim(),
+      context: card.context,
+      key: `summary:${card.text}:${card.evidence.join("").replace(/\s+/g, " ").trim()}`,
+    });
   }
-  const residualProse = bodyWithoutResolvedDetails
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<details[^>]*>\s*<summary>\s*<strong>\s*\d+\s+open issues?\s*<\/strong>\s*<\/summary>[\s\S]*?<\/details>/gi, "")
-    .replace(/^\s*-\s*(?:<picture>[\s\S]*?<\/picture>\s*)?\[[^\]]+\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\).*$/gm, "")
-    .replace(/^###\s+.+$/gm, "")
-    .replace(/\*\*No open issues\*\*\s*(?:🎉)?/gi, "")
-    .replace(/<sub>[\s\S]*?<\/sub>/gi, "")
-    .trim();
+  for (const section of residual) {
+    const bodyWithoutStatusSummaries = section.parts.join("");
+    for (const match of bodyWithoutStatusSummaries.matchAll(
+      /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
+    )) {
+      const title = match[1].trim();
+      const commentId = Number.parseInt(match[2], 10);
+      if (resolvedCommentIds.has(commentId)) {
+        continue;
+      }
+      const key = `inline:${commentId}:${title.replace(/\s+/g, " ")}`;
+      if (title && !concerns.some(concern => concern.key === key && concern.context === section.context)) {
+        concerns.push({ text: title, evidence: title, context: section.context, key });
+      }
+    }
+    const residualProse = bodyWithoutStatusSummaries
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<\/?details[^>]*>/gi, "")
+      .replace(/^\s*-\s*(?:<picture>[\s\S]*?<\/picture>\s*)?\[[^\]]+\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\)[ \t]*/gm, "")
+      .replace(/^#{1,6}\s+.+$/gm, "")
+      .replace(/\*\*No open issues\*\*\s*(?:🎉)?/gi, "")
+      .replace(/<sub>[\s\S]*?<\/sub>/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
-  if (
-    (residualProse.length > 0 || (concerns.length === 0 && !hadInlineLinks)) &&
-    !concerns.includes(fallbackHeadline)
-  ) {
-    concerns.push(fallbackHeadline);
+    if (residualProse.length > 0) {
+      concerns.push({ text: residualProse, evidence: residualProse, context: section.context, key: `prose:${residualProse}` });
+    }
   }
-  return concerns;
+  return concerns.map(concern => {
+    const key = JSON.stringify([concern.context, concern.key]);
+    return { ...concern, key, id: `concern:${createHash("sha256").update(key).digest("hex").slice(0, 16)}` };
+  });
 }
 
 export function extractBodyOnlyFindings(
@@ -317,6 +366,7 @@ export function extractBodyOnlyFindings(
   resolvedCommentIds = new Set()
 ) {
   const findings = [];
+  const entries = [];
   const validReviews = (reviews || []).filter(
     (r) =>
       r &&
@@ -354,7 +404,10 @@ export function extractBodyOnlyFindings(
     const reviewSubmittedMs = review.submittedAt ? Date.parse(review.submittedAt) : NaN;
     const headlineMatch = body.match(/^###\s+.+$/m);
     const headline = headlineMatch ? headlineMatch[0].trim() : review.state;
-    const concerns = extractBodyConcerns(body, headline, resolvedCommentIds);
+    const concerns = extractBodyConcerns(body, resolvedCommentIds);
+    if (concerns.length === 0 && isActiveChangesRequested) {
+      concerns.push({ text: headline, key: `decision:${reviewId}` });
+    }
     if (concerns.length === 0 && !isActiveChangesRequested) {
       continue;
     }
@@ -363,37 +416,45 @@ export function extractBodyOnlyFindings(
       if (typeof c?.body !== "string" || !new RegExp(`\\b${reviewId}\\b`).test(c.body)) {
         return false;
       }
-      const commentCreatedMs = c.createdAt ? Date.parse(c.createdAt) : NaN;
+      const commentCreatedMs = Date.parse(c.updatedAt || c.createdAt || "");
       if (Number.isFinite(reviewSubmittedMs) && Number.isFinite(commentCreatedMs)) {
         return commentCreatedMs >= reviewSubmittedMs;
       }
       return true;
     });
 
-    const unsettledConcerns = isActiveChangesRequested
-      ? concerns
-      : concerns.filter((concern) => {
-          if (eligibleComments.length === 0) {
-            return true;
-          }
-          if (concerns.length === 1) {
-            return false;
-          }
-          const lowerConcern = concern.toLowerCase();
-          return !eligibleComments.some((c) => c.body.toLowerCase().includes(lowerConcern));
-        });
-
-    if (unsettledConcerns.length > 0) {
-      findings.push({
-        reviewId,
-        author: login,
-        state: review.state,
-        commitOid,
-        headline,
-        unsettledConcerns,
-        body,
-      });
+    const authorKey = normalizeReviewerLogin(login);
+    const keyedConcerns = concerns.map(concern => ({ ...concern, key: JSON.stringify([authorKey, concern.key]) }));
+    for (const concern of keyedConcerns) {
+      const dispositions = eligibleComments.filter(c =>
+        concerns.length === 1 ||
+        (concern.id && new RegExp(`\\b${concern.id}\\b`, "i").test(c.body)) ||
+        (concerns.filter(other => other.text.toLowerCase() === concern.text.toLowerCase()).length === 1 &&
+          c.body.toLowerCase().includes(concern.text.toLowerCase())));
+      concern.settled = !isActiveChangesRequested && dispositions.length > 0;
     }
+    entries.push({ reviewId, author: login, state: review.state, commitOid, headline, body, keyedConcerns, isActiveChangesRequested });
+  }
+  const pendingKeys = new Map();
+  for (const { keyedConcerns, isActiveChangesRequested, ...entry } of entries) {
+    const finding = { ...entry, unsettledConcerns: [], unsettledConcernDetails: [], relatedReviewIds: [entry.reviewId] };
+    for (const concern of keyedConcerns) {
+      if (!isActiveChangesRequested && concern.settled) continue;
+      const previous = !isActiveChangesRequested && pendingKeys.get(concern.key);
+      if (previous) {
+        if (!previous.relatedReviewIds.includes(entry.reviewId)) previous.relatedReviewIds.push(entry.reviewId);
+        continue;
+      }
+      finding.unsettledConcerns.push(concern.text);
+      finding.unsettledConcernDetails.push({
+        id: concern.id,
+        text: concern.text,
+        evidence: concern.evidence,
+        context: concern.context,
+      });
+      if (!isActiveChangesRequested) pendingKeys.set(concern.key, finding);
+    }
+    if (finding.unsettledConcerns.length > 0) findings.push(finding);
   }
   return findings;
 }
@@ -1179,6 +1240,7 @@ async function evaluatePrPollTickInner(args, execFn, state) {
           nodes {
             databaseId
             createdAt
+            updatedAt
             author { login }
             body
           }

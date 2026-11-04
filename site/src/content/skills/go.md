@@ -28,6 +28,9 @@ Scope follows affected user journeys and their shared behavior owner, not just
 edited files. Test Doctor checks equivalent entry points against one intended
 contract; `pr` receives that evidence and justified differences. This does not
 authorize broader edits or a whole-repository audit.
+Identify trust boundaries and host/native fixture prerequisites before coding.
+Missing host evidence stays an explicit gap; a local smoke test cannot establish
+cross-host success.
 
 ## Install with required skills
 

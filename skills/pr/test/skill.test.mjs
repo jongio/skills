@@ -197,9 +197,9 @@ test("catalog body has a copyable install command with every required skill", as
 
 test("body-only findings get evidence-backed disposition without fake thread resolution", async () => {
   const text = skill.replace(/\s+/g, " ");
-  assert.match(text, /Deduplicate.*review ID.*heading.*file\/line/i);
+  assert.match(text, /Deduplicate by underlying defect.*review ID.*heading.*file\/line/i);
   assert.match(text, /revalidate older findings against the current head/i);
-  assert.match(text, /body-only finding.*PR comment citing its review ID and heading/i);
+  assert.match(text, /body-only finding.*consolidated PR comment citing its review ID and heading/i);
   assert.match(text, /no thread to resolve/i);
   assert.match(text, /all actionable feedback \(including review-body-only findings\) is addressed/i);
 });
@@ -214,6 +214,19 @@ test("review replies identify every fix tersely with actual commit links", async
   assert.match(comments, /no long validation summaries or verbose resolution reports/i);
   assert.match(comments, /unfixed or disputed.*concise, evidence-backed disposition.*never invent a fixing commit/i);
   assert.match(comments, /replying does not replace thread resolution or review\/merge gates/i);
+});
+
+test("delivery batches repairs, bounds repeated failures, and avoids review-round acknowledgments", () => {
+  assert.match(skill, /wait for applicable current-head CI to pass before requesting or re-requesting reviews/);
+  assert.match(skill, /unless the user requests early review/);
+  assert.match(skill, /inspect all affected failures and establish the cause before editing/);
+  assert.match(skill, /Record the failure, evidence, attempted repair, and result across resumptions/);
+  assert.match(skill, /After two unsuccessful repair cycles for the same failure, pause/);
+  assert.match(skill, /resume only with new evidence or user direction/);
+  assert.match(skill, /defer review requests until applicable CI passes/);
+  assert.match(skill, /Repeated advisory assessments without new evidence reuse the existing disposition/);
+  assert.match(skill, /do not post acknowledgments for every review round/);
+  assert.match(skill, /Never describe automated self-review as completed human review/);
 });
 
 test("eval spec covers private repo reviewer rules, comment resolution, and balanced grader weights", async () => {
@@ -243,6 +256,8 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "post-merge-issue-retry-and-permission-failure",
     "post-merge-unknown-and-cross-repository-issues",
     "pre-merge-partial-closing-link",
+    "repeated-advisories-with-renewed-evidence",
+    "bounded-evidence-led-ci-repairs",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
   assert.equal((evalSpec.match(/type: skill-invocation/g) ?? []).length, cases.length);
@@ -262,6 +277,11 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
       `${requiredGrader} failure must prevent passing threshold`,
     );
   }
+});
+
+test("churn evals preserve new findings, final-head review, and diagnostic escalation", () => {
+  assert.match(evalSpec, /name: repeated-advisories-with-renewed-evidence[\s\S]*old disposition[\s\S]*consolidated comment/);
+  assert.match(evalSpec, /name: bounded-evidence-led-ci-repairs[\s\S]*two unsuccessful repair cycles[\s\S]*new evidence or user direction/);
 });
 
 test("base-update evals distinguish divergence, confirmed blockers, and unknown state", async () => {
@@ -499,7 +519,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
           state: "COMMENTED",
           submittedAt: "2026-10-22T20:00:00Z",
           commit: { oid: "head123" },
-          body: "### 🔵 Needs a closer look",
+          body: "### 🔵 Needs a closer look\nThe worker releases ownership before cancellation completes.",
         },
       ],
       [{ databaseId: 501, createdAt: "2026-10-22T19:00:00Z", body: "Addressed review 902 early." }],
@@ -515,7 +535,7 @@ test("pr-watch-daemon detects unresolved threads, body-only findings, errored Co
           state: "COMMENTED",
           submittedAt: "2026-10-22T20:00:00Z",
           commit: { oid: "head123" },
-          body: "### 🔵 Needs a closer look",
+          body: "### 🔵 Needs a closer look\nThe worker releases ownership before cancellation completes.",
         },
       ],
       [{ databaseId: 501, createdAt: "2026-10-22T20:05:00Z", body: "Addressed review 902 in commit abc." }],

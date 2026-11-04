@@ -36,6 +36,23 @@ rechecking, not speculative updates; a required merge queue alone is not a reaso
 to update. Necessary updates require fresh blocker evidence and new-head checks
 and reviews, without bypassing freshness requirements or shared-branch safeguards.
 
+Batch related repairs before requesting reviews; normally wait for applicable
+current-head CI to pass. Final-head review and approval gates remain unchanged.
+After two unsuccessful repair cycles for the same failure, pause with diagnostic
+evidence rather than continuing speculative pushes.
+
+Deduplicate underlying findings across review rounds. The watcher groups exact
+repeats from the same reviewer and retains source review IDs and dispositions.
+Heading-only advisories are not findings; new evidence and active
+`CHANGES_REQUESTED` decisions still block. Reconcile paraphrases manually and
+update one consolidated disposition instead of posting repetitive acknowledgments.
+An old disposition must be revalidated after a later review before it settles
+that renewed concern, explicitly citing its review ID. Unrelated edits do not
+revalidate another concern.
+For long prose or ambiguous titles, cite the review ID and the exact `concern:...`
+token from `unsettledConcernDetails`; full evidence and local context remain
+available without requiring a verbatim reply.
+
 ## Install with required skills
 
 The single-skill options above do not install dependencies. Use this command
