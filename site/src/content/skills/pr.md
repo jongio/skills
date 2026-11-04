@@ -47,7 +47,8 @@ Heading-only advisories are not findings; new evidence and active
 `CHANGES_REQUESTED` decisions still block. Reconcile paraphrases manually and
 update one consolidated disposition instead of posting repetitive acknowledgments.
 An old disposition must be revalidated after a later review before it settles
-that renewed concern.
+that renewed concern, explicitly citing its review ID. Unrelated edits do not
+revalidate another concern.
 
 ## Install with required skills
 

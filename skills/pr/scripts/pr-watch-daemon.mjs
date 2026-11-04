@@ -265,11 +265,26 @@ export function isErroredCopilotReview(review) {
 }
 
 function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
+  const concerns = [];
   const bodyWithoutStatusSummaries = body.replace(
     /<summary>\s*<strong>\s*\d+\s+(?:open issues?|resolved since last review)\s*<\/strong>\s*<\/summary>/gi,
     ""
+  ).replace(
+    /(?:<details[^>]*>\s*)?<summary>([\s\S]*?)<\/summary>([\s\S]*?)(?:<\/details>|$)/gi,
+    (section, summary, explanation) => {
+      const title = summary.match(/<\/picture>\s*([^<\n]+)/i)?.[1]?.trim();
+      if (!title) return section;
+      concerns.push({
+        text: title,
+        key: `summary:${title}:${explanation.replace(/\s+/g, " ").trim()}`,
+      });
+      return "";
+    }
   );
-  const concerns = [];
+  const context = [...body.matchAll(/^###\s+.+$/gm)]
+    .map(match => match[0].trim())
+    .filter(heading => !/Needs a closer look|Changes recommended|No open issues|Looks good|Ready to merge/i.test(heading))
+    .join("\n");
   for (const match of bodyWithoutStatusSummaries.matchAll(
     /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
   )) {
@@ -281,14 +296,6 @@ function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
     const key = `inline:${commentId}:${title.replace(/\s+/g, " ")}`;
     if (title && !concerns.some(concern => concern.key === key)) {
       concerns.push({ text: title, key });
-    }
-  }
-  for (const match of bodyWithoutStatusSummaries.matchAll(
-    /<summary>[\s\S]*?<\/picture>\s*([^<\n]+)<\/summary>/gi
-  )) {
-    const title = match[1].trim();
-    if (title && !concerns.some(concern => concern.text === title)) {
-      concerns.push({ text: title, key: `summary:${title}` });
     }
   }
   const residualProse = bodyWithoutStatusSummaries
@@ -304,7 +311,7 @@ function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
   if (residualProse.length > 0) {
     concerns.push({ text: residualProse, key: `prose:${residualProse}` });
   }
-  return concerns;
+  return concerns.map(concern => ({ ...concern, key: JSON.stringify([context, concern.key]) }));
 }
 
 export function extractBodyOnlyFindings(
@@ -315,7 +322,6 @@ export function extractBodyOnlyFindings(
 ) {
   const findings = [];
   const entries = [];
-  const settledKeys = new Map();
   const validReviews = (reviews || []).filter(
     (r) =>
       r &&
@@ -378,23 +384,14 @@ export function extractBodyOnlyFindings(
       const dispositions = eligibleComments.filter(c =>
         concerns.length === 1 || c.body.toLowerCase().includes(concern.text.toLowerCase()));
       concern.settled = !isActiveChangesRequested && dispositions.length > 0;
-      if (concern.settled) {
-        for (const comment of dispositions) {
-          const dispositionMs = Date.parse(comment.updatedAt || comment.createdAt || "");
-          if (Number.isFinite(dispositionMs)) {
-            settledKeys.set(concern.key, Math.max(settledKeys.get(concern.key) ?? -Infinity, dispositionMs));
-          }
-        }
-      }
     }
-    entries.push({ reviewId, author: login, state: review.state, commitOid, headline, body, keyedConcerns, isActiveChangesRequested, reviewSubmittedMs });
+    entries.push({ reviewId, author: login, state: review.state, commitOid, headline, body, keyedConcerns, isActiveChangesRequested });
   }
   const pendingKeys = new Map();
-  for (const { keyedConcerns, isActiveChangesRequested, reviewSubmittedMs, ...entry } of entries) {
+  for (const { keyedConcerns, isActiveChangesRequested, ...entry } of entries) {
     const finding = { ...entry, unsettledConcerns: [], relatedReviewIds: [entry.reviewId] };
     for (const concern of keyedConcerns) {
-      if (!isActiveChangesRequested && (concern.settled ||
-          (Number.isFinite(reviewSubmittedMs) && settledKeys.get(concern.key) >= reviewSubmittedMs))) continue;
+      if (!isActiveChangesRequested && concern.settled) continue;
       const previous = !isActiveChangesRequested && pendingKeys.get(concern.key);
       if (previous) {
         if (!previous.relatedReviewIds.includes(entry.reviewId)) previous.relatedReviewIds.push(entry.reviewId);

@@ -134,7 +134,8 @@ Track underlying defects, not review rounds. Heading-only advisories do not
 create findings. The watcher groups exact repeated concerns from the same
 reviewer across heads, retains their source review IDs, and reuses explicit
 dispositions revalidated after the repeated review (including edits to the same
-comment). Old dispositions cannot silence later renewed concerns.
+comment, explicitly citing each renewed review ID). An unrelated comment edit
+cannot settle renewed feedback. Old dispositions cannot silence later concerns.
 Different evidence or reviewers remain distinct; active
 `CHANGES_REQUESTED` decisions remain blocking. Manually reconcile paraphrases
 against the current code rather than assuming equivalent headlines mean the

@@ -36,7 +36,7 @@ test("identical concerns across heads share one finding and retain source review
 test("a revalidated disposition covers identical repeats, not new evidence", () => {
   const first = review(100, summary("Check retained evidence before adopting journals."));
   const repeated = review(101, summary("Check retained evidence before adopting journals."));
-  const revalidated = { ...disposition(100), updatedAt: "2026-10-22T20:01:30Z" };
+  const revalidated = { ...disposition(100, "Revalidated review 101."), updatedAt: "2026-10-22T20:01:30Z" };
   assert.deepEqual(
     extractBodyOnlyFindings([repeated, first], [revalidated], "current-head"),
     [],
@@ -55,6 +55,46 @@ test("an old disposition cannot silence a renewed concern in a later review", ()
     review(101, summary("Check retained evidence before adopting journals.")),
   ], [disposition(100)], "current-head");
   assert.deepEqual(findings.map(finding => finding.reviewId), [101]);
+});
+
+test("editing another disposition cannot settle renewed feedback without its review ID", () => {
+  const findings = extractBodyOnlyFindings([
+    review(100, summary("Check retained evidence before adopting journals.")),
+    review(101, summary("Check retained evidence before adopting journals.")),
+    review(102, summary("Await shutdown before releasing process ownership.")),
+  ], [{
+    ...disposition(100, "Review 102: addressed process ownership."),
+    updatedAt: "2026-10-22T20:03:00Z",
+  }], "current-head");
+  assert.deepEqual(findings.map(finding => finding.reviewId), [101]);
+});
+
+test("location headings keep identical wording at different paths distinct", () => {
+  const findings = extractBodyOnlyFindings([
+    review(100, "### src/alpha.mjs:10\nAwait shutdown before releasing ownership."),
+    review(101, "### src/beta.mjs:20\nAwait shutdown before releasing ownership."),
+  ], [], "current-head");
+  assert.equal(findings.length, 2);
+  const unresolved = extractBodyOnlyFindings([
+    review(100, "### src/alpha.mjs:10\nAwait shutdown before releasing ownership."),
+    review(101, "### src/beta.mjs:20\nAwait shutdown before releasing ownership."),
+  ], [{ ...disposition(100), updatedAt: "2026-10-22T20:02:00Z" }], "current-head");
+  assert.deepEqual(unresolved.map(finding => finding.reviewId), [101]);
+});
+
+test("summary cards have one disposition identity while explanation changes remain evidence", () => {
+  const card = explanation => `<summary><picture><img></picture>Timeout</summary>${explanation}`;
+  for (const body of [card("The worker can outlive cancellation."),
+    `<details>${card("The worker can outlive cancellation.")}</details>`]) {
+    const findings = extractBodyOnlyFindings([review(100, body)], [], "current-head");
+    assert.deepEqual(findings[0].unsettledConcerns, ["Timeout"]);
+    assert.deepEqual(extractBodyOnlyFindings([review(100, body)], [disposition(100, "Timeout fixed.")], "current-head"), []);
+  }
+  const findings = extractBodyOnlyFindings([
+    review(100, `<details>${card("The worker can outlive cancellation.")}</details>`),
+    review(101, `<details>${card("A new retry branch releases ownership before shutdown.")}</details>`),
+  ], [], "current-head");
+  assert.equal(findings.length, 2);
 });
 
 test("new evidence attached to an existing inline link still requires disposition", () => {
@@ -140,7 +180,7 @@ test("the production poll honors edited consolidated dispositions without waivin
           reviewRequests: { nodes: [] },
           reviews: { nodes: [review(100, body), review(101, body)] },
           reviewThreads: { nodes: [] },
-          comments: { nodes: [{ ...disposition(100), databaseId: 500, updatedAt }] },
+          comments: { nodes: [{ ...disposition(100, updatedAt ? "Revalidated review 101." : ""), databaseId: 500, updatedAt }] },
           commits: { nodes: [{ commit: { statusCheckRollup: {
             state: "SUCCESS",
             contexts: { nodes: [{ __typename: "CheckRun", name: "test", status: "COMPLETED", conclusion: "SUCCESS" }] },
