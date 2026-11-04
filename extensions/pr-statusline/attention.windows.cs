@@ -19,6 +19,7 @@ internal sealed class AttentionCommand
     public string color { get; set; }
     public bool acknowledged { get; set; }
     public string previewId { get; set; }
+    [ScriptIgnore] public long ReceivedAt { get; set; }
 }
 
 internal sealed class AttentionLatch
@@ -29,6 +30,7 @@ internal sealed class AttentionLatch
     public string PreviewId;
     private bool wasAway;
     private long inputAtStart;
+    private long receivedAt;
 
     public void Update(AttentionCommand command, bool focused, long inputSequence)
     {
@@ -39,6 +41,7 @@ internal sealed class AttentionLatch
             Acknowledged = command.acknowledged;
             wasAway = !focused;
             inputAtStart = inputSequence;
+            receivedAt = command.ReceivedAt;
         }
         else Acknowledged |= command.acknowledged;
         Active = command.kind != null;
@@ -47,10 +50,11 @@ internal sealed class AttentionLatch
         PreviewId = command.previewId;
     }
 
-    public bool Show(bool focused, long inputSequence, bool settled = true)
+    public bool Show(bool focused, long inputSequence, bool settled = true, long inputTimestamp = long.MaxValue)
     {
         if (!focused) wasAway = true;
-        if (Active && !Acknowledged && focused && settled && (wasAway || inputSequence > inputAtStart))
+        if (Active && !Acknowledged && focused && settled &&
+            (wasAway || (inputSequence > inputAtStart && inputTimestamp > receivedAt)))
             Acknowledged = true;
         return Active && !Acknowledged;
     }
@@ -62,6 +66,7 @@ internal sealed class AttentionFocus
     private long focusedSince = -1, interactionSince = -1;
     public bool Focused, Settled;
     public long InputSequence, SettledInputSequence;
+    public long InputTimestamp, SettledInputTimestamp;
 
     public AttentionFocus(IntPtr window, long inputSequence)
     {
@@ -83,30 +88,48 @@ internal sealed class AttentionFocus
         if (Settled && interactionSince >= 0 && milliseconds - interactionSince >= 250)
         {
             SettledInputSequence = InputSequence;
+            SettledInputTimestamp = InputTimestamp;
             interactionSince = -1;
         }
     }
 
-    public void Interact(IntPtr foreground, long milliseconds)
+    public void Interact(IntPtr foreground, long milliseconds, long occurredAt = -1)
     {
         Observe(foreground, milliseconds);
         if (Focused)
         {
             InputSequence++;
+            InputTimestamp = occurredAt >= 0 ? occurredAt : milliseconds;
             if (interactionSince < 0) interactionSince = milliseconds;
         }
     }
+}
+
+internal sealed class AttentionFrameSchedule
+{
+    private long nextFrame;
+    public bool Take(long milliseconds)
+    {
+        if (milliseconds < nextFrame) return false;
+        nextFrame = milliseconds + 250;
+        return true;
+    }
+    public void Reset() { nextFrame = 0; }
+    public uint Delay(long milliseconds) { return (uint)Math.Max(0, Math.Min(100, nextFrame - milliseconds)); }
 }
 
 internal static class TerminalAttention
 {
     private const uint Popup = 0x80000000;
     private const uint OverlayStyle = 0x00080000 | 0x00000020 | 0x00000080 | 0x08000000;
-    private const uint PositionFlags = 0x0010 | 0x0040 | 0x0200;
+    private const uint MoveFlags = 0x0010 | 0x0200 | 0x0400;
+    private const int MessageBatchLimit = 64;
     private static readonly WindowProc Callback = Dispatch;
     private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 8192 };
     private static readonly string ClassName = "CopilotSessionAttention_" + Process.GetCurrentProcess().Id;
     private static readonly ConcurrentQueue<AttentionCommand> Commands = new ConcurrentQueue<AttentionCommand>();
+    private static readonly AutoResetEvent CommandSignal = new AutoResetEvent(false);
+    private static readonly AttentionFrameSchedule FrameSchedule = new AttentionFrameSchedule();
     private static volatile bool inputClosed;
     private static Exception inputError;
     private static TextWriter output;
@@ -114,6 +137,16 @@ internal static class TerminalAttention
     private static uint consoleProcessId, consoleThreadId;
     private static int lastWidth, lastHeight, lastDpi;
     private static bool registered, lastMaximized;
+    private static bool inputListening, presentationValid, borderVisible, washVisible;
+    private static int lastX, lastY;
+    private static IntPtr lastAnchor;
+    private static string lastStyle;
+    private static int borderAlpha = -1, washAlpha = -1;
+    private static long positionCalls, alphaCalls, visibilityCalls;
+    private static long paintedFrames;
+    private static string safetyStage;
+    private static Mutex windowLease;
+    private static bool leaseHeld;
     private static string currentColor;
     private static IntPtr inputBuffer;
     private static long inputSequence;
@@ -205,6 +238,13 @@ internal static class TerminalAttention
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rectangle rectangle);
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr window, out Rectangle rectangle);
     [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
+    [DllImport("user32.dll")] private static extern uint GetGuiResources(IntPtr process, uint flags);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessage(IntPtr window, uint message, UIntPtr parameter, IntPtr value);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr parameter,
+        IntPtr value, uint flags, uint timeout, out UIntPtr result);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr window, uint flags);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -212,6 +252,7 @@ internal static class TerminalAttention
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent, IntPtr window);
     [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] private static extern int GetMessageTime();
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RegisterRawInputDevices(RawInputDevice[] devices, uint count, uint size);
     [DllImport("user32.dll")]
@@ -228,11 +269,15 @@ internal static class TerminalAttention
     [DllImport("user32.dll")] private static extern bool PeekMessage(out Message message, IntPtr window, uint min, uint max, uint remove);
     [DllImport("user32.dll")] private static extern bool TranslateMessage(ref Message message);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr DispatchMessage(ref Message message);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint MsgWaitForMultipleObjectsEx(uint count, IntPtr[] handles, uint milliseconds, uint wakeMask, uint flags);
     [DllImport("user32.dll")] private static extern bool InvalidateRect(IntPtr window, IntPtr rectangle, bool erase);
     [DllImport("user32.dll")] private static extern bool UpdateWindow(IntPtr window);
     [DllImport("user32.dll")] private static extern int FillRect(IntPtr context, ref Rectangle rectangle, IntPtr background);
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rectangle value, int size);
+    [DllImport("dwmapi.dll", EntryPoint = "DwmGetWindowAttribute")]
+    private static extern int DwmGetWindowValue(IntPtr window, int attribute, out uint value, int size);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateSolidBrush(uint color);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int ellipseWidth, int ellipseHeight);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
@@ -249,6 +294,9 @@ internal static class TerminalAttention
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool Process32First(IntPtr snapshot, ref ProcessEntry entry);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry entry);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll")] private static extern ulong GetTickCount64();
+    [DllImport("kernel32.dll")] private static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")] private static extern bool GetProcessHandleCount(IntPtr process, out uint count);
 
     private static void Check(bool success)
     {
@@ -358,13 +406,15 @@ internal static class TerminalAttention
         uint read = GetRawInputData(input, 0x10000003, inputBuffer, ref size, InputHeaderSize);
         if (read == uint.MaxValue || read < InputHeaderSize + 8) return;
         int type = Marshal.ReadInt32(inputBuffer);
+        ulong now = GetTickCount64();
+        long occurredAt = (long)now - unchecked((uint)now - (uint)GetMessageTime());
         if (type == 1)
         {
             int key = (ushort)Marshal.ReadInt16(inputBuffer, (int)InputHeaderSize + 6);
             bool released = (Marshal.ReadInt16(inputBuffer, (int)InputHeaderSize + 2) & 1) != 0;
             if (!IsEditingKey(key, released, GetAsyncKeyState(0x11) < 0, GetAsyncKeyState(0x10) < 0,
                 GetAsyncKeyState(0x12) < 0, GetAsyncKeyState(0x5B) < 0 || GetAsyncKeyState(0x5C) < 0)) return;
-            focus.Interact(GetForegroundWindow(), FocusClock.ElapsedMilliseconds);
+            focus.Interact(GetForegroundWindow(), FocusClock.ElapsedMilliseconds, occurredAt);
         }
         else if (type == 0 && (Marshal.ReadInt16(inputBuffer, (int)InputHeaderSize + 4) & 0x0D55) != 0)
         {
@@ -372,12 +422,53 @@ internal static class TerminalAttention
             if (!GetCursorPos(out point)) return;
             IntPtr under = WindowFromPoint(point);
             if (under == target || IsChild(target, under))
-                focus.Interact(GetForegroundWindow(), FocusClock.ElapsedMilliseconds);
+                focus.Interact(GetForegroundWindow(), FocusClock.ElapsedMilliseconds, occurredAt);
         }
+    }
+
+    private static string LeaseName(IntPtr window)
+    {
+        uint processId;
+        GetWindowThreadProcessId(window, out processId);
+        return "Local\\CopilotAttention_" + processId + "_" + window.ToInt64();
+    }
+
+    private static void AcquireWindowLease()
+    {
+        windowLease = new Mutex(false, LeaseName(target));
+        try { leaseHeld = windowLease.WaitOne(0); }
+        catch (AbandonedMutexException) { leaseHeld = true; }
+        if (!leaseHeld)
+        {
+            windowLease.Dispose();
+            windowLease = null;
+            throw new InvalidOperationException("Another attention renderer already uses this Terminal window; use one Copilot session per window.");
+        }
+    }
+
+    private static void ReleaseWindowLease()
+    {
+        if (windowLease == null) return;
+        if (leaseHeld) windowLease.ReleaseMutex();
+        windowLease.Dispose();
+        windowLease = null;
+        leaseHeld = false;
+    }
+
+    private static void SetInputListening(bool enabled)
+    {
+        if (enabled == inputListening) return;
+        var devices = new[] {
+            new RawInputDevice { usagePage = 1, usage = 2, flags = enabled ? 0x100u : 1u, window = enabled ? wash : IntPtr.Zero },
+            new RawInputDevice { usagePage = 1, usage = 6, flags = enabled ? 0x100u : 1u, window = enabled ? wash : IntPtr.Zero }
+        };
+        Check(RegisterRawInputDevices(devices, (uint)devices.Length, (uint)Marshal.SizeOf(typeof(RawInputDevice))));
+        inputListening = enabled;
     }
 
     private static void Initialize()
     {
+        AcquireWindowLease();
         focus = new AttentionFocus(target, inputSequence);
         if (oldDpiContext == IntPtr.Zero) oldDpiContext = SetThreadDpiAwarenessContext(new IntPtr(-4));
         var definition = new WindowClass {
@@ -386,17 +477,20 @@ internal static class TerminalAttention
         };
         if (RegisterClassEx(ref definition) == 0) throw new Win32Exception();
         registered = true;
+        // A foreign owner joins input queues and can freeze that application's UI.
         wash = CreateWindowEx(OverlayStyle, ClassName, "Copilot attention background", Popup,
-            0, 0, 1, 1, target, IntPtr.Zero, definition.instance, IntPtr.Zero);
+            0, 0, 1, 1, IntPtr.Zero, IntPtr.Zero, definition.instance, IntPtr.Zero);
         border = CreateWindowEx(OverlayStyle, ClassName, "Copilot attention border", Popup,
-            0, 0, 1, 1, target, IntPtr.Zero, definition.instance, IntPtr.Zero);
+            0, 0, 1, 1, IntPtr.Zero, IntPtr.Zero, definition.instance, IntPtr.Zero);
         if (wash == IntPtr.Zero || border == IntPtr.Zero) throw new Win32Exception();
+        if (GetWindow(wash, 4) != IntPtr.Zero || GetWindow(border, 4) != IntPtr.Zero)
+            throw new InvalidOperationException("Attention surfaces are not isolated; the renderer was stopped.");
         if (inputBuffer == IntPtr.Zero) inputBuffer = Marshal.AllocHGlobal(64);
-        var devices = new[] {
-            new RawInputDevice { usagePage = 1, usage = 2, flags = 0x100, window = wash },
-            new RawInputDevice { usagePage = 1, usage = 6, flags = 0x100, window = wash }
-        };
-        Check(RegisterRawInputDevices(devices, (uint)devices.Length, (uint)Marshal.SizeOf(typeof(RawInputDevice))));
+        presentationValid = false;
+        borderVisible = washVisible = false;
+        borderAlpha = washAlpha = -1;
+        lastStyle = null;
+        FrameSchedule.Reset();
     }
 
     private static Rectangle Bounds()
@@ -449,17 +543,71 @@ internal static class TerminalAttention
         }
     }
 
-    private static void Render(string style, string color, double seconds)
+    private struct WindowOrder
     {
-        Rectangle bounds = Bounds();
-        if (!IsWindowVisible(target) || IsIconic(target) || bounds.Width < 30 || bounds.Height < 30)
+        public IntPtr Anchor, Lower;
+    }
+
+    private static WindowOrder FindWindowOrder()
+    {
+        IntPtr lower = target, previous = GetWindow(target, 3);
+        for (int attempt = 0; attempt < 32; attempt++)
         {
-            Hide();
-            return;
+            if (previous == IntPtr.Zero) return new WindowOrder { Anchor = previous, Lower = lower };
+            if (previous != border && previous != wash)
+            {
+                if (GetAncestor(previous, 3) != target) return new WindowOrder { Anchor = previous, Lower = lower };
+                lower = previous;
+            }
+            previous = GetWindow(previous, 3);
         }
+        throw new InvalidOperationException("Attention window ordering did not stabilize; renderer stopped.");
+    }
+
+    private static IntPtr Anchor() { return FindWindowOrder().Anchor; }
+
+    private static void SetAlpha(IntPtr window, int alpha, ref int previous)
+    {
+        if (alpha == previous) return;
+        Check(SetLayeredWindowAttributes(window, 0, (byte)alpha, 2));
+        previous = alpha;
+        alphaCalls++;
+    }
+
+    private static bool SurfaceOrderMatches(string style, IntPtr lowerWindow)
+    {
+        IntPtr unused = style == "border" ? wash : style == "background" ? border : IntPtr.Zero;
+        IntPtr previous = GetWindow(lowerWindow, 3);
+        for (int attempt = 0; attempt < 3 && unused != IntPtr.Zero && previous == unused; attempt++)
+            previous = GetWindow(previous, 3);
+        IntPtr lower = style == "border" ? border : wash;
+        return previous == lower && (style != "both" || GetWindow(wash, 3) == border);
+    }
+
+    private static void HideSurface(IntPtr window, ref bool visible)
+    {
+        if (window != IntPtr.Zero && (visible || IsWindowVisible(window)))
+        {
+            ShowWindow(window, 0);
+            visibilityCalls++;
+        }
+        visible = false;
+    }
+
+    private static void Place(IntPtr window, IntPtr after, Rectangle bounds, bool visible)
+    {
+        Check(SetWindowPos(window, after, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
+            MoveFlags | (visible ? 0x0040u : 0x0004u)));
+        positionCalls++;
+    }
+
+    private static void PaintFrame(string style, string color, double seconds, Rectangle bounds, bool show)
+    {
+        paintedFrames++;
         int dpi = (int)GetDpiForWindow(target);
         bool maximized = IsZoomed(target);
-        if (bounds.Width != lastWidth || bounds.Height != lastHeight || dpi != lastDpi || maximized != lastMaximized)
+        bool resized = bounds.Width != lastWidth || bounds.Height != lastHeight || dpi != lastDpi || maximized != lastMaximized;
+        if (resized)
         {
             SetRegion(border, bounds, true);
             SetRegion(wash, bounds, false);
@@ -470,35 +618,89 @@ internal static class TerminalAttention
         }
         SetColor(color);
         double pulse = (1 + Math.Sin(seconds * Math.PI)) / 2;
-        Check(SetLayeredWindowAttributes(border, 0, (byte)(170 + 80 * pulse), 2));
-        Check(SetLayeredWindowAttributes(wash, 0, (byte)(30 + 30 * pulse), 2));
-        IntPtr after = GetWindow(target, 3);
-        while (after == border || after == wash) after = GetWindow(after, 3);
+        if (style != "background") SetAlpha(border, (int)(170 + 80 * pulse), ref borderAlpha);
+        if (style != "border") SetAlpha(wash, (int)(30 + 30 * pulse), ref washAlpha);
+        WindowOrder order = show ? FindWindowOrder() : new WindowOrder { Anchor = IntPtr.Zero, Lower = target };
+        IntPtr after = order.Anchor;
+        if (presentationValid && !resized && bounds.Left == lastX && bounds.Top == lastY &&
+            after == lastAnchor && style == lastStyle && (!show ||
+                (borderVisible == (style != "background") && washVisible == (style != "border") &&
+                    IsWindowVisible(border) == borderVisible && IsWindowVisible(wash) == washVisible &&
+                    SurfaceOrderMatches(style, order.Lower)))) return;
+        lastAnchor = after;
+        lastX = bounds.Left;
+        lastY = bounds.Top;
+        lastStyle = style;
+        presentationValid = true;
         if (style != "background")
         {
-            Check(SetWindowPos(border, after, bounds.Left, bounds.Top, bounds.Width, bounds.Height, PositionFlags));
+            Place(border, after, bounds, show);
+            borderVisible = show;
             after = border;
         }
-        else ShowWindow(border, 0);
+        else HideSurface(border, ref borderVisible);
         if (style != "border")
-            Check(SetWindowPos(wash, after, bounds.Left, bounds.Top, bounds.Width, bounds.Height, PositionFlags));
-        else ShowWindow(wash, 0);
+        {
+            Place(wash, after, bounds, show);
+            washVisible = show;
+        }
+        else HideSurface(wash, ref washVisible);
+    }
+
+    private static void Render(string style, string color, long milliseconds)
+    {
+        if (!FrameSchedule.Take(milliseconds)) return;
+        Rectangle bounds = Bounds();
+        uint cloaked;
+        bool hidden = DwmGetWindowValue(target, 14, out cloaked, sizeof(uint)) == 0 && cloaked != 0;
+        if (!IsWindowVisible(target) || !IsWindowEnabled(target) || IsIconic(target) || hidden ||
+            bounds.Width < 30 || bounds.Height < 30)
+        {
+            Hide();
+            return;
+        }
+        PaintFrame(style, color, milliseconds / 1000.0, bounds, true);
     }
 
     private static void Hide()
     {
-        if (border != IntPtr.Zero) ShowWindow(border, 0);
-        if (wash != IntPtr.Zero) ShowWindow(wash, 0);
+        HideSurface(border, ref borderVisible);
+        HideSurface(wash, ref washVisible);
+        presentationValid = false;
     }
 
     private static void Cleanup()
     {
+        try { if (inputListening) SetInputListening(false); } catch (Win32Exception) { inputListening = false; }
         if (inputBuffer != IntPtr.Zero) { Marshal.FreeHGlobal(inputBuffer); inputBuffer = IntPtr.Zero; }
-        if (border != IntPtr.Zero) DestroyWindow(border);
-        if (wash != IntPtr.Zero) DestroyWindow(wash);
-        if (registered) UnregisterClass(ClassName, GetModuleHandle(null));
-        if (brush != IntPtr.Zero) DeleteObject(brush);
-        if (oldDpiContext != IntPtr.Zero) SetThreadDpiAwarenessContext(oldDpiContext);
+        if (border != IntPtr.Zero) { DestroyWindow(border); border = IntPtr.Zero; }
+        if (wash != IntPtr.Zero) { DestroyWindow(wash); wash = IntPtr.Zero; }
+        if (registered) { UnregisterClass(ClassName, GetModuleHandle(null)); registered = false; }
+        if (brush != IntPtr.Zero) { DeleteObject(brush); brush = IntPtr.Zero; }
+        if (oldDpiContext != IntPtr.Zero) { SetThreadDpiAwarenessContext(oldDpiContext); oldDpiContext = IntPtr.Zero; }
+        currentColor = null;
+        lastWidth = lastHeight = lastDpi = 0;
+        presentationValid = borderVisible = washVisible = false;
+        ReleaseWindowLease();
+    }
+
+    private static int PumpMessages()
+    {
+        Message message;
+        int count = 0;
+        while (count < MessageBatchLimit && PeekMessage(out message, IntPtr.Zero, 0, 0, 1))
+        {
+            TranslateMessage(ref message);
+            DispatchMessage(ref message);
+            count++;
+        }
+        return count;
+    }
+
+    private static void WaitForWork(uint milliseconds)
+    {
+        if (MsgWaitForMultipleObjectsEx(1, new[] { CommandSignal.SafeWaitHandle.DangerousGetHandle() },
+            milliseconds, 0x04FF, 0x0004) == uint.MaxValue) throw new Win32Exception();
     }
 
     private static void Emit(object message)
@@ -529,11 +731,14 @@ internal static class TerminalAttention
                 Guid previewId;
                 if (command.type == "preview" && (!Guid.TryParse(command.previewId, out previewId) || previewId == Guid.Empty))
                     throw new InvalidDataException("Invalid attention preview ID.");
+                if (Commands.Count >= 64) throw new InvalidDataException("Attention command queue exceeded its limit.");
+                command.ReceivedAt = (long)GetTickCount64();
                 Commands.Enqueue(command);
+                CommandSignal.Set();
             }
         }
         catch (Exception error) { inputError = error; }
-        finally { inputClosed = true; }
+        finally { inputClosed = true; CommandSignal.Set(); }
     }
 
     private static void CheckLatch(bool condition)
@@ -604,6 +809,21 @@ internal static class TerminalAttention
         if (IsEditingKey(0x56, false, true, true, false, false)) tracker.Interact(new IntPtr(1), 1100);
         tracker.Observe(new IntPtr(1), 1400);
         CheckLatch(!pasted.Show(true, tracker.SettledInputSequence, tracker.Settled));
+        var delayed = new AttentionLatch();
+        delayed.Update(new AttentionCommand { generation = 1, kind = "question", ReceivedAt = 500 }, true, 0);
+        var delayedFocus = new AttentionFocus(new IntPtr(1), 0);
+        delayedFocus.Observe(new IntPtr(1), 0);
+        delayedFocus.Observe(new IntPtr(1), 250);
+        delayedFocus.Interact(new IntPtr(1), 600, 400);
+        delayedFocus.Observe(new IntPtr(1), 900);
+        CheckLatch(delayed.Show(true, delayedFocus.SettledInputSequence, true, delayedFocus.SettledInputTimestamp));
+        delayedFocus.Interact(new IntPtr(1), 1000, 1000);
+        delayedFocus.Observe(new IntPtr(1), 1300);
+        CheckLatch(!delayed.Show(true, delayedFocus.SettledInputSequence, true, delayedFocus.SettledInputTimestamp));
+        var schedule = new AttentionFrameSchedule();
+        int frames = 0;
+        for (int millisecond = 0; millisecond < 10000; millisecond++) if (schedule.Take(millisecond)) frames++;
+        CheckLatch(frames == 40);
         Emit(new { type = "selfTest", passed = true });
     }
 
@@ -681,11 +901,32 @@ internal static class TerminalAttention
             tracker.Interact(first, time + 2400);
             tracker.Observe(first, time + 2700);
             CheckLatch(!latch.Show(tracker.Focused, tracker.SettledInputSequence, tracker.Settled));
+            target = first;
+            border = CreateWindowEx(OverlayStyle, ClassName, "", Popup, 0, 0, 16, 16, IntPtr.Zero,
+                IntPtr.Zero, definition.instance, IntPtr.Zero);
+            wash = CreateWindowEx(OverlayStyle, ClassName, "", Popup, 0, 0, 16, 16, IntPtr.Zero,
+                IntPtr.Zero, definition.instance, IntPtr.Zero);
+            CheckLatch(border != IntPtr.Zero && wash != IntPtr.Zero);
+            Check(SetWindowPos(opened, new IntPtr(1), 0, 0, 16, 16, MoveFlags));
+            Check(SetWindowPos(first, opened, 0, 0, 16, 16, MoveFlags));
+            Check(SetWindowPos(other, opened, 0, 0, 16, 16, MoveFlags));
+            Check(SetWindowPos(border, opened, 0, 0, 16, 16, MoveFlags));
+            Check(SetWindowPos(wash, border, 0, 0, 16, 16, MoveFlags));
+            CheckLatch(SurfaceOrderMatches("both", FindWindowOrder().Lower) && Anchor() == opened);
+            Check(SetWindowPos(first, opened, 0, 0, 16, 16, MoveFlags));
+            CheckLatch(Anchor() == opened && !SurfaceOrderMatches("both", FindWindowOrder().Lower));
+            Check(SetWindowPos(border, opened, 0, 0, 16, 16, MoveFlags));
+            Check(SetWindowPos(wash, border, 0, 0, 16, 16, MoveFlags));
+            CheckLatch(SurfaceOrderMatches("both", FindWindowOrder().Lower));
+            CheckLatch(!IsWindowVisible(first) && !IsWindowVisible(border) && !IsWindowVisible(wash));
             Emit(new { type = "focusIsolationTest", passed = true, sameProcessWindows = true,
-                ownedWindowExcluded = true, newWindowExcluded = true, transientActivationExcluded = true });
+                ownedWindowExcluded = true, newWindowExcluded = true, transientActivationExcluded = true,
+                raisedTargetOrderRecovered = true });
         }
         finally
         {
+            if (border != IntPtr.Zero) { DestroyWindow(border); border = IntPtr.Zero; }
+            if (wash != IntPtr.Zero) { DestroyWindow(wash); wash = IntPtr.Zero; }
             if (opened != IntPtr.Zero) DestroyWindow(opened);
             if (other != IntPtr.Zero) DestroyWindow(other);
             if (first != IntPtr.Zero) DestroyWindow(first);
@@ -716,6 +957,83 @@ internal static class TerminalAttention
         }
     }
 
+    private static void GraphicsSafetyTest(IntPtr fixture)
+    {
+        if (!string.Equals(WindowClassName(fixture), "STATIC", StringComparison.OrdinalIgnoreCase) || IsWindowVisible(fixture))
+            throw new ArgumentException("Graphics safety tests require a private hidden STATIC fixture.");
+        target = fixture;
+        Initialize();
+        CheckLatch(GetWindow(border, 4) == IntPtr.Zero && GetWindow(wash, 4) == IntPtr.Zero);
+        CheckLatch(!inputListening && !IsWindowVisible(border) && !IsWindowVisible(wash));
+        Emit(new { type = "graphicsSafetyReady", windowHandle = target.ToInt64().ToString() });
+        if (Console.In.ReadLine() != "run") throw new InvalidOperationException("Graphics safety test cancelled.");
+        UIntPtr response;
+        SafetyStage("confirm fixture hang");
+        CheckLatch(SendMessageTimeout(fixture, 0, UIntPtr.Zero, IntPtr.Zero, 3, 100, out response) == IntPtr.Zero);
+        positionCalls = alphaCalls = visibilityCalls = 0;
+        var rectangle = new Rectangle { Left = 0, Top = 0, Right = 320, Bottom = 200 };
+        FrameSchedule.Reset();
+        int frames = 0;
+        SafetyStage("hidden frames");
+        for (int milliseconds = 0; milliseconds < 10000; milliseconds++)
+        {
+            if (!FrameSchedule.Take(milliseconds)) continue;
+            PumpMessages();
+            PaintFrame("both", "#FFBB24", milliseconds / 1000.0, rectangle, false);
+            frames++;
+        }
+        CheckLatch(frames == 40 && positionCalls == 2 && alphaCalls <= 80 && visibilityCalls == 0);
+        CheckLatch(!IsWindowVisible(border) && !IsWindowVisible(wash));
+        CheckLatch(GetForegroundWindow() != border && GetForegroundWindow() != wash);
+        long measuredPositionCalls = positionCalls, measuredAlphaCalls = alphaCalls;
+        SafetyStage("message batch");
+        for (int message = 0; message < 1000; message++) Check(PostMessage(wash, 0x8001, UIntPtr.Zero, IntPtr.Zero));
+        int pumped = PumpMessages();
+        CheckLatch(pumped > 0 && pumped <= MessageBatchLimit);
+        Message pending;
+        CheckLatch(PeekMessage(out pending, IntPtr.Zero, 0, 0, 0));
+        Cleanup();
+        PumpMessages();
+        uint gdiBefore = GetGuiResources(GetCurrentProcess(), 0);
+        uint userBefore = GetGuiResources(GetCurrentProcess(), 1);
+        uint handlesBefore;
+        SafetyStage("resource baseline");
+        Check(GetProcessHandleCount(GetCurrentProcess(), out handlesBefore));
+        for (int cycle = 0; cycle < 20; cycle++)
+        {
+            SafetyStage("resource cycle " + cycle);
+            Initialize();
+            PumpMessages();
+            PaintFrame("both", "#FFBB24", 0.5, rectangle, false);
+            Cleanup();
+            PumpMessages();
+        }
+        uint gdiAfter = GetGuiResources(GetCurrentProcess(), 0);
+        uint userAfter = GetGuiResources(GetCurrentProcess(), 1);
+        uint handlesAfter;
+        SafetyStage("resource totals");
+        Check(GetProcessHandleCount(GetCurrentProcess(), out handlesAfter));
+        CheckLatch(gdiAfter <= gdiBefore && userAfter <= userBefore && handlesAfter <= handlesBefore);
+        ReadCommands(Console.In);
+        CheckLatch(inputClosed && inputError == null);
+        SafetyStage("message-aware wait");
+        WaitForWork(100);
+        Emit(new {
+            type = "graphicsSafetyTest", passed = true, frames = frames,
+            positionCalls = measuredPositionCalls, alphaCalls = measuredAlphaCalls, pumpedMessages = pumped,
+            gdiBefore = gdiBefore, gdiAfter = gdiAfter, userBefore = userBefore, userAfter = userAfter,
+            handlesBefore = handlesBefore, handlesAfter = handlesAfter, visibleOverlays = 0,
+            foreignUnresponsive = true, unownedOverlays = true
+        });
+    }
+
+    private static void SafetyStage(string stage)
+    {
+        safetyStage = stage;
+        Console.Error.WriteLine("graphics-safety: " + stage);
+        Console.Error.Flush();
+    }
+
     [STAThread]
     private static int Main(string[] args)
     {
@@ -726,9 +1044,22 @@ internal static class TerminalAttention
             if (args.Length == 1 && args[0] == "--persistence-test") { PersistenceTest(); return 0; }
             if (args.Length == 1 && args[0] == "--focus-isolation-test") { FocusIsolationTest(); return 0; }
             if (args.Length == 1 && args[0] == "--classic-console-host") { ClassicConsoleHost(); return 0; }
+            if (args.Length == 2 && args[0] == "--lease-probe")
+            {
+                target = new IntPtr(long.Parse(args[1], CultureInfo.InvariantCulture));
+                AcquireWindowLease();
+                Emit(new { type = "leaseProbe", acquired = true });
+                return 0;
+            }
+            if (args.Length == 2 && args[0] == "--graphics-safety-test")
+            {
+                GraphicsSafetyTest(new IntPtr(long.Parse(args[1], CultureInfo.InvariantCulture)));
+                return 0;
+            }
             uint ownerId;
             if (args.Length < 1 || !uint.TryParse(args[0], out ownerId) || ownerId == 0)
                 throw new ArgumentException("A live session process ID is required.");
+            bool diagnostics = args.Length == 2 && args[1] == "--diagnostics";
             using (Process owner = Process.GetProcessById((int)ownerId))
             {
                 TextReader input = Console.In;
@@ -744,36 +1075,51 @@ internal static class TerminalAttention
                 reader.Start();
                 Emit(new { type = "ready", windowHandle = target.ToInt64().ToString() });
                 var clock = Stopwatch.StartNew();
+                long nextHeartbeat = 0;
                 var latch = new AttentionLatch();
                 AttentionLatch preview = null;
                 while (!inputClosed && !owner.HasExited && IsWindow(consoleWindow))
                 {
-                    Message message;
-                    while (PeekMessage(out message, IntPtr.Zero, 0, 0, 1))
+                    PumpMessages();
+                    if (clock.ElapsedMilliseconds >= nextHeartbeat)
                     {
-                        TranslateMessage(ref message);
-                        DispatchMessage(ref message);
+                        if (diagnostics)
+                        {
+                            uint cloak;
+                            bool cloakKnown = DwmGetWindowValue(target, 14, out cloak, sizeof(uint)) == 0;
+                            string style = preview != null ? preview.Style : latch.Style;
+                            Emit(new {
+                                type = "heartbeat", windowHandle = target.ToInt64().ToString(),
+                                borderVisible = IsWindowVisible(border), washVisible = IsWindowVisible(wash),
+                                ordered = SurfaceOrderMatches(style, FindWindowOrder().Lower), foreground = TargetFocused(),
+                                targetVisible = IsWindowVisible(target), targetEnabled = IsWindowEnabled(target),
+                                targetMinimized = IsIconic(target), targetCloaked = cloakKnown ? (object)cloak : null,
+                                x = lastX, y = lastY, width = lastWidth, height = lastHeight,
+                                frames = paintedFrames, positionCalls = positionCalls, alphaCalls = alphaCalls
+                            });
+                        }
+                        else Emit(new { type = "heartbeat", windowHandle = target.ToInt64().ToString() });
+                        nextHeartbeat = clock.ElapsedMilliseconds + 1000;
                     }
                     focus.Observe(GetForegroundWindow(), FocusClock.ElapsedMilliseconds);
                     inputSequence = focus.InputSequence;
                     IntPtr currentTarget = TerminalOwner(consoleWindow);
-                    if (currentTarget == IntPtr.Zero) { Hide(); Thread.Sleep(50); continue; }
+                    if (currentTarget == IntPtr.Zero)
+                    {
+                        SetInputListening(false);
+                        Hide();
+                        WaitForWork(100);
+                        continue;
+                    }
                     if (currentTarget != target)
                     {
-                        Hide();
+                        Cleanup();
                         target = currentTarget;
-                        DestroyWindow(border);
-                        DestroyWindow(wash);
-                        border = wash = IntPtr.Zero;
-                        UnregisterClass(ClassName, GetModuleHandle(null));
-                        registered = false;
                         Initialize();
-                        lastWidth = lastHeight = 0;
-                        currentColor = null;
                         Emit(new { type = "binding", windowHandle = target.ToInt64().ToString() });
                     }
                     AttentionCommand command;
-                    while (Commands.TryDequeue(out command))
+                    for (int count = 0; count < 64 && Commands.TryDequeue(out command); count++)
                     {
                         if (command.type == "preview")
                         {
@@ -787,20 +1133,21 @@ internal static class TerminalAttention
                     }
                     bool focused = focus.Focused;
                     bool acknowledged = latch.Acknowledged;
-                    bool visible = latch.Show(focused, focus.SettledInputSequence, focus.Settled);
+                    bool visible = latch.Show(focused, focus.SettledInputSequence, focus.Settled, focus.SettledInputTimestamp);
                     if (!acknowledged && latch.Acknowledged)
                         Emit(new { type = "acknowledged", generation = latch.Generation,
                             windowHandle = target.ToInt64().ToString() });
-                    if (preview != null && !preview.Show(focused, focus.SettledInputSequence, focus.Settled))
+                    if (preview != null && !preview.Show(focused, focus.SettledInputSequence, focus.Settled, focus.SettledInputTimestamp))
                     {
                         string completedId = preview.PreviewId;
                         preview = null;
                         Emit(new { type = "previewComplete", windowHandle = target.ToInt64().ToString(), previewId = completedId });
                     }
-                    if (preview != null) Render(preview.Style, preview.Color, clock.Elapsed.TotalSeconds);
-                    else if (visible) Render(latch.Style, latch.Color, clock.Elapsed.TotalSeconds);
+                    SetInputListening((preview != null || visible) && focused);
+                    if (preview != null) Render(preview.Style, preview.Color, clock.ElapsedMilliseconds);
+                    else if (visible) Render(latch.Style, latch.Color, clock.ElapsedMilliseconds);
                     else Hide();
-                    Thread.Sleep(50);
+                    WaitForWork(preview != null || visible ? FrameSchedule.Delay(clock.ElapsedMilliseconds) : 100);
                 }
                 if (inputError != null) throw inputError;
             }
@@ -808,7 +1155,13 @@ internal static class TerminalAttention
         }
         catch (Exception error)
         {
-            try { Emit(new { type = "unavailable", message = error.Message }); } catch (IOException) { }
+            try
+            {
+                if (args.Length > 0 && args[0] == "--graphics-safety-test")
+                    Emit(new { type = "unavailable", message = error.Message, stage = safetyStage, detail = error.ToString() });
+                else Emit(new { type = "unavailable", message = error.Message });
+            }
+            catch (IOException) { }
             return 1;
         }
         finally { Cleanup(); }

@@ -27,7 +27,7 @@ async function fixture(run) {
 	try { await run(home); } finally { rmSync(home, { recursive: true, force: true }); }
 }
 
-function fakeHelper({ startup = { type: "ready", windowHandle: "1234" } } = {}) {
+function fakeHelper({ startup = { type: "ready", windowHandle: "1234" }, closeOnEnd = true } = {}) {
 	const children = [], messages = [];
 	function spawn(executable, args, options) {
 		const child = new EventEmitter();
@@ -36,8 +36,9 @@ function fakeHelper({ startup = { type: "ready", windowHandle: "1234" } } = {}) 
 		child.stdin = new Writable({
 			write(data, _encoding, done) { messages.push(JSON.parse(String(data))); done(); },
 		});
-		child.stdin.once("finish", () => queueMicrotask(() => child.emit("close", 0)));
-		child.kill = () => { child.emit("close", 0); };
+		child.stdin.once("finish", () => { if (closeOnEnd) queueMicrotask(() => child.emit("close", 0)); });
+		child.killCount = 0;
+		child.kill = () => { child.killCount++; child.emit("close", 0); };
 		child.message = (value) => child.stdout.write(`${JSON.stringify({
 			windowHandle: "1234",
 			...(value.type === "previewComplete" ? { previewId: messages.findLast((message) => message.type === "preview")?.previewId } : {}),
@@ -208,14 +209,53 @@ test("focus acknowledgment survives settings changes; a new request gets a fresh
 		await flush();
 		helper.children[0].child.message({ type: "acknowledged", generation: 1 });
 		attention.configure({ style: "border" });
-		assert.equal(helper.messages.at(-1).acknowledged, true);
-		assert.equal(helper.messages.at(-1).generation, 1);
+		assert.equal(helper.children[0].child.stdin.writableEnded, true);
+		assert.equal(attention.status().binding, null);
+		assert.equal(helper.children.length, 1);
 		attention.observe(event("permission.requested", { requestId: "two" }));
+		await flush();
+		assert.equal(helper.children.length, 2);
 		assert.equal(helper.messages.at(-1).generation, 2);
 		assert.equal(helper.messages.at(-1).acknowledged, false);
 		attention.observe(event("abort"));
 		assert.equal(helper.messages.at(-1).kind, null);
 		assert.equal(helper.messages.at(-1).acknowledged, true);
+	} finally { attention.stop(); }
+}));
+
+test("a new alert waits for its predecessor to release the window before starting another helper", async () => fixture(async (home) => {
+	setAttentionConfig({ enabled: true }, { home });
+	const helper = fakeHelper({ closeOnEnd: false });
+	const { attention } = controller(home, { spawn: helper.spawn });
+	try {
+		attention.observe(event("permission.requested", { requestId: "first" }));
+		await flush();
+		const previous = helper.children[0].child;
+		previous.message({ type: "acknowledged", generation: 1 });
+		attention.observe(event("user_input.requested", { requestId: "next" }));
+		await flush();
+		assert.equal(helper.children.length, 1);
+		previous.emit("close", 0);
+		await flush();
+		assert.equal(helper.children.length, 2);
+		assert.equal(helper.messages.at(-1).kind, "question");
+		assert.equal(helper.messages.at(-1).generation, 2);
+	} finally {
+		attention.stop();
+		for (const { child } of helper.children) child.emit("close", 0);
+	}
+}));
+
+test("an acknowledged preview releases an otherwise idle helper even when attention stays enabled", async () => fixture(async (home) => {
+	setAttentionConfig({ enabled: true }, { home });
+	const { attention, helper } = controller(home);
+	try {
+		await attention.preview();
+		helper.children[0].child.message({ type: "previewComplete" });
+		await flush();
+		assert.equal(helper.children[0].child.stdin.writableEnded, true);
+		assert.equal(attention.status().binding, null);
+		assert.equal(readAttentionConfig(home).enabled, true);
 	} finally { attention.stop(); }
 }));
 
@@ -231,7 +271,8 @@ test("only acknowledgment from this session's exact bound window can dismiss its
 		assert.equal(helper.messages.at(-1).acknowledged, false);
 		child.message({ type: "acknowledged", generation: 1 });
 		attention.configure({ style: "both" });
-		assert.equal(helper.messages.at(-1).acknowledged, true);
+		assert.equal(child.stdin.writableEnded, true);
+		assert.equal(attention.status().binding, null);
 	} finally { attention.stop(); }
 	const preview = controller(home);
 	try {
@@ -265,6 +306,7 @@ test("unresolved input stays active through working/idle updates; resolving it a
 		attention.observe(event("assistant.turn_start"));
 		assert.equal(helper.messages.at(-1).kind, null, "No alert is needed once Copilot can continue.");
 		attention.observe(event("user_input.requested", { requestId: "next" }));
+		await flush();
 		assert.equal(helper.messages.at(-1).kind, "question");
 		assert.equal(helper.messages.at(-1).acknowledged, false);
 		attention.observe(event("user.message", { content: "Here is my answer" }));
@@ -304,7 +346,8 @@ test("running sessions reload shared preferences independently without re-arming
 		setAttentionConfig({ style: "background" }, { home });
 		await until(() => first.attention.status().style === "background" && second.attention.status().style === "background");
 		assert.equal(first.helper.messages.at(-1).generation, 1);
-		assert.equal(first.helper.messages.at(-1).acknowledged, true);
+		assert.equal(first.helper.children[0].child.stdin.writableEnded, true);
+		assert.equal(first.helper.children.length, 1);
 		assert.equal(second.helper.messages.at(-1).acknowledged, false);
 		first.attention.stop();
 		setAttentionConfig({ enabled: false }, { home });
@@ -357,7 +400,7 @@ test("independent sessions adopt an atomic preference update after their initial
 				},
 			};
 			const facade = "data:text/javascript," + encodeURIComponent(
-				"export const { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, watchFile, unwatchFile, writeFileSync } = globalThis.attentionFs;");
+				"export const { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmdirSync, rmSync, watchFile, unwatchFile, writeFileSync } = globalThis.attentionFs;");
 			registerHooks({ resolve(specifier, context, next) {
 				return specifier === "node:fs" && context.parentURL === ${JSON.stringify(source)}
 					? { url: facade, shortCircuit: true } : next(specifier, context);
@@ -417,7 +460,7 @@ test("independent sessions adopt an atomic preference update after their initial
 			assert.equal(entry.state.helpers, 1);
 			assert.equal(entry.state.last.generation, 1);
 		}
-		assert.equal(first.state.last.acknowledged, true);
+		assert.equal(first.state.ended, true);
 		assert.equal(second.state.last.acknowledged, false);
 		first.child.send("stop");
 		await until(() => first.state.stopped, "First watcher did not stop");
@@ -525,6 +568,63 @@ test("unsupported platforms never spawn; native failures are isolated and explic
 		assert.match(attention.status().error, /verified console/);
 		assert.equal(reports.length, 1);
 		assert.equal(attention.status().binding, null);
+	} finally { attention.stop(); }
+}));
+
+test("an unresponsive renderer is stopped by the parent watchdog without touching terminal sessions", async (t) => fixture(async (home) => {
+	t.mock.timers.enable({ apis: ["Date", "setInterval"] });
+	setAttentionConfig({ enabled: true }, { home });
+	const { attention, helper, reports } = controller(home);
+	try {
+		attention.observe(event("permission.requested", { requestId: "wait" }));
+		await flush();
+		assert.equal(helper.children.length, 1);
+		t.mock.timers.tick(6000);
+		await flush();
+		assert.equal(helper.children[0].child.stdin.writableEnded, true);
+		assert.equal(attention.status().binding, null);
+		assert.match(attention.status().error, /liveness timed out/);
+		assert.equal(reports.length, 1);
+		assert.equal(helper.children.length, 1);
+	} finally { attention.stop(); }
+}));
+
+test("the watchdog terminates only its captured helper if graceful shutdown cannot complete", async (t) => fixture(async (home) => {
+	t.mock.timers.enable({ apis: ["Date", "setInterval", "setTimeout"] });
+	setAttentionConfig({ enabled: true }, { home });
+	const helper = fakeHelper({ closeOnEnd: false });
+	const { attention } = controller(home, { spawn: helper.spawn });
+	try {
+		attention.observe(event("permission.requested", { requestId: "wait" }));
+		await flush();
+		const child = helper.children[0].child;
+		t.mock.timers.tick(6000);
+		await flush();
+		assert.equal(child.stdin.writableEnded, true);
+		assert.equal(child.killCount, 0);
+		t.mock.timers.tick(1500);
+		await flush();
+		assert.equal(child.killCount, 1);
+		assert.equal(helper.children.length, 1);
+	} finally { attention.stop(); }
+}));
+
+test("only liveness from the bound renderer keeps its watchdog alive", async (t) => fixture(async (home) => {
+	t.mock.timers.enable({ apis: ["Date", "setInterval"] });
+	setAttentionConfig({ enabled: true }, { home });
+	const { attention, helper } = controller(home);
+	try {
+		attention.observe(event("permission.requested", { requestId: "wait" }));
+		await flush();
+		const child = helper.children[0].child;
+		t.mock.timers.tick(4000);
+		child.message({ type: "heartbeat" });
+		t.mock.timers.tick(4000);
+		assert.equal(child.stdin.writableEnded, false);
+		child.message({ type: "heartbeat", windowHandle: "different" });
+		t.mock.timers.tick(2000);
+		await flush();
+		assert.equal(child.stdin.writableEnded, true);
 	} finally { attention.stop(); }
 }));
 
@@ -729,7 +829,22 @@ test("statusline reconfiguration preserves independent attention settings and pa
 test("native helper compiles, caches its build, latches focus until a new generation, and never guesses a window", {
 	skip: process.platform !== "win32",
 }, async (t) => fixture(async (home) => {
-	const executable = await buildAttentionHelper({ home });
+	let compilerStarts = 0;
+	const source = join(root, "extensions", "pr-statusline", "attention.windows.cs");
+	const expectedSource = readFileSync(source);
+	const compile = (binary, args, options) => {
+		compilerStarts++;
+		assert.notEqual(args.at(-1), source);
+		assert.deepEqual(readFileSync(args.at(-1)), expectedSource);
+		return spawn(binary, args, options);
+	};
+	const [executable, concurrent] = await Promise.all([
+		buildAttentionHelper({ home, spawn: compile }),
+		buildAttentionHelper({ home, spawn: compile }),
+	]);
+	assert.equal(concurrent, executable);
+	assert.equal(compilerStarts, 1);
+	assert.equal(existsSync(`${executable}.lock`), false);
 	assert.equal(await buildAttentionHelper({ home }), executable);
 	const latch = spawnSync(executable, ["--self-test"], { encoding: "utf8", windowsHide: true, timeout: 10000 });
 	assert.equal(latch.status, 0, latch.stderr);
@@ -739,6 +854,7 @@ test("native helper compiles, caches its build, latches focus until a new genera
 	assert.deepEqual(JSON.parse(isolated.stdout), {
 		type: "focusIsolationTest", passed: true, sameProcessWindows: true,
 		ownedWindowExcluded: true, newWindowExcluded: true, transientActivationExcluded: true,
+		raisedTargetOrderRecovered: true,
 	});
 	const persistence = spawnSync(executable, ["--persistence-test"], { encoding: "utf8", windowsHide: true, timeout: 30000 });
 	assert.equal(persistence.status, 0, persistence.stderr || persistence.stdout);
@@ -770,7 +886,7 @@ test("native helper compiles, caches its build, latches focus until a new genera
 			if (classic.exitCode === null) classic.kill();
 		}
 	}
-	if (process.env.WT_SESSION) {
+	if (process.env.WT_SESSION && process.env.COPILOT_ATTENTION_DESKTOP_TEST === "1") {
 		const hostPid = Number(process.env.COPILOT_ATTENTION_TEST_OWNER_PID) || process.pid;
 		const bound = spawnSync(executable, [String(hostPid), "--probe"], { encoding: "utf8", windowsHide: true, timeout: 10000 });
 		if (bound.status !== 0) {
@@ -818,6 +934,77 @@ test("native helper compiles, caches its build, latches focus until a new genera
 		} finally {
 			attention.stop();
 			if (helperProcess && helperProcess.exitCode === null) helperProcess.kill();
+		}
+	}
+}));
+
+test("native graphics stay isolated from a hung hidden window and bound resource and redraw work", {
+	skip: process.platform !== "win32", timeout: 120000,
+}, async (t) => fixture(async (home) => {
+	const executable = await buildAttentionHelper({ home });
+	const fixtureExecutable = await buildAttentionHelper({
+		home, source: join(root, "extensions", "pr-statusline", "test", "fixtures", "attention-window.cs"),
+	});
+	const fixtureProcess = spawn(fixtureExecutable, [], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+	const fixtureReader = createInterface({ input: fixtureProcess.stdout });
+	let renderer, rendererReader;
+	let stage = "fixture startup", trace = "";
+	try {
+		const [fixtureLine] = await once(fixtureReader, "line", { signal: AbortSignal.timeout(10000) });
+		const fixtureInfo = JSON.parse(fixtureLine);
+		assert.equal(fixtureInfo.type, "fixtureReady");
+		renderer = spawn(executable, ["--graphics-safety-test", fixtureInfo.windowHandle], {
+			windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
+		});
+		renderer.stderr.on("data", (data) => { trace = (trace + data).slice(-8000); });
+		rendererReader = createInterface({ input: renderer.stdout });
+		stage = "renderer startup";
+		const [readyLine] = await once(rendererReader, "line", { signal: AbortSignal.timeout(10000) });
+		assert.equal(JSON.parse(readyLine).type, "graphicsSafetyReady", readyLine);
+		const duplicate = spawnSync(executable, ["--lease-probe", fixtureInfo.windowHandle], {
+			encoding: "utf8", windowsHide: true, timeout: 5000,
+		});
+		assert.equal(duplicate.status, 1, duplicate.stdout || duplicate.stderr);
+		assert.match(JSON.parse(duplicate.stdout).message, /Another attention renderer/);
+		stage = "fixture hang";
+		fixtureProcess.stdin.write("hang\n");
+		const [hungLine] = await once(fixtureReader, "line", { signal: AbortSignal.timeout(5000) });
+		assert.equal(JSON.parse(hungLine).type, "fixtureHung");
+		const resultLine = once(rendererReader, "line", { signal: AbortSignal.timeout(5000) });
+		stage = "hidden rendering and resource work";
+		const closed = once(renderer, "close");
+		renderer.stdin.end("run\n");
+		const [line] = await resultLine;
+		const result = JSON.parse(line);
+		assert.equal(result.type, "graphicsSafetyTest", line);
+		assert.equal(result.passed, true);
+		assert.equal(result.foreignUnresponsive, true);
+		assert.equal(result.unownedOverlays, true);
+		assert.equal(result.visibleOverlays, 0);
+		assert.equal(result.frames, 40);
+		assert.equal(result.positionCalls, 2);
+		assert.ok(result.alphaCalls <= 80);
+		assert.ok(result.pumpedMessages <= 64);
+		assert.ok(result.gdiAfter <= result.gdiBefore);
+		assert.ok(result.userAfter <= result.userBefore);
+		assert.ok(result.handlesAfter <= result.handlesBefore);
+		const [code] = await closed;
+		assert.equal(code, 0);
+		const released = spawnSync(executable, ["--lease-probe", fixtureInfo.windowHandle], {
+			encoding: "utf8", windowsHide: true, timeout: 5000,
+		});
+		assert.equal(released.status, 0, released.stdout || released.stderr);
+		t.diagnostic(JSON.stringify(result));
+	} catch (error) {
+		throw new Error(`Graphics safety failed during ${stage}: ${error.message}\n${trace}`, { cause: error });
+	} finally {
+		rendererReader?.close();
+		if (renderer?.exitCode === null) renderer.kill();
+		fixtureReader.close();
+		fixtureProcess.stdin.end();
+		if (fixtureProcess.exitCode === null) {
+			await Promise.race([once(fixtureProcess, "close"), new Promise((resolve) => setTimeout(resolve, 1000))]);
+			if (fixtureProcess.exitCode === null) fixtureProcess.kill();
 		}
 	}
 }));

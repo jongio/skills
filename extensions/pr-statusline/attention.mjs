@@ -1,8 +1,9 @@
 import { spawn as spawnProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { withStateLock } from "../state-lock.mjs";
 import { AttentionState, isAttentionInteraction } from "./attention-state.mjs";
@@ -81,11 +82,27 @@ export async function buildAttentionHelper({
 	const compiler = join(framework, "csc.exe");
 	if (!existsSync(compiler)) throw new Error("Windows .NET Framework compiler is unavailable; window attention is disabled.");
 	mkdirSync(directory, { recursive: true });
+	const lock = `${destination}.lock`;
+	const deadline = performance.now() + 30000;
+	for (;;) {
+		if (existsSync(destination)) return destination;
+		try {
+			mkdirSync(lock);
+			break;
+		} catch (error) {
+			if (error.code !== "EEXIST") throw error;
+			if (performance.now() >= deadline) throw new Error("Attention compiler cache is busy; no renderer was started.");
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+	}
 	const temporary = join(directory, `attention-${hash}-${process.pid}-${randomUUID()}.exe`);
+	const snapshot = `${temporary}.cs`;
 	try {
+		if (existsSync(destination)) return destination;
+		writeFileSync(snapshot, content, { mode: 0o600 });
 		await new Promise((resolve, reject) => {
 			const child = spawn(compiler, ["/nologo", "/optimize+", "/target:winexe",
-				`/reference:${join(framework, "System.Web.Extensions.dll")}`, `/out:${temporary}`, source], {
+				`/reference:${join(framework, "System.Web.Extensions.dll")}`, `/out:${temporary}`, snapshot], {
 				windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
 			});
 			let output = "";
@@ -112,7 +129,11 @@ export async function buildAttentionHelper({
 		}
 		return destination;
 	} finally {
-		rmSync(temporary, { force: true });
+		try { rmSync(temporary, { force: true }); }
+		finally {
+			try { rmSync(snapshot, { force: true }); }
+			finally { rmdirSync(lock); }
+		}
 	}
 }
 
@@ -131,6 +152,9 @@ export function createSessionAttention({
 	let activePreview = null;
 	let appliedRevision = null;
 	let appliedConfigValid = false;
+	let heartbeatTimer = null;
+	let lastHeartbeat = 0;
+	let stopping = null;
 
 	const status = () => ({ enabled: config.enabled, supported, style: config.style,
 		binding, error: lastError, ...state.snapshot() });
@@ -140,6 +164,8 @@ export function createSessionAttention({
 		failed = true;
 	};
 	function stopChild() {
+		clearInterval(heartbeatTimer);
+		heartbeatTimer = null;
 		cancelStart?.();
 		activePreview = null;
 		const current = child;
@@ -147,6 +173,9 @@ export function createSessionAttention({
 		binding = null;
 		previous = null;
 		if (!current) return;
+		const completion = new Promise((resolve) => current.once("close", resolve));
+		stopping = completion;
+		completion.then(() => { if (stopping === completion) stopping = null; });
 		current.stdin.end();
 		const timer = setTimeout(() => current.kill(), 1500);
 		timer.unref();
@@ -154,6 +183,21 @@ export function createSessionAttention({
 	}
 	function send(message) {
 		if (child && !child.stdin.destroyed) child.stdin.write(`${JSON.stringify(message)}\n`);
+	}
+	function hasPendingAttention() {
+		const snapshot = state.snapshot();
+		return config.enabled && snapshot.kind && snapshot.generation > acknowledgedGeneration;
+	}
+	function watchHeartbeat(current) {
+		lastHeartbeat = Date.now();
+		if (heartbeatTimer) return;
+		heartbeatTimer = setInterval(() => {
+			if (child === current && Date.now() - lastHeartbeat > 5000) {
+				fail(new Error("Window attention liveness timed out; the helper was stopped."));
+				stopChild();
+			}
+		}, 1000);
+		heartbeatTimer.unref();
 	}
 	function publish() {
 		if (!child || !binding) return;
@@ -171,12 +215,14 @@ export function createSessionAttention({
 			send({ type: "preview", ...preview, style: config.style, color: config.colors[preview.kind] });
 			preview = null;
 		}
+		if (!hasPendingAttention() && !preview && !activePreview) stopChild();
 	}
 	async function start() {
 		if (child || starting || stopped || failed || !supported) return starting;
 		starting = (async () => {
 			try {
 				const executable = await build({ home, env, spawn });
+				if (stopping) await stopping;
 				if (stopped || (!preview && (!config.enabled || !state.snapshot().kind ||
 					state.generation <= acknowledgedGeneration))) return;
 				const current = spawn(executable, [String(ownerProcessId)], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
@@ -211,7 +257,7 @@ export function createSessionAttention({
 						return;
 					}
 					let newline;
-					while ((newline = buffer.indexOf("\n")) >= 0) {
+					while (child === current && (newline = buffer.indexOf("\n")) >= 0) {
 						const line = buffer.slice(0, newline).trim();
 						buffer = buffer.slice(newline + 1);
 						if (!line) continue;
@@ -221,17 +267,21 @@ export function createSessionAttention({
 								if (!/^[1-9]\d*$/.test(String(message.windowHandle))) throw new Error("Invalid Terminal window binding.");
 								binding = String(message.windowHandle);
 								lastError = null;
+								watchHeartbeat(current);
 								finish();
 								publish();
+							} else if (message.type === "heartbeat" && String(message.windowHandle) === binding) {
+								lastHeartbeat = Date.now();
 							} else if (message.type === "acknowledged" && Number.isSafeInteger(message.generation) &&
 								String(message.windowHandle) === binding &&
 								message.generation <= state.generation) {
 								acknowledgedGeneration = Math.max(acknowledgedGeneration, message.generation);
+								if (!hasPendingAttention() && !preview && !activePreview) stopChild();
 							} else if (message.type === "previewComplete" &&
 								String(message.windowHandle) === binding &&
 								activePreview && message.previewId === activePreview.previewId) {
 								activePreview = null;
-								if (!config.enabled) stopChild();
+								if (!hasPendingAttention() && !preview) stopChild();
 							} else if (message.type === "unavailable") {
 								const error = new Error(String(message.message));
 								fail(error);
@@ -253,6 +303,8 @@ export function createSessionAttention({
 				current.once("close", (code) => {
 					if (child !== current) return;
 					child = null;
+					clearInterval(heartbeatTimer);
+					heartbeatTimer = null;
 					activePreview = null;
 					binding = null;
 					previous = null;
