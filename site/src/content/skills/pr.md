@@ -49,6 +49,9 @@ update one consolidated disposition instead of posting repetitive acknowledgment
 An old disposition must be revalidated after a later review before it settles
 that renewed concern, explicitly citing its review ID. Unrelated edits do not
 revalidate another concern.
+For long prose or ambiguous titles, cite the review ID and the exact `concern:...`
+token from `unsettledConcernDetails`; full evidence and local context remain
+available without requiring a verbatim reply.
 
 ## Install with required skills
 

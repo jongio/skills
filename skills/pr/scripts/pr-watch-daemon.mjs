@@ -274,25 +274,44 @@ function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
   const parents = [];
   const residual = [];
   let activeCard = null;
+  let headings = [];
   let cursor = 0;
-  const append = text => (activeCard ? activeCard.evidence : residual).push(text);
+  const context = () => headings.filter(Boolean).join("\n");
+  const appendResidual = text => {
+    const previous = residual.at(-1);
+    if (previous?.context === context()) previous.parts.push(text);
+    else residual.push({ context: context(), parts: [text] });
+  };
+  const append = text => activeCard ? activeCard.evidence.push(text) : appendResidual(text);
   const boundaries = /<details\b[^>]*>|<\/details\s*>|<summary>[\s\S]*?<\/summary>|^#{1,6}\s+.+$|^[ \t]*[-*]\s+[^\n]*#discussion_r\d+[^\n]*/gim;
   for (const match of source.matchAll(boundaries)) {
     append(source.slice(cursor, match.index));
     const token = match[0];
     if (/^<details\b/i.test(token)) {
-      parents.push(activeCard);
+      parents.push({ card: activeCard, headings: [...headings] });
       activeCard = null;
     } else if (/^<\/details/i.test(token)) {
-      activeCard = parents.pop() ?? null;
+      const parent = parents.pop();
+      activeCard = parent?.card ?? null;
+      headings = parent?.headings ?? headings;
     } else if (/^<summary>/i.test(token)) {
       const title = token.match(/<\/picture>\s*([^<\n]+)/i)?.[1]?.trim();
-      activeCard = title ? { text: title, evidence: [] } : null;
+      activeCard = title ? { text: title, evidence: [], context: context(), bounded: parents.length > 0 } : null;
       if (activeCard) cards.push(activeCard);
-      else residual.push(token);
+      else appendResidual(token);
+    } else if (/^#/.test(token) && activeCard?.bounded) {
+      activeCard.evidence.push(token);
     } else {
       activeCard = null;
-      residual.push(token);
+      if (/^#/.test(token)) {
+        const level = token.match(/^#+/)[0].length;
+        headings = headings.slice(0, level - 1);
+        if (!/Needs a closer look|Changes recommended|No open issues|Looks good|Ready to merge/i.test(token)) {
+          headings[level - 1] = token.trim();
+        }
+      } else {
+        appendResidual(token);
+      }
     }
     cursor = match.index + token.length;
   }
@@ -300,41 +319,44 @@ function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
   for (const card of cards) {
     concerns.push({
       text: card.text,
+      evidence: card.evidence.join("").replace(/\s+/g, " ").trim(),
+      context: card.context,
       key: `summary:${card.text}:${card.evidence.join("").replace(/\s+/g, " ").trim()}`,
     });
   }
-  const bodyWithoutStatusSummaries = residual.join("");
-  const context = [...body.matchAll(/^###\s+.+$/gm)]
-    .map(match => match[0].trim())
-    .filter(heading => !/Needs a closer look|Changes recommended|No open issues|Looks good|Ready to merge/i.test(heading))
-    .join("\n");
-  for (const match of bodyWithoutStatusSummaries.matchAll(
-    /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
-  )) {
-    const title = match[1].trim();
-    const commentId = Number.parseInt(match[2], 10);
-    if (resolvedCommentIds.has(commentId)) {
-      continue;
+  for (const section of residual) {
+    const bodyWithoutStatusSummaries = section.parts.join("");
+    for (const match of bodyWithoutStatusSummaries.matchAll(
+      /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
+    )) {
+      const title = match[1].trim();
+      const commentId = Number.parseInt(match[2], 10);
+      if (resolvedCommentIds.has(commentId)) {
+        continue;
+      }
+      const key = `inline:${commentId}:${title.replace(/\s+/g, " ")}`;
+      if (title && !concerns.some(concern => concern.key === key && concern.context === section.context)) {
+        concerns.push({ text: title, evidence: title, context: section.context, key });
+      }
     }
-    const key = `inline:${commentId}:${title.replace(/\s+/g, " ")}`;
-    if (title && !concerns.some(concern => concern.key === key)) {
-      concerns.push({ text: title, key });
-    }
-  }
-  const residualProse = bodyWithoutStatusSummaries
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<\/?details[^>]*>/gi, "")
-    .replace(/^\s*-\s*(?:<picture>[\s\S]*?<\/picture>\s*)?\[[^\]]+\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\)[ \t]*/gm, "")
-    .replace(/^###\s+.+$/gm, "")
-    .replace(/\*\*No open issues\*\*\s*(?:🎉)?/gi, "")
-    .replace(/<sub>[\s\S]*?<\/sub>/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
+    const residualProse = bodyWithoutStatusSummaries
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<\/?details[^>]*>/gi, "")
+      .replace(/^\s*-\s*(?:<picture>[\s\S]*?<\/picture>\s*)?\[[^\]]+\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\)[ \t]*/gm, "")
+      .replace(/^#{1,6}\s+.+$/gm, "")
+      .replace(/\*\*No open issues\*\*\s*(?:🎉)?/gi, "")
+      .replace(/<sub>[\s\S]*?<\/sub>/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
-  if (residualProse.length > 0) {
-    concerns.push({ text: residualProse, key: `prose:${residualProse}` });
+    if (residualProse.length > 0) {
+      concerns.push({ text: residualProse, evidence: residualProse, context: section.context, key: `prose:${residualProse}` });
+    }
   }
-  return concerns.map(concern => ({ ...concern, key: JSON.stringify([context, concern.key]) }));
+  return concerns.map(concern => {
+    const key = JSON.stringify([concern.context, concern.key]);
+    return { ...concern, key, id: `concern:${createHash("sha256").update(key).digest("hex").slice(0, 16)}` };
+  });
 }
 
 export function extractBodyOnlyFindings(
@@ -405,14 +427,17 @@ export function extractBodyOnlyFindings(
     const keyedConcerns = concerns.map(concern => ({ ...concern, key: JSON.stringify([authorKey, concern.key]) }));
     for (const concern of keyedConcerns) {
       const dispositions = eligibleComments.filter(c =>
-        concerns.length === 1 || c.body.toLowerCase().includes(concern.text.toLowerCase()));
+        concerns.length === 1 ||
+        (concern.id && new RegExp(`\\b${concern.id}\\b`, "i").test(c.body)) ||
+        (concerns.filter(other => other.text.toLowerCase() === concern.text.toLowerCase()).length === 1 &&
+          c.body.toLowerCase().includes(concern.text.toLowerCase())));
       concern.settled = !isActiveChangesRequested && dispositions.length > 0;
     }
     entries.push({ reviewId, author: login, state: review.state, commitOid, headline, body, keyedConcerns, isActiveChangesRequested });
   }
   const pendingKeys = new Map();
   for (const { keyedConcerns, isActiveChangesRequested, ...entry } of entries) {
-    const finding = { ...entry, unsettledConcerns: [], relatedReviewIds: [entry.reviewId] };
+    const finding = { ...entry, unsettledConcerns: [], unsettledConcernDetails: [], relatedReviewIds: [entry.reviewId] };
     for (const concern of keyedConcerns) {
       if (!isActiveChangesRequested && concern.settled) continue;
       const previous = !isActiveChangesRequested && pendingKeys.get(concern.key);
@@ -421,6 +446,12 @@ export function extractBodyOnlyFindings(
         continue;
       }
       finding.unsettledConcerns.push(concern.text);
+      finding.unsettledConcernDetails.push({
+        id: concern.id,
+        text: concern.text,
+        evidence: concern.evidence,
+        context: concern.context,
+      });
       if (!isActiveChangesRequested) pendingKeys.set(concern.key, finding);
     }
     if (finding.unsettledConcerns.length > 0) findings.push(finding);

@@ -141,6 +141,14 @@ Different evidence or reviewers remain distinct; active
 against the current code rather than assuming equivalent headlines mean the
 same finding.
 
+Watcher findings include `unsettledConcernDetails` with an `id`, display text,
+full evidence, and local heading context. Cite the review ID and the exact
+`concern:<id>` token to disposition prose concisely or distinguish identical
+titles at different locations. Evidence or location changes produce a different
+token; each renewed review still requires its own explicit reference.
+Internal headings in balanced cards remain card evidence. Headings outside
+cards define local context, not a shared location for the entire review.
+
 Reply once per distinct actionable concern. Update one consolidated body-finding
 comment with review IDs, headings, and actual fixing-commit links instead of
 posting another acknowledgment each round. Keep fixes and dispositions brief.

@@ -122,6 +122,56 @@ test("new evidence attached to an existing inline link still requires dispositio
   assert.deepEqual(findings.map(finding => finding.reviewId), [101]);
 });
 
+test("headings inside balanced cards remain evidence, unlike following standalone sections", () => {
+  const card = `<summary><picture><img></picture>Timeout</summary>\n### Reproduction\nThe worker outlives cancellation.`;
+  const balanced = `<details>${card}</details>`;
+  const findings = extractBodyOnlyFindings([review(100, balanced)], [], "current-head");
+  assert.deepEqual(findings[0].unsettledConcerns, ["Timeout"]);
+  assert.deepEqual(extractBodyOnlyFindings([review(100, balanced)], [disposition(100, "Timeout fixed.")], "current-head"), []);
+  const standalone = extractBodyOnlyFindings([review(100, card)], [disposition(100, "Timeout fixed.")], "current-head");
+  assert.equal(standalone.length, 1);
+  assert.match(standalone[0].unsettledConcerns[0], /worker outlives/);
+});
+
+test("each card retains its own location when reviews swap cards under the same headings", () => {
+  const card = title => `<details><summary><picture><img></picture>${title}</summary>Check cancellation.</details>`;
+  const body = (first, second) => `### src/alpha.mjs:10\n${card(first)}\n### src/beta.mjs:20\n${card(second)}`;
+  const findings = extractBodyOnlyFindings([
+    review(100, body("Timeout", "Validation")),
+    review(101, body("Validation", "Timeout")),
+  ], [], "current-head");
+  assert.equal(findings.length, 2);
+  assert.deepEqual(findings.map(finding => finding.relatedReviewIds), [[100], [101]]);
+  const details = findings.flatMap(finding => finding.unsettledConcernDetails);
+  assert.equal(new Set(details.map(concern => concern.id)).size, 4);
+  const duplicateTitles = review(100, body("Timeout", "Timeout"));
+  const duplicateFindings = extractBodyOnlyFindings([duplicateTitles], [disposition(100, "Timeout fixed.")], "current-head");
+  assert.equal(duplicateFindings[0].unsettledConcerns.length, 2);
+  const firstId = duplicateFindings[0].unsettledConcernDetails[0].id;
+  const partial = extractBodyOnlyFindings([duplicateTitles], [disposition(100, `${firstId} fixed.`)], "current-head");
+  assert.equal(partial[0].unsettledConcerns.length, 1);
+  assert.match(partial[0].unsettledConcernDetails[0].context, /beta/);
+});
+
+test("prose has a concise explicit identity without copying evidence or clearing other concerns", () => {
+  const prose = "The cancellation worker releases ownership before the child process has fully stopped, allowing another worker to adopt the same running process.";
+  const card = `<details><summary><picture><img></picture>Timeout</summary>Wait for shutdown.</details>`;
+  const first = review(100, `${summary(prose)}\n${card}`);
+  const findings = extractBodyOnlyFindings([first], [], "current-head");
+  const detail = findings[0].unsettledConcernDetails.find(concern => concern.evidence.includes(prose));
+  assert.match(detail.id, /^concern:[a-f0-9]{16}$/);
+  const partial = extractBodyOnlyFindings([first], [disposition(100, `${detail.id} fixed.`)], "current-head");
+  assert.deepEqual(partial[0].unsettledConcerns, ["Timeout"]);
+  assert.deepEqual(extractBodyOnlyFindings([first], [disposition(100, `${detail.id} and Timeout fixed.`)], "current-head"), []);
+  const renewed = extractBodyOnlyFindings([first, review(101, `${summary(prose)}\n${card}`)],
+    [disposition(100, `${detail.id} and Timeout fixed.`)], "current-head");
+  assert.deepEqual(renewed.map(finding => finding.reviewId), [101]);
+  const changed = extractBodyOnlyFindings([review(100, `${summary(`${prose} A new retry also loses ownership.`)}\n${card}`)],
+    [disposition(100, `${detail.id} and Timeout fixed.`)], "current-head");
+  assert.equal(changed[0].unsettledConcernDetails.length, 1);
+  assert.notEqual(changed[0].unsettledConcernDetails[0].id, detail.id);
+});
+
 test("same headline, different authors, or an early comment cannot settle distinct findings", () => {
   const findings = extractBodyOnlyFindings([
     review(100, summary("Check retained evidence before adopting journals.")),
@@ -203,6 +253,34 @@ test("the production poll honors edited consolidated dispositions without waivin
           } } }] },
         } } } },
       };
+    });
+
+    test("the production poll exposes concise identities and keeps partially addressed prose blocking", async () => {
+      const args = parsePrWatchArgs(["once", "--repo", "example/repo", "--pr", "1", "--head", "current-head", "--since-comment-id", "500"]);
+      const body = "### src/alpha.mjs:10\nThe cancellation path releases ownership before shutdown.\n" +
+        "<details><summary><picture><img></picture>Timeout</summary>\n### Reproduction\nThe worker outlives cancellation.</details>";
+      let response = "";
+      const poll = () => evaluatePrPollTick(args, request => ({
+        ok: true, status: 200, headers: {},
+        data: request.kind !== "graphql" ? { workflow_runs: [] } : { data: { repository: { pullRequest: {
+          state: "OPEN", headRefOid: "current-head", mergeable: "MERGEABLE", mergeStateStatus: "CLEAN",
+          reviewRequests: { nodes: [] }, reviews: { nodes: [review(101, body)] }, reviewThreads: { nodes: [] },
+          comments: { nodes: response ? [{ databaseId: 500, body: response, createdAt: "2026-10-22T20:02:00Z" }] : [] },
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS", contexts: {
+            nodes: [{ __typename: "CheckRun", name: "test", status: "COMPLETED", conclusion: "SUCCESS" }],
+          } } } }] },
+        } } } },
+      }));
+      const first = await poll();
+      const details = first.events[0].bodyFindings[0].unsettledConcernDetails;
+      assert.equal(details.length, 2);
+      const prose = details.find(concern => concern.evidence.includes("releases ownership"));
+      response = `Review 101: ${prose.id} fixed.`;
+      const partial = await poll();
+      assert.equal(partial.events[0].type, "FEEDBACK_ACTION_NEEDED");
+      assert.deepEqual(partial.events[0].bodyFindings[0].unsettledConcerns, ["Timeout"]);
+      response += " Timeout fixed.";
+      assert.equal((await poll()).events[0].type, "PR_READY_TO_MERGE");
     });
     assert.equal(result.events.some(event => event.type === "PR_READY_TO_MERGE"), ready, JSON.stringify(result.events));
     assert.equal(result.events.some(event => event.type === "FEEDBACK_ACTION_NEEDED"), !ready, JSON.stringify(result.events));
