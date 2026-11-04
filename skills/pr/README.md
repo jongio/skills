@@ -130,18 +130,29 @@ not just inline comments and unresolved threads. Copilot can embed actionable
 findings inside nested details, including "previously missed" issues in unchanged
 code, even when the same review says "No open issues".
 
-Each finding receives an evidence-backed disposition. Duplicate links are
-reconciled, older findings are checked against the current head, and body-only
-findings receive a PR reply identifying the review and heading rather than a
-claim that a nonexistent thread was resolved.
+Track underlying defects, not review rounds. Heading-only advisories do not
+create findings. The watcher groups exact repeated concerns from the same
+reviewer across heads, retains their source review IDs, and reuses explicit
+dispositions revalidated after the repeated review (including edits to the same
+comment). Old dispositions cannot silence later renewed concerns.
+Different evidence or reviewers remain distinct; active
+`CHANGES_REQUESTED` decisions remain blocking. Manually reconcile paraphrases
+against the current code rather than assuming equivalent headlines mean the
+same finding.
 
-Reply to every actionable comment and finding, including Copilot review bodies.
-For each fix, use one short sentence or bullet with a clickable link to the actual
-fixing commit and a brief description; omit long validation summaries and verbose
-resolution reports. Related body-only fixes may share a reply if each remains
-identifiable by review ID and heading. Unfixed or disputed findings get a concise,
-evidence-backed disposition, never an invented fixing commit. Replies do not
-replace resolving addressed bot threads or the existing review and merge gates.
+Reply once per distinct actionable concern. Update one consolidated body-finding
+comment with review IDs, headings, and actual fixing-commit links instead of
+posting another acknowledgment each round. Keep fixes and dispositions brief.
+Optional or tangential suggestions do not authorize broader edits. Replies never
+replace thread resolution, final-head review, required approvals, or merge consent.
+
+Batch related repairs and wait for applicable current-head CI to pass before
+requesting reviews, unless the user requests early review. Every changed head
+still needs final-head reviews before merge. Diagnose failures before increasing
+timeouts or relocating fixtures; local smoke tests do not establish hosted success.
+After two unsuccessful repair cycles for the same failure, pause with evidence
+and the missing diagnostic or decision. Preserve that attempt history across
+resumptions; continue only with new evidence or user direction.
 
 ## Review and merge gates
 

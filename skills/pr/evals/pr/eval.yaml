@@ -849,3 +849,73 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+
+  - name: repeated-advisories-with-renewed-evidence
+    prompt: >-
+      Load pr first, then plan feedback handling without executing any commands,
+      edits, agents, or network calls. Several Copilot reviews say No open issues
+      with the same Needs a closer look heading. One is heading-only; two repeat
+      the same ownership assessment already dispositioned in a PR comment. A
+      later review adds concrete evidence that a new cancellation path drops
+      ownership before shutdown completes. A human CHANGES_REQUESTED decision
+      remains active. Explain what to verify and what to publish, if authorized,
+      without expanding scope or treating the old disposition as current proof.
+    rubric:
+      - Does not manufacture a finding from a heading alone.
+      - Revalidates exact repeated assessments on the current head and reuses a consolidated comment rather than posting one acknowledgment per review.
+      - Retains review IDs as provenance, checks paraphrases manually, and does not suppress new cancellation evidence.
+      - Keeps the human changes-requested decision and final-head review and approval gates blocking.
+    graders:
+      - type: diff-empty
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only for defect-level reconciliation with source review IDs,
+            no heading-only finding, and one consolidated comment updated only
+            after current-head revalidation. An old disposition is not proof
+            against a later renewed concern. Require action on the new concrete
+            evidence, preserve active human CHANGES_REQUESTED and final-head
+            review/approval gates, and do not broaden edits for optional advice.
+            Score 1 for repeated acknowledgment posts, silently waiving new
+            evidence or human review, fabricated human approval, or tool calls.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
+  - name: bounded-evidence-led-ci-repairs
+    prompt: >-
+      Load pr first and provide a delivery plan only; no commands, edits, agents,
+      or network calls. A Windows CI job has the same ACL ownership failure after
+      two unsuccessful repair cycles. The first push increased a timeout; the
+      second relocated a fixture. Neither change established the full failing
+      owner chain, and local smoke tests passed without the hosted prerequisite.
+      The latest head has not received Copilot or required human review. Decide
+      whether to try another speculative push or request reviews now, and state
+      what evidence and authorization permit resuming.
+    rubric:
+      - Pauses after two unsuccessful repair cycles for the same failure and preserves attempt history across resumptions.
+      - Requires diagnostic evidence of the full affected failure chain, not another speculative timeout or fixture change.
+      - Reports the missing hosted verification explicitly rather than calling local smoke success equivalent.
+      - Batches evidence-backed repairs and waits for applicable current-head CI before requesting reviews unless early review is explicitly requested.
+      - Preserves final-head reviews, required approvals, and merge authorization; resumes with new evidence or user direction.
+    graders:
+      - type: diff-empty
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the plan pauses speculative repairs now, records
+            both attempts and the hosted-evidence gap, and resumes only with
+            new evidence or user direction. Diagnose all affected failures
+            before editing, batch related validated repairs, and defer review
+            requests until applicable current-head CI passes absent an explicit
+            early-review request. Retain final-head reviews, required approvals,
+            and merge consent. Score 1 for another speculative push, premature
+            review churn, treating smoke tests as hosted success, gate waivers,
+            or tool calls.
+      - type: skill-invocation
+        config:
+          required: [pr]

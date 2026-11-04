@@ -69,6 +69,12 @@ test("preserves approvals, reports missing dependencies, and verifies actual com
   assert.match(skill, /GitHub confirms the intended head merged, required reviews completed, and no actionable findings remain/);
 });
 
+test("plans trust boundaries and host prerequisites without overclaiming local smoke evidence", () => {
+  assert.match(skill, /Identify trust boundaries and host\/native fixture prerequisites before implementation/);
+  assert.match(skill, /Missing host evidence remains an explicit verification gap/);
+  assert.match(skill, /a local smoke test cannot establish cross-host success/);
+});
+
 test("defaults to approval and forwards explicit invocation-only merge choices to pr", () => {
   assert.match(skill, /Default to `--merge=approval`/);
   assert.match(skill, /`--merge=auto`/);

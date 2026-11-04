@@ -264,48 +264,45 @@ export function isErroredCopilotReview(review) {
   return Boolean(review && typeof review.body === "string" && ERRORED_COPILOT_REVIEW_RE.test(review.body));
 }
 
-function extractBodyConcerns(body, fallbackHeadline, resolvedCommentIds = new Set()) {
-  const bodyWithoutResolvedDetails = body.replace(
-    /<details[^>]*>\s*<summary>\s*<strong>\s*\d+\s+resolved since last review\s*<\/strong>\s*<\/summary>[\s\S]*?<\/details>/gi,
+function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
+  const bodyWithoutStatusSummaries = body.replace(
+    /<summary>\s*<strong>\s*\d+\s+(?:open issues?|resolved since last review)\s*<\/strong>\s*<\/summary>/gi,
     ""
   );
   const concerns = [];
-  let hadInlineLinks = false;
-  for (const match of bodyWithoutResolvedDetails.matchAll(
+  for (const match of bodyWithoutStatusSummaries.matchAll(
     /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
   )) {
-    hadInlineLinks = true;
     const title = match[1].trim();
     const commentId = Number.parseInt(match[2], 10);
     if (resolvedCommentIds.has(commentId)) {
       continue;
     }
-    if (title && !concerns.includes(title)) {
-      concerns.push(title);
+    const key = `inline:${commentId}:${title.replace(/\s+/g, " ")}`;
+    if (title && !concerns.some(concern => concern.key === key)) {
+      concerns.push({ text: title, key });
     }
   }
-  for (const match of bodyWithoutResolvedDetails.matchAll(
+  for (const match of bodyWithoutStatusSummaries.matchAll(
     /<summary>[\s\S]*?<\/picture>\s*([^<\n]+)<\/summary>/gi
   )) {
     const title = match[1].trim();
-    if (title && !concerns.includes(title)) {
-      concerns.push(title);
+    if (title && !concerns.some(concern => concern.text === title)) {
+      concerns.push({ text: title, key: `summary:${title}` });
     }
   }
-  const residualProse = bodyWithoutResolvedDetails
+  const residualProse = bodyWithoutStatusSummaries
     .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<details[^>]*>\s*<summary>\s*<strong>\s*\d+\s+open issues?\s*<\/strong>\s*<\/summary>[\s\S]*?<\/details>/gi, "")
-    .replace(/^\s*-\s*(?:<picture>[\s\S]*?<\/picture>\s*)?\[[^\]]+\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\).*$/gm, "")
+    .replace(/<\/?details[^>]*>/gi, "")
+    .replace(/^\s*-\s*(?:<picture>[\s\S]*?<\/picture>\s*)?\[[^\]]+\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\)[ \t]*/gm, "")
     .replace(/^###\s+.+$/gm, "")
     .replace(/\*\*No open issues\*\*\s*(?:🎉)?/gi, "")
     .replace(/<sub>[\s\S]*?<\/sub>/gi, "")
+    .replace(/\s+/g, " ")
     .trim();
 
-  if (
-    (residualProse.length > 0 || (concerns.length === 0 && !hadInlineLinks)) &&
-    !concerns.includes(fallbackHeadline)
-  ) {
-    concerns.push(fallbackHeadline);
+  if (residualProse.length > 0) {
+    concerns.push({ text: residualProse, key: `prose:${residualProse}` });
   }
   return concerns;
 }
@@ -317,6 +314,8 @@ export function extractBodyOnlyFindings(
   resolvedCommentIds = new Set()
 ) {
   const findings = [];
+  const entries = [];
+  const settledKeys = new Map();
   const validReviews = (reviews || []).filter(
     (r) =>
       r &&
@@ -354,7 +353,10 @@ export function extractBodyOnlyFindings(
     const reviewSubmittedMs = review.submittedAt ? Date.parse(review.submittedAt) : NaN;
     const headlineMatch = body.match(/^###\s+.+$/m);
     const headline = headlineMatch ? headlineMatch[0].trim() : review.state;
-    const concerns = extractBodyConcerns(body, headline, resolvedCommentIds);
+    const concerns = extractBodyConcerns(body, resolvedCommentIds);
+    if (concerns.length === 0 && isActiveChangesRequested) {
+      concerns.push({ text: headline, key: `decision:${reviewId}` });
+    }
     if (concerns.length === 0 && !isActiveChangesRequested) {
       continue;
     }
@@ -363,37 +365,45 @@ export function extractBodyOnlyFindings(
       if (typeof c?.body !== "string" || !new RegExp(`\\b${reviewId}\\b`).test(c.body)) {
         return false;
       }
-      const commentCreatedMs = c.createdAt ? Date.parse(c.createdAt) : NaN;
+      const commentCreatedMs = Date.parse(c.updatedAt || c.createdAt || "");
       if (Number.isFinite(reviewSubmittedMs) && Number.isFinite(commentCreatedMs)) {
         return commentCreatedMs >= reviewSubmittedMs;
       }
       return true;
     });
 
-    const unsettledConcerns = isActiveChangesRequested
-      ? concerns
-      : concerns.filter((concern) => {
-          if (eligibleComments.length === 0) {
-            return true;
+    const authorKey = normalizeReviewerLogin(login);
+    const keyedConcerns = concerns.map(concern => ({ ...concern, key: JSON.stringify([authorKey, concern.key]) }));
+    for (const concern of keyedConcerns) {
+      const dispositions = eligibleComments.filter(c =>
+        concerns.length === 1 || c.body.toLowerCase().includes(concern.text.toLowerCase()));
+      concern.settled = !isActiveChangesRequested && dispositions.length > 0;
+      if (concern.settled) {
+        for (const comment of dispositions) {
+          const dispositionMs = Date.parse(comment.updatedAt || comment.createdAt || "");
+          if (Number.isFinite(dispositionMs)) {
+            settledKeys.set(concern.key, Math.max(settledKeys.get(concern.key) ?? -Infinity, dispositionMs));
           }
-          if (concerns.length === 1) {
-            return false;
-          }
-          const lowerConcern = concern.toLowerCase();
-          return !eligibleComments.some((c) => c.body.toLowerCase().includes(lowerConcern));
-        });
-
-    if (unsettledConcerns.length > 0) {
-      findings.push({
-        reviewId,
-        author: login,
-        state: review.state,
-        commitOid,
-        headline,
-        unsettledConcerns,
-        body,
-      });
+        }
+      }
     }
+    entries.push({ reviewId, author: login, state: review.state, commitOid, headline, body, keyedConcerns, isActiveChangesRequested, reviewSubmittedMs });
+  }
+  const pendingKeys = new Map();
+  for (const { keyedConcerns, isActiveChangesRequested, reviewSubmittedMs, ...entry } of entries) {
+    const finding = { ...entry, unsettledConcerns: [], relatedReviewIds: [entry.reviewId] };
+    for (const concern of keyedConcerns) {
+      if (!isActiveChangesRequested && (concern.settled ||
+          (Number.isFinite(reviewSubmittedMs) && settledKeys.get(concern.key) >= reviewSubmittedMs))) continue;
+      const previous = !isActiveChangesRequested && pendingKeys.get(concern.key);
+      if (previous) {
+        if (!previous.relatedReviewIds.includes(entry.reviewId)) previous.relatedReviewIds.push(entry.reviewId);
+        continue;
+      }
+      finding.unsettledConcerns.push(concern.text);
+      if (!isActiveChangesRequested) pendingKeys.set(concern.key, finding);
+    }
+    if (finding.unsettledConcerns.length > 0) findings.push(finding);
   }
   return findings;
 }
@@ -1179,6 +1189,7 @@ async function evaluatePrPollTickInner(args, execFn, state) {
           nodes {
             databaseId
             createdAt
+            updatedAt
             author { login }
             body
           }
