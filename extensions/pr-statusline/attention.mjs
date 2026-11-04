@@ -69,8 +69,19 @@ export function setAttentionConfig(update, { home = defaultHome() } = {}) {
 	});
 }
 
+function isProcessAlive(pid) {
+	if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return error?.code === "EPERM";
+	}
+}
+
 export async function buildAttentionHelper({
 	home = defaultHome(), env = process.env, spawn = spawnProcess, source = join(HERE, "attention.windows.cs"),
+	lockTimeoutMs = 30000, staleLockMs = 35000, missingOwnerMs = 250,
 } = {}) {
 	const content = readFileSync(source);
 	const hash = createHash("sha256").update(content).digest("hex").slice(0, 20);
@@ -83,16 +94,41 @@ export async function buildAttentionHelper({
 	if (!existsSync(compiler)) throw new Error("Windows .NET Framework compiler is unavailable; window attention is disabled.");
 	mkdirSync(directory, { recursive: true });
 	const lock = `${destination}.lock`;
-	const deadline = performance.now() + 30000;
+	const ownerFile = join(lock, "owner.json");
+	const ownerToken = randomUUID();
+	const deadline = performance.now() + lockTimeoutMs;
+	let missingOwnerSince = null;
 	for (;;) {
 		if (existsSync(destination)) return destination;
 		try {
 			mkdirSync(lock);
+			writeFileSync(ownerFile, JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: ownerToken }), { mode: 0o600 });
 			break;
 		} catch (error) {
 			if (error.code !== "EEXIST") throw error;
+			let reclaim = false;
+			try {
+				const owner = JSON.parse(readFileSync(ownerFile, "utf8"));
+				missingOwnerSince = null;
+				const age = Date.now() - Number(owner?.startedAt);
+				if (!isProcessAlive(owner?.pid) || !Number.isFinite(age) || age >= staleLockMs) reclaim = true;
+			} catch {
+				if (missingOwnerSince === null) missingOwnerSince = performance.now();
+				else if (performance.now() - missingOwnerSince >= missingOwnerMs) reclaim = true;
+			}
+			if (reclaim) {
+				const stale = `${lock}.stale-${process.pid}-${randomUUID()}`;
+				try {
+					renameSync(lock, stale);
+					rmSync(stale, { recursive: true, force: true });
+					missingOwnerSince = null;
+					continue;
+				} catch {
+					// Another process reclaimed or released the lock first.
+				}
+			}
 			if (performance.now() >= deadline) throw new Error("Attention compiler cache is busy; no renderer was started.");
-			await new Promise((resolve) => setTimeout(resolve, 100));
+			await new Promise((resolve) => setTimeout(resolve, 50));
 		}
 	}
 	const temporary = join(directory, `attention-${hash}-${process.pid}-${randomUUID()}.exe`);
@@ -132,7 +168,17 @@ export async function buildAttentionHelper({
 		try { rmSync(temporary, { force: true }); }
 		finally {
 			try { rmSync(snapshot, { force: true }); }
-			finally { rmdirSync(lock); }
+			finally {
+				try {
+					const currentOwner = JSON.parse(readFileSync(ownerFile, "utf8"));
+					if (currentOwner?.token === ownerToken) {
+						rmSync(ownerFile, { force: true });
+						rmdirSync(lock);
+					}
+				} catch {
+					try { rmdirSync(lock); } catch {}
+				}
+			}
 		}
 	}
 }

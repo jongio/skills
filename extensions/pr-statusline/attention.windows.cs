@@ -123,7 +123,11 @@ internal static class TerminalAttention
     private const uint Popup = 0x80000000;
     private const uint OverlayStyle = 0x00080000 | 0x00000020 | 0x00000080 | 0x08000000;
     private const uint MoveFlags = 0x0010 | 0x0200 | 0x0400;
+    private const int ExtendedStyleIndex = -20;
+    private const int TopmostStyle = 0x00000008;
     private const int MessageBatchLimit = 64;
+    private static readonly IntPtr TopmostBand = new IntPtr(-1);
+    private static readonly IntPtr NonTopmostBand = new IntPtr(-2);
     private static readonly WindowProc Callback = Dispatch;
     private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 8192 };
     private static readonly string ClassName = "CopilotSessionAttention_" + Process.GetCurrentProcess().Id;
@@ -136,7 +140,7 @@ internal static class TerminalAttention
     private static IntPtr brush, border, wash, consoleWindow, target, oldDpiContext;
     private static uint consoleProcessId, consoleThreadId;
     private static int lastWidth, lastHeight, lastDpi;
-    private static bool registered, lastMaximized;
+    private static bool registered, lastMaximized, lastTopmost;
     private static bool inputListening, presentationValid, borderVisible, washVisible;
     private static int lastX, lastY;
     private static IntPtr lastAnchor;
@@ -238,6 +242,7 @@ internal static class TerminalAttention
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rectangle rectangle);
     [DllImport("user32.dll")] private static extern bool GetClientRect(IntPtr window, out Rectangle rectangle);
     [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr window, uint command);
+    [DllImport("user32.dll", SetLastError = true)] private static extern int GetWindowLong(IntPtr window, int index);
     [DllImport("user32.dll")] private static extern bool IsWindowEnabled(IntPtr window);
     [DllImport("user32.dll")] private static extern uint GetGuiResources(IntPtr process, uint flags);
     [DllImport("user32.dll", SetLastError = true)]
@@ -574,8 +579,17 @@ internal static class TerminalAttention
         alphaCalls++;
     }
 
+    private static bool IsTopmost(IntPtr window)
+    {
+        return window != IntPtr.Zero && (GetWindowLong(window, ExtendedStyleIndex) & TopmostStyle) != 0;
+    }
+
     private static bool SurfaceOrderMatches(string style, IntPtr lowerWindow)
     {
+        bool topmost = IsTopmost(target);
+        if ((style != "background" && IsTopmost(border) != topmost) ||
+            (style != "border" && IsTopmost(wash) != topmost))
+            return false;
         IntPtr unused = style == "border" ? wash : style == "background" ? border : IntPtr.Zero;
         IntPtr previous = GetWindow(lowerWindow, 3);
         for (int attempt = 0; attempt < 3 && unused != IntPtr.Zero && previous == unused; attempt++)
@@ -594,10 +608,21 @@ internal static class TerminalAttention
         visible = false;
     }
 
-    private static void Place(IntPtr window, IntPtr after, Rectangle bounds, bool visible)
+    private static void Place(IntPtr window, IntPtr after, Rectangle bounds, bool visible, bool topmost)
     {
-        Check(SetWindowPos(window, after, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
-            MoveFlags | (visible ? 0x0040u : 0x0004u)));
+        IntPtr effectiveAfter = after;
+        if (after == IntPtr.Zero)
+        {
+            if (topmost) effectiveAfter = TopmostBand;
+            else if (IsTopmost(window)) effectiveAfter = NonTopmostBand;
+        }
+        else if (IsTopmost(window) != topmost)
+        {
+            Check(SetWindowPos(window, topmost ? TopmostBand : NonTopmostBand, 0, 0, 0, 0,
+                MoveFlags | 0x0001u | 0x0002u));
+        }
+        Check(SetWindowPos(window, effectiveAfter, bounds.Left, bounds.Top, bounds.Width, bounds.Height,
+            MoveFlags | (visible ? 0x0040u : 0u)));
         positionCalls++;
     }
 
@@ -606,6 +631,7 @@ internal static class TerminalAttention
         paintedFrames++;
         int dpi = (int)GetDpiForWindow(target);
         bool maximized = IsZoomed(target);
+        bool topmost = IsTopmost(target);
         bool resized = bounds.Width != lastWidth || bounds.Height != lastHeight || dpi != lastDpi || maximized != lastMaximized;
         if (resized)
         {
@@ -620,28 +646,29 @@ internal static class TerminalAttention
         double pulse = (1 + Math.Sin(seconds * Math.PI)) / 2;
         if (style != "background") SetAlpha(border, (int)(170 + 80 * pulse), ref borderAlpha);
         if (style != "border") SetAlpha(wash, (int)(30 + 30 * pulse), ref washAlpha);
-        WindowOrder order = show ? FindWindowOrder() : new WindowOrder { Anchor = IntPtr.Zero, Lower = target };
+        WindowOrder order = FindWindowOrder();
         IntPtr after = order.Anchor;
         if (presentationValid && !resized && bounds.Left == lastX && bounds.Top == lastY &&
-            after == lastAnchor && style == lastStyle && (!show ||
+            after == lastAnchor && style == lastStyle && topmost == lastTopmost &&
+            SurfaceOrderMatches(style, order.Lower) && (!show ||
                 (borderVisible == (style != "background") && washVisible == (style != "border") &&
-                    IsWindowVisible(border) == borderVisible && IsWindowVisible(wash) == washVisible &&
-                    SurfaceOrderMatches(style, order.Lower)))) return;
+                    IsWindowVisible(border) == borderVisible && IsWindowVisible(wash) == washVisible))) return;
         lastAnchor = after;
         lastX = bounds.Left;
         lastY = bounds.Top;
         lastStyle = style;
+        lastTopmost = topmost;
         presentationValid = true;
         if (style != "background")
         {
-            Place(border, after, bounds, show);
+            Place(border, after, bounds, show, topmost);
             borderVisible = show;
             after = border;
         }
         else HideSurface(border, ref borderVisible);
         if (style != "border")
         {
-            Place(wash, after, bounds, show);
+            Place(wash, after, bounds, show, topmost);
             washVisible = show;
         }
         else HideSurface(wash, ref washVisible);
@@ -680,7 +707,7 @@ internal static class TerminalAttention
         if (oldDpiContext != IntPtr.Zero) { SetThreadDpiAwarenessContext(oldDpiContext); oldDpiContext = IntPtr.Zero; }
         currentColor = null;
         lastWidth = lastHeight = lastDpi = 0;
-        presentationValid = borderVisible = washVisible = false;
+        lastTopmost = presentationValid = borderVisible = washVisible = false;
         ReleaseWindowLease();
     }
 
@@ -918,10 +945,21 @@ internal static class TerminalAttention
             Check(SetWindowPos(border, opened, 0, 0, 16, 16, MoveFlags));
             Check(SetWindowPos(wash, border, 0, 0, 16, 16, MoveFlags));
             CheckLatch(SurfaceOrderMatches("both", FindWindowOrder().Lower));
+            var bounds = new Rectangle { Left = 0, Top = 0, Right = 16, Bottom = 16 };
+            Check(SetWindowPos(first, TopmostBand, 0, 0, 16, 16, MoveFlags));
+            Check(SetWindowPos(other, first, 0, 0, 16, 16, MoveFlags));
+            CheckLatch(IsTopmost(first) && !SurfaceOrderMatches("both", FindWindowOrder().Lower));
+            PaintFrame("both", "#FFBB24", 0.0, bounds, false);
+            CheckLatch(IsTopmost(border) && IsTopmost(wash) && SurfaceOrderMatches("both", FindWindowOrder().Lower));
+            Check(SetWindowPos(first, NonTopmostBand, 0, 0, 16, 16, MoveFlags));
+            Check(SetWindowPos(other, first, 0, 0, 16, 16, MoveFlags));
+            CheckLatch(!IsTopmost(first) && !SurfaceOrderMatches("both", FindWindowOrder().Lower));
+            PaintFrame("both", "#FFBB24", 0.25, bounds, false);
+            CheckLatch(!IsTopmost(border) && !IsTopmost(wash) && SurfaceOrderMatches("both", FindWindowOrder().Lower));
             CheckLatch(!IsWindowVisible(first) && !IsWindowVisible(border) && !IsWindowVisible(wash));
             Emit(new { type = "focusIsolationTest", passed = true, sameProcessWindows = true,
                 ownedWindowExcluded = true, newWindowExcluded = true, transientActivationExcluded = true,
-                raisedTargetOrderRecovered = true });
+                raisedTargetOrderRecovered = true, topmostTargetMirrored = true });
         }
         finally
         {

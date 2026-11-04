@@ -652,6 +652,46 @@ test("a request resolved during compilation does not launch a stale alert helper
 	} finally { attention.stop(); }
 }));
 
+test("buildAttentionHelper reclaims abandoned build locks from dead or incomplete builders without stealing a live lock", async () => fixture(async (home) => {
+	const windir = join(home, "windows");
+	const compiler = join(windir, "Microsoft.NET", process.arch === "ia32" ? "Framework" : "Framework64", "v4.0.30319", "csc.exe");
+	fs.mkdirSync(dirname(compiler), { recursive: true });
+	writeFileSync(compiler, "");
+	const source = join(home, "attention.cs");
+	writeFileSync(source, "// synthetic source");
+	let compiles = 0;
+	const fakeCompile = (_bin, args) => {
+		compiles++;
+		const outArg = args.find((arg) => arg.startsWith("/out:"));
+		writeFileSync(outArg.slice(5), "exe");
+		const child = new EventEmitter();
+		child.stdout = new PassThrough();
+		child.stderr = new PassThrough();
+		queueMicrotask(() => child.emit("close", 0));
+		return child;
+	};
+	const firstExe = await buildAttentionHelper({ home, env: { WINDIR: windir }, source, spawn: fakeCompile });
+	const lock = `${firstExe}.lock`;
+	rmSync(firstExe, { force: true });
+	fs.mkdirSync(lock, { recursive: true });
+	writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: 99999999, startedAt: Date.now(), token: "dead" }));
+	assert.equal(await buildAttentionHelper({ home, env: { WINDIR: windir }, source, spawn: fakeCompile }), firstExe);
+	assert.equal(compiles, 2);
+	rmSync(firstExe, { force: true });
+	fs.mkdirSync(lock, { recursive: true });
+	assert.equal(await buildAttentionHelper({
+		home, env: { WINDIR: windir }, source, spawn: fakeCompile, missingOwnerMs: 50,
+	}), firstExe);
+	assert.equal(compiles, 3);
+	rmSync(firstExe, { force: true });
+	fs.mkdirSync(lock, { recursive: true });
+	writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: "live" }));
+	await assert.rejects(buildAttentionHelper({
+		home, env: { WINDIR: windir }, source, spawn: fakeCompile, lockTimeoutMs: 120,
+	}), /compiler cache is busy/);
+	assert.equal(existsSync(join(lock, "owner.json")), true);
+}));
+
 test("preview has no timer, clears on interaction, works while disabled and does not opt the user in", async () => fixture(async (home) => {
 	const { attention, helper } = controller(home);
 	try {
@@ -854,7 +894,7 @@ test("native helper compiles, caches its build, latches focus until a new genera
 	assert.deepEqual(JSON.parse(isolated.stdout), {
 		type: "focusIsolationTest", passed: true, sameProcessWindows: true,
 		ownedWindowExcluded: true, newWindowExcluded: true, transientActivationExcluded: true,
-		raisedTargetOrderRecovered: true,
+		raisedTargetOrderRecovered: true, topmostTargetMirrored: true,
 	});
 	const persistence = spawnSync(executable, ["--persistence-test"], { encoding: "utf8", windowsHide: true, timeout: 30000 });
 	assert.equal(persistence.status, 0, persistence.stderr || persistence.stdout);
