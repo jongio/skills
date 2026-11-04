@@ -97,6 +97,22 @@ test("summary cards have one disposition identity while explanation changes rema
   assert.equal(findings.length, 2);
 });
 
+test("nested cards, standalone cards, and following Markdown sections retain independent concerns", () => {
+  const card = (title, explanation) => `<summary><picture><img></picture>${title}</summary>${explanation}`;
+  const timeout = card("Timeout", "The worker can outlive cancellation.");
+  const ownership = card("Ownership", "The retry releases ownership before shutdown.");
+  for (const body of [
+    `<details>${timeout}<details>${ownership}</details>More timeout evidence.</details>`,
+    `${timeout}\n${ownership}`,
+    `${timeout}\n### Ownership\nThe retry releases ownership before shutdown.`,
+  ]) {
+    const findings = extractBodyOnlyFindings([review(100, body)], [disposition(100, "Timeout fixed.")], "current-head");
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].unsettledConcerns.length, 1);
+    assert.match(findings[0].unsettledConcerns[0], /Ownership|retry releases ownership/);
+  }
+});
+
 test("new evidence attached to an existing inline link still requires disposition", () => {
   const body = title => `### Findings\n- [${title}](https://github.com/example/repo/pull/1#discussion_r42)`;
   const findings = extractBodyOnlyFindings([

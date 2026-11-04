@@ -266,21 +266,44 @@ export function isErroredCopilotReview(review) {
 
 function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
   const concerns = [];
-  const bodyWithoutStatusSummaries = body.replace(
+  const source = body.replace(
     /<summary>\s*<strong>\s*\d+\s+(?:open issues?|resolved since last review)\s*<\/strong>\s*<\/summary>/gi,
     ""
-  ).replace(
-    /(?:<details[^>]*>\s*)?<summary>([\s\S]*?)<\/summary>([\s\S]*?)(?:<\/details>|$)/gi,
-    (section, summary, explanation) => {
-      const title = summary.match(/<\/picture>\s*([^<\n]+)/i)?.[1]?.trim();
-      if (!title) return section;
-      concerns.push({
-        text: title,
-        key: `summary:${title}:${explanation.replace(/\s+/g, " ").trim()}`,
-      });
-      return "";
-    }
   );
+  const cards = [];
+  const parents = [];
+  const residual = [];
+  let activeCard = null;
+  let cursor = 0;
+  const append = text => (activeCard ? activeCard.evidence : residual).push(text);
+  const boundaries = /<details\b[^>]*>|<\/details\s*>|<summary>[\s\S]*?<\/summary>|^#{1,6}\s+.+$|^[ \t]*[-*]\s+[^\n]*#discussion_r\d+[^\n]*/gim;
+  for (const match of source.matchAll(boundaries)) {
+    append(source.slice(cursor, match.index));
+    const token = match[0];
+    if (/^<details\b/i.test(token)) {
+      parents.push(activeCard);
+      activeCard = null;
+    } else if (/^<\/details/i.test(token)) {
+      activeCard = parents.pop() ?? null;
+    } else if (/^<summary>/i.test(token)) {
+      const title = token.match(/<\/picture>\s*([^<\n]+)/i)?.[1]?.trim();
+      activeCard = title ? { text: title, evidence: [] } : null;
+      if (activeCard) cards.push(activeCard);
+      else residual.push(token);
+    } else {
+      activeCard = null;
+      residual.push(token);
+    }
+    cursor = match.index + token.length;
+  }
+  append(source.slice(cursor));
+  for (const card of cards) {
+    concerns.push({
+      text: card.text,
+      key: `summary:${card.text}:${card.evidence.join("").replace(/\s+/g, " ").trim()}`,
+    });
+  }
+  const bodyWithoutStatusSummaries = residual.join("");
   const context = [...body.matchAll(/^###\s+.+$/gm)]
     .map(match => match[0].trim())
     .filter(heading => !/Needs a closer look|Changes recommended|No open issues|Looks good|Ready to merge/i.test(heading))
