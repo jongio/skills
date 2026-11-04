@@ -95,20 +95,26 @@ export async function buildAttentionHelper({
 	mkdirSync(directory, { recursive: true });
 	const lock = `${destination}.lock`;
 	const ownerToken = randomUUID();
-	const ownerFile = join(lock, `owner-${ownerToken}.json`);
+	const startedAt = Date.now();
+	const ownerName = `owner-${process.pid}-${startedAt}-${ownerToken}.json`;
+	const ownerFile = join(lock, ownerName);
+	const stagedOwnerFile = join(directory, `.${ownerName}.tmp`);
+	const ownerPayload = JSON.stringify({ pid: process.pid, startedAt, token: ownerToken });
 	const deadline = performance.now() + lockTimeoutMs;
 	let missingOwnerSince = null;
 	for (;;) {
 		if (existsSync(destination)) return destination;
 		try {
 			mkdirSync(lock);
-			writeFileSync(ownerFile, JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: ownerToken }), { flag: "wx", mode: 0o600 });
+			writeFileSync(stagedOwnerFile, ownerPayload, { flag: "wx", mode: 0o600 });
+			renameSync(stagedOwnerFile, ownerFile);
 			break;
 		} catch (error) {
+			try { rmSync(stagedOwnerFile, { force: true }); } catch {}
 			if (error.code === "ENOENT") continue;
 			if (error.code !== "EEXIST") throw error;
 			try {
-				const entries = readdirSync(lock).filter((name) => name.startsWith("owner-") && name.endsWith(".json"));
+				const entries = readdirSync(lock).filter((name) => name.startsWith("owner") && name.endsWith(".json"));
 				if (entries.length === 0) {
 					if (missingOwnerSince === null) missingOwnerSince = performance.now();
 					else if (performance.now() - missingOwnerSince >= missingOwnerMs) {
@@ -116,25 +122,51 @@ export async function buildAttentionHelper({
 						try { rmdirSync(lock); continue; } catch {}
 					}
 				} else {
-					missingOwnerSince = null;
 					let anyLive = false;
+					let anyIncomplete = false;
 					for (const entry of entries) {
 						const entryPath = join(lock, entry);
-						let staleEntry = false;
+						let pid = null;
+						let entryStartedAt = null;
+						let parsed = false;
 						try {
 							const owner = JSON.parse(readFileSync(entryPath, "utf8"));
-							const age = Date.now() - Number(owner?.startedAt);
-							staleEntry = !isProcessAlive(owner?.pid) || !Number.isFinite(age) || age >= staleLockMs;
+							pid = owner?.pid;
+							entryStartedAt = owner?.startedAt;
+							parsed = true;
 						} catch {
-							staleEntry = true;
+							const match = /^owner-(\d+)-(\d+)-/u.exec(entry);
+							if (match) {
+								pid = Number(match[1]);
+								entryStartedAt = Number(match[2]);
+								parsed = true;
+							}
 						}
+						if (!parsed) {
+							anyIncomplete = true;
+							continue;
+						}
+						const age = Date.now() - Number(entryStartedAt);
+						const staleEntry = !isProcessAlive(pid) || !Number.isFinite(age) || age >= staleLockMs;
 						if (staleEntry) {
 							try { rmSync(entryPath, { force: true }); } catch {}
 						} else {
 							anyLive = true;
 						}
 					}
-					if (!anyLive) {
+					if (anyLive) {
+						missingOwnerSince = null;
+					} else if (anyIncomplete) {
+						if (missingOwnerSince === null) missingOwnerSince = performance.now();
+						else if (performance.now() - missingOwnerSince >= missingOwnerMs) {
+							missingOwnerSince = null;
+							for (const entry of entries) {
+								try { rmSync(join(lock, entry), { force: true }); } catch {}
+							}
+							try { rmdirSync(lock); continue; } catch {}
+						}
+					} else {
+						missingOwnerSince = null;
 						try { rmdirSync(lock); continue; } catch {}
 					}
 				}

@@ -710,6 +710,86 @@ test("buildAttentionHelper reclaims abandoned build locks from dead or incomplet
 		home, env: { WINDIR: windir }, source, spawn: fakeCompile, lockTimeoutMs: 120,
 	}), /compiler cache is busy/);
 	assert.equal(existsSync(join(lock, "owner-live.json")), true);
+	rmSync(lock, { recursive: true, force: true });
+
+	// Interprocess regression test: pause Builder 1 after creating an empty owner file before JSON bytes are written.
+	const releasePublication = join(home, "release-publication");
+	const compileCountFile = join(home, "compile-count");
+	writeFileSync(compileCountFile, "0");
+	const attentionUrl = pathToFileURL(join(root, "extensions", "pr-statusline", "attention.mjs")).href;
+	const workerScript = `
+		import * as fs from "node:fs";
+		import { registerHooks } from "node:module";
+		import { EventEmitter } from "node:events";
+		import { PassThrough } from "node:stream";
+		const wait = new Int32Array(new SharedArrayBuffer(4));
+		let pausedOnce = false;
+		globalThis.hookedFs = {
+			...fs,
+			renameSync(from, to) {
+				if (!pausedOnce && String(to).includes(".exe.lock") && String(to).endsWith(".json")) {
+					pausedOnce = true;
+					const fd = fs.openSync(to, "wx", 0o600);
+					fs.closeSync(fd);
+					fs.writeSync(1, JSON.stringify({ type: "publishing", file: to }) + "\\n");
+					const deadline = Date.now() + 5000;
+					while (!fs.existsSync(${JSON.stringify(releasePublication)}) && Date.now() < deadline) {
+						Atomics.wait(wait, 0, 0, 10);
+					}
+				}
+				return fs.renameSync(from, to);
+			},
+		};
+		const facade = "data:text/javascript," + encodeURIComponent(
+			"export const { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } = globalThis.hookedFs;");
+		registerHooks({ resolve(specifier, context, next) {
+			return specifier === "node:fs" && context.parentURL === ${JSON.stringify(attentionUrl)}
+				? { url: facade, shortCircuit: true } : next(specifier, context);
+		} });
+		const { buildAttentionHelper } = await import(${JSON.stringify(attentionUrl)});
+		const exe = await buildAttentionHelper({
+			home: ${JSON.stringify(home)},
+			env: { WINDIR: ${JSON.stringify(windir)} },
+			source: ${JSON.stringify(source)},
+			spawn(_bin, args) {
+				const count = Number(fs.readFileSync(${JSON.stringify(compileCountFile)}, "utf8")) + 1;
+				fs.writeFileSync(${JSON.stringify(compileCountFile)}, String(count));
+				const outArg = args.find((arg) => arg.startsWith("/out:"));
+				fs.writeFileSync(outArg.slice(5), "exe");
+				const child = new EventEmitter();
+				child.stdout = new PassThrough();
+				child.stderr = new PassThrough();
+				queueMicrotask(() => child.emit("close", 0));
+				return child;
+			},
+		});
+		fs.writeSync(1, JSON.stringify({ type: "done", exe }) + "\\n");
+	`;
+	const builderOne = spawn(process.execPath, ["--input-type=module", "-e", workerScript], {
+		env: process.env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+	});
+	const workerLines = createInterface({ input: builderOne.stdout });
+	const [pubLine] = await once(workerLines, "line", { signal: AbortSignal.timeout(5000) });
+	const pubMsg = JSON.parse(pubLine);
+	assert.equal(pubMsg.type, "publishing");
+	assert.equal(readFileSync(pubMsg.file, "utf8"), "", "Owner file should still be empty while paused");
+	let secondCompiles = 0;
+	const builderTwoPromise = buildAttentionHelper({
+		home, env: { WINDIR: windir }, source, missingOwnerMs: 50,
+		spawn(_bin, args) {
+			secondCompiles++;
+			return fakeCompile(_bin, args);
+		},
+	});
+	await new Promise((resolve) => setTimeout(resolve, 120));
+	assert.equal(secondCompiles, 0, "Competing process must not reclaim an in-progress owner publication");
+	writeFileSync(releasePublication, "go");
+	const [doneLine] = await once(workerLines, "line", { signal: AbortSignal.timeout(5000) });
+	assert.equal(JSON.parse(doneLine).exe, firstExe);
+	assert.equal(await builderTwoPromise, firstExe);
+	assert.equal(secondCompiles, 0);
+	assert.equal(Number(readFileSync(compileCountFile, "utf8")), 1);
+	workerLines.close();
 }));
 
 test("preview has no timer, clears on interaction, works while disabled and does not opt the user in", async () => fixture(async (home) => {
