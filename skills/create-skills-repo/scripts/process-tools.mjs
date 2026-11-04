@@ -5,9 +5,9 @@ import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 export const CREATE_SKILL_INSTALL_GUIDANCE =
-  "Install create-skill with: npx skills add jongio/skills --skill create-skill -g --agent github-copilot";
+  "Install create-skill with: npx skills add jongio/skills --skill create-skill (or pass --create-skill-source <path>)";
 export const CATALOG_INSTALL_GUIDANCE =
-  "Install create-gh-pages-site with: npx skills add jongio/skills --skill create-gh-pages-site -g --agent github-copilot";
+  "Install create-gh-pages-site with: npx skills add jongio/skills --skill create-gh-pages-site (or pass --catalog-script <path>)";
 
 function dependencyError(message) {
   const error = new Error(message);
@@ -107,20 +107,27 @@ async function probeNodeScript(script, requiredText, label, guidance) {
   }
 }
 
-function installedSkillCandidates(skillRoot, skillName, scriptName) {
+function installedSkillDirs(skillRoot, skillName) {
   const parent = path.dirname(skillRoot);
+  const cwd = process.cwd();
+  const copilotHome = process.env.COPILOT_HOME || path.join(homedir(), ".copilot");
   return [
-    path.join(parent, skillName, "scripts", scriptName),
-    path.join(homedir(), ".copilot", "skills", skillName, "scripts", scriptName),
-    path.join(
-      homedir(),
-      ".agents",
-      "skills",
-      skillName,
-      "scripts",
-      scriptName,
-    ),
+    path.join(parent, skillName),
+    path.join(cwd, ".github", "skills", skillName),
+    path.join(cwd, ".agents", "skills", skillName),
+    path.join(cwd, ".claude", "skills", skillName),
+    path.join(cwd, "skills", skillName),
+    path.join(copilotHome, "installed-plugins", "jongio-skills", "jongio-skills", "skills", skillName),
+    path.join(copilotHome, "installed-plugins", "jongio-skills", skillName),
+    path.join(copilotHome, "skills", skillName),
+    path.join(homedir(), ".agents", "skills", skillName),
   ];
+}
+
+function installedSkillCandidates(skillRoot, skillName, scriptName) {
+  return installedSkillDirs(skillRoot, skillName).map((dir) =>
+    path.join(dir, "scripts", scriptName),
+  );
 }
 
 async function firstAvailableFile(candidates) {
@@ -150,9 +157,7 @@ export async function resolveCreateSkillDependency(skillRoot, explicitSource) {
     ? await directoryRealPath(explicitSource, "create-skill snapshot")
     : await firstAvailableDirectory([
       path.join(skillRoot, "templates", "repository", "skills", "create-skill"),
-      path.join(path.dirname(skillRoot), "create-skill"),
-      path.join(homedir(), ".copilot", "skills", "create-skill"),
-      path.join(homedir(), ".agents", "skills", "create-skill"),
+      ...installedSkillDirs(skillRoot, "create-skill"),
     ]);
   if (!source) {
     throw dependencyError(

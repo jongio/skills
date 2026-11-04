@@ -9,7 +9,7 @@ head-pinned CI summaries with their observation time.
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill create-session-board-canvas -g --agent github-copilot
+npx skills add jongio/skills --skill create-session-board-canvas
 ```
 
 The aggregate or individual skill plugin discovers the bundled Copilot

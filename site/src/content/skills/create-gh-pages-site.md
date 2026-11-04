@@ -8,7 +8,7 @@ thumb: images/thumb-create-gh-pages-site.png
 order: 2
 install:
   - label: Install for GitHub Copilot
-    cmd: npx skills add jongio/skills --skill create-gh-pages-site -g --agent github-copilot
+    cmd: npx skills add jongio/skills --skill create-gh-pages-site
   - label: Install from the plugin marketplace
     cmd: copilot plugin install create-gh-pages-site@jongio-skills
 ---

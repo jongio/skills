@@ -7,7 +7,7 @@ thumb: images/thumb-naming-is-hard.png
 order: 6
 install:
   - label: Install for GitHub Copilot
-    cmd: npx skills add jongio/skills --skill naming-is-hard -g --agent github-copilot
+    cmd: npx skills add jongio/skills --skill naming-is-hard
   - label: Install from the plugin marketplace
     cmd: copilot plugin install naming-is-hard@jongio-skills
 ---

@@ -192,7 +192,8 @@ test("long-running delivery distinguishes execution, external waits, and blocked
 test("catalog body has a copyable install command with every required skill", async () => {
   const catalog = await readFile(new URL("../../../site/src/content/skills/pr.md", import.meta.url), "utf8");
   const body = catalog.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
-  assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill pr --skill test-doctor --skill doc-doctor -g --agent github-copilot\r?\n```/);
+  assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill pr --skill test-doctor --skill doc-doctor\r?\n```/);
+  assert.doesNotMatch(catalog, /-g\s+--agent\s+github-copilot/);
 });
 
 test("body-only findings get evidence-backed disposition without fake thread resolution", async () => {

@@ -6,7 +6,7 @@ repoPath: skills/pr
 thumb: images/thumb-pr.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill pr --skill test-doctor --skill doc-doctor -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill pr --skill test-doctor --skill doc-doctor"
 ---
 
 ## What it does
@@ -74,7 +74,7 @@ The single-skill options above do not install dependencies. Use this command
 to install `pr` and every required skill, or choose the full collection.
 
 ```sh
-npx skills add jongio/skills --skill pr --skill test-doctor --skill doc-doctor -g --agent github-copilot
+npx skills add jongio/skills --skill pr --skill test-doctor --skill doc-doctor
 ```
 
 ## Use it

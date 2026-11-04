@@ -7,7 +7,7 @@ thumb: images/thumb-deps-doctor.png
 order: 9
 install:
   - label: Install for GitHub Copilot
-    cmd: npx skills add jongio/skills --skill deps-doctor -g --agent github-copilot
+    cmd: npx skills add jongio/skills --skill deps-doctor
   - label: Install from the plugin marketplace
     cmd: copilot plugin marketplace add jongio/skills && copilot plugin install deps-doctor@jongio-skills
 ---

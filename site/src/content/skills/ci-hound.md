@@ -6,7 +6,7 @@ repoPath: skills/ci-hound
 thumb: images/thumb-ci-hound.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill ci-hound -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill ci-hound"
 ---
 
 ## What it does

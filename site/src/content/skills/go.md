@@ -6,7 +6,7 @@ repoPath: skills/go
 thumb: images/thumb-go.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill doc-doctor --skill create-session-board-canvas -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill doc-doctor --skill create-session-board-canvas"
 ---
 
 ## What it does
@@ -38,7 +38,7 @@ The single-skill options above do not install dependencies. Use this command
 to install `go` and every required skill, or choose the full collection.
 
 ```sh
-npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill doc-doctor --skill create-session-board-canvas -g --agent github-copilot
+npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill doc-doctor --skill create-session-board-canvas
 ```
 
 ## Use it

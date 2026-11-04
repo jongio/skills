@@ -6,7 +6,7 @@ repoPath: skills/refactor
 thumb: images/thumb-refactor.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill refactor -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill refactor"
 ---
 
 ## What it does

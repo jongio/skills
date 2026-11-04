@@ -6,7 +6,7 @@ repoPath: skills/retro
 thumb: images/thumb-retro.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill retro -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill retro"
   - label: Install from the plugin marketplace
     cmd: copilot plugin install retro@jongio-skills
 ---

@@ -6,7 +6,7 @@ repoPath: skills/nobs
 thumb: images/thumb-nobs.png
 install:
   - label: Install for GitHub Copilot
-    cmd: "npx skills add jongio/skills --skill nobs -g --agent github-copilot"
+    cmd: "npx skills add jongio/skills --skill nobs"
 ---
 
 ## What it does

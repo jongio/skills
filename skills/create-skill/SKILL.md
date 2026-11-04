@@ -11,7 +11,7 @@ description: >-
   create-skills-repo), editing one existing skill instruction without registration work (use
   skill-authoring), creating an agent persona.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 > [!CAUTION]

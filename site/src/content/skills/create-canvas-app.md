@@ -7,7 +7,7 @@ thumb: images/thumb-create-canvas-app.png
 order: 1
 install:
   - label: Install for GitHub Copilot
-    cmd: npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot
+    cmd: npx skills add jongio/skills --skill create-canvas-app
   - label: Install from the plugin marketplace
     cmd: copilot plugin install create-canvas-app@jongio-skills
 ---

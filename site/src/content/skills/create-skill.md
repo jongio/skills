@@ -7,7 +7,7 @@ thumb: images/thumb-create-skill.png
 order: 3
 install:
   - label: Install for GitHub Copilot
-    cmd: npx skills add jongio/skills --skill create-skill -g --agent github-copilot
+    cmd: npx skills add jongio/skills --skill create-skill
   - label: Install from the plugin marketplace
     cmd: copilot plugin marketplace add jongio/skills && copilot plugin install create-skill@jongio-skills
 ---

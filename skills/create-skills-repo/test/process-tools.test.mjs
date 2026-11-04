@@ -370,3 +370,76 @@ test("catalog composition handoff validates every bound result field", async (t)
     });
   }
 });
+
+test("resolvers discover project-local and installed-plugin layouts with precedence and restore cwd/env", async (t) => {
+  const work = await mkdtemp(path.join(tmpdir(), "resolver-discovery-"));
+  const prevCwd = process.cwd();
+  const hadCopilotHome = Object.prototype.hasOwnProperty.call(process.env, "COPILOT_HOME");
+  const prevCopilotHome = process.env.COPILOT_HOME;
+  t.after(async () => {
+    process.chdir(prevCwd);
+    if (hadCopilotHome) {
+      process.env.COPILOT_HOME = prevCopilotHome;
+    } else {
+      delete process.env.COPILOT_HOME;
+    }
+    await rm(work, { recursive: true, force: true });
+  });
+
+  const standaloneSkillRoot = path.join(work, "standalone", "create-skills-repo");
+  const projectRoot = path.join(work, "project");
+  const copilotHome = path.join(work, "copilot-home");
+  await mkdir(standaloneSkillRoot, { recursive: true });
+  await mkdir(projectRoot, { recursive: true });
+  process.chdir(projectRoot);
+  process.env.COPILOT_HOME = copilotHome;
+
+  const catalogStub = 'if (process.argv.includes("--help")) console.log("--repo --staging-dir --templates-dir --json");\n';
+  const createSkillStub = 'if (process.argv.includes("--help")) console.log("fixture register --input --repo-root --dry-run --approve");\n';
+
+  // 1. Installed plugin fallback under COPILOT_HOME/installed-plugins/jongio-skills/jongio-skills/skills/*
+  const pluginCatalogScript = path.join(
+    copilotHome,
+    "installed-plugins",
+    "jongio-skills",
+    "jongio-skills",
+    "skills",
+    "create-gh-pages-site",
+    "scripts",
+    "new-site.mjs",
+  );
+  const pluginCreateSkillDir = path.join(
+    copilotHome,
+    "installed-plugins",
+    "jongio-skills",
+    "jongio-skills",
+    "skills",
+    "create-skill",
+  );
+  await writeScript(pluginCatalogScript, catalogStub);
+  await writeScript(path.join(pluginCreateSkillDir, "scripts", "create-skill.mjs"), createSkillStub);
+
+  const resolvedPluginCatalog = await resolveCatalogDependency(standaloneSkillRoot);
+  assert.ok(resolvedPluginCatalog.script.endsWith(path.join("installed-plugins", "jongio-skills", "jongio-skills", "skills", "create-gh-pages-site", "scripts", "new-site.mjs")));
+  const resolvedPluginCreate = await resolveCreateSkillDependency(standaloneSkillRoot);
+  assert.ok(resolvedPluginCreate.source.endsWith(path.join("installed-plugins", "jongio-skills", "jongio-skills", "skills", "create-skill")));
+
+  // 2. Project-local .agents/skills/* takes precedence over installed plugin
+  const projectCatalogScript = path.join(
+    projectRoot,
+    ".agents",
+    "skills",
+    "create-gh-pages-site",
+    "scripts",
+    "new-site.mjs",
+  );
+  const projectCreateSkillDir = path.join(projectRoot, ".github", "skills", "create-skill");
+  await writeScript(projectCatalogScript, catalogStub);
+  await writeScript(path.join(projectCreateSkillDir, "scripts", "create-skill.mjs"), createSkillStub);
+
+  const resolvedProjectCatalog = await resolveCatalogDependency(standaloneSkillRoot);
+  assert.ok(resolvedProjectCatalog.script.endsWith(path.join(".agents", "skills", "create-gh-pages-site", "scripts", "new-site.mjs")));
+  const resolvedProjectCreate = await resolveCreateSkillDependency(standaloneSkillRoot);
+  assert.ok(resolvedProjectCreate.source.endsWith(path.join(".github", "skills", "create-skill")));
+});
+

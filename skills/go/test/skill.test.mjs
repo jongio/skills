@@ -126,7 +126,8 @@ test("catalog body has a copyable install command with every required skill", as
   const body = catalog.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, "");
   assert.match(body, /Requires `test-doctor` and `pr`/);
   assert.match(body, /`doc-doctor`/);
-  assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill go --skill test-doctor --skill pr --skill doc-doctor --skill create-session-board-canvas -g --agent github-copilot\r?\n```/);
+  assert.match(body, /```sh\r?\nnpx skills add jongio\/skills --skill go --skill test-doctor --skill pr --skill doc-doctor --skill create-session-board-canvas\r?\n```/);
+  assert.doesNotMatch(catalog, /-g\s+--agent\s+github-copilot/);
 });
 
 test("go opens the optional session board only when explicitly requested and carries identity through delivery", () => {

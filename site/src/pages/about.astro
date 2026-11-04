@@ -57,15 +57,21 @@ import Layout from "../layouts/Layout.astro";
 
   <section class="card">
     <h2>Install</h2>
-    <p><strong>1 · Add the Copilot plugin marketplace</strong> (one-time setup in Copilot CLI):</p>
+    <p><strong>1 · Cross-platform one-liner (Copilot, Claude, Codex &amp; Gemini CLIs):</strong></p>
+    <p class="muted">Installs the native plugin in every detected CLI and removes conflicting raw copies from <code>~/.copilot/skills</code>, <code>~/.claude/skills</code>, and <code>~/.agents/skills</code> (shared <code>~/.agents/skills</code> and <code>~/.codex/skills</code> entries are preserved when another consumer such as Codex IDE or Cline is present unless <code>-CleanShared</code> / <code>--clean-shared</code> is passed in a local checkout, since non-plugin hosts may still need those raw skills):</p>
+    <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install.ps1 | iex</code></pre>
+    <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install.sh | bash</code></pre>
+    <p><strong>2 · Per-agent native plugin install (global &amp; namespaced):</strong></p>
+    <p class="muted">In Copilot CLI or Claude Code:</p>
     <pre><code>/plugin marketplace add jongio/skills</code></pre>
-    <p><strong>2 · Install a single skill vs. all skills &amp; statuslines:</strong></p>
-    <p class="muted">Install just one skill:</p>
-    <pre><code>/plugin install create-canvas-app@jongio-skills</code></pre>
-    <p class="muted">Or install all skills and statuslines together:</p>
     <pre><code>/plugin install jongio-skills@jongio-skills</code></pre>
-    <p><strong>3 · Or use the Skills CLI (`npx skills`):</strong></p>
-    <pre><code>npx skills add jongio/skills --skill create-canvas-app -g --agent github-copilot</code></pre>
+    <p class="muted">In Codex CLI:</p>
+    <pre><code>codex plugin marketplace add jongio/skills &amp;&amp; codex plugin add jongio-skills</code></pre>
+    <p class="muted">In Gemini CLI:</p>
+    <pre><code>gemini extensions install https://github.com/jongio/skills --consent</code></pre>
+    <p><strong>3 · Project-scoped install via Skills CLI (<code>npx skills</code>):</strong></p>
+    <p class="muted">Install into the current repository without touching <code>~/.agents/skills</code>:</p>
+    <pre><code>npx skills add jongio/skills --skill create-canvas-app</code></pre>
     <pre><code>npx skills add jongio/skills --all</code></pre>
     <p class="muted">
       Browse all skills in <a href="/skills/catalog/">the catalog</a> or view the <a href="/skills/statuslines/">Copilot CLI statuslines guide</a>.

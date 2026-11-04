@@ -15,10 +15,10 @@ parts — and drops in labeled image placeholders you swap for real art.
 
 ## Quickstart
 
-**1. Install the skill** (global, for GitHub Copilot):
+**1. Install the skill**:
 
 ```sh
-npx skills add jongio/skills --skill create-gh-pages-site -g --agent github-copilot
+npx skills add jongio/skills --skill create-gh-pages-site
 ```
 
 **2. Reload skills** — run `/skills reload`, or start a new session.

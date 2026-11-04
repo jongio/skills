@@ -30,7 +30,7 @@ change. It does not create empty branches, commits, or pull requests.
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill deps-doctor -g --agent github-copilot
+npx skills add jongio/skills --skill deps-doctor
 ```
 
 Or install it from the Copilot plugin marketplace:

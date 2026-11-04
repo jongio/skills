@@ -7,7 +7,7 @@ thumb: images/thumb-eli5.png
 order: 8
 install:
   - label: Install for GitHub Copilot
-    cmd: npx skills add jongio/skills --skill eli5 -g --agent github-copilot
+    cmd: npx skills add jongio/skills --skill eli5
   - label: Install from the plugin marketplace
     cmd: copilot plugin install eli5@jongio-skills
 ---

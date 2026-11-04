@@ -527,7 +527,7 @@ test("missing catalog capability stops before target writes", async (t) => {
   t.after(() => rm(fx.root, { recursive: true, force: true }));
   fx.dependencies.resolveCatalog = async () => {
     const error = new Error(
-      "create-gh-pages-site is unavailable.\nInstall create-gh-pages-site with: npx skills add jongio/skills --skill create-gh-pages-site -g --agent github-copilot",
+      "create-gh-pages-site is unavailable.\nInstall create-gh-pages-site with: npx skills add jongio/skills --skill create-gh-pages-site",
     );
     error.exitCode = 3;
     throw error;

@@ -10,7 +10,7 @@ description: >-
   create-skill), creating an unrelated GitHub Pages site (use
   create-gh-pages-site), or general repository health files (use repo-ready).
 metadata:
-  version: "1.1.0"
+  version: "1.1.2"
 ---
 
 # Create Skills Repository

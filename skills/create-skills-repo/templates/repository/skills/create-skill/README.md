@@ -6,7 +6,7 @@ or thumbnail provenance.
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill create-skill -g --agent github-copilot
+npx skills add jongio/skills --skill create-skill
 ```
 
 Reload skills, then invoke:

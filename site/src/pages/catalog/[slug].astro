@@ -44,37 +44,49 @@ const repoUrl = `https://github.com/jongio/skills/tree/main/${skill.data.repoPat
   <section class="card install-section">
     <h2>Install</h2>
     <p class="muted" style="margin:0 0 1rem;">
-      Choose this skill or the full collection. Add the Copilot marketplace once; it does not need to be added again for each skill.
+      Install the namespaced plugin globally across your coding agents (keeps <code>/jongio-skills:{skill.id}</code> conflict-free and includes sibling skills), or install just <code>{skill.id}</code> into a project.
     </p>
 
     <div class="install-split">
       <div class="install-box install-box--primary">
         <div class="install-box__head">
-          <span class="install-badge">This skill only</span>
-          <strong>Install just <code>{skill.id}</code></strong>
+          <span class="install-badge">Recommended · Global plugin</span>
+          <strong>Install all skills &amp; statuslines (namespaced)</strong>
         </div>
 
-        <p class="install-label">In Copilot CLI (add marketplace once, then install this skill):</p>
+        <p class="install-label">One-liner across detected CLIs (Copilot, Claude, Codex &amp; Gemini):</p>
+        <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install.ps1 | iex</code></pre>
+        <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install.sh | bash</code></pre>
+
+        <p class="install-label">Or inside Copilot CLI / Claude Code:</p>
         <pre><code>/plugin marketplace add jongio/skills</code></pre>
-        <pre><code>{`/plugin install ${skill.id}@jongio-skills`}</code></pre>
+        <pre><code>/plugin install jongio-skills@jongio-skills</code></pre>
 
-        <p class="install-label">Or via Skills CLI (terminal):</p>
-        <pre><code>{`npx skills add jongio/skills --skill ${skill.id} -g --agent github-copilot`}</code></pre>
-
+        <p class="install-label">In Codex CLI or Gemini CLI:</p>
+        <pre><code>codex plugin marketplace add jongio/skills &amp;&amp; codex plugin add jongio-skills</code></pre>
+        <pre><code>gemini extensions install https://github.com/jongio/skills --consent</code></pre>
       </div>
 
       <div class="install-box">
         <div class="install-box__head">
-          <span class="install-badge install-badge--neutral">Full collection</span>
-          <strong>Install all skills &amp; statuslines</strong>
+          <span class="install-badge install-badge--neutral">This skill only</span>
+          <strong>Install just <code>{skill.id}</code></strong>
         </div>
 
-        <p class="install-label">In Copilot CLI (add marketplace once, then install the full bundle):</p>
-        <pre><code>/plugin marketplace add jongio/skills</code></pre>
-        <pre><code>/plugin install jongio-skills@jongio-skills</code></pre>
+        <p class="install-label">Project scope via Skills CLI (avoids global <code>~/.agents/skills</code> plugin shadowing):</p>
+        <pre><code>{`npx skills add jongio/skills --skill ${skill.id}`}</code></pre>
 
-        <p class="install-label">Or via Skills CLI (all skills):</p>
-        <pre><code>npx skills add jongio/skills --all</code></pre>
+        {skill.id !== "pr" ? (
+          <>
+            <p class="install-label">Or single-skill plugin in Copilot CLI:</p>
+            <pre><code>/plugin marketplace add jongio/skills</code></pre>
+            <pre><code>{`/plugin install ${skill.id}@jongio-skills`}</code></pre>
+          </>
+        ) : (
+          <p class="muted" style="margin:0.65rem 0 0;">
+            In Copilot CLI, install <code>jongio-skills@jongio-skills</code> above rather than a standalone <code>pr</code> plugin so the command is namespaced as <code>/jongio-skills:pr</code> instead of colliding with built-in <code>/pr</code>.
+          </p>
+        )}
       </div>
     </div>
 

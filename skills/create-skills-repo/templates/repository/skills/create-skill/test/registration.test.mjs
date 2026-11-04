@@ -135,7 +135,7 @@ test("README registration targets the skill table and escapes Markdown separator
     );
     assert.match(
       updates.get(join(root, "site", "src", "content", "skills", "table-safe-skill.md")),
-      /cmd: "npx skills add octocat\/skills --skill table-safe-skill -g --agent github-copilot"/,
+      /cmd: "npx skills add octocat\/skills --skill table-safe-skill"/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

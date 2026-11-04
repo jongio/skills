@@ -26,7 +26,7 @@ It also avoids several common diagnostic errors:
 ## Install
 
 ```sh
-npx skills add jongio/skills --skill dns-doctor -g --agent github-copilot
+npx skills add jongio/skills --skill dns-doctor
 ```
 
 Reload skills or start a new agent session, then invoke `/dns-doctor`.
