@@ -682,6 +682,7 @@ test("buildAttentionHelper reclaims abandoned build locks from dead or incomplet
 		const child = new EventEmitter();
 		child.stdout = new PassThrough();
 		child.stderr = new PassThrough();
+		child.kill = () => child.emit("close", 1);
 		slowCompileChild = { child, outputPath: outArg.slice(5) };
 		return child;
 	};
@@ -705,27 +706,32 @@ test("buildAttentionHelper reclaims abandoned build locks from dead or incomplet
 	writeFileSync(predecessorFile, JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: "predecessor" }));
 	let delayedCompileChild = null;
 	const waitingBuilder = buildAttentionHelper({
-		home, env: { WINDIR: windir }, source, staleLockMs: 220,
+		home, env: { WINDIR: windir }, source, staleLockMs: 60000,
 		spawn(_bin, args) {
 			compiles++;
 			const outArg = args.find((arg) => arg.startsWith("/out:"));
 			const child = new EventEmitter();
 			child.stdout = new PassThrough();
 			child.stderr = new PassThrough();
+			child.kill = () => child.emit("close", 1);
 			delayedCompileChild = { child, outputPath: outArg.slice(5) };
 			return child;
 		},
 	});
-	await new Promise((resolve) => setTimeout(resolve, 150));
+	await new Promise((resolve) => setTimeout(resolve, 250));
+	const releasedAt = Date.now();
 	rmSync(predecessorFile, { force: true });
 	fs.rmdirSync(lock);
-	const waitStart = Date.now() + 2000;
+	const waitStart = Date.now() + 5000;
 	while (!delayedCompileChild && Date.now() < waitStart) await new Promise((resolve) => setTimeout(resolve, 10));
 	assert.ok(delayedCompileChild, "Waiting builder should acquire lock after predecessor releases it");
-	await new Promise((resolve) => setTimeout(resolve, 120));
+	const acquiredOwnerFiles = fs.readdirSync(lock).filter((name) => name.startsWith("owner-") && name.endsWith(".json"));
+	assert.equal(acquiredOwnerFiles.length, 1);
+	const acquiredOwner = JSON.parse(readFileSync(join(lock, acquiredOwnerFiles[0]), "utf8"));
+	assert.ok(acquiredOwner.startedAt >= releasedAt, `Expected startedAt (${acquiredOwner.startedAt}) >= releasedAt (${releasedAt})`);
 	let competingCompiles = 0;
 	await assert.rejects(buildAttentionHelper({
-		home, env: { WINDIR: windir }, source, staleLockMs: 220, lockTimeoutMs: 60,
+		home, env: { WINDIR: windir }, source, staleLockMs: 10000, lockTimeoutMs: 60,
 		spawn(_bin, args) {
 			competingCompiles++;
 			return fakeCompile(_bin, args);
