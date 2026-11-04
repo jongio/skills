@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@microsoft/vally-cli": "0.20.0",
-    "skills": "1.7.2"
+    "skills": "1.7.4"
   },
   "overrides": {
     "@github/copilot-sdk": {
