@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "automationId": "synthetic-backlog-triage",
+  "host": "github.example.test",
+  "reviewer": "example-reviewer",
+  "expiresAt": "2099-01-01T00:00:00Z",
+  "issueRepositories": [
+    {
+      "repository": "example-org/planning",
+      "visibility": "private",
+      "operations": [
+        "add-project-item",
+        "set-project-priority",
+        "set-project-epic",
+        "set-parent",
+        "link-similar",
+        "link-implementation-pr",
+        "close-exact-duplicate",
+        "set-area-label",
+        "set-milestone",
+        "create-backlog-milestone"
+      ],
+      "sources": [
+        { "repository": "example-org/planning", "ref": "refs/heads/main" }
+      ],
+      "milestones": {
+        "mode": "evidenced",
+        "definitions": [
+          {
+            "title": "Backlog",
+            "description": "Unscheduled non-release work; no delivery commitment.",
+            "dueOn": null
+          }
+        ]
+      }
+    },
+    {
+      "repository": "example-org/public-client",
+      "visibility": "public",
+      "operations": [
+        "add-project-item",
+        "set-project-priority",
+        "set-project-epic",
+        "set-parent",
+        "link-similar",
+        "link-implementation-pr",
+        "close-exact-duplicate",
+        "set-area-label"
+      ],
+      "sources": [
+        { "repository": "example-org/public-client", "ref": "refs/heads/trunk" }
+      ],
+      "milestones": { "mode": "preserve", "definitions": [] }
+    }
+  ],
+  "project": {
+    "owner": "example-org",
+    "number": 123,
+    "visibility": "private",
+    "priorityMeanings": { "P0": "Now", "P1": "Next", "P2": "Later" }
+  },
+  "privacy": {
+    "publicWrites": "public-evidence-only",
+    "privateRouting": "project-only"
+  },
+  "checkpoint": {
+    "directory": "X:\\operator-private\\synthetic-backlog-triage",
+    "scope": "synthetic-backlog-triage"
+  },
+  "budgets": {
+    "maxSeconds": 240,
+    "maxIssues": 10,
+    "maxPages": 40,
+    "maxWrites": 20,
+    "maxReadAttempts": 3,
+    "maxCheckpointBytes": 1048576,
+    "reconcileEveryHours": 24,
+    "failureQuietHours": 12
+  }
+}
