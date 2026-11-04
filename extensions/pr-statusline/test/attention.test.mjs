@@ -400,7 +400,7 @@ test("independent sessions adopt an atomic preference update after their initial
 				},
 			};
 			const facade = "data:text/javascript," + encodeURIComponent(
-				"export const { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmdirSync, rmSync, watchFile, unwatchFile, writeFileSync } = globalThis.attentionFs;");
+				"export const { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, watchFile, unwatchFile, writeFileSync } = globalThis.attentionFs;");
 			registerHooks({ resolve(specifier, context, next) {
 				return specifier === "node:fs" && context.parentURL === ${JSON.stringify(source)}
 					? { url: facade, shortCircuit: true } : next(specifier, context);
@@ -674,8 +674,28 @@ test("buildAttentionHelper reclaims abandoned build locks from dead or incomplet
 	const lock = `${firstExe}.lock`;
 	rmSync(firstExe, { force: true });
 	fs.mkdirSync(lock, { recursive: true });
-	writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: 99999999, startedAt: Date.now(), token: "dead" }));
-	assert.equal(await buildAttentionHelper({ home, env: { WINDIR: windir }, source, spawn: fakeCompile }), firstExe);
+	writeFileSync(join(lock, "owner-dead.json"), JSON.stringify({ pid: 99999999, startedAt: Date.now(), token: "dead" }));
+	let slowCompileChild = null;
+	const slowFakeCompile = (_bin, args) => {
+		compiles++;
+		const outArg = args.find((arg) => arg.startsWith("/out:"));
+		const child = new EventEmitter();
+		child.stdout = new PassThrough();
+		child.stderr = new PassThrough();
+		slowCompileChild = { child, outputPath: outArg.slice(5) };
+		return child;
+	};
+	const reclaimerOne = buildAttentionHelper({ home, env: { WINDIR: windir }, source, spawn: slowFakeCompile });
+	const reclaimerTwo = buildAttentionHelper({ home, env: { WINDIR: windir }, source, spawn: slowFakeCompile });
+	const deadline = Date.now() + 2000;
+	while (!slowCompileChild && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.ok(slowCompileChild, "First reclaimer should start compilation");
+	await new Promise((resolve) => setTimeout(resolve, 120));
+	assert.equal(compiles, 2, "Second simultaneous reclaimer must not delete the replacement lock or start a second compiler");
+	assert.equal(fs.readdirSync(lock).some((name) => name.startsWith("owner-") && name !== "owner-dead.json"), true);
+	writeFileSync(slowCompileChild.outputPath, "exe");
+	slowCompileChild.child.emit("close", 0);
+	assert.deepEqual(await Promise.all([reclaimerOne, reclaimerTwo]), [firstExe, firstExe]);
 	assert.equal(compiles, 2);
 	rmSync(firstExe, { force: true });
 	fs.mkdirSync(lock, { recursive: true });
@@ -685,11 +705,11 @@ test("buildAttentionHelper reclaims abandoned build locks from dead or incomplet
 	assert.equal(compiles, 3);
 	rmSync(firstExe, { force: true });
 	fs.mkdirSync(lock, { recursive: true });
-	writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: "live" }));
+	writeFileSync(join(lock, "owner-live.json"), JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: "live" }));
 	await assert.rejects(buildAttentionHelper({
 		home, env: { WINDIR: windir }, source, spawn: fakeCompile, lockTimeoutMs: 120,
 	}), /compiler cache is busy/);
-	assert.equal(existsSync(join(lock, "owner.json")), true);
+	assert.equal(existsSync(join(lock, "owner-live.json")), true);
 }));
 
 test("preview has no timer, clears on interaction, works while disabled and does not opt the user in", async () => fixture(async (home) => {

@@ -1,6 +1,6 @@
 import { spawn as spawnProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -94,41 +94,53 @@ export async function buildAttentionHelper({
 	if (!existsSync(compiler)) throw new Error("Windows .NET Framework compiler is unavailable; window attention is disabled.");
 	mkdirSync(directory, { recursive: true });
 	const lock = `${destination}.lock`;
-	const ownerFile = join(lock, "owner.json");
 	const ownerToken = randomUUID();
+	const ownerFile = join(lock, `owner-${ownerToken}.json`);
 	const deadline = performance.now() + lockTimeoutMs;
 	let missingOwnerSince = null;
 	for (;;) {
 		if (existsSync(destination)) return destination;
 		try {
 			mkdirSync(lock);
-			writeFileSync(ownerFile, JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: ownerToken }), { mode: 0o600 });
+			writeFileSync(ownerFile, JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: ownerToken }), { flag: "wx", mode: 0o600 });
 			break;
 		} catch (error) {
+			if (error.code === "ENOENT") continue;
 			if (error.code !== "EEXIST") throw error;
-			let reclaim = false;
 			try {
-				const owner = JSON.parse(readFileSync(ownerFile, "utf8"));
-				missingOwnerSince = null;
-				const age = Date.now() - Number(owner?.startedAt);
-				if (!isProcessAlive(owner?.pid) || !Number.isFinite(age) || age >= staleLockMs) reclaim = true;
-			} catch {
-				if (missingOwnerSince === null) missingOwnerSince = performance.now();
-				else if (performance.now() - missingOwnerSince >= missingOwnerMs) reclaim = true;
-			}
-			if (reclaim) {
-				const stale = `${lock}.stale-${process.pid}-${randomUUID()}`;
-				try {
-					renameSync(lock, stale);
-					rmSync(stale, { recursive: true, force: true });
+				const entries = readdirSync(lock).filter((name) => name.startsWith("owner-") && name.endsWith(".json"));
+				if (entries.length === 0) {
+					if (missingOwnerSince === null) missingOwnerSince = performance.now();
+					else if (performance.now() - missingOwnerSince >= missingOwnerMs) {
+						missingOwnerSince = null;
+						try { rmdirSync(lock); continue; } catch {}
+					}
+				} else {
 					missingOwnerSince = null;
-					continue;
-				} catch {
-					// Another process reclaimed or released the lock first.
+					let anyLive = false;
+					for (const entry of entries) {
+						const entryPath = join(lock, entry);
+						let staleEntry = false;
+						try {
+							const owner = JSON.parse(readFileSync(entryPath, "utf8"));
+							const age = Date.now() - Number(owner?.startedAt);
+							staleEntry = !isProcessAlive(owner?.pid) || !Number.isFinite(age) || age >= staleLockMs;
+						} catch {
+							staleEntry = true;
+						}
+						if (staleEntry) {
+							try { rmSync(entryPath, { force: true }); } catch {}
+						} else {
+							anyLive = true;
+						}
+					}
+					if (!anyLive) {
+						try { rmdirSync(lock); continue; } catch {}
+					}
 				}
-			}
+			} catch {}
 			if (performance.now() >= deadline) throw new Error("Attention compiler cache is busy; no renderer was started.");
-			await new Promise((resolve) => setTimeout(resolve, 50));
+			await new Promise((resolve) => setTimeout(resolve, 25));
 		}
 	}
 	const temporary = join(directory, `attention-${hash}-${process.pid}-${randomUUID()}.exe`);
@@ -169,13 +181,8 @@ export async function buildAttentionHelper({
 		finally {
 			try { rmSync(snapshot, { force: true }); }
 			finally {
-				try {
-					const currentOwner = JSON.parse(readFileSync(ownerFile, "utf8"));
-					if (currentOwner?.token === ownerToken) {
-						rmSync(ownerFile, { force: true });
-						rmdirSync(lock);
-					}
-				} catch {
+				try { rmSync(ownerFile, { force: true }); }
+				finally {
 					try { rmdirSync(lock); } catch {}
 				}
 			}
