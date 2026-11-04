@@ -95,22 +95,32 @@ export async function buildAttentionHelper({
 	mkdirSync(directory, { recursive: true });
 	const lock = `${destination}.lock`;
 	const ownerToken = randomUUID();
-	const startedAt = Date.now();
-	const ownerName = `owner-${process.pid}-${startedAt}-${ownerToken}.json`;
-	const ownerFile = join(lock, ownerName);
-	const stagedOwnerFile = join(directory, `.${ownerName}.tmp`);
-	const ownerPayload = JSON.stringify({ pid: process.pid, startedAt, token: ownerToken });
+	let ownerFile = null;
 	const deadline = performance.now() + lockTimeoutMs;
 	let missingOwnerSince = null;
 	for (;;) {
 		if (existsSync(destination)) return destination;
+		let stagedOwnerFile = null;
+		let acquiredDir = false;
 		try {
 			mkdirSync(lock);
+			acquiredDir = true;
+			const startedAt = Date.now();
+			const ownerName = `owner-${process.pid}-${startedAt}-${ownerToken}.json`;
+			const nextOwnerFile = join(lock, ownerName);
+			stagedOwnerFile = join(directory, `.${ownerName}.tmp`);
+			const ownerPayload = JSON.stringify({ pid: process.pid, startedAt, token: ownerToken });
 			writeFileSync(stagedOwnerFile, ownerPayload, { flag: "wx", mode: 0o600 });
-			renameSync(stagedOwnerFile, ownerFile);
+			renameSync(stagedOwnerFile, nextOwnerFile);
+			ownerFile = nextOwnerFile;
 			break;
 		} catch (error) {
-			try { rmSync(stagedOwnerFile, { force: true }); } catch {}
+			if (stagedOwnerFile) {
+				try { rmSync(stagedOwnerFile, { force: true }); } catch {}
+			}
+			if (acquiredDir && !ownerFile) {
+				try { rmdirSync(lock); } catch {}
+			}
 			if (error.code === "ENOENT") continue;
 			if (error.code !== "EEXIST") throw error;
 			try {

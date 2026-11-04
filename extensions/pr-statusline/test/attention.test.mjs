@@ -697,12 +697,52 @@ test("buildAttentionHelper reclaims abandoned build locks from dead or incomplet
 	slowCompileChild.child.emit("close", 0);
 	assert.deepEqual(await Promise.all([reclaimerOne, reclaimerTwo]), [firstExe, firstExe]);
 	assert.equal(compiles, 2);
+
+	// Acquisition after waiting must stamp startedAt at lock acquisition time, not queue entry time.
+	rmSync(firstExe, { force: true });
+	fs.mkdirSync(lock, { recursive: true });
+	const predecessorFile = join(lock, `owner-${process.pid}-${Date.now()}-predecessor.json`);
+	writeFileSync(predecessorFile, JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: "predecessor" }));
+	let delayedCompileChild = null;
+	const waitingBuilder = buildAttentionHelper({
+		home, env: { WINDIR: windir }, source, staleLockMs: 220,
+		spawn(_bin, args) {
+			compiles++;
+			const outArg = args.find((arg) => arg.startsWith("/out:"));
+			const child = new EventEmitter();
+			child.stdout = new PassThrough();
+			child.stderr = new PassThrough();
+			delayedCompileChild = { child, outputPath: outArg.slice(5) };
+			return child;
+		},
+	});
+	await new Promise((resolve) => setTimeout(resolve, 150));
+	rmSync(predecessorFile, { force: true });
+	fs.rmdirSync(lock);
+	const waitStart = Date.now() + 2000;
+	while (!delayedCompileChild && Date.now() < waitStart) await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.ok(delayedCompileChild, "Waiting builder should acquire lock after predecessor releases it");
+	await new Promise((resolve) => setTimeout(resolve, 120));
+	let competingCompiles = 0;
+	await assert.rejects(buildAttentionHelper({
+		home, env: { WINDIR: windir }, source, staleLockMs: 220, lockTimeoutMs: 60,
+		spawn(_bin, args) {
+			competingCompiles++;
+			return fakeCompile(_bin, args);
+		},
+	}), /compiler cache is busy/);
+	assert.equal(competingCompiles, 0, "Queue wait time before acquisition must not shorten the active lease");
+	writeFileSync(delayedCompileChild.outputPath, "exe");
+	delayedCompileChild.child.emit("close", 0);
+	assert.equal(await waitingBuilder, firstExe);
+	assert.equal(compiles, 3);
+
 	rmSync(firstExe, { force: true });
 	fs.mkdirSync(lock, { recursive: true });
 	assert.equal(await buildAttentionHelper({
 		home, env: { WINDIR: windir }, source, spawn: fakeCompile, missingOwnerMs: 50,
 	}), firstExe);
-	assert.equal(compiles, 3);
+	assert.equal(compiles, 4);
 	rmSync(firstExe, { force: true });
 	fs.mkdirSync(lock, { recursive: true });
 	writeFileSync(join(lock, "owner-live.json"), JSON.stringify({ pid: process.pid, startedAt: Date.now(), token: "live" }));
