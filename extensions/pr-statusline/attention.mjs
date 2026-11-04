@@ -112,8 +112,14 @@ export async function buildAttentionHelper({
 			const ownerPayload = JSON.stringify({ pid: process.pid, startedAt, token: ownerToken });
 			writeFileSync(stagedOwnerFile, ownerPayload, { flag: "wx", mode: 0o600 });
 			renameSync(stagedOwnerFile, nextOwnerFile);
-			ownerFile = nextOwnerFile;
-			break;
+			stagedOwnerFile = null;
+			const activeOwners = readdirSync(lock).filter((name) => name.startsWith("owner") && name.endsWith(".json"));
+			if (activeOwners.length !== 1 || activeOwners[0] !== ownerName) {
+				try { rmSync(nextOwnerFile, { force: true }); } catch {}
+			} else {
+				ownerFile = nextOwnerFile;
+				break;
+			}
 		} catch (error) {
 			if (stagedOwnerFile) {
 				try { rmSync(stagedOwnerFile, { force: true }); } catch {}

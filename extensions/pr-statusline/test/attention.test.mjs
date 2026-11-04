@@ -758,7 +758,9 @@ test("buildAttentionHelper reclaims abandoned build locks from dead or incomplet
 	assert.equal(existsSync(join(lock, "owner-live.json")), true);
 	rmSync(lock, { recursive: true, force: true });
 
-	// Interprocess regression test: pause Builder 1 after creating an empty owner file before JSON bytes are written.
+	// Interprocess regression test: pause Builder 1 after mkdirSync(lock) before renameSync publishes owner metadata,
+	// let Builder 2 reclaim the empty lock and start compiling, then resume Builder 1 and verify Builder 1 backs out
+	// so only one compiler ever runs.
 	const releasePublication = join(home, "release-publication");
 	const compileCountFile = join(home, "compile-count");
 	writeFileSync(compileCountFile, "0");
@@ -775,8 +777,6 @@ test("buildAttentionHelper reclaims abandoned build locks from dead or incomplet
 			renameSync(from, to) {
 				if (!pausedOnce && String(to).includes(".exe.lock") && String(to).endsWith(".json")) {
 					pausedOnce = true;
-					const fd = fs.openSync(to, "wx", 0o600);
-					fs.closeSync(fd);
 					fs.writeSync(1, JSON.stringify({ type: "publishing", file: to }) + "\\n");
 					const deadline = Date.now() + 5000;
 					while (!fs.existsSync(${JSON.stringify(releasePublication)}) && Date.now() < deadline) {
@@ -818,22 +818,33 @@ test("buildAttentionHelper reclaims abandoned build locks from dead or incomplet
 	const [pubLine] = await once(workerLines, "line", { signal: AbortSignal.timeout(5000) });
 	const pubMsg = JSON.parse(pubLine);
 	assert.equal(pubMsg.type, "publishing");
-	assert.equal(readFileSync(pubMsg.file, "utf8"), "", "Owner file should still be empty while paused");
-	let secondCompiles = 0;
+	let builderTwoCompile = null;
 	const builderTwoPromise = buildAttentionHelper({
-		home, env: { WINDIR: windir }, source, missingOwnerMs: 50,
+		home, env: { WINDIR: windir }, source, missingOwnerMs: 40,
 		spawn(_bin, args) {
-			secondCompiles++;
-			return fakeCompile(_bin, args);
+			const count = Number(readFileSync(compileCountFile, "utf8")) + 1;
+			writeFileSync(compileCountFile, String(count));
+			const outArg = args.find((arg) => arg.startsWith("/out:"));
+			const child = new EventEmitter();
+			child.stdout = new PassThrough();
+			child.stderr = new PassThrough();
+			child.kill = () => child.emit("close", 1);
+			builderTwoCompile = { child, outputPath: outArg.slice(5) };
+			return child;
 		},
 	});
-	await new Promise((resolve) => setTimeout(resolve, 120));
-	assert.equal(secondCompiles, 0, "Competing process must not reclaim an in-progress owner publication");
+	const reclaimDeadline = Date.now() + 3000;
+	while (!builderTwoCompile && Date.now() < reclaimDeadline) await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.ok(builderTwoCompile, "Builder 2 should reclaim the empty lock while Builder 1 is paused before renameSync");
+	// Resume Builder 1 so its delayed renameSync lands inside Builder 2's replacement lock directory.
 	writeFileSync(releasePublication, "go");
+	await new Promise((resolve) => setTimeout(resolve, 150));
+	assert.equal(Number(readFileSync(compileCountFile, "utf8")), 1, "Builder 1 must back out when Builder 2 already owns the replacement lock");
+	writeFileSync(builderTwoCompile.outputPath, "exe");
+	builderTwoCompile.child.emit("close", 0);
 	const [doneLine] = await once(workerLines, "line", { signal: AbortSignal.timeout(5000) });
 	assert.equal(JSON.parse(doneLine).exe, firstExe);
 	assert.equal(await builderTwoPromise, firstExe);
-	assert.equal(secondCompiles, 0);
 	assert.equal(Number(readFileSync(compileCountFile, "utf8")), 1);
 	workerLines.close();
 }));
