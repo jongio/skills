@@ -41,6 +41,21 @@ current-head CI to pass. Final-head review and approval gates remain unchanged.
 After two unsuccessful repair cycles for the same failure, pause with diagnostic
 evidence rather than continuing speculative pushes.
 
+For each new CI-ready review round, inventory paginated submitted review history
+and retain all prior human reviewers in the expected roster across pushes and
+resumptions, not only pending or required reviewers. Request or re-request them
+individually, except those already pending or with a valid submitted review on
+that full head. Recheck the full head and CI before each request. On resume,
+rebuild and deduplicate from live pending requests
+and full-head submitted reviews, not conversation memory; pending requests
+persist across pushes. Verify requests after writing, not every poll, and never
+re-request pending or completed reviewers. Exclude the PR author and bots;
+Copilot keeps its separate request and exception policy. An unrequestable
+reviewer or failed request is a blocker to report, not a reason to silently drop
+a reviewer or prevent requesting other eligible reviewers. Recheck live state
+before retrying unknown request outcomes. New pushes need new-head reviews
+without waiving required approvals or active changes-requested decisions.
+
 Deduplicate underlying findings across review rounds. The watcher groups exact
 repeats from the same reviewer and retains source review IDs and dispositions.
 Heading-only advisories are not findings; new evidence and active

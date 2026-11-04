@@ -229,6 +229,34 @@ test("delivery batches repairs, bounds repeated failures, and avoids review-roun
   assert.match(skill, /Never describe automated self-review as completed human review/);
 });
 
+test("ready review rounds retain and re-request prior human reviewers without polling churn", async () => {
+  const approvals = skill.split("5. **Request Approvals**:")[1]?.split("6. **Monitor & Remediate**:")[0];
+  assert.ok(approvals);
+  assert.match(approvals, /paginated submitted review history/);
+  assert.match(approvals, /all prior human reviewers.*expected roster across pushes and resumptions/);
+  assert.match(approvals, /each new CI-ready head.*request or re-request.*prior human reviewers/);
+  assert.match(approvals, /excluding the PR author and bots/);
+  assert.match(approvals, /already pending.*valid submitted review on that full head/);
+  assert.match(approvals, /individually with `gh pr edit <number> -R <owner\/repo> --add-reviewer <login>`/);
+  assert.match(approvals, /Recheck the full head and CI before each request/);
+  assert.match(approvals, /On resume, rebuild and deduplicate from live pending requests and full-head submitted reviews, not conversation memory/);
+  assert.match(approvals, /pending requests persist across pushes/);
+  assert.match(approvals, /Verify requests after writing.*never re-request pending or completed reviewers on every poll/);
+  assert.match(approvals, /unrequestable reviewer or failed request.*blocker.*never silently drop/);
+  assert.match(approvals, /prevent requesting other eligible reviewers/);
+  assert.match(approvals, /Unknown request outcomes require live rechecking before any retry/);
+  assert.match(approvals, /wait for applicable current-head CI to pass/);
+  for (const file of ["../README.md", "../../../site/src/content/skills/pr.md"]) {
+    const text = (await readFile(new URL(file, import.meta.url), "utf8")).replace(/\s+/g, " ");
+    assert.match(text, /prior human reviewers.*expected roster across pushes and resumptions/);
+    assert.match(text, /individually/);
+    assert.match(text, /deduplicate from live pending requests and full-head submitted reviews, not conversation memory/);
+    assert.match(text, /Verify requests after writing, not every poll/);
+    assert.match(text, /already pending.*valid submitted review on that full head/);
+    assert.match(text, /unrequestable reviewer or failed request.*blocker/i);
+  }
+});
+
 test("eval spec covers private repo reviewer rules, comment resolution, and balanced grader weights", async () => {
   assert.doesNotMatch(evalSpec, /devx|devy/i);
   const cases = [...evalSpec.matchAll(/^  - name: (.+)$/gm)].map(([, name]) => name);
@@ -257,6 +285,7 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "post-merge-unknown-and-cross-repository-issues",
     "pre-merge-partial-closing-link",
     "repeated-advisories-with-renewed-evidence",
+    "rerequest-prior-human-reviewers",
     "bounded-evidence-led-ci-repairs",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);

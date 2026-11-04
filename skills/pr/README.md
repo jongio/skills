@@ -125,6 +125,27 @@ or redesign the workflow without authorization.
 
 ## Review feedback
 
+At each new CI-ready review round, inventory paginated submitted review history,
+not only pending requests or required approvers. Retain all prior human reviewers
+in the expected roster across pushes and resumptions, including those who
+approved, commented, requested changes, or had a review dismissed. Exclude the
+PR author and bots; Copilot uses its separate request path and exception policy.
+Batch known fixes and wait for applicable current-head CI before requesting
+reviews, unless the user explicitly requests early review.
+
+Request or re-request eligible prior reviewers individually with
+`gh pr edit <number> -R <owner/repo> --add-reviewer <login>`, except those already
+pending or with a valid submitted review on that full head. Recheck the full head
+and CI before each request. On resume, rebuild
+and deduplicate from live pending requests and full-head submitted reviews, not
+conversation memory; pending requests persist across pushes. Verify requests
+after writing, not every poll; never re-request pending or completed reviewers.
+An unrequestable reviewer or failed request is a blocker to report, never a
+reason to silently remove them from the expected roster or prevent requesting
+other eligible reviewers. Recheck live state before retrying an unknown request
+outcome. A new push starts a new head-specific round; completed reviews,
+required approvals, and active changes-requested decisions remain separate gates.
+
 The workflow reads full submitted review bodies and PR conversation comments,
 not just inline comments and unresolved threads. Copilot can embed actionable
 findings inside nested details, including "previously missed" issues in unchanged

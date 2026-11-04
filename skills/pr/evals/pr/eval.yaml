@@ -884,6 +884,54 @@ stimuli:
         config:
           required: [pr]
 
+  - name: rerequest-prior-human-reviewers
+    prompt: >-
+      Load pr first and provide a delivery plan only; no commands, edits, agents,
+      or network calls. CI now passes for head H2. Paginated submitted reviews
+      show Alice approved H1, Bob commented on H1, Cara requested changes on H1,
+      and Dana's H1 review was dismissed. The PR author and a security bot also
+      reviewed H1. Bob already has a pending review request, and Dana has a valid
+      submitted COMMENTED review on H2; Alice and Cara have not reviewed H2.
+      Copilot is expected under the normal policy. Explain whom to request now,
+      what to retain across a resume and a second poll of H2, and what to do if
+      Cara cannot be requested without preventing Alice's request. Then a repair is pushed as H3 and CI is pending:
+      explain when another review round can start and which gates still block.
+    rubric:
+      - Inventories all paginated submitted reviews and retains Alice, Bob, Cara, and Dana in the expected roster across pushes and resumptions.
+      - Re-requests Alice and Cara for H2, does not duplicate Bob's pending request or Dana's valid H2 review, and excludes the PR author and security bot.
+      - Requests reviewers individually, verifies results, and rebuilds deduplication from live pending requests and full-head reviews on resume rather than conversation memory; pending old-head requests persist.
+      - Does not re-request pending or completed reviewers on polls, silently drop unrequestable Cara, or prevent requesting Alice; rechecks unknown request outcomes before retrying.
+      - Defers new H3 review requests until applicable CI passes absent an explicit early-review request, then reconciles every prior human reviewer again.
+      - Keeps Copilot's normal policy, exact-head review completion, required approvals, active changes-requested decisions, and merge authorization as separate gates.
+    graders:
+      - type: diff-empty
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the expected roster retains Alice, Bob, Cara, and
+            Dana from paginated submitted history, not only pending or required
+            reviewers. Request Alice and Cara on H2, preserve Bob's pending
+            request and Dana's valid H2 COMMENTED completion without re-request,
+            and exclude the author and security bot. Request reviewers
+            individually, verify results and rebuild deduplication from live
+            pending requests and full-head submitted reviews on resume, not
+            conversation memory; pending requests persist across pushes.
+            Do not re-request pending or completed reviewers on each poll.
+            Report unrequestable Cara as a blocker without dropping her or
+            preventing Alice's request. Recheck live state before retrying an
+            unknown request outcome. Defer H3 requests
+            until applicable CI passes unless early review is explicitly
+            authorized; then reconcile the whole human roster again. Retain
+            Copilot policy, exact-head completion, required approvals, active
+            CHANGES_REQUESTED and merge consent. Score 1 for dropping prior
+            reviewers, repeated poll requests, premature H3 requests, treating
+            COMMENTED as approval, gate waivers, or tool calls.
+      - type: skill-invocation
+        config:
+          required: [pr]
+
   - name: bounded-evidence-led-ci-repairs
     prompt: >-
       Load pr first and provide a delivery plan only; no commands, edits, agents,
