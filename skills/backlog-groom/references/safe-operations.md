@@ -9,6 +9,11 @@ changes. Request distinct approval for destructive removal, Project creation,
 global field changes, automation policy, consequential ownership and dates.
 Batch related ordinary changes only when their exact scope is reviewable.
 
+The sole unattended alternative is the explicit
+[unattended policy contract](unattended-policy.md). Its validated operator
+allowlist authorizes bounded effects, not arbitrary future plans. It does not
+relax audit/apply approval, acceptance, privacy or revalidation requirements.
+
 Every operation records: target ID/reference, operation kind, observed before
 value/version, desired value, evidence, expected effect, approval class, and
 postcondition. Re-discover fields, views, milestones, issues and relationships

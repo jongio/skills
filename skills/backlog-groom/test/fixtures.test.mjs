@@ -8,6 +8,8 @@ const expected = [
   "changed-head", "closure-and-parent", "view-populations", "ownership-and-dates",
   "shared-fields", "done-card", "serialization", "resume-and-pagination",
   "concurrent-view", "ui-blocked",
+  "unattended-authority", "unattended-public-routing", "unattended-evidence",
+  "unattended-recovery",
 ];
 const spec = (await readFile(new URL("eval.yaml", root), "utf8")).replace(/\r\n/g, "\n");
 

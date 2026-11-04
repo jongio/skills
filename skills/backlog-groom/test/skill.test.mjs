@@ -29,6 +29,7 @@ test("instructions are bounded, portable, and all relative links resolve", async
     "references/evidence-ledger.md",
     "references/organization.md",
     "references/safe-operations.md",
+    "references/unattended-policy.md",
   ]));
   for (const [, link] of links) assert.ok((await read(link)).length > 100);
 });
