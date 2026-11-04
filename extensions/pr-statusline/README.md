@@ -207,6 +207,47 @@ console. An attachable classic console or an unowned pseudoconsole is rejected
 without falling back to an ancestor's Terminal, even if it inherited
 `WT_SESSION`.
 
+### Desktop isolation and resource limits
+
+The visual surfaces are **unowned top-level windows**. They are never made
+children or owned popups of Windows Terminal: cross-process ownership joins
+input queues and can stall unrelated UI. The helper explicitly hides its
+surfaces when the tracked window is minimized, disabled, cloaked, or missing
+instead of relying on that ownership relationship.
+
+Only one helper may render for a Terminal window. A second helper reports the
+conflict rather than competing to reorder the same window. Use one Copilot
+session per Terminal window for independent alerts.
+
+Painting is capped at four frames per second. Unchanged window positions and
+Z-order anchors are not repeatedly applied, but actual surface visibility and
+layer order are checked so raising Terminal cannot leave an alert behind it.
+Placement respects Terminal's existing owned-window family without making the
+overlay itself an owned window. Hiding is idempotent. Message and
+command batches are bounded, and raw input is registered only while an
+unacknowledged alert is in the focused Terminal, not while idle or in the
+background. Queued input that predates an alert cannot acknowledge it.
+
+The helper's UI thread emits a liveness signal every second. If no signal is
+received for more than five seconds, the extension stops only that helper and
+reports the timeout; it does not close the terminal or restart the renderer in
+a loop. Alerts remain available without a timeout while liveness is healthy.
+Once no unacknowledged alert or preview remains, the helper exits and releases
+its window lease instead of keeping hidden GUI windows and a polling process
+alive for the rest of the session.
+Cold compilation is serialized for the same cached helper binary, so sessions
+starting together do not each launch a compiler. Cache contention times out
+without starting a renderer. The compiler reads an immutable snapshot of the
+hashed source, not a live file that could change during an update.
+
+Default tests use private **hidden** fixture windows, including an intentionally
+unresponsive fixture. They check input-queue isolation, duplicate-renderer
+rejection, bounded drawing work, watchdog behavior, and stable GDI/USER/process
+handle counts. Live Terminal rendering tests are opt-in:
+`COPILOT_ATTENTION_DESKTOP_TEST=1`. A real desktop trial should start with one
+window; installing an update does not enable attention or require re-enabling
+it across existing sessions.
+
 No shell profile changes, global hooks, system service, or AI requests are
 needed. On first use, the bundled C# source is compiled with Windows' .NET
 Framework compiler and cached under

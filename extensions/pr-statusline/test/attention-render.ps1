@@ -102,6 +102,7 @@ try {
     $fillX = $sample.FillX
     $y = $sample.Y
     $foreground = [AttentionPixels]::GetForegroundWindow()
+    $frameSeconds = 0.5
     foreach ($mode in @('border', 'background', 'both')) {
         Call 'Hide'
         [void][AttentionPixels]::DwmFlush()
@@ -109,9 +110,10 @@ try {
         if ($baseline -eq [uint32]::MaxValue) {
             throw [NotSupportedException]::new('Desktop pixel capture is unavailable at the current sample.')
         }
-        Call 'Render' @($mode, '#FFBB24', [double]0.5)
+        Call 'Render' @($mode, '#FFBB24', [long]($frameSeconds * 1000))
+        $frameSeconds += 2
         Pump
-        Start-Sleep -Milliseconds 150
+        Start-Sleep -Milliseconds 250
         if ([AttentionPixels]::GetForegroundWindow() -ne $foreground) { throw "$mode stole foreground focus." }
         if ($mode -ne 'background') {
             AssertPixel ([AttentionPixels]::Sample($borderX, $y)) 0x0024BBFF "$mode border"
@@ -127,9 +129,9 @@ try {
             AssertPixel ([AttentionPixels]::Sample($fillX, $y)) $expected "$mode background"
         }
     }
-    Call 'Render' @('border', '#B48CFF', [double]0.5)
+    Call 'Render' @('border', '#B48CFF', [long]($frameSeconds * 1000))
     Pump
-    Start-Sleep -Milliseconds 150
+    Start-Sleep -Milliseconds 250
     AssertPixel ([AttentionPixels]::Sample($borderX, $y)) 0x00FF8CB4 'Updated question color'
     '{"type":"renderTest","visible":true,"passed":true}'
 } catch [NotSupportedException] {
