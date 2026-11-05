@@ -138,6 +138,9 @@ test("go opens the optional session board only when explicitly requested and car
   assert.match(skill, /do not create or open it by default/);
   assert.match(skill, /text fallback.*does not block `go`/);
   assert.match(skill, /1-line user-visible status update in `assistant\.message\.content` outside `<thought>`/);
+  assert.match(skill, /before launching any synchronous `task`\/`research`\/`rubber-duck` sub-agent or blocking `read_powershell` wait/);
+  assert.match(skill, /State a brief plan and acceptance criteria for that affected behavioral scope in visible `assistant\.message\.content` outside `<thought>` before invoking `test-doctor`/);
+  assert.match(skill, /for documentation-only or copy-only changes, run only doc\/link\/site contract tests covering the touched files/);
   assert.match(skill, /never send an empty `assistant\.message` \(`""`\), as `<thought>` blocks are hidden from the user/);
   assert.match(skill, /board\/goal identity when available/);
   assert.match(pr, /optional.*session progress reporting.*through delivery/);

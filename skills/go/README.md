@@ -21,9 +21,12 @@ summary and contract checklist and forbidding sub-agent test/lint/build executio
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
 Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
 At every workflow stage transition (`Worktree`, `test-doctor`, `Implementation`,
-`rubber-duck`, `PR` handoff), `go` requires a 1-line user-visible status update
-in `assistant.message.content` outside `<thought>` alongside the tool call so
-sessions never stall on silent `"Working..."` turns.
+`rubber-duck`, `PR` handoff), before launching any synchronous `task`/`research`/`rubber-duck`
+sub-agent or blocking `read_powershell` wait, and when acknowledging mid-run user
+messages, `go` requires a 1-line user-visible status update
+in `assistant.message.content` outside `<thought>` alongside the tool call (and
+outputs the Step 1 plan and acceptance criteria in visible `assistant.message.content`
+before invoking `test-doctor`) so sessions never stall on silent `"Working..."` turns.
 
 When explicitly requested by the user, `go` opens or reuses the session progress
 canvas (`create-session-board-canvas`): kanban, actual primary/subagent team,

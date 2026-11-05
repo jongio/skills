@@ -26,3 +26,14 @@ list/add/remove/clear/refresh requests.
 Clearing pills must not close work, stop agents, delete transcripts or worktrees,
 or change enabled components. Do not scan other sessions or edit raw tracking
 files. If the extension tools are unavailable, do not claim tracking changed.
+
+# User-visible progress updates
+
+`<thought>` / `reasoningText` blocks are hidden from the user and never count as
+progress updates. Always include user-visible text in `assistant.message.content`
+outside `<thought>` at workflow stage transitions, when acknowledging a user
+message, before launching a synchronous `task` subagent or blocking
+`read_powershell` wait, and on every PR watcher poll (even when `read_powershell`
+reports the command is still running). Never chain `read_powershell` or
+subagent calls with an empty `assistant.message.content` (`""`).
+

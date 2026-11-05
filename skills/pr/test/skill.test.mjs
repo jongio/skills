@@ -186,7 +186,8 @@ test("long-running delivery distinguishes execution, external waits, and blocked
   assert.match(skill, /stage, elapsed time, last meaningful result, and next event at least every 60 seconds/);
   assert.match(skill, /1-line user-visible status update in `assistant\.message\.content` outside `<thought>` at every stage transition and before blocking `read_powershell` waits/);
   assert.match(skill, /never send an empty `assistant\.message` \(`""`\), as `<thought>` blocks are hidden from the user/);
-  assert.match(skill, /printing a timestamped status table in visible `assistant\.message\.content` outside `<thought>` in the same response that invokes the next `read_powershell\(delay: 60\)` call/);
+  assert.match(skill, /immediately report the PR URL and head SHA in visible `assistant\.message\.content` outside `<thought>`/);
+  assert.match(skill, /printing a timestamped status table in visible `assistant\.message\.content` outside `<thought>` in the same response that invokes the next `read_powershell\(delay: 60\)` call and when launching or relaunching `watch`, even when `read_powershell` reports the command is still running/);
   assert.match(skill, /host notifications or scheduling rather than tight polling/);
   assert.match(skill, /Distinguish running commands, external review\/CI waits, and blocked approval\/input/);
   assert.match(skill, /exact decision needed and that execution is paused; resume only after that decision/);

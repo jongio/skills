@@ -16,7 +16,7 @@ Plan, test, and implement the current context, then hand verified changes to pr 
 Requires `test-doctor` and `pr`, plus `doc-doctor` for PR preflight; install those skills too, or choose the full collection above.
 Before handing off to `pr`, `go` audits the final diff for scope minimality (stripping superseded scaffolding and dead flags/helpers from abandoned approaches), cross-file CLI/function call contracts, lifecycle/state-machine symmetry, and fail-closed mutations, and invokes the repository's local `code-review` skill in local/branch mode when present or runs one bounded, read-only cross-model `rubber-duck` sub-agent review using a different model family than the active model when available (supplying the diff/test summary and contract checklist and forbidding sub-agent test/lint/build execution).
 Only `pr` runs the documentation pass; `go` does not duplicate it.
-At every workflow stage transition (`Worktree`, `test-doctor`, `Implementation`, `rubber-duck`, `PR` handoff), `go` requires a 1-line user-visible status update in `assistant.message.content` outside `<thought>` alongside the tool call.
+At every workflow stage transition (`Worktree`, `test-doctor`, `Implementation`, `rubber-duck`, `PR` handoff), before launching any synchronous `task`/`research`/`rubber-duck` sub-agent or blocking `read_powershell` wait, and when acknowledging mid-run user messages, `go` requires a 1-line user-visible status update in `assistant.message.content` outside `<thought>` alongside the tool call (and outputs the Step 1 plan in visible `assistant.message.content` before invoking `test-doctor`).
 
 When explicitly requested by the user, `go` opens/reuses a session progress
 canvas with live kanban, primary/subagent reports, task percentage, blockers,
