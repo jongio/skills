@@ -13,6 +13,8 @@ test("the plugin ships default-on active-session enrollment without enrolling re
   assert.match(rule, /Honor manual clear\/remove/);
   assert.match(rule, /When the session statusline tools are available/);
   assert.match(rule, /Use the `session-statusline` skill/);
+  assert.match(rule, /# User-visible progress updates/);
+  assert.match(rule, /Never chain `read_powershell` or\s+subagent calls with an empty `assistant\.message\.content`/);
 });
 
 test("session-statusline is discoverable through the aggregate plugin and individual marketplace entry", () => {

@@ -112,7 +112,13 @@ cleanup are reported as pending rather than retried unconditionally or claimed d
 
 ## Bounded PR monitoring
 
-Direct `pr` and `go`-routed monitoring use the same watcher. `watch` budgets
+Direct `pr` and `go`-routed monitoring use the same watcher. Emit a 1-line
+user-visible status update in `assistant.message.content` outside `<thought>` at
+every stage transition, report the PR URL and head SHA when submitted, and print
+the timestamped status table in visible `assistant.message.content` when launching
+or relaunching `watch` and in the same response that invokes each
+`read_powershell(delay: 60)` call, even when `read_powershell` reports the command
+is still running (`<thought>` blocks are hidden from the user). `watch` budgets
 API calls and sleeps to 540 seconds by default, reduced for shorter positive
 `COPILOT_TASK_WAIT_TIMEOUT_SECONDS`. `--max-wait-sec <non-negative integer>`
 overrides that budget; `0` disables chunking. Local startup/state writes add

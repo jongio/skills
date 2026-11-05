@@ -5,7 +5,7 @@ import { createProgressCanvas } from "./canvas.mjs";
 import { createCanvasRuntime } from "./canvas-kit/server.mjs";
 import { workspaceStore, sessionStore } from "./canvas-kit/storage.mjs";
 import { validate } from "./canvas-kit/validate.mjs";
-import { actorFor, createProgressEventGate, isProgressEvent, progressInputSchema, readSessionSources } from "./host.mjs";
+import { actorFor, createFeedbackGate, createProgressEventGate, isProgressEvent, progressInputSchema, readSessionSources } from "./host.mjs";
 import { acquireProvider } from "./provider.mjs";
 import { createTrackingSync, trackingChangeKind, trackingResult } from "./references.mjs";
 
@@ -44,21 +44,31 @@ if (lease) {
     },
     onClose: async (ctx) => { await ready; await runtime.closeInstance(ctx.instanceId); },
   });
+  const feedbackGate = createFeedbackGate();
   const session = await joinSession({
     hooks: {
       onPostToolUse: async (input, invocation) => {
+        if (invocation.sessionId !== process.env.SESSION_ID) return;
         const delta = trackingResult(input);
-        if (!delta || invocation.sessionId !== process.env.SESSION_ID) return;
-        if (input.toolArgs?.action === "list" && tracking?.isReading(delta.kind)) return;
-        try {
-          await ready;
-          if (delta.refreshAll) { await refreshTracking(); return; }
-          const snapshot = service.syncTracking(delta, tracking.current(delta.kind || "all"));
-          const pending = refreshTracking(delta.kind || "all");
-          await Promise.all([snapshot, pending]);
-        } catch (error) {
-          await logTrackingError(error);
+        if (delta) {
+          if (input.toolArgs?.action === "list" && tracking?.isReading(delta.kind)) return;
+          try {
+            await ready;
+            if (delta.refreshAll) { await refreshTracking(); }
+            else {
+              const snapshot = service.syncTracking(delta, tracking.current(delta.kind || "all"));
+              const pending = refreshTracking(delta.kind || "all");
+              await Promise.all([snapshot, pending]);
+            }
+          } catch (error) {
+            await logTrackingError(error);
+          }
         }
+        return feedbackGate.evaluateToolHook(input, invocation, process.env.SESSION_ID);
+      },
+      onPostToolUseFailure: async (input, invocation) => {
+        if (invocation.sessionId !== process.env.SESSION_ID) return;
+        return feedbackGate.evaluateToolHook(input, invocation, process.env.SESSION_ID);
       },
     },
     canvases: [canvas],
@@ -110,6 +120,7 @@ if (lease) {
   };
   const events = createProgressEventGate(handle);
   const unsubscribe = session.on((event) => {
+    feedbackGate.observe(event);
     if (isProgressEvent(event)) events.push(event);
   });
   const initializing = (async () => {

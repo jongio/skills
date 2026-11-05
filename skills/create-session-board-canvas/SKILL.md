@@ -3,7 +3,7 @@ name: create-session-board-canvas
 description: >-
   Open and maintain a live canvas for the current session's plan, kanban tasks, primary/subagent team, progress, blockers, owned PRs/issues, head-pinned CI, and delivery status. USE FOR: create a canvas that shows session progress, session board canvas, session kanban, show session tasks and agents, show session PRs and CI in a canvas, go progress board. DO NOT USE FOR: generic canvas apps (use create-canvas-app), footer pill management (use session-statusline), implementation workflow (use go), cross-session dashboards.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Create Session Board Canvas

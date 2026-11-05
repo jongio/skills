@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { actorFor, createProgressEventGate, isProgressEvent, readSessionSources, progressInputSchema } from "../runtime/host.mjs";
+import { actorFor, createFeedbackGate, createProgressEventGate, isProgressEvent, readSessionSources, progressInputSchema } from "../runtime/host.mjs";
 import { acquireProvider } from "../runtime/provider.mjs";
 import { validate } from "../runtime/canvas-kit/validate.mjs";
 import { createProgressService } from "../runtime/progress.mjs";
@@ -107,6 +107,45 @@ test("the host routes root cancellation through startup buffering but ignores de
   }
   await route({ type: "abort", data: {} });
   assert.deepEqual(service.snapshot().attention, []);
+});
+
+test("feedback gate injects tail reminders for silent root turns while ignoring subagents and visible updates", () => {
+  let time = 1000;
+  const gate = createFeedbackGate({ now: () => time, silenceThresholdMs: 45000, maxSilentTurns: 2 });
+  assert.equal(gate.evaluateToolHook({ toolName: "view" }, { sessionId: "s" }, "s"), undefined);
+
+  // Subagent empty turns never trigger root feedback gate
+  gate.observe({ type: "assistant.message", data: { content: "", parentToolCallId: "sub-1" } });
+  assert.equal(gate.evaluateToolHook({ toolName: "read_powershell" }, { sessionId: "s" }, "s"), undefined);
+
+  // Root empty turn + read_powershell or pr-watch-daemon triggers immediately
+  gate.observe({ type: "assistant.message", data: { content: "" } });
+  assert.equal(gate.evaluateToolHook({ toolName: "read_powershell" }, { sessionId: "s", agentId: "worker" }, "s"), undefined);
+  assert.equal(gate.evaluateToolHook({ toolName: "read_powershell" }, { sessionId: "other" }, "s"), undefined);
+  assert.match(
+    gate.evaluateToolHook({ toolName: "read_powershell" }, { sessionId: "s" }, "s")?.additionalContext ?? "",
+    /Do NOT chain read_powershell/,
+  );
+
+  // Single fast view turn does not trigger until threshold or second silent turn
+  assert.equal(gate.evaluateToolHook({ toolName: "view" }, { sessionId: "s" }, "s"), undefined);
+  gate.observe({ type: "assistant.message", data: { content: "" } });
+  assert.match(
+    gate.evaluateToolHook({ toolName: "view" }, { sessionId: "s" }, "s")?.additionalContext ?? "",
+    /2 turn\(s\)/,
+  );
+
+  // Visible assistant message resets the gate
+  gate.observe({ type: "assistant.message", data: { content: "Completed baseline checks." } });
+  assert.equal(gate.evaluateToolHook({ toolName: "read_powershell" }, { sessionId: "s" }, "s"), undefined);
+
+  // Unacknowledged root user message + silent tool turn triggers immediately
+  gate.observe({ type: "user.message", data: { content: "once identified assign all those issues" } });
+  gate.observe({ type: "assistant.message", data: { content: "" } });
+  assert.match(
+    gate.evaluateToolHook({ toolName: "view" }, { sessionId: "s" }, "s")?.additionalContext ?? "",
+    /USER FEEDBACK GATE:/,
+  );
 });
 
 test("the actual board entrypoint refreshes canonical tracking without recursive native hooks", (t) => {
@@ -272,6 +311,26 @@ test("the actual board entrypoint refreshes canonical tracking without recursive
           && value.references.prs.length === 0 && value.references.issues.length === 0);
       }
       assert.ok(logs.some((message) => /Session board tracking sync unavailable:.*ENOSPC/.test(message)));
+      observer({ type: "assistant.message", data: { content: "" } });
+      const silentReadGate = await configuration.hooks.onPostToolUse(
+        { toolName: "read_powershell", toolArgs: { shellId: "pr-watch-1", delay: 60 }, toolResult: { resultType: "success", textResultForLlm: '{"status":{"headRefOid":"abc"}}' } },
+        { sessionId },
+      );
+      assert.match(silentReadGate?.additionalContext ?? "", /USER FEEDBACK GATE:.*Do NOT chain read_powershell/);
+      observer({ type: "assistant.message", data: { content: "Status table printed" } });
+      assert.equal(
+        await configuration.hooks.onPostToolUse(
+          { toolName: "read_powershell", toolArgs: { shellId: "pr-watch-1", delay: 60 }, toolResult: { resultType: "success", textResultForLlm: '{"status":{"headRefOid":"abc"}}' } },
+          { sessionId },
+        ),
+        undefined,
+      );
+      observer({ type: "assistant.message", data: { content: "" } });
+      const failGate = await configuration.hooks.onPostToolUseFailure(
+        { toolName: "task", toolArgs: { name: "sub" }, error: "denied" },
+        { sessionId },
+      );
+      assert.match(failGate?.additionalContext ?? "", /USER FEEDBACK GATE:/);
       console.log("native adapter boundaries passed");
       process.emit("SIGTERM");
     `], { encoding: "utf8", timeout: 15000, windowsHide: true, env: process.env });
