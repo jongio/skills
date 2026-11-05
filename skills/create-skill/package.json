@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@azure/identity": "4.14.0",
-    "openai": "7.43.0"
+    "openai": "7.45.1"
   },
   "devDependencies": {
     "@microsoft/vally-cli": "0.20.0",
