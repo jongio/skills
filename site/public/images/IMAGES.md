@@ -7,6 +7,10 @@ What lives in `site/public/images/`, what uses it, and which files are spare ass
 | File | Used by | Purpose | Recommended size |
 | --- | --- | --- | --- |
 | `og.svg` / `og.png` | `<meta og:image>` uses the PNG | Collection overview social card; SVG is the editable source. | 1200×630 |
+| `app-plugins-nav.png` | Home install walkthrough | Copilot app Settings / Customize → Plugins navigation screenshot. | 2× |
+| `app-add-marketplace.png` | Home install walkthrough | Copilot app Add marketplace dialog with `jongio/skills`. | 2× |
+| `app-browse-install.png` | Home install walkthrough | Browsing the `jongio-skills` marketplace in the Copilot app. | 2× |
+| `app-installed.png` | Home install walkthrough | Installed and enabled skill in the Copilot app. | 2× |
 | `favicon.svg` | _(not referenced — the root `public/favicon.svg` is used)_ | Optional. | 64×64 |
 | `hero.svg` | _(spare)_ | Optional hero banner if you add one. | 1280×640 |
 | `item-thumb.svg` | _(spare)_ | Superseded by generated `thumb-<skill>.png` art. | 640×400 |
@@ -23,16 +27,21 @@ validate all catalog mappings and generate byte-identical public copies.
 | File | Used by | Notes |
 | --- | --- | --- |
 | `thumb-backlog-groom.png` | `backlog-groom` card/detail | Azure GPT Image 2 planning console with multi-repository issues, evidence checks, and pending work. |
+| `thumb-ci-hound.png` | `ci-hound` card/detail | Azure GPT Image 2 CI pipeline console with failure alert, isolated worktree repair card, and parallel green workflow nodes. |
 | `thumb-create-canvas-app.png` | `create-canvas-app` card/detail | Canvas extension panel beside the Copilot composer. |
 | `thumb-create-gh-pages-site.png` | `create-gh-pages-site` card/detail | Astro site scaffold deploying to GitHub Pages. |
+| `thumb-create-session-board-canvas.png` | `create-session-board-canvas` card/detail | Azure GPT Image 2 session-board canvas window transforming a plan card into a three-column kanban board with agent badges and a progress bar. |
 | `thumb-create-skill.png` | `create-skill` card/detail | Azure OpenAI generated thumbnail for complete skill authoring and registration. |
 | `thumb-create-skills-repo.png` | `create-skills-repo` card/detail | Azure OpenAI generated thumbnail for cross-agent repository setup. |
 | `thumb-deps-doctor.png` | `deps-doctor` card/detail | Dependency graph on a slate console, amber packages upgrading left to right into green ones, inspected by a stethoscope lens. Byte parity with the skill copy is asserted by a test. |
 | `thumb-dns-doctor.png` | `dns-doctor` card/detail | DNS diagnostic workstation, record cards, and stethoscope. |
+| `thumb-doc-doctor.png` | `doc-doctor` card/detail | Azure GPT Image 2 documentation editor aligning docs and code with repaired links and green check badges. |
 | `thumb-git-tidy.png` | `git-tidy` card/detail | Git branch tree being tidied, merged branches swept up while protected branches are kept. Byte parity with the skill copy is asserted by a test. |
 | `thumb-eli5.png` | `eli5` card/detail | Byte parity with the skill copy is asserted by a test. |
 | `thumb-naming-is-hard.png` | `naming-is-hard` card/detail | Candidate names screened across registries. |
 | `thumb-repo-ready.png` | `repo-ready` card/detail | Repository health checklist with gap indicators. |
+| `thumb-retro.png` | `retro` card/detail | Azure GPT Image 2 session retrospective workspace turning conversation cards into a verified closeout checklist and tidy branch path. |
+| `thumb-session-statusline.png` | `session-statusline` card/detail | Azure GPT Image 2 terminal statusline footer sweeping stale pills into organized color-coded session pills while preserving underlying work. |
 | `thumb-skill-doctor.png` | `skill-doctor` card/detail | Session cards become concise skill fixes through an inspection loop, with cached-review and PR badges. |
 | `thumb-test-doctor.png` | `test-doctor` card/detail | Test diagnostic console transforms amber gaps into verified green test cards; generated source and provider provenance live with the skill. |
 | `thumb-pr.png` | `pr` card/detail | Pull request checklist workflow from local commit and preflight checks through review resolution, CI, and merge. |

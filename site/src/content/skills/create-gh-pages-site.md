@@ -16,15 +16,17 @@ install:
 ## What it does
 
 `create-gh-pages-site` builds a site about your project and configures it for
-GitHub Pages:
+GitHub Pages (targeting the **current repository by default**, or a named repository):
 
 - **Picks the right template** — `static-html`, `astro`, `react-vite`, `eleventy`,
-  or `jekyll` — for what you're building.
-- **Configures links and assets** for your repository's Pages address, including its subdirectory.
-- **Adds automated deployment** through GitHub Actions.
+  `jekyll`, `skills-catalog` (browsable skills marketplace catalog), or `spectator`
+  (reviewable VitePress specification) — for what you're building.
+- **Configures links and assets** for your repository's Pages address, including its project-site subdirectory (`/<repo>/`) or user-site root (`/`).
+- **Adds automated deployment** through a commit-pinned, least-privilege GitHub Actions workflow and sets the repository's Website homepage link.
 - **Writes project-specific content** from your README, code, and documentation:
-  a CLI reference, usage guide, feature tour, or catalog.
-- **Marks missing images** so you can replace them before publishing.
+  a CLI reference, usage guide, feature tour, specification, or catalog.
+- **Marks missing images** with labeled placeholders and an `IMAGES.md` checklist so you can replace them before publishing, while reusing existing repo images.
+- **Supports fail-closed `--staging-dir` composition** for tools like `create-skills-repo`.
 
 ## When to reach for it
 

@@ -18,13 +18,13 @@ install:
 for a project board, document preview, editor, or dashboard the agent can update
 as you work.
 
-- The panel updates live when you or the agent changes its state.
-- Saved state survives reloads and later sessions.
-- Optional team sharing keeps one document in a private GitHub repository.
-- Light and dark themes match GitHub.
-- Buttons can use the app's AI or hand a task back to the agent, without a separate API key.
+- The panel updates live over SSE when you or the agent changes its state, without clobbering focus or in-progress typing.
+- Saved state survives reloads and later sessions (with optional shared `githubStore` storage in a private repository).
+- Light and dark themes match GitHub Primer tokens and ship the official GitHub Lucide icon set.
+- Buttons can call the app's AI (`ctx.ai`) or hand a task back to the agent (`ctx.askAgent`), without a separate API key.
+- Includes validated `ghapp://` deep-link builders, SSRF-safe `safeFetch` egress guards, and `sync-kit.mjs` / `check-kit-freshness.mjs` for scoped kit updates.
 
-The generated Preact + htm app runs without a build step and includes tests.
+The generated Preact + htm app runs without a build step, offers `list`, `data`, and `ai` templates, and includes an HTTP smoke test.
 
 ## When to reach for it
 

@@ -25,10 +25,11 @@ import Layout from "../layouts/Layout.astro";
     <h2>Works across agents</h2>
     <p>
       The skills use the <a href="https://github.com/vercel-labs/skills">SKILL.md</a>
-      format, so they work with <strong>GitHub Copilot</strong>, <strong>Claude</strong>,
-      <strong>Codex</strong>, and any agent that supports it. The repo also plugs into
-      the GitHub Copilot <strong>plugin</strong> system — add it as a marketplace, or
-      install the whole repo as a single plugin.
+      format and <a href="https://agent-plugins.org/plugin-authors/manifest">Agent Plugins 1.0</a>,
+      so they work with <strong>GitHub Copilot</strong> (App, CLI, VS Code, and coding agent),
+      <strong>Claude Code</strong>, <strong>Codex</strong>, <strong>Cursor</strong>,
+      <strong>Gemini CLI</strong>, and any host that supports them. Add the repo as a
+      marketplace, install individual skills, or install the whole collection as one plugin.
     </p>
     <p class="muted">
       Installation steps differ by app. See the
@@ -47,8 +48,12 @@ import Layout from "../layouts/Layout.astro";
       issues stay beside their checkout.
     </p>
     <p class="muted">
-      These are Copilot CLI extensions, not skills. Use <code>/statusline-setup</code>
-      to choose components and <code>/session-worktree</code> to inspect checkouts.
+      These are Copilot CLI–only extensions (they automatically no-op in the GitHub
+      Copilot app). Use <code>/session-statusline setup</code> (or <code>/statusline-setup</code>)
+      to choose components, <code>/session-statusline name &lt;label&gt;</code> to label the
+      session, <code>/session-statusline refresh | clear</code> to refresh or clear tracked
+      items, <code>/session-worktree</code> to inspect checkouts, and <code>/session-attention</code>
+      for Windows Terminal attention alerts.
       See the <a href="/skills/statuslines/">statuslines guide</a> for the grouped
       footer illustration and the meaning of <code>*</code>, <code>+</code>,
       <code>%</code>, <code>↑</code>, <code>↓</code>, and <code>?</code>.
@@ -58,13 +63,15 @@ import Layout from "../layouts/Layout.astro";
   <section class="card">
     <h2>Install</h2>
     <p><strong>1 · Cross-platform one-liner (Copilot, Claude, Codex &amp; Gemini CLIs):</strong></p>
-    <p class="muted">Installs the native plugin in every detected CLI and removes conflicting raw copies from <code>~/.copilot/skills</code>, <code>~/.claude/skills</code>, and <code>~/.agents/skills</code> (shared <code>~/.agents/skills</code> and <code>~/.codex/skills</code> entries are preserved when another consumer such as Codex IDE or Cline is present unless <code>-CleanShared</code> / <code>--clean-shared</code> is passed in a local checkout, since non-plugin hosts may still need those raw skills):</p>
+    <p class="muted">Runs the native plugin install in every detected CLI first and then removes only provenance-verified conflicting raw copies from <code>~/.copilot/skills</code>, <code>~/.claude/skills</code>, and <code>~/.agents/skills</code> (unrelated or hand-authored skills are preserved, and shared <code>~/.agents/skills</code> and <code>~/.codex/skills</code> entries stay intact when another consumer such as Codex IDE or Cline is present unless <code>-CleanShared</code> / <code>--clean-shared</code> or <code>-CleanOnly</code> / <code>--clean-only</code> is passed in a local checkout):</p>
     <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install.ps1 | iex</code></pre>
     <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install.sh | bash</code></pre>
     <p><strong>2 · Per-agent native plugin install (global &amp; namespaced):</strong></p>
     <p class="muted">In Copilot CLI or Claude Code:</p>
     <pre><code>/plugin marketplace add jongio/skills</code></pre>
     <pre><code>/plugin install jongio-skills@jongio-skills</code></pre>
+    <p class="muted">Or install just the Copilot CLI statuslines (without skills):</p>
+    <pre><code>/plugin install statuslines@jongio-skills</code></pre>
     <p class="muted">In Codex CLI:</p>
     <pre><code>codex plugin marketplace add jongio/skills &amp;&amp; codex plugin add jongio-skills</code></pre>
     <p class="muted">In Gemini CLI:</p>
@@ -75,7 +82,7 @@ import Layout from "../layouts/Layout.astro";
     <pre><code>npx skills add jongio/skills --all</code></pre>
     <p class="muted">
       Browse all skills in <a href="/skills/catalog/">the catalog</a> or view the <a href="/skills/statuslines/">Copilot CLI statuslines guide</a>.
-      In Copilot CLI, start a new session after installing extensions. For skills
+      In Copilot CLI, start a new session after installing extensions (and enable experimental SDK extensions once with <code>/settings experimental on</code> followed by <code>/restart</code>). For skills
       alone, <code>/skills reload</code> also refreshes the available skills.
     </p>
   </section>

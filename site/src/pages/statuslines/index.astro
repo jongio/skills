@@ -14,7 +14,8 @@ const base = import.meta.env.BASE_URL;
       and <strong>Branch and Worktree</strong> (<code>worktree-statusline</code>).
       Choose any combination. See where work is happening, what needs attention on GitHub, and how background tasks are progressing.
       Explicitly enroll PRs and issues this session owns; references, shell commands, and GitHub responses never create them.
-      Actual session agent launches remain automatic.
+      Actual session agent launches remain automatic. Terminal statuslines, <code>/session-*</code> commands, and Windows Terminal
+      attention alerts are <strong>Copilot CLI–only</strong> (they automatically no-op when hosted in the GitHub Copilot app).
     </p>
   </header>
 
@@ -54,10 +55,10 @@ const base = import.meta.env.BASE_URL;
         </div>
         <div class="sl-install-item">
           <div class="sl-os-label">Step 3 · Pick your statuslines anytime in Copilot CLI</div>
-          <pre class="sl-primary-pre"><code>/statusline-setup</code></pre>
+          <pre class="sl-primary-pre"><code>/session-statusline setup</code></pre>
         </div>
       </div>
-      <p class="sl-primary-sub">Start a new session after installation to load the extensions. Run setup again whenever you want to change the enabled components. Use <code>/session-statusline clear</code> to dismiss this session's pills without disabling components or deleting work. The full plugin includes the <code>session-statusline</code> skill for requests such as "clear the footer pills".</p>
+      <p class="sl-primary-sub">Start a new session after installation to load the extensions (and enable experimental SDK extensions once with <code>/settings experimental on</code> followed by <code>/restart</code> in existing CLI windows). Run <code>/session-statusline setup</code> (or the alias <code>/statusline-setup</code>) whenever you want to change the enabled components. Use <code>/session-statusline refresh</code> to force-refresh tracked data, <code>/session-statusline clear</code> to dismiss this session's pills without disabling components or deleting work, and <code>/session-statusline name &lt;label&gt;</code> to label this session in the footer. The full plugin includes the <code>session-statusline</code> skill for requests such as "clear the footer pills" or "name this session API migration".</p>
     </div>
 
     <div class="sl-install-secondary">
@@ -70,6 +71,12 @@ const base = import.meta.env.BASE_URL;
         <div class="sl-install-item">
           <div class="sl-os-label">macOS &amp; Linux · Bash</div>
           <pre><code>curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash</code></pre>
+        </div>
+        <div class="sl-install-item">
+          <div class="sl-os-label">Local checkout · Node.js (interactive picker or explicit flags)</div>
+          <pre><code>node ./scripts/setup-statusline.mjs
+node ./scripts/setup-statusline.mjs --all
+node ./scripts/setup-statusline.mjs --prs --issues --subagents --worktrees</code></pre>
         </div>
       </div>
     </div>
@@ -275,10 +282,46 @@ const base = import.meta.env.BASE_URL;
       </div>
     </div>
     <div class="sl-shot-block">
-      <h2>Inspect what the footer is tracking</h2>
+      <h2 id="session-controls">Inspect, refresh, clear, and name this session</h2>
       <p>Run <code>/session-worktree</code>, <code>/session-prs</code>, <code>/session-issues</code>, or <code>/session-subagents</code> in Copilot CLI to inspect this session's tracked work.</p>
-      <p>PR, issue, and subagent commands also accept <code>clear</code> to clear their tracked items for this session. The worktree command is inspect-only; there is no unified force-refresh command yet.</p>
+      <p>Use <code>/session-statusline refresh</code> to force a fresh update across PRs, issues, subagents, and worktrees without changing tracked items or enabled components. Use <code>/session-statusline clear</code> to clear all tracked pills for this session at once, or pass <code>clear</code> / <code>remove</code> to <code>/session-prs</code>, <code>/session-issues</code>, or <code>/session-subagents</code>. The <code>/session-worktree</code> command is inspect-only.</p>
+      <p><strong>Custom session names:</strong> run <code>/session-statusline name API migration</code> (or ask the <code>session-statusline</code> skill to "name this session API migration") to place a custom single-line label first in that session's footer. It persists on resume, and <code>clear</code> or <code>refresh</code> preserves it. Use <code>/session-statusline name</code> to show the current label or <code>/session-statusline clear-name</code> to remove it.</p>
       <p>For an unexpected commit count, fetch the relevant remote through your normal workflow first. For extensions updated during a running session, start a new session to load the updated collector.</p>
+    </div>
+
+    <div class="sl-shot-block">
+      <div class="sl-shot-header">
+        <div>
+          <h2 id="attention-alerts">Windows Terminal attention alerts</h2>
+          <p class="sl-shot-sub">Optional focus-aware window borders and background washes for Copilot CLI sessions in Windows Terminal, independent of which footer rows are enabled.</p>
+        </div>
+        <span><a href="https://github.com/jongio/skills/blob/main/extensions/pr-statusline/README.md#windows-terminal-attention-alerts" target="_blank" rel="noopener">Full guide →</a></span>
+      </div>
+      <pre><code>/session-attention both
+/session-attention preview
+/session-attention status
+/session-attention off</code></pre>
+      <div class="sl-legend-grid">
+        <div class="sl-legend-item"><code>Amber · Approval</code><span>Permission or plan approval is needed in that session.</span></div>
+        <div class="sl-legend-item"><code>Purple · Question</code><span>A question or elicitation dialog is waiting for your answer.</span></div>
+        <div class="sl-legend-item"><code>Green · Ready</code><span>The root session finished its response and became idle.</span></div>
+        <div class="sl-legend-item"><code>Red · Error</code><span>The root session reported an error.</span></div>
+      </div>
+      <p class="sl-shot-sub" style="margin-top:0.75rem;">Alerts are off by default and have no timeout. Focusing the bound Windows Terminal window (or clicking, typing, or scrolling in it if already focused) acknowledges and clears the alert. Choose <code>border</code>, <code>background</code>, or <code>both</code>.</p>
+    </div>
+
+    <div class="sl-shot-block">
+      <div class="sl-shot-header">
+        <div>
+          <h2 id="daemon-notifications">Optional CI/PR daemon timeline bridge</h2>
+          <p class="sl-shot-sub">Log background <code>ci-hound</code> and <code>pr</code> watcher events into the active Copilot CLI session timeline without calling a model, starting repairs, or authorizing a merge.</p>
+        </div>
+        <span><a href="https://github.com/jongio/skills/tree/main/extensions/daemon-notifications" target="_blank" rel="noopener">View source →</a></span>
+      </div>
+      <pre><code>node scripts/setup-statusline.mjs --notifications
+/daemon-notifications subscribe ci
+node skills/ci-hound/scripts/ci-hound-daemon.mjs watch --events-file "&lt;returned-file&gt;"</code></pre>
+      <p class="sl-shot-sub" style="margin-top:0.75rem;">Included in the <code>jongio-skills</code> and <code>statuslines</code> plugins. Use <code>/daemon-notifications status</code> to list subscriptions or <code>/daemon-notifications unsubscribe ci</code> to disable one.</p>
     </div>
   </section>
 

@@ -16,10 +16,11 @@ install:
 
 `create-skill` turns a skill idea into a complete, registered repository entry:
 
-- `SKILL.md` instructions that tell the agent when and how to use the skill.
-- A README, license, tests, and evaluation cases for checking its behavior.
-- Registration in the repository's marketplace, plugin listings, CI, and catalog.
-- Optional thumbnail art, or a local placeholder when you do not want generated art.
+- `SKILL.md` instructions (with `metadata.version: "1.0.0"`) that tell the agent when and how to use the skill.
+- A README, license, `.npmrc` (`min-release-age=7`), deterministic tests, and Vally `0.20.0` evaluation cases for checking its behavior.
+- Registration in the repository's marketplace, plugin listings, Dependabot config, CI, and catalog.
+- Optional validated 1024×1024 thumbnail art with recorded prompt/provider provenance, or a deterministic local placeholder when you do not want generated art.
+- Noninteractive `fixture` mode for repository generators, plus `scripts/version-skills.mjs` (`bump`, `sync`, `check`) compatibility.
 
 It checks how your repository distributes skills before making changes. If that
 setup is unclear, it stops for clarification rather than guessing where to register.

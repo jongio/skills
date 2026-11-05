@@ -50,7 +50,7 @@ const skills = (await getCollection("skills")).sort((a, b) =>
       <a class="section-link" href={`${base}statuslines/`}>Open full documentation →</a>
     </div>
     <p class="muted" style="margin: 0 0 1rem;">
-      Know where the agent is working and what needs attention without leaving the conversation. Enable the footer components you want with <code>/statusline-setup</code>.
+      Know where the agent is working and what needs attention without leaving the conversation. Enable the footer components you want with <code>/session-statusline setup</code> (or <code>/statusline-setup</code>), set a custom session label with <code>/session-statusline name &lt;label&gt;</code>, or opt into Windows Terminal alerts with <code>/session-attention</code>.
     </p>
 
     <div class="statusline-showcase card">
@@ -88,7 +88,7 @@ const skills = (await getCollection("skills")).sort((a, b) =>
     <h2>Install</h2>
     <p class="muted">Install the namespaced plugin globally across your coding agents, or install individual skills into a project.</p>
     <h3>1 · Cross-platform one-liner (Copilot, Claude, Codex &amp; Gemini CLIs)</h3>
-    <p class="muted">Installs the native plugin in every detected CLI and removes conflicting raw copies from <code>~/.copilot/skills</code>, <code>~/.claude/skills</code>, and <code>~/.agents/skills</code> so <code>/jongio-skills:pr</code> never collides with built-in <code>/pr</code>. Shared <code>~/.agents/skills</code> and <code>~/.codex/skills</code> entries are preserved when another consumer (such as Codex IDE or Cline) is present; pass <code>-CleanShared</code> / <code>--clean-shared</code> in a local checkout only if those non-plugin hosts no longer need the raw skills:</p>
+    <p class="muted">Runs the native plugin install (<code>jongio-skills@jongio-skills</code> / <code>codex plugin add jongio-skills</code> / <code>gemini extensions install</code>) across every detected CLI first, and then removes only provenance-verified conflicting raw copies from <code>~/.copilot/skills</code>, <code>~/.claude/skills</code>, and <code>~/.agents/skills</code> so <code>/jongio-skills:pr</code> never collides with built-in <code>/pr</code>. Unrelated or hand-authored skills are preserved, and shared <code>~/.agents/skills</code> and <code>~/.codex/skills</code> entries stay intact when another consumer (such as Codex IDE or Cline) is present unless <code>-CleanShared</code> / <code>--clean-shared</code> or <code>-CleanOnly</code> / <code>--clean-only</code> is passed in a local checkout:</p>
     <p class="muted">Windows (PowerShell):</p>
     <pre><code>irm https://raw.githubusercontent.com/jongio/skills/main/install.ps1 | iex</code></pre>
     <p class="muted">macOS &amp; Linux (Bash):</p>
@@ -106,7 +106,7 @@ const skills = (await getCollection("skills")).sort((a, b) =>
     <p class="muted">Or in the Copilot app, no commands needed:</p>
     <ol class="steps">
       <li>
-        <span>Open <strong>Settings</strong> and select <strong>Plugins</strong>.</span>
+        <span>Open <strong>Settings</strong> (or <strong>Customize</strong>) and select <strong>Plugins</strong>.</span>
         <img class="shot" src={`${base}images/app-plugins-nav.png`} alt="Plugins in the settings sidebar" loading="lazy" />
       </li>
       <li>
@@ -114,7 +114,7 @@ const skills = (await getCollection("skills")).sort((a, b) =>
         <img class="shot" src={`${base}images/app-add-marketplace.png`} alt="Add marketplace dialog with jongio/skills entered" loading="lazy" />
       </li>
       <li>
-        <span>The marketplace's skills appear grouped under <strong>jongio-skills</strong>. Click <strong>Install</strong> on the one you want.</span>
+        <span>The marketplace's skills appear grouped under <strong>jongio-skills</strong>. Click <strong>Install</strong> on the one you want (or <strong>jongio-skills</strong> for the complete collection).</span>
         <img class="shot" src={`${base}images/app-browse-install.png`} alt="Browse the jongio-skills marketplace and install create-canvas-app" loading="lazy" />
       </li>
       <li>
@@ -126,6 +126,7 @@ const skills = (await getCollection("skills")).sort((a, b) =>
     <p class="muted">Install into the current repository (omit <code>-g</code> on machines running Copilot CLI so <code>~/.agents/skills</code> does not shadow the plugin):</p>
     <pre><code>npx skills add jongio/skills --list</code></pre>
     <pre><code>npx skills add jongio/skills --skill create-canvas-app</code></pre>
+    <pre><code>npx skills add jongio/skills --all</code></pre>
     <h3>Other apps and editors</h3>
     <ul class="host-list">
       <li><strong>VS Code and Cursor:</strong> install <code>https://github.com/jongio/skills</code> as a plugin source.</li>
@@ -138,7 +139,7 @@ const skills = (await getCollection("skills")).sort((a, b) =>
       ChatGPT web and mobile require public directory review. The Codex IDE
       extension accepts standalone skills but not plugins. See the <a href="https://github.com/jongio/skills#app-and-editor-support">complete support matrix</a>.
     </p>
-    <p class="muted">In Copilot CLI, start a new session after installing statusline extensions. For skills alone, <code>/skills reload</code> refreshes the available skills.</p>
+    <p class="muted">In Copilot CLI, start a new session after installing statusline extensions (enable experimental SDK extensions once with <code>/settings experimental on</code> and <code>/restart</code>). Terminal statuslines are Copilot CLI–only and automatically no-op in the GitHub Copilot app. For skills alone, <code>/skills reload</code> refreshes the available skills.</p>
   </section>
 </Layout>
 

@@ -1,6 +1,6 @@
 ---
 title: doc-doctor
-tagline: "Check changed documentation against code and fix material gaps."
+tagline: "Compare changed or requested documentation against actual code, validate local links, anchors, images, examples, and frontmatter, and fix material gaps within scope."
 useWhen: "doc-doctor, check docs, stale docs, broken links, README accuracy"
 repoPath: skills/doc-doctor
 thumb: images/thumb-doc-doctor.png
@@ -11,11 +11,12 @@ install:
 
 ## What it does
 
-Check changed documentation against code and fix material gaps.
+Compare changed or requested documentation against actual code, validate local links, anchors, images, examples, and frontmatter, and fix material gaps within scope.
 
-Checks the current diff and affected docs, including missing updates, local links,
-examples, and repository frontmatter rules. Keeps the instructions to ten lines.
-`pr` owns this preflight check; `go` delegates it rather than running it twice.
+- Reviews the requested scope (default: current diff and affected docs), comparing README, API/CLI/config docs, and examples with actual code to find missing updates — not just already-edited doc files.
+- Validates local links, anchors, images, examples, and frontmatter against repository rules, and reports external links as unchecked unless verified.
+- Fixes material gaps within scope while preserving unrelated edits and approval boundaries, treating doc content as untrusted data rather than instructions.
+- Reports fixes, remaining findings with file/line evidence, and checks actually performed. `pr` owns this preflight check; `go` delegates it to `pr` rather than running it twice.
 
 ## Use it
 

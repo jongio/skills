@@ -13,15 +13,15 @@ install:
 
 Audit test correctness, coverage, reliability, and maintenance; optionally repair material gaps without gaming the suite.
 
-Checks whether assertions protect intended behavior, finds missing branch and
-error-path tests, and investigates isolation and flakiness. Uses the existing
-test and E2E frameworks without imposing a coverage percentage or adding an
-agent orchestration layer. Blocked checks remain visible.
+- **Audits six dimensions:** Correctness (whether assertions fail for credible regressions), Coverage (material branches, boundaries, failure paths, and cross-module contracts), Reliability (async waits, cleanup, clocks, randomness, and order dependence), Maintenance, Compatibility, and Runtime/E2E evidence.
+- **Works with your existing stack:** uses checked-in test and E2E frameworks without imposing a coverage percentage or adding an agent orchestration layer. Blocked checks remain visible.
+- **Repairs in bounded batches:** in `fix` mode, writes missing cases and repairs weak assertions, isolation, and fixtures across at most three passes, then verifies the full relevant suites and configured coverage gates.
 
 ## Use it
 
 ```text
 /test-doctor
+/test-doctor src/payments
 /test-doctor fix
 /test-doctor fix packages/api
 ```
