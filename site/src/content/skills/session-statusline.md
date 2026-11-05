@@ -14,7 +14,7 @@ install:
 Manage only the current session's active statusline pills and custom footer name in Copilot CLI without deleting work or changing enabled components.
 
 - **Custom session names:** set, inspect, or clear a single-line session label (`name`, `clear-name`) that appears first in that session's enabled footer and persists on resume.
-- **Session-bound pill controls:** list, add, remove, or clear tracked PRs (`session_prs`), issues (`session_issues`), and subagents (`session_subagents`), or clear/refresh the entire session footer at once (`session_statusline`).
+- **Session-bound pill controls:** list, add, remove, or clear tracked PRs (`session_prs`) and issues (`session_issues`), list, remove, or clear tracked subagents (`session_subagents`), or clear/refresh the entire session footer at once (`session_statusline`).
 - **Explicit enrollment only:** all PR and issue enrollment is explicit; shell commands, GitHub writes/results, references, and lookups never add pills. Actual session agent launches remain automatic.
 - **Copilot CLI–only:** included in the full `jongio-skills` plugin and backed by the statusline SDK extensions in Copilot CLI (automatically disabled when hosted in the GitHub Copilot app).
 
