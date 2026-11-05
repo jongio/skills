@@ -1,12 +1,25 @@
 # jongio/skills
 
 [![skills.sh](https://skills.sh/b/jongio/skills)](https://skills.sh/jongio/skills)
+[![Catalog & Docs](https://img.shields.io/badge/catalog-jongio.github.io%2Fskills-0969da)](https://jongio.github.io/skills/)
 
-Jon Gallant's collection of skills for AI coding agents — works with
-[GitHub Copilot](https://docs.github.com/copilot), Claude, Codex, and any agent
-that supports the [`SKILL.md`](https://github.com/vercel-labs/skills) format. A
-general-purpose monorepo: each skill lives in its own folder under
-[`skills/`](skills/) and can be installed individually or all at once.
+Jon Gallant's collection of portable skills and terminal statusline extensions
+for AI coding agents — works with
+[GitHub Copilot](https://docs.github.com/copilot) (App, CLI, VS Code, and
+coding agent), Claude Code, Codex, Cursor, Gemini CLI, and any host that
+supports [Agent Plugins 1.0](https://agent-plugins.org/plugin-authors/manifest)
+or the [`SKILL.md`](https://github.com/vercel-labs/skills) format. Each skill
+lives in its own self-contained folder under [`skills/`](skills/) and can be
+installed individually or all at once as one plugin.
+
+[**Live Catalog**](https://jongio.github.io/skills/) &middot;
+[**Skills**](#skills) &middot;
+[**CLI Statuslines**](#copilot-cli-statusline-extensions) &middot;
+[**Install**](#install) &middot;
+[**Supported Hosts**](#app-and-editor-support) &middot;
+[**Versioning**](#versioning) &middot;
+[**Dependency Policy**](#dependency-maintenance) &middot;
+[**Layout & CI**](#layout)
 
 ## Skills
 
@@ -20,19 +33,31 @@ general-purpose monorepo: each skill lives in its own folder under
 | [`naming-is-hard`](skills/naming-is-hard/) | Interactive naming assistant for projects, CLIs, and products. Profiles what you're building, generates diverse candidate names, learns your preferences as you react, and validates finalists against real availability (domains, GitHub, npm/PyPI/crates/RubyGems/NuGet, social handles) plus a trademark and existing-business screen. Every finalist lands a verdict: Deal Breaker, It's Complicated, or Perfect Match. |
 | [`eli5`](skills/eli5/) | Explain the code, error, design, or idea already in context using plain language, a useful analogy, the proper grown-up terms, and an honest note about where the analogy stops working. |
 | [`dns-doctor`](skills/dns-doctor/) | Audit DNS delegation, records, DNSSEC, CAA, web routing, TLS, CDN behavior, mail authentication, takeover exposure, and zone hygiene, then apply exact provider changes only after explicit user approval. |
-| [`deps-doctor`](skills/deps-doctor/) | Audit, update, and secure dependencies across npm, pnpm, Yarn, pip, Poetry, uv, Go, Cargo, Bundler, Composer, NuGet, Maven, Gradle, Swift, pub, and Hex, plus Docker base images, GitHub Actions, Terraform, and dev container features. Ranks vulnerabilities by exploitation evidence, withholds releases too new to have been vetted, fixes breaking changes forward instead of rolling back, and never opens an empty dependency pull request. |
+| [`deps-doctor`](skills/deps-doctor/) | Audit, update, and secure dependencies across npm, pnpm, Yarn, pip, Pipenv, Poetry, uv, Go, Cargo, Bundler, Composer, NuGet, Maven, Gradle, Swift, pub, and Hex, plus Docker base images, GitHub Actions, Terraform, and dev container features. Finds outdated, unused, and undeclared packages, ranks vulnerabilities by exploitation evidence, screens supply-chain risk, withholds releases too new to have been vetted, fixes breaking changes forward instead of rolling back, and never opens an empty dependency pull request. |
 | [`git-tidy`](skills/git-tidy/) | Content-aware Git work triage across branches, worktrees, stashes, remote refs, tags, remotes, artifacts, ignored tracking, large blobs, and maintenance. Leads with plain decisions and concrete actions while exact proof stays available on demand; analysis is read-only and every action requires separate approval. |
 | [`test-doctor`](skills/test-doctor/) | Audit test correctness, coverage, reliability, and maintenance; optionally repair material gaps without gaming the suite. |
 | [`pr`](skills/pr/) | A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge. |
 | [`go`](skills/go/) | Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge. |
-| [`retro`](skills/retro/) | Close out a session with an evidence-backed task and feedback audit, source-skill improvements, and safely approved branch and worktree cleanup |
-| [`doc-doctor`](skills/doc-doctor/) | Check changed documentation against code and fix material gaps. |
+| [`retro`](skills/retro/) | Close out a session with an evidence-backed task and feedback audit, source-skill improvements, and safely approved branch and worktree cleanup. |
+| [`doc-doctor`](skills/doc-doctor/) | Compare changed or requested documentation against actual code, validate local links, anchors, images, examples, and frontmatter, and fix material gaps within scope. |
 | [`backlog-groom`](skills/backlog-groom/) | Groom GitHub backlogs across issue and source repositories, with or without Projects, using scoped evidence and approved changes. |
 | [`refactor`](skills/refactor/) | Plan behavior-preserving refactoring with explicit scope, depth and risk choices. |
 | [`skill-doctor`](skills/skill-doctor/) | Learn from recent session feedback and trim skill bloat, with cached audits, a dedicated worktree, and one improvement PR. |
 | [`ci-hound`](skills/ci-hound/) | Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows. |
 | [`session-statusline`](skills/session-statusline/) | Manage only the current session's active statusline pills and clear entries without deleting work or changing enabled components. |
 | [`create-session-board-canvas`](skills/create-session-board-canvas/) | Show a live session progress board with canonical tasks, blockers, and primary/subagent updates. |
+
+**How the delivery workflow skills fit together:** triage issues with
+[`backlog-groom`](skills/backlog-groom/), plan and implement with
+[`go`](skills/go/) (or scope structural changes with
+[`refactor`](skills/refactor/)), audit tests and docs with
+[`test-doctor`](skills/test-doctor/) and [`doc-doctor`](skills/doc-doctor/),
+ship and merge with [`pr`](skills/pr/), monitor main CI with
+[`ci-hound`](skills/ci-hound/), and close out or refine skills with
+[`retro`](skills/retro/), [`skill-doctor`](skills/skill-doctor/), and
+[`git-tidy`](skills/git-tidy/). Track live progress in the terminal footer with
+[`session-statusline`](skills/session-statusline/) or in a side-panel board
+with [`create-session-board-canvas`](skills/create-session-board-canvas/).
 
 A skill is invoked straight from the Copilot composer &mdash; here `create-canvas-app`
 turns a one-line prompt into a working canvas:
@@ -84,6 +109,19 @@ irm https://raw.githubusercontent.com/jongio/skills/main/install-statusline.ps1 
 curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install-statusline.sh | bash
 ```
 
+```sh
+# Or from a local checkout (interactive picker or explicit flags):
+node ./scripts/setup-statusline.mjs
+node ./scripts/setup-statusline.mjs --all
+node ./scripts/setup-statusline.mjs --prs --issues --subagents --worktrees
+```
+
+> **Note:** Terminal statuslines, `/session-*` slash commands, and Windows
+> Terminal attention alerts are **Copilot CLI–only** (they automatically no-op
+> when a session is hosted in the GitHub Copilot app). SDK extension commands
+> require experimental features enabled once with `/settings experimental on`,
+> followed by `/restart` in existing CLI windows.
+
 **Custom session names:** run `/session-statusline name API migration`, or ask
 the `session-statusline` skill to "name this session API migration". The label
 appears first in that session's footer and persists on resume. Use
@@ -96,7 +134,17 @@ background wash until that session's window gets focus, or
 `/session-attention preview` to try the appearance without enabling it.
 Alerts are off by default. See [window attention settings and behavior](extensions/pr-statusline/README.md#windows-terminal-attention-alerts).
 
+**Optional CI/PR daemon timeline bridge:** the
+[`daemon-notifications`](extensions/daemon-notifications/) extension logs
+background [`ci-hound`](skills/ci-hound/) and [`pr`](skills/pr/) watcher events
+into the active Copilot CLI session timeline without calling a model or
+starting repairs. Enable it with `node scripts/setup-statusline.mjs --notifications`,
+run `/daemon-notifications subscribe <watcher>`, and pass the returned file to
+the watcher with `--events-file`.
+
 ## Install
+
+<a id="add-as-a-marketplace-or-install-as-a-plugin"></a>
 
 ### Option 1: Copilot Plugin Marketplace (Recommended)
 
@@ -130,9 +178,14 @@ copilot plugin install statuslines@jongio-skills
 copilot plugin install create-canvas-app@jongio-skills
 ```
 
+> **Tip for the `pr` skill in Copilot CLI:** Copilot CLI reserves `/pr` as a
+> built-in command. Install the complete `jongio-skills@jongio-skills` plugin
+> rather than a standalone `pr` copy so the skill is namespaced as
+> `/jongio-skills:pr` and never collides with `/pr`.
+
 **In the Copilot app** (no commands needed):
 
-1. Open **Settings** and select **Plugins**.
+1. Open **Settings** (or **Customize**) and select **Plugins**.
 
    ![Plugins in the settings sidebar](docs/images/app-plugins-nav.png)
 
@@ -150,7 +203,7 @@ copilot plugin install create-canvas-app@jongio-skills
 
 ### Option 2: Cross-Platform Plugin Installer (One-Liner)
 
-Installing raw skills into `~/.agents/skills`, `~/.copilot/skills`, `~/.claude/skills`, or `~/.codex/skills` (for example with `npx skills add jongio/skills --all -g`) registers un-namespaced slash commands that shadow installed plugins and collide with built-in `/pr` in Copilot CLI. Use the root installer to clean conflicting raw folders and run the native plugin install (`jongio-skills@jongio-skills` / `codex plugin add jongio-skills`) across detected platform CLIs (`copilot`, `claude`, `codex`, and `gemini`):
+Installing raw skills into `~/.agents/skills`, `~/.copilot/skills`, `~/.claude/skills`, or `~/.codex/skills` (for example with `npx skills add jongio/skills --all -g`) registers un-namespaced slash commands that shadow installed plugins and collide with built-in `/pr` in Copilot CLI. Use the root installer to run the native plugin install (`jongio-skills@jongio-skills` / `codex plugin add jongio-skills`) across detected platform CLIs (`copilot`, `claude`, `codex`, and `gemini`) first, and then clean only provenance-verified conflicting raw folders (preserving unrelated or hand-authored skills, and keeping `~/.codex/skills` intact for the Codex IDE extension unless `--clean-only` or `--clean-shared` is passed):
 
 ```powershell
 # Windows (PowerShell one-liner)
@@ -159,6 +212,8 @@ irm https://raw.githubusercontent.com/jongio/skills/main/install.ps1 | iex
 # Or from a local checkout:
 .\install.ps1 -DryRun
 .\install.ps1
+.\install.ps1 -Platform copilot,claude
+.\install.ps1 -CleanOnly
 ```
 
 ```bash
@@ -168,6 +223,8 @@ curl -fsSL https://raw.githubusercontent.com/jongio/skills/main/install.sh | bas
 # Or from a local checkout:
 ./install.sh --dry-run
 ./install.sh
+./install.sh --platform copilot,claude
+./install.sh --clean-only
 ```
 
 Or run each agent's native CLI plugin commands directly:
@@ -229,6 +286,7 @@ different discovery path:
 
 ```text
 plugin.json                         Agent Plugins 1.0 package
+extensions/plugin.json              Standalone Copilot CLI statuslines plugin
 marketplace.json                    GitHub Copilot marketplace
 .agents/plugins/marketplace.json    Codex and ChatGPT desktop marketplace
 .codex-plugin/plugin.json           Codex plugin compatibility manifest
@@ -236,6 +294,7 @@ marketplace.json                    GitHub Copilot marketplace
 .claude-plugin/plugin.json          Claude Code plugin
 .cursor-plugin/marketplace.json     Cursor marketplace
 gemini-extension.json               Gemini CLI extension
+com.github.copilot/                 Copilot CLI SDK extensions and default-on rules
 skills/                             Canonical Agent Skills
 ```
 
@@ -325,12 +384,20 @@ gate on October 29, 2026; no override or age exception is needed.
 ```text
 marketplace.json              GitHub Copilot marketplace
 plugin.json                   Agent Plugins 1.0 package manifest
+extensions/                   Copilot CLI statusline extensions + daemon notifications
+  plugin.json                 Standalone statuslines plugin manifest
+com.github.copilot/           Exposed Copilot host extensions (statusline, session-progress,
+                              daemon-notifications) and default-on rules/*.mdc
+runtime/github-client/        Portable Octokit REST/GraphQL runtime shared by watchers and statuslines
+scripts/                      Cross-platform plugin/statusline installers, version-skills, benchmarks
+install.ps1 / install.sh      Root cross-platform plugin installer one-liners
+install-statusline.ps1 / .sh  Standalone Copilot CLI statusline installer one-liners
 .agents/plugins/              Codex and ChatGPT desktop marketplace
 .codex-plugin/                Codex compatibility manifest
 .claude-plugin/               Claude Code plugin and marketplace
 .cursor-plugin/               Cursor marketplace
 gemini-extension.json         Gemini CLI extension
-test/                         Cross-harness distribution parity tests
+test/                         Cross-harness distribution, runtime, and policy tests
 skills/
   create-canvas-app/          One self-contained skill
     SKILL.md                  Authoring contract the agent reads
@@ -340,8 +407,24 @@ skills/
     test/                     Deterministic tests, run in CI for every skill
     kit/  scripts/  docs/     Skill-specific assets
 docs/                         Specs, test plans, thumbnail prompts
-site/                         Astro catalog published to GitHub Pages
-.github/workflows/            skill-lint (matching PRs/main pushes), skill-eval (agent evals)
+site/                         Astro catalog published to GitHub Pages (jongio.github.io/skills)
+.github/workflows/            skill-lint, skill-eval, statusline-performance, deploy
+```
+
+### Local validation
+
+```sh
+# Distribution manifests, workflow security, dependency policy, and statusline gates
+node --test --test-concurrency=1 test/*.test.mjs
+
+# Release version parity across skills, statuslines, and host manifests
+node scripts/version-skills.mjs check
+
+# Portable GitHub runtime bundle parity and unit tests
+npm test --prefix runtime/github-client
+
+# Individual skill tests and strict Vally eval-spec lint (after installing .github/tools/vally)
+npm test --prefix skills/<name>
 ```
 
 ### Adding a skill
@@ -351,24 +434,31 @@ everywhere the catalog advertises it. The root distribution test covers every
 skill and host manifest. Skills with additional registration contracts enforce
 them in local tests. On pull requests, `skill-lint.yml` runs Vally lint, strict
 eval-spec lint, and deterministic tests for affected skills, including
-lockfile-only changes. Any change under `site/` triggers the workflow, which
-always builds the catalog site. Matching pushes to the default branch and
-manual runs cover every skill.
+lockfile-only changes, plus portable GitHub runtime checks and the catalog site
+build. Matching pushes to the default branch and manual runs cover every skill.
 
 DNS Doctor and Git Tidy run their three-OS coverage matrices only when selected
 by the shared change-detection job. Shared workflow, Vally tooling, Dependabot,
-root test, README, or marketplace/plugin manifest edits select all skills;
-Git Tidy spec edits select Git Tidy. New commits cancel superseded Skill Lint
+`runtime/`, root test, README, or marketplace/plugin manifest edits select all
+skills; Git Tidy spec edits select Git Tidy, and shared canvas kit or
+`session-progress` extension edits select their dependent canvas skills.
+`statusline-performance.yml` benchmarks and validates statusline changes across
+Ubuntu and Windows on pull requests. New commits cancel superseded Skill Lint
 runs for the same PR, but not running push or manual jobs.
 
 1. `skills/<name>/` with `SKILL.md` (500-line ceiling; overflow goes to
-   `references/`), `README.md`, `package.json`, `test/`, and `evals/<name>/eval.yaml`.
+   `references/`), `README.md`, `.npmrc` (`min-release-age=7`), `package.json`,
+   `package-lock.json`, `test/`, and `evals/<name>/eval.yaml` (discovered
+   automatically by `.github/workflows/skill-eval.yml`).
    Use `/create-skill <name>` to create and register this complete shape.
 2. The skill table in this README.
-3. `marketplace.json` and the `keywords` array in `plugin.json`.
+3. `marketplace.json` and the `keywords` array in `plugin.json`, then
+   `node scripts/version-skills.mjs sync` (or `bump`) so mirrored host manifests
+   stay aligned.
 4. `site/src/content/skills/<name>.md`, with `thumb:` pointing at
    `images/thumb-<name>.png`.
-5. The `all=` matrix in `.github/workflows/skill-eval.yml`.
+5. An npm entry for `/skills/<name>` in `.github/dependabot.yml` with a 7-day
+   cooldown (`cooldown: default-days: 7`).
 6. A tracked thumbnail at `skills/<name>/thumbnail.png`, generated from a
    prompt recorded in [`docs/thumbnail-prompts.md`](docs/thumbnail-prompts.md)
    and listed in [`site/public/images/IMAGES.md`](site/public/images/IMAGES.md).
