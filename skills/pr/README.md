@@ -8,12 +8,19 @@ A concise checklist workflow for taking changes from local commit and preflight 
 npx skills add jongio/skills --skill pr --skill test-doctor --skill doc-doctor
 ```
 
-Reload your agent skills, then invoke `/pr`. Preflight uses `test-doctor` for tests
+Reload your agent skills, then invoke `/pr`. Before committing, `pr` audits
+modified and untracked files against the final chosen approach to strip
+superseded scaffolding, dead flags/helpers, and stray debug or secret files so
+only the minimal complete change is committed. Preflight uses `test-doctor` for tests
 (reusing matching `go`/`test-doctor` evidence under the identity rule),
-`doc-doctor` for the diff and affected documentation, and a diff + one bounded,
+`doc-doctor` for the diff and affected documentation, and a diff review + repository-local
+`code-review` skill (in local/branch mode when present) or one bounded,
 read-only cross-model `rubber-duck` sub-agent review when invoked directly
 without `go` (reusing matching `go` Step 4 review evidence under the identity rule,
-supplying the diff/test summary, and forbidding sub-agent test/lint/build execution).
+checking scope minimality, cross-file CLI/function call contracts,
+lifecycle/state-machine symmetry across stop/start, resume `continue`, and
+rollback, and fail-closed mutations/tool pinning, supplying the diff/test summary,
+and forbidding sub-agent test/lint/build execution).
 `pr` owns the documentation pass, including when called by `go`; matching passing
 evidence is reused, documentation-only `doc-doctor` edits do not invalidate
 passing code-review or `test-doctor` evidence unless code, executable examples,

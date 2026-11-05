@@ -54,6 +54,9 @@ test("plans, tests, implements, and reviews before invoking pr without copying i
   assert.ok(skill.split("\n").length <= 60, "keep SKILL.md short and sweet");
   assert.match(skill, /^1\..*plan[\s\S]*^2\..*Invoke `test-doctor fix`[\s\S]*^3\..*Implement[\s\S]*^4\..*Review[\s\S]*^5\..*Invoke `jongio\/pr`/m);
   assert.match(skill, /run only targeted test files covering the touched scope rather than whole-repository suites before final verification/);
+  assert.match(skill, /scope minimality.*reverting superseded scaffolding, dead flags\/helpers, and abandoned-approach artifacts/i);
+  assert.match(skill, /cross-file CLI\/function call contracts.*lifecycle\/state-machine symmetry.*fail-closed mutations/i);
+  assert.match(skill, /invoke the repository's local `code-review` skill in local\/branch mode when present/i);
   assert.match(skill, /one bounded, read-only `rubber-duck` sub-agent review.*different model family than the currently active model/);
   assert.match(skill, /forbid sub-agent test, lint, typecheck, or build execution/);
   assert.match(skill, /(?:without|rather than) repeating `rubber-duck` loops/);
