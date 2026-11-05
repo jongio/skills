@@ -379,6 +379,12 @@ The tooling locks resolve `body-parser` 2.4.0 for GHSA-27r3-jxmh-p828 through
 Express's existing supported range. This patch passed the seven-day release-age
 gate on October 29, 2026; no override or age exception is needed.
 
+`skills/create-skill` and its bundled `create-skills-repo` snapshot temporarily
+override `@azure/identity`'s `@azure/msal-node` dependency to 7.1.2 for
+[GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5) while
+`@azure/identity` 4.14.1 completes the seven-day release-age gate. Remove this
+override when `@azure/identity` 4.14.1 or newer is adopted.
+
 ## Layout
 
 ```text
