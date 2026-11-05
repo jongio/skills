@@ -10,10 +10,14 @@ npx skills add jongio/skills --skill go --skill test-doctor --skill pr --skill d
 
 Invoke `/go <context>` with an issue, conversation, code, or error.
 `go` plans, runs targeted regression tests with Test Doctor before implementation,
-implements, and reviews/fixes (including one bounded, read-only cross-model
+implements, and audits/reviews the final diff for scope minimality (stripping
+superseded scaffolding and dead flags/helpers from abandoned approaches),
+cross-file CLI/function call contracts, lifecycle/state-machine symmetry, and
+fail-closed mutations (invoking the repository's local `code-review` skill in
+local/branch mode when present or one bounded, read-only cross-model
 `rubber-duck` sub-agent review using a different model family than the active
 model when sub-agent model selection is available, supplying the diff/test
-summary and forbidding sub-agent test/lint/build execution); `pr` reuses
+summary and contract checklist and forbidding sub-agent test/lint/build execution); `pr` reuses
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
 Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
 
