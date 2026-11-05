@@ -3,8 +3,8 @@ import Layout from "../../layouts/Layout.astro";
 import SkillGrid from "../../components/SkillGrid.astro";
 import { getCollection } from "astro:content";
 
-const skills = (await getCollection("skills")).sort(
-  (a, b) => a.data.order - b.data.order,
+const skills = (await getCollection("skills")).sort((a, b) =>
+  a.id.localeCompare(b.id),
 );
 ---
 

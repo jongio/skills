@@ -27,7 +27,13 @@ test("site pages and skill catalog entries never recommend -g --agent github-cop
 
   const catalogDir = path.join(SITE_ROOT, "src", "content", "skills");
   for (const file of readdirSync(catalogDir).filter((name) => name.endsWith(".md"))) {
+    const skillId = path.basename(file, ".md");
     const content = read("site", "src", "content", "skills", file);
+    assert.match(
+      content,
+      new RegExp(`^title:\\s*["']?${skillId}["']?\\s*$`, "m"),
+      `site/src/content/skills/${file} must use the exact skill name "${skillId}" as its title`,
+    );
     assert.doesNotMatch(
       content,
       /-g\s+--agent\s+github-copilot/,
@@ -59,6 +65,15 @@ test("site pages and skill catalog entries never recommend -g --agent github-cop
     /skill\.id !== "pr"\s*\?/,
     "catalog/[slug].astro must gate single-skill plugin install on skill.id !== 'pr'",
   );
+
+  for (const rel of ["site/src/pages/index.astro", "site/src/pages/catalog/index.astro"]) {
+    const content = read(rel);
+    assert.match(
+      content,
+      /a\.id\.localeCompare\(b\.id\)/,
+      `${rel} must sort skills alphabetically by skill id`,
+    );
+  }
 });
 
 test("site install sections document the cross-platform one-liner and native CLI plugin commands", () => {
