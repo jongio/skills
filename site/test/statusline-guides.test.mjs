@@ -163,3 +163,14 @@ test("social previews use the authored raster card rather than a placeholder", (
   assert.equal(png.readUInt32BE(16), 1200);
   assert.equal(png.readUInt32BE(20), 630);
 });
+
+test("statuslines page documents refresh, custom session names, attention alerts, and daemon notifications", () => {
+  const guide = read("../src/pages/statuslines/index.astro");
+  assert.doesNotMatch(guide, /no unified force-refresh command yet/i);
+  assert.match(guide, /\/session-statusline refresh/);
+  assert.match(guide, /\/session-statusline clear/);
+  assert.match(guide, /\/session-statusline name/);
+  assert.match(guide, /\/session-statusline clear-name/);
+  assert.match(guide, /\/session-attention/);
+  assert.match(guide, /\/daemon-notifications subscribe/);
+});

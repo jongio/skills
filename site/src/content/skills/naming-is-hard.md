@@ -25,8 +25,9 @@ research into where each name is already in use.
 3. **Learns your preferences.** You react to one card at a time (Like / Pass /
    Super-like). Later suggestions reflect your choices while keeping a mix of styles.
 4. **Checks real availability.** For your finalists it scans domains (DNS
-   and registration checks), GitHub, package registries, and social handles, then
-   searches for trademark and existing-business conflicts.
+   and registration checks), GitHub, package registries (`npm`, `PyPI`, `crates.io`,
+   `RubyGems`, and `NuGet`), and social handles, then searches for trademark and
+   existing-business conflicts.
 5. **Gives a verdict.** Every finalist rolls up to one of three tiers:
    - 🚫 **Deal Breaker**: a famous trademark or company owns it. Walk away.
    - 💛 **It's Complicated**: a key channel is taken or a potential conflict needs review.

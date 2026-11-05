@@ -90,3 +90,22 @@ test("site install sections document the cross-platform one-liner and native CLI
     assert.match(content, /codex plugin add jongio-skills/, `${rel} must include Codex CLI plugin install`);
   }
 });
+
+test("every catalog skill thumbnail is listed in IMAGES.md and thumbnail-prompts.md", () => {
+  const imagesDoc = read("site/public/images/IMAGES.md");
+  const promptsDoc = read("docs/thumbnail-prompts.md");
+  const catalogDir = path.join(SITE_ROOT, "src", "content", "skills");
+  for (const file of readdirSync(catalogDir).filter((name) => name.endsWith(".md"))) {
+    const skillId = path.basename(file, ".md");
+    assert.match(
+      imagesDoc,
+      new RegExp(`\\|\\s*\`thumb-${skillId}\\.png\`\\s*\\|`),
+      `site/public/images/IMAGES.md must list thumb-${skillId}.png`,
+    );
+    assert.match(
+      promptsDoc,
+      new RegExp(`^#{2,3}\\s+${skillId}\\b`, "m"),
+      `docs/thumbnail-prompts.md must record provenance for ${skillId}`,
+    );
+  }
+});

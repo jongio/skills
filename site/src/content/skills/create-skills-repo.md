@@ -16,11 +16,11 @@ install:
 
 `create-skills-repo` scaffolds or upgrades a complete skills marketplace:
 
-- A shared `skills/` collection with installation support for multiple agents.
-- A working example and a `create-skill` workflow for adding your own skills.
-- Automated checks and behavior evaluations, plus Dependabot configuration.
-- A GitHub Pages catalog where people can browse and install your skills.
-- Upgrade support that identifies files you have customized.
+- A shared `skills/` collection with installation manifests for GitHub Copilot, Claude Code, Codex, Cursor, and Gemini CLI.
+- A working example skill and a bundled `create-skill` workflow for adding your own skills.
+- Automated checks, Vally `0.20.0` behavior evaluations, `scripts/version-skills.mjs` release management (`check`, `sync`, `bump`), and Dependabot configuration with 7-day release-age gates.
+- A GitHub Pages catalog (composed via `create-gh-pages-site`) where people can browse and install your skills.
+- Transactional upgrade support that verifies managed file hashes and preserves files you have customized.
 
 Before applying changes, it shows a preview. Your own files are preserved, and
 customized generated files are flagged for review instead of being overwritten.

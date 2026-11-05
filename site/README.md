@@ -13,11 +13,14 @@ Live: https://jongio.github.io/skills/
   snippet), install options, and an overview of the four statusline components.
 - **Statuslines** (`/statuslines/`) — Branch and Worktree, Pull Requests, Issues,
   and Subagents, including a grouped-footer illustration, native branch-marker
-  and upstream/base divergence legends, setup commands, and links to the extension guides.
-- **Skills** (`/catalog/`) — the catalog, one card per skill.
+  and upstream/base divergence legends, setup/refresh/clear/naming commands,
+  Windows Terminal attention alerts (`/session-attention`), the optional CI/PR
+  daemon timeline bridge (`daemon-notifications`), and links to the extension guides.
+- **Skills** (`/catalog/`) — the catalog, one card per skill, with a delivery
+  workflow overview, live search, and grid/list layout toggle.
 - **Skill detail** (`/catalog/<skill>/`) — thumbnail, install commands, and the
   skill's write-up, generated from a content collection.
-- **About** (`/about/`) — what the repo is and how to install it.
+- **About** (`/about/`) — what the repo is, supported hosts, and how to install it.
 
 Adding a skill is a single Markdown file in `src/content/skills/` — the home grid,
 catalog, and detail pages all render from that collection.
@@ -26,10 +29,12 @@ catalog, and detail pages all render from that collection.
 
 ```sh
 npm install
-npm run dev      # http://localhost:4321/skills/
-npm run build    # outputs to dist/
-npm run preview  # serve the production build at the /skills/ base
-npm run bench    # repeatable catalog discovery timings and built-asset sizes
+npm test             # run install-doc, guide, thumbnail-sync, and performance tests
+npm run sync:thumbnails # validate catalog mappings and copy skill thumbnails to public/images/
+npm run dev          # http://localhost:4321/skills/
+npm run build        # outputs to dist/ and enforces performance budgets
+npm run preview      # serve the production build at the /skills/ base
+npm run bench        # repeatable catalog discovery timings and built-asset sizes
 ```
 
 Production builds generate responsive WebP thumbnails from the canonical skill
@@ -57,20 +62,32 @@ internal links resolve under `https://jongio.github.io/skills/`.
 
 ```text
 astro.config.mjs              site + base for GitHub Pages
+scripts/
+  sync-thumbnails.mjs         validates catalog mappings and copies skill thumbnails
+  check-performance.mjs       enforces JS/CSS/WebP budgets on dist/
+  benchmark.mjs               measures catalog discovery and asset budgets
+test/
+  install-docs.test.mjs       guards plugin/skill install commands across pages
+  statusline-guides.test.mjs  validates SVG guides, icon codepoints, and accents
+  sync-thumbnails.test.mjs    tests thumbnail mapping and path safety
+  performance.test.mjs        tests asset budget enforcement
 src/
   content.config.ts           the `skills` content collection schema
+  thumbnails.ts               maps catalog thumb frontmatter to canonical skill PNGs
   content/skills/             one Markdown entry per skill (frontmatter + write-up)
   pages/
-    index.astro               home: hero + skills grid + install
-    catalog/index.astro       the catalog list
+    index.astro               home: hero + skills grid + statuslines + install
+    catalog/index.astro       the catalog list + workflow overview
     catalog/[slug].astro      per-skill detail page
-    statuslines/index.astro   all four statuslines and checkout-grouped footer
+    statuslines/index.astro   all four statuslines, session controls, attention alerts, and daemon bridge
     about.astro               about the repo
   layouts/Layout.astro        HTML shell, base-aware nav, theme toggle, copy buttons
-  components/SkillCard.astro   skill card (thumbnail + install snippet)
+  components/
+    SkillCard.astro           skill card (thumbnail + install snippet)
+    SkillGrid.astro           searchable grid/list toggle container
 public/
   favicon.svg                 site icon
-  images/                     thumbnails + placeholders (see images/IMAGES.md)
+  images/                     thumbnails + screenshots (see images/IMAGES.md)
   screenshots/                statusline detail artwork and grouped-footer SVG
 .github/workflows/deploy.yml  (at the repo root) Pages deploy
 ```

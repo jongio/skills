@@ -13,6 +13,12 @@ install:
 
 Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on `main` failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows.
 
+- **Zero-token background daemon (`scripts/ci-hound-daemon.mjs`):** polls every `15s` while `main` runs are active and `60s` when idle, reusing `If-None-Match` (`304 Not Modified`) and `updated_at` deltas at zero rate-limit cost, and wakes the agent on `JOB_FAILED`, `WORKFLOW_FAILED`, `NEW_MAIN_COMMIT`, `WATCHED_RUNS_GREEN`, or deduplicated `ALL_GREEN`.
+- **Two-tier monitoring:** Tier 1 watches `main` (`push`, `workflow_dispatch`, `schedule`) for instant job-level failure alerts and isolated worktree auto-repair; Tier 2 harvests step/job durations, queue wait times, and recurring flake signatures across all runs including pull requests.
+- **Multi-repository portfolio setup (`/ci-hound setup`):** watch the current repository by default, an explicit `--repos` list, or dynamic owner scopes (`--all-my-repos --visibility private`, `--owner <login> --visibility <all|private|public>`).
+- **Context-aware delivery routing:** routes new incident repairs and workflow optimizations through `go` (`test-doctor fix` -> `pr`), and routes existing fix worktrees or open in-flight PRs directly through `pr`.
+- **Optional Copilot CLI timeline bridge:** subscribe with `/daemon-notifications subscribe ci` and pass `--events-file "<returned-file>"` to log watcher transitions into the session timeline without model calls.
+
 ## Use it
 
 ```text
