@@ -17,13 +17,16 @@
   },
   "dependencies": {
     "@azure/identity": "4.14.0",
-    "openai": "7.43.0"
+    "openai": "7.45.1"
   },
   "devDependencies": {
     "@microsoft/vally-cli": "0.20.0",
     "skills": "1.7.4"
   },
   "overrides": {
+    "@azure/identity": {
+      "@azure/msal-node": "7.1.2"
+    },
     "@github/copilot-sdk": {
       "zod": "4.6.7"
     }

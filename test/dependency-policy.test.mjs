@@ -87,3 +87,19 @@ test("site security overrides remain scoped to the vulnerable parents", async ()
     assert.equal(manifest.dependencies[name], undefined, `${name} is not a direct dependency`);
   }
 });
+
+test("create-skill security overrides remain scoped to the vulnerable parents", async () => {
+  for (const dir of [
+    "skills/create-skill",
+    "skills/create-skills-repo/templates/repository/skills/create-skill",
+  ]) {
+    const manifest = await json(`${dir}/package.json`);
+    const lock = await json(`${dir}/package-lock.json`);
+    assert.deepEqual(manifest.overrides, {
+      "@azure/identity": { "@azure/msal-node": "7.1.2" },
+      "@github/copilot-sdk": { zod: "4.6.7" },
+    });
+    assert.equal(lock.packages["node_modules/@azure/msal-node"].version, "7.1.2", dir);
+    assert.equal(lock.packages["node_modules/zod"].version, "4.6.7", dir);
+  }
+});
