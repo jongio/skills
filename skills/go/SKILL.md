@@ -3,7 +3,7 @@ name: go
 description: >-
   **WORKFLOW SKILL** - Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge. USE FOR: /go, implement this context end to end, take this issue from plan to merge. DO NOT USE FOR: PR-only work on existing changes (use pr), standalone test audits (use test-doctor), Go language questions without an implementation request.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 # Go
@@ -23,7 +23,7 @@ Default to squash merging and deleting the PR branch after merge unless the user
 
 ## Workflow
 
-Only when the user explicitly asks for the session board/canvas, invoke `create-session-board-canvas` after resolving the worktree choice and follow the [progress contract](references/session-progress.md) through delegation and the `pr` handoff; do not create or open it by default. Missing canvas support uses a disclosed text fallback and does not block `go`.
+Only when the user explicitly asks for the session board/canvas, invoke `create-session-board-canvas` after resolving the worktree choice and follow the [progress contract](references/session-progress.md) through delegation and the `pr` handoff; do not create or open it by default. Missing canvas support uses a disclosed text fallback and does not block `go`. At every workflow stage transition (`Worktree`, `test-doctor`, `Implementation`, `rubber-duck`, `PR` handoff), include a 1-line user-visible status update in `assistant.message.content` outside `<thought>` alongside the tool call; never send an empty `assistant.message` (`""`), as `<thought>` blocks are hidden from the user and do not count as progress updates.
 
 1. Inspect the current context, repository instructions, and existing work; resolve the worktree choice before tests or edits. Before defining touched scope, map affected user journeys, equivalent entry points, and the canonical behavior owner. Identify trust boundaries and host/native fixture prerequisites before implementation. State a brief plan and acceptance criteria for that affected behavioral scope; reuse valid completed work and ask only blocking questions. Missing host evidence remains an explicit verification gap; a local smoke test cannot establish cross-host success. Do not turn this into a whole-repository audit or silently expand authorized edits.
 2. Invoke `test-doctor fix` on that scope to establish a baseline and write meaningful regression tests before implementation, using the journey contract and affected surfaces; run only targeted test files covering the touched scope rather than whole-repository suites before final verification.

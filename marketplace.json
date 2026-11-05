@@ -12,13 +12,13 @@
       "name": "jongio-skills",
       "source": "./",
       "description": "Install the complete Jon Gallant skills collection as one plugin.",
-      "version": "2.1.8"
+      "version": "2.1.11"
     },
     {
       "name": "statuslines",
       "source": "./extensions",
       "description": "Install only the composable PR, Issue, Subagent, and Branch/Worktree statusline extensions for GitHub Copilot CLI without installing skills.",
-      "version": "1.1.1"
+      "version": "1.1.2"
     },
     {
       "name": "create-canvas-app",
@@ -90,13 +90,13 @@
       "name": "pr",
       "source": "./skills/pr",
       "description": "A concise checklist workflow for taking changes from local commit and preflight checks through PR submission, review resolution, CI monitoring, and merge.",
-      "version": "1.1.0"
+      "version": "1.1.1"
     },
     {
       "name": "go",
       "source": "./skills/go",
       "description": "Plan, test, and implement the current context, then hand verified changes to pr for delivery and merge.",
-      "version": "1.1.0"
+      "version": "1.1.1"
     },
     {
       "name": "retro",
@@ -115,12 +115,6 @@
       "source": "./skills/backlog-groom",
       "description": "Groom GitHub backlogs across issue and source repositories, with or without Projects, using scoped evidence and approved changes.",
       "version": "1.1.0"
-    },
-    {
-      "name": "nobs",
-      "source": "./skills/nobs",
-      "description": "Give the shortest complete answer for supplied or current context without filler or loss of essential facts.",
-      "version": "1.0.1"
     },
     {
       "name": "refactor",

@@ -10,6 +10,7 @@ import { createSessionAttention, runAttentionCommand } from "./attention.mjs";
 import { clearSessionStatusline, refreshSessionStatusline } from "./session-statusline.mjs";
 import {
 	ensurePluginStatuslineRegistered,
+	isTerminalStatuslineSupported,
 	readSessionName,
 	runInteractiveStatuslinePicker,
 	setSessionName,
@@ -26,10 +27,9 @@ import {
 	writeState as writeSubagentState,
 } from "../subagent-statusline/tracker.mjs";
 
-const { firstRun } = ensurePluginStatuslineRegistered("pr-statusline", dirname(fileURLToPath(import.meta.url)), {
-	includeSiblings: true,
-});
+const extensionDir = dirname(fileURLToPath(import.meta.url));
 
+let session;
 let collector;
 let attention;
 async function manage(action, reference, invocation) {
@@ -249,29 +249,38 @@ const configuration = {
 	],
 };
 
-const bootstrap = await joinSession({ tools: [], requestedEnvironmentVariables: configuration.requestedEnvironmentVariables });
-const { extensions } = await bootstrap.rpc.extensions.list();
-const current = extensions.find((entry) => entry.pid === process.pid);
-if (!current) throw new Error("Cannot verify the current statusline controller; restart Copilot before migrating.");
-const standalone = ["pr", "issue", "subagent", "worktree"].map((name) => ({
-	id: `user:${name}-statusline`,
-	file: join(configHome(), "extensions", `${name}-statusline`, "extension.mjs"),
-}));
-for (const entry of standalone.filter((entry) => entry.id !== current.id)) {
-	try {
-		renameSync(entry.file, `${entry.file}.disabled-${Date.now()}-${process.pid}`);
-	} catch (error) {
-		if (error.code !== "ENOENT") throw error;
+if (!isTerminalStatuslineSupported()) {
+	await joinSession({ tools: [] });
+} else {
+	const bootstrap = await joinSession({ tools: [], requestedEnvironmentVariables: configuration.requestedEnvironmentVariables });
+	if (isTerminalStatuslineSupported({ sessionId: bootstrap.sessionId, workspacePath: bootstrap.workspacePath })) {
+		const { firstRun } = ensurePluginStatuslineRegistered("pr-statusline", extensionDir, {
+			includeSiblings: true,
+		});
+		const { extensions } = await bootstrap.rpc.extensions.list();
+		const current = extensions.find((entry) => entry.pid === process.pid);
+		if (!current) throw new Error("Cannot verify the current statusline controller; restart Copilot before migrating.");
+		const standalone = ["pr", "issue", "subagent", "worktree"].map((name) => ({
+			id: `user:${name}-statusline`,
+			file: join(configHome(), "extensions", `${name}-statusline`, "extension.mjs"),
+		}));
+		for (const entry of standalone.filter((entry) => entry.id !== current.id)) {
+			try {
+				renameSync(entry.file, `${entry.file}.disabled-${Date.now()}-${process.pid}`);
+			} catch (error) {
+				if (error.code !== "ENOENT") throw error;
+			}
+			if (extensions.some((extension) => extension.id === entry.id)) await bootstrap.rpc.extensions.disable({ id: entry.id });
+		}
+		// Remove the bootstrap subscriber before registering the final SDK handlers.
+		await bootstrap.disconnect();
+		session = await joinSession(configuration);
+
+		attention = createSessionAttention({ ownerProcessId: process.ppid });
+		collector = await collect(session, { attention });
+
+		if (firstRun && session.capabilities?.ui?.elicitation) {
+			runInteractiveStatuslinePicker(session).catch(() => {});
+		}
 	}
-	if (extensions.some((extension) => extension.id === entry.id)) await bootstrap.rpc.extensions.disable({ id: entry.id });
-}
-// Remove the bootstrap subscriber before registering the final SDK handlers.
-await bootstrap.disconnect();
-const session = await joinSession(configuration);
-
-attention = createSessionAttention({ ownerProcessId: process.ppid });
-collector = await collect(session, { attention });
-
-if (firstRun && session.capabilities?.ui?.elicitation) {
-	runInteractiveStatuslinePicker(session).catch(() => {});
 }

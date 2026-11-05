@@ -20,6 +20,10 @@ model when sub-agent model selection is available, supplying the diff/test
 summary and contract checklist and forbidding sub-agent test/lint/build execution); `pr` reuses
 valid preflight evidence and owns Git, remaining checks, CI, reviews, and merge.
 Only `pr` invokes `doc-doctor`, so calling `go` does not run it twice.
+At every workflow stage transition (`Worktree`, `test-doctor`, `Implementation`,
+`rubber-duck`, `PR` handoff), `go` requires a 1-line user-visible status update
+in `assistant.message.content` outside `<thought>` alongside the tool call so
+sessions never stall on silent `"Working..."` turns.
 
 When explicitly requested by the user, `go` opens or reuses the session progress
 canvas (`create-session-board-canvas`): kanban, actual primary/subagent team,

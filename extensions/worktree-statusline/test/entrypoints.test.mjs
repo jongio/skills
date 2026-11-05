@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { configureStatuslines } from "../../../scripts/setup-statusline.mjs";
-import { discoverRenderers, ensurePluginStatuslineRegistered, getEnabledStatuslines, setSessionName } from "../compose.mjs";
+import { discoverRenderers, ensurePluginStatuslineRegistered, getEnabledStatuslines, isTerminalStatuslineSupported, setSessionName } from "../compose.mjs";
 import { SessionTracker, writeState as writePrState } from "../../pr-statusline/tracker.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -562,3 +562,71 @@ test("unified and standalone agent commands and tools share populated remove/cle
 		assert.match(result.stdout, /agent adapter parity passed/);
 	}
 }));
+
+test("statusline extensions skip tool registration, background polling, and config writes in GitHub Copilot App sessions", () => fixture((home) => {
+	const appSessionId = "app-session";
+	const cliSessionId = "cli-session";
+	mkdirSync(join(home, "session-state", appSessionId), { recursive: true });
+	writeFileSync(join(home, "session-state", appSessionId, "workspace.yaml"), "id: app-session\nclient_name: github/autopilot\n");
+	mkdirSync(join(home, "session-state", cliSessionId), { recursive: true });
+	writeFileSync(join(home, "session-state", cliSessionId, "workspace.yaml"), "id: cli-session\nclient_name: github/cli\n");
+
+	assert.equal(isTerminalStatuslineSupported({ sessionId: appSessionId, home, env: {} }), false);
+	assert.equal(isTerminalStatuslineSupported({ sessionId: cliSessionId, home, env: {} }), true);
+	assert.equal(isTerminalStatuslineSupported({
+		sessionId: "unknown-session",
+		home,
+		env: { COPILOT_SDK_PATH: "C:\\Users\\user\\AppData\\Local\\Programs\\GitHub Copilot\\copilot-sdk" },
+	}), false);
+	assert.equal(isTerminalStatuslineSupported({
+		sessionId: "unknown-session",
+		home,
+		env: { COPILOT_SDK_PATH: "/Applications/GitHub Copilot.app/Contents/Resources/copilot-sdk" },
+	}), false);
+
+	for (const id of ids) {
+		const isolated = join(home, id);
+		mkdirSync(join(isolated, "session-state", appSessionId), { recursive: true });
+		writeFileSync(join(isolated, "session-state", appSessionId, "workspace.yaml"), "id: app-session\nclient_name: github/autopilot\n");
+		const entry = pathToFileURL(join(root, "extensions", id, "extension.mjs")).href;
+		const result = node(isolated, ["--input-type=module", "-e", `
+			import assert from "node:assert/strict";
+			import { existsSync } from "node:fs";
+			import { join } from "node:path";
+			import { registerHooks } from "node:module";
+			const joined = [];
+			let activityCalls = 0, eventsSubscribed = 0;
+			const session = {
+				sessionId: ${JSON.stringify(appSessionId)},
+				capabilities: { ui: { elicitation: true } },
+				ui: { elicitation: async () => { throw new Error("Must not prompt for statusline setup in App"); } },
+				on: () => { eventsSubscribed++; return () => {}; },
+				getEvents: async () => { throw new Error("Must not replay transcript in App"); },
+				rpc: {
+					metadata: { activity: async () => { activityCalls++; return { hasActiveWork: false }; } },
+					extensions: { list: async () => { throw new Error("Must not list/migrate extensions in App"); } },
+				},
+			};
+			globalThis.joinTestSession = async (value = {}) => {
+				joined.push(value);
+				return session;
+			};
+			const sdk = "data:text/javascript," + encodeURIComponent("export const joinSession = globalThis.joinTestSession;");
+			registerHooks({ resolve(specifier, context, next) {
+				return specifier === "@github/copilot-sdk/extension" ? { url: sdk, shortCircuit: true } : next(specifier, context);
+			} });
+			process.env.SESSION_ID = ${JSON.stringify(appSessionId)};
+			await import(${JSON.stringify(entry)});
+			assert.equal(joined.length, 1);
+			assert.deepEqual(joined[0].tools, []);
+			assert.equal(joined[0].commands, undefined);
+			assert.equal(activityCalls, 0);
+			assert.equal(eventsSubscribed, 0);
+			assert.equal(existsSync(join(process.env.COPILOT_HOME, "statusline-config.json")), false);
+			console.log("app skip passed");
+		`]);
+		assert.equal(result.status, 0, result.stderr);
+		assert.match(result.stdout, /app skip passed/);
+	}
+}));
+
