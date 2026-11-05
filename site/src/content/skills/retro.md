@@ -1,5 +1,5 @@
 ---
-title: Session Retro
+title: retro
 tagline: "Close out a session with an evidence-backed task and feedback audit, source-skill improvements, and safely approved branch and worktree cleanup"
 useWhen: "retro, session retro, session retrospective, wrap up this session, check whether we are done, reconcile my feedback"
 repoPath: skills/retro

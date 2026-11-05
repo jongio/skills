@@ -420,3 +420,25 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 08baa9ed97ba72f128d1d1051119960d7eef89f4fdc8d4a466e5da6ad3c837c9
+
+## create-session-board-canvas (31a1df78de87)
+
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One large rounded dark-navy session-board canvas window is the hero surface. Inside it, show a clear left-to-right transformation: on the left, a compact plan card with abstract dash lines and a small amber blocker badge connects via smooth dashed guide lines into a clean three-column kanban board on the right with pending amber cards, active cyan task cards with tiny agent node badges, and completed emerald-green task cards with circular green check badges, topped by a sleek segmented progress bar and a green pull-request merge badge. Place a small GitHub Octocat mark in the upper-right with a dotted tether to the canvas window, never the main subject. Deep navy, cyan-indigo, emerald health green, and warm amber palette; clean modern rounded shapes, soft long shadows, subtle dashed connectors, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and rounded pills instead of labels. No words, letters, numerals, percentages, fake text, photorealism, 3D, extra floating windows, or clutter."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 31a1df78de87f12500b7648dc4e15392a0060e580b10641a7127bea2727d12ab
+
+## session-statusline (540b36af8d3f)
+
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One large rounded dark-slate terminal window with a prominent bottom statusline footer bar is the hero surface. Inside it, show a clear left-to-right transformation: on the left, cluttered stale status pills with an amber warning dot are swept away through a subtle dashed filter arc into a clean, organized session footer bar on the right holding four distinct color-coded rounded pills in sky blue, health green with a circular check badge, warm amber, and soft violet, while a tidy git-branch and pull-request card above the footer carries a small green shield badge to show that clearing pills preserves underlying work. Place a small GitHub Octocat mark in the upper-right with a dotted tether to the terminal window, never the main subject. Dark slate navy, sky blue, health green, warm amber, and soft violet palette; clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and rounded pills instead of labels. No words, letters, numerals, fake text, photorealism, 3D, trash cans, destructive imagery, or clutter."
+
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 540b36af8d3f05e61f14db979615ce69c708166d44da55bf6e8cd43198d97eaa

@@ -1,5 +1,5 @@
 ---
-title: "Explain Like I'm 5 (eli5)"
+title: eli5
 tagline: "Understand code, errors, and ideas through a plain-language explanation and a useful comparison."
 useWhen: "When you say ELI5, explain this simply, or ask for a beginner-friendly explanation of the current conversation, selection, or attachment."
 repoPath: skills/eli5
