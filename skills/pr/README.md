@@ -113,7 +113,12 @@ See the shared [issue reconciliation contract](references/issue-reconciliation.m
 ## Progress and blocked work
 
 During long-running execution, report the current stage, elapsed time, last
-meaningful result, and next event at least every 60 seconds. Use host notifications
+meaningful result, and next event at least every 60 seconds. Emit a 1-line
+user-visible status update in `assistant.message.content` outside `<thought>` at
+every stage transition and print the timestamped status table in visible
+`assistant.message.content` in the same response that invokes each next
+`read_powershell(delay: 60)` call (never chaining empty `assistant.message`
+turns, since `<thought>` blocks are hidden from the user). Use host notifications
 or scheduling instead of tight polling. Distinguish running checks from external
 review/CI waits and approval/input blockers; identify the exact pending decision
 and state when execution is paused. Wall-clock waiting is not active execution,

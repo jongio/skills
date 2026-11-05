@@ -35,8 +35,8 @@ test("discoverCanonicalSkills lists all canonical repo skills including pr and g
   const skills = discoverCanonicalSkills(REPO_ROOT);
   assert.ok(skills.includes("pr"), "must include pr");
   assert.ok(skills.includes("go"), "must include go");
-  assert.ok(skills.includes("nobs"), "must include nobs");
-  assert.ok(skills.length >= 22, `expected at least 22 skills, got ${skills.length}`);
+  assert.ok(skills.includes("eli5"), "must include eli5");
+  assert.ok(skills.length >= 21, `expected at least 21 skills, got ${skills.length}`);
 });
 
 test("parseInstallPluginArgs parses flags and repeatable platforms", () => {
@@ -63,7 +63,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     const agentsUnrelated = path.join(home, ".agents", "skills", "microsoft-foundry");
     const copilotGo = path.join(home, ".copilot", "skills", "go");
     const copilotUnrelated = path.join(home, ".copilot", "skills", "azd-app");
-    const claudeNobs = path.join(home, ".claude", "skills", "nobs");
+    const claudeEli5 = path.join(home, ".claude", "skills", "eli5");
     const claudeHandwrittenPr = path.join(home, ".claude", "skills", "pr");
     const claudeUnrelated = path.join(home, ".claude", "skills", "playwright-cli");
     const staleDirect = path.join(home, ".copilot", "installed-plugins", "_direct", "skills");
@@ -73,7 +73,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
       agentsUnrelated,
       copilotGo,
       copilotUnrelated,
-      claudeNobs,
+      claudeEli5,
       claudeHandwrittenPr,
       claudeUnrelated,
       staleDirect,
@@ -84,14 +84,14 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
         "---\nname: custom\n---\nHand-authored skill mentioning https://github.com/jongio/skills.\n",
       );
     }
-    // Give copilotGo and claudeNobs real jongio/skills provenance via canonical SKILL.md content
+    // Give copilotGo and claudeEli5 real jongio/skills provenance via canonical SKILL.md content
     writeFileSync(
       path.join(copilotGo, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
     );
     writeFileSync(
-      path.join(claudeNobs, "SKILL.md"),
-      readFileSync(path.join(REPO_ROOT, "skills", "nobs", "SKILL.md"), "utf8"),
+      path.join(claudeEli5, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "eli5", "SKILL.md"), "utf8"),
     );
     writeFileSync(path.join(staleDirect, "plugin.json"), JSON.stringify({ name: "jongio-skills", version: "2.0.0" }));
 
@@ -143,7 +143,7 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
     // Provenance-verified jongio/skills removed from raw personal folders
     assert.equal(existsSync(agentsPr), false, "~/.agents/skills/pr must be removed");
     assert.equal(existsSync(copilotGo), false, "~/.copilot/skills/go must be removed");
-    assert.equal(existsSync(claudeNobs), false, "~/.claude/skills/nobs must be removed");
+    assert.equal(existsSync(claudeEli5), false, "~/.claude/skills/eli5 must be removed");
     assert.equal(existsSync(staleDirect), false, "stale _direct/skills plugin copy must be removed");
 
     // Hand-written skill with colliding directory name (even if it mentions jongio/skills) preserved
@@ -176,16 +176,16 @@ test("applyPluginInstall verifies provenance, runs native plugin CLIs first, and
 test("platform-scoped install only cleans targeted platforms and preserves skills on failure or when no CLI is available", () => {
   withTempHome((home) => {
     const copilotGo = path.join(home, ".copilot", "skills", "go");
-    const claudeNobs = path.join(home, ".claude", "skills", "nobs");
+    const claudeEli5 = path.join(home, ".claude", "skills", "eli5");
     mkdirSync(copilotGo, { recursive: true });
-    mkdirSync(claudeNobs, { recursive: true });
+    mkdirSync(claudeEli5, { recursive: true });
     writeFileSync(
       path.join(copilotGo, "SKILL.md"),
       readFileSync(path.join(REPO_ROOT, "skills", "go", "SKILL.md"), "utf8"),
     );
     writeFileSync(
-      path.join(claudeNobs, "SKILL.md"),
-      readFileSync(path.join(REPO_ROOT, "skills", "nobs", "SKILL.md"), "utf8"),
+      path.join(claudeEli5, "SKILL.md"),
+      readFileSync(path.join(REPO_ROOT, "skills", "eli5", "SKILL.md"), "utf8"),
     );
 
     // 1. No CLI detected without --clean-only refuses to delete skills
@@ -199,7 +199,7 @@ test("platform-scoped install only cleans targeted platforms and preserves skill
       /No target platform CLIs detected/,
     );
     assert.equal(existsSync(copilotGo), true);
-    assert.equal(existsSync(claudeNobs), true);
+    assert.equal(existsSync(claudeEli5), true);
 
     // 2. Failed CLI install leaves existing skills untouched
     assert.throws(
@@ -224,7 +224,7 @@ test("platform-scoped install only cleans targeted platforms and preserves skill
       commandRunner: () => ({ status: 0, stdout: "ok", stderr: "" }),
     });
     assert.equal(existsSync(copilotGo), false, "migrated copilot skill must be cleaned");
-    assert.equal(existsSync(claudeNobs), true, "untargeted claude skill must be preserved");
+    assert.equal(existsSync(claudeEli5), true, "untargeted claude skill must be preserved");
   });
 });
 

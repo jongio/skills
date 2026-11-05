@@ -114,7 +114,11 @@ overhead, so overrides must leave room below the host deadline.
 
 `WATCH_CHUNK_TIMEOUT` is a clean rotation, not readiness or merge authorization.
 Report status and re-arm with the same repository, head pins, reviewer policy
-and watchlist. Requests and fallback share the deadline. The next PR, phases,
+and watchlist. Emit a 1-line user-visible status update in
+`assistant.message.content` outside `<thought>` at every stage transition, and
+print the timestamped status table in visible `assistant.message.content` in the
+same response that invokes the next `read_powershell(delay: 60)` call (never
+chaining empty `assistant.message` turns). Requests and fallback share the deadline. The next PR, phases,
 snapshots, ETags, retry counters, comment cursors and shared cooldown persist
 under `$COPILOT_HOME/pr-watch` (default `~/.copilot/pr-watch`). Active cooldowns
 prevent premature API calls after restart. After handling comments, use

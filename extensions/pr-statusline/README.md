@@ -331,6 +331,11 @@ Using `Azure/azure-dev` as an example checkout:
 
 ## Session recovery and setup
 
+Terminal statuslines and Windows Terminal attention are CLI-only. When a session
+is hosted by GitHub Copilot App (`github/autopilot`), the statusline extensions
+join with an empty toolset and skip registering `session_*` tools/commands,
+starting the 15-second background collector, or prompting for footer setup.
+
 The unified SDK extension provides a separate command from Copilot's built-in
 `/statusline` and `/footer`, which are left untouched:
 

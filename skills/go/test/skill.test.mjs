@@ -134,6 +134,8 @@ test("go opens the optional session board only when explicitly requested and car
   assert.match(skill, /Only when the user explicitly asks for the session board\/canvas, invoke `create-session-board-canvas` after resolving the worktree choice/);
   assert.match(skill, /do not create or open it by default/);
   assert.match(skill, /text fallback.*does not block `go`/);
+  assert.match(skill, /1-line user-visible status update in `assistant\.message\.content` outside `<thought>`/);
+  assert.match(skill, /never send an empty `assistant\.message` \(`""`\), as `<thought>` blocks are hidden from the user/);
   assert.match(skill, /board\/goal identity when available/);
   assert.match(pr, /optional.*session progress reporting.*through delivery/);
 });

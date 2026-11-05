@@ -7,6 +7,49 @@ import { stripVTControlCharacters } from "node:util";
 export const configHome = () => process.env.COPILOT_HOME || join(homedir(), ".copilot");
 
 const PREFERRED_ORDER = ["worktree-statusline", "pr-statusline", "issue-statusline", "subagent-statusline"];
+const NON_TERMINAL_CLIENTS = /^(?:github\/autopilot|github[-/]app|copilot[-/]app|vscode|visual[- ]studio)/i;
+const TERMINAL_CLI_CLIENTS = /^(?:github\/cli|copilot[-/]cli|cli)$/i;
+
+export function isTerminalStatuslineSupported({
+	sessionId = process.env.SESSION_ID,
+	workspacePath = null,
+	home = configHome(),
+	env = process.env,
+} = {}) {
+	const explicitClient = String(
+		env?.COPILOT_CLIENT_NAME ?? env?.GITHUB_COPILOT_CLIENT_NAME ?? env?.COPILOT_HOST ?? "",
+	).trim();
+	if (explicitClient) {
+		if (NON_TERMINAL_CLIENTS.test(explicitClient)) return false;
+		if (TERMINAL_CLI_CLIENTS.test(explicitClient)) return true;
+	}
+	const candidates = [];
+	if (typeof workspacePath === "string" && workspacePath.trim()) {
+		candidates.push(join(workspacePath.trim(), "workspace.yaml"));
+	}
+	if (typeof sessionId === "string" && /^[\w-]{1,128}$/.test(sessionId)) {
+		candidates.push(join(home, "session-state", sessionId, "workspace.yaml"));
+	}
+	for (const candidate of candidates) {
+		try {
+			const raw = readFileSync(candidate, "utf8");
+			const match = /^client_name:\s*(.+?)\s*$/m.exec(raw);
+			if (match) {
+				const clientName = match[1].trim().replace(/^["']|["']$/g, "");
+				if (NON_TERMINAL_CLIENTS.test(clientName)) return false;
+				if (!TERMINAL_CLI_CLIENTS.test(clientName)) return false;
+				return true;
+			}
+		} catch {
+			// Ignore missing or unreadable workspace metadata.
+		}
+	}
+	const sdkPath = String(env?.COPILOT_SDK_PATH ?? "").trim();
+	if (/[/\\]GitHub Copilot(?:\.app(?:[/\\]Contents[/\\]Resources)?)?[/\\]copilot-sdk(?:[/\\]|$)/i.test(sdkPath)) {
+		return false;
+	}
+	return true;
+}
 
 const NERD_FONT_TO_UNICODE = new Map([
 	["\uE726", "\uE0A0"],

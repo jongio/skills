@@ -7,6 +7,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf
 test("the plugin ships default-on active-session enrollment without enrolling references", () => {
   const rule = read("com.github.copilot/rules/session-statusline.mdc");
   assert.match(rule, /^alwaysApply: true$/m);
+  assert.match(rule, /Do not search for or call `session_prs`, `session_issues`, `session_subagents`,\s+`session_statusline`, or `statusline_setup` when hosted in GitHub Copilot App/);
   assert.match(rule, /Never add pills for references/);
   assert.match(rule, /Remove a target\s+when this session stops working on it/);
   assert.match(rule, /Honor manual clear\/remove/);

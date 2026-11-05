@@ -16,6 +16,7 @@ Plan, test, and implement the current context, then hand verified changes to pr 
 Requires `test-doctor` and `pr`, plus `doc-doctor` for PR preflight; install those skills too, or choose the full collection above.
 Before handing off to `pr`, `go` reviews the final diff and runs one bounded, read-only cross-model `rubber-duck` sub-agent review using a different model family than the active model when available (supplying the diff/test summary and forbidding sub-agent test/lint/build execution).
 Only `pr` runs the documentation pass; `go` does not duplicate it.
+At every workflow stage transition (`Worktree`, `test-doctor`, `Implementation`, `rubber-duck`, `PR` handoff), `go` requires a 1-line user-visible status update in `assistant.message.content` outside `<thought>` alongside the tool call.
 
 When explicitly requested by the user, `go` opens/reuses a session progress
 canvas with live kanban, primary/subagent reports, task percentage, blockers,
