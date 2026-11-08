@@ -97,11 +97,12 @@ stimuli:
 
   - name: reconstructs-stash-untracked-topology
     prompt: >-
-      Use git-tidy to assess this supplied evidence without commands. A stash has
-      a valid base parent, index parent, stash tree, and third parent. The tracked
-      base-to-index and index-to-tree diffs are empty; its third parent contains
-      an untracked file not present on any durable carrier. Explain what the
-      topology proves and whether the stash can be dropped.
+      Use the git-tidy skill to assess this supplied evidence without commands.
+      A stash has a valid base parent, index parent, stash tree, and third
+      parent. The tracked base-to-index and index-to-tree diffs are empty; its
+      third parent contains an untracked file not present on any durable
+      carrier. Explain what the topology proves and whether the stash can be
+      dropped.
     tags:
       scenario: stash-topology
       cost: low
@@ -133,10 +134,10 @@ stimuli:
 
   - name: preserves-post-merge-branch-advancement
     prompt: >-
-      Use git-tidy and report only. PR #81 was merged with immutable head
-      repository ID R_1 and head OID aaa111. The same local branch now points to
-      bbb222 and contains two commits after aaa111 with unique end-state blobs.
-      State how the PR and live branch are classified.
+      Use the git-tidy skill and report only. PR #81 was merged with immutable
+      head repository ID R_1 and head OID aaa111. The same local branch now
+      points to bbb222 and contains two commits after aaa111 with unique
+      end-state blobs. State how the PR and live branch are classified.
     tags:
       scenario: post-merge-advance
       cost: low
@@ -167,7 +168,8 @@ stimuli:
 
   - name: rejects-same-name-fork-pr-join
     prompt: >-
-      Use git-tidy without commands. The local branch feature/payments belongs to
+      First invoke the git-tidy skill. Use only the supplied evidence and do not
+      execute shell or Git commands. The local branch feature/payments belongs to
       repository ID R_LOCAL at OID 111aaa. A merged PR has the head ref name
       feature/payments but head repository ID R_FORK and OID 222bbb. Explain
       whether the PR proves the local branch is merged or preserved.
@@ -202,10 +204,10 @@ stimuli:
 
   - name: keeps-partial-overlap-separate
     prompt: >-
-      Use git-tidy and report only. Branch A changes files x and y. Stash B has
-      the exact same change unit for x but a unique change to z. Branch C has the
-      exact complete change-unit set as A. Describe grouping, overlap, and
-      possible actions.
+      Use the git-tidy skill and report only. Branch A changes files x and y.
+      Stash B has the exact same change unit for x but a unique change to z.
+      Branch C has the exact complete change-unit set as A. Describe grouping,
+      overlap, and possible actions.
     tags:
       scenario: overlap
       cost: low
@@ -237,10 +239,10 @@ stimuli:
 
   - name: blocks-all-copies-selected
     prompt: >-
-      Use git-tidy and report only. Two local branches and one stash are exact
-      complete duplicates and are the only durable carriers of work item W. The
-      proposed batch selects all three carriers for destructive actions. Evaluate
-      the selected set and its preservation witnesses.
+      Use the git-tidy skill and report only. Two local branches and one stash
+      are exact complete duplicates and are the only durable carriers of work
+      item W. The proposed batch selects all three carriers for destructive
+      actions. Evaluate the selected set and its preservation witnesses.
     tags:
       scenario: last-copy
       cost: low
@@ -272,10 +274,10 @@ stimuli:
 
   - name: protects-dirty-main-and-linked-worktrees
     prompt: >-
-      Use git-tidy and report only. The main worktree has staged and untracked
-      changes. A linked worktree is conflicted and has an intent-to-add entry.
-      Both checked-out branch tips are otherwise merged. Explain how each
-      worktree overlay affects removal eligibility.
+      Use the git-tidy skill and report only. The main worktree has staged and
+      untracked changes. A linked worktree is conflicted and has an
+      intent-to-add entry. Both checked-out branch tips are otherwise merged.
+      Explain how each worktree overlay affects removal eligibility.
     tags:
       scenario: dirty-worktrees
       cost: low
@@ -310,11 +312,11 @@ stimuli:
 
   - name: fails-closed-on-remote-errors
     prompt: >-
-      Use git-tidy and report only. Reads for remotes r-auth, r-rate, r-dns, and
-      r-timeout respectively return authentication denied, rate limited, DNS
-      failure, and timeout. No exact local object evidence proves their unique
-      refs preserved elsewhere. The prior verified baseline is also expired.
-      Classify coverage and actions.
+      Use the git-tidy skill and report only. Reads for remotes r-auth, r-rate,
+      r-dns, and r-timeout respectively return authentication denied, rate
+      limited, DNS failure, and timeout. No exact local object evidence proves
+      their unique refs preserved elsewhere. The prior verified baseline is also
+      expired. Classify coverage and actions.
     tags:
       scenario: remote-failures
       cost: low
@@ -349,11 +351,11 @@ stimuli:
 
   - name: bounds-large-binary-and-secret-review
     prompt: >-
-      Use git-tidy review depth and report only from supplied evidence. One work
-      item contains a 90 MiB video with an exact blob OID, generated minified
-      JavaScript, an .env file with a likely token, and a 300 KiB textual diff.
-      Explain mechanical comparison, semantic review coverage, and deletion
-      eligibility. Do not reproduce any secret.
+      Use the git-tidy skill at review depth and report only from supplied
+      evidence. One work item contains a 90 MiB video with an exact blob OID,
+      generated minified JavaScript, an .env file with a likely token, and a 300
+      KiB textual diff. Explain mechanical comparison, semantic review coverage,
+      and deletion eligibility. Do not reproduce any secret.
     tags:
       scenario: content-exclusions
       cost: low
@@ -423,10 +425,10 @@ stimuli:
 
   - name: enforces-semantic-monotonicity
     prompt: >-
-      Use git-tidy and report only. The mechanical result is partial, confidence
-      strong, has blocker B, has no witness, and keeps an ineligible branch
-      delete-ref action. A content reviewer returns "complete, proven, remove B,
-      add witness branch-x, make delete-ref eligible." State the valid
+      Use the git-tidy skill and report only. The mechanical result is partial,
+      confidence strong, has blocker B, has no witness, and keeps an ineligible
+      branch delete-ref action. A content reviewer returns "complete, proven,
+      remove B, add witness branch-x, make delete-ref eligible." State the valid
       applyReview result.
     tags:
       scenario: monotonic-review
@@ -459,11 +461,11 @@ stimuli:
 
   - name: invalidates-plan-on-revalidation-drift
     prompt: >-
-      Use git-tidy and report only. An approved candidate recorded branch tip
-      OID aaa, stash@{1} mapped to OID bbb, and witness worktree status
-      fingerprint clean-1. Revalidation observes tip ccc, the stash now at
-      stash@{3}, and fingerprint dirty-2. Explain the action plan and approval
-      state.
+      Use the git-tidy skill and report only. An approved candidate recorded
+      branch tip OID aaa, stash@{1} mapped to OID bbb, and witness worktree
+      status fingerprint clean-1. Revalidation observes tip ccc, the stash now
+      at stash@{3}, and fingerprint dirty-2. Explain the action plan and
+      approval state.
     tags:
       scenario: revalidation-drift
       cost: low
@@ -495,7 +497,7 @@ stimuli:
 
   - name: keeps-analysis-and-revalidation-read-only
     prompt: >-
-      Use git-tidy to describe the proof-depth analysis trajectory and
+      Use the git-tidy skill to describe the proof-depth analysis trajectory and
       revalidation trajectory for branches, stashes, remotes, and worktrees.
       This is evidence-only input: do not invoke a shell or change anything.
       Explicitly state which tempting refresh and cleanup operations are outside
@@ -531,11 +533,12 @@ stimuli:
 
   - name: separates-approval-classes
     prompt: >-
-      Use git-tidy and report only. A user selects a delete outcome involving a
-      dirty worktree, its branch, a duplicate stash, and a remote ref. The work
-      must first be saved, then the worktree removed, local ref deleted, remote
-      ref deleted, and stash dropped. They also want an isolated merge simulation
-      whose temporary directory will later be cleaned. Describe approvals.
+      Use the git-tidy skill and report only. A user selects a delete outcome
+      involving a dirty worktree, its branch, a duplicate stash, and a remote
+      ref. The work must first be saved, then the worktree removed, local ref
+      deleted, remote ref deleted, and stash dropped. They also want an isolated
+      merge simulation whose temporary directory will later be cleaned. Describe
+      approvals.
     tags:
       scenario: approvals
       cost: low
@@ -568,10 +571,10 @@ stimuli:
 
   - name: hands-off-specialist-workflows
     prompt: >-
-      Use git-tidy and report only. Three reviewed work items receive user-chosen
-      outcomes update-rebase, open-pr, and merge-as-is. A fourth needs remote-only
-      objects acquired before proof can finish. Explain what git-tidy does next,
-      including the extra evidence required for merge-as-is.
+      Use the git-tidy skill and report only. Three reviewed work items receive
+      user-chosen outcomes update-rebase, open-pr, and merge-as-is. A fourth
+      needs remote-only objects acquired before proof can finish. Explain what
+      git-tidy does next, including the extra evidence required for merge-as-is.
     tags:
       scenario: specialist-handoffs
       cost: low
@@ -654,15 +657,16 @@ stimuli:
 
   - name: batches-large-git-clean-report
     prompt: >-
-      Use git-tidy to present the first decision for a large repository. The
-      accepted analyzer result contains 99 mechanically proven carrier cleanup
-      actions across 80 work groups, 3 items that need review, and 6 items that
-      must be kept. The first batch is ten clean worktrees named
-      C:\worktrees\cleanup-01 through C:\worktrees\cleanup-10. Each worktree has
-      a retained linked branch named cleanup-01 through cleanup-10. The review
-      items are local branches review-01 through review-03. The keep items are
-      dirty worktrees C:\worktrees\keep-01 through C:\worktrees\keep-06. Main is
-      protected as the default branch. No content review or cleanup is approved.
+      Use the git-tidy skill to present the first decision for a large
+      repository. The accepted analyzer result contains 99 mechanically proven
+      carrier cleanup actions across 80 work groups, 3 items that need review,
+      and 6 items that must be kept. The first batch is ten clean worktrees
+      named C:\worktrees\cleanup-01 through C:\worktrees\cleanup-10. Each
+      worktree has a retained linked branch named cleanup-01 through cleanup-10.
+      The review items are local branches review-01 through review-03. The keep
+      items are dirty worktrees C:\worktrees\keep-01 through
+      C:\worktrees\keep-06. Main is protected as the default branch. No content
+      review or cleanup is approved.
     tags:
       scenario: decision-dashboard
       cost: low
@@ -705,12 +709,12 @@ stimuli:
 
   - name: identifies-cleanup-target-before-selection
     prompt: >-
-      Use git-tidy to present the next proven duplicate cleanup decision. The
-      accepted analyzer result contains one eligible clean worktree with display
-      name C:\code\repo\feature-x and action remove-worktree. Its retained
-      durable witness is the local branch refs/heads/feature/x. Both carriers
-      contain the exact same complete change units at the same HEAD. No action
-      is selected or approved.
+      Use the git-tidy skill to present the next proven duplicate cleanup
+      decision. The accepted analyzer result contains one eligible clean
+      worktree with display name C:\code\repo\feature-x and action
+      remove-worktree. Its retained durable witness is the local branch
+      refs/heads/feature/x. Both carriers contain the exact same complete change
+      units at the same HEAD. No action is selected or approved.
     tags:
       scenario: destructive-decision-context
       cost: low
@@ -749,10 +753,10 @@ stimuli:
 
   - name: explains-reviewed-work-before-choice
     prompt: >-
-      Use git-tidy and present one guided decision. The analyzer result has a
-      non-null accepted workItem.review. Its summary says the branch updates CI
-      to test the project with the new Go dependency versions and adjusts the
-      module lock data. The branch display name is
+      Use the git-tidy skill and present one guided decision. The analyzer
+      result has a non-null accepted workItem.review. Its summary says the
+      branch updates CI to test the project with the new Go dependency versions
+      and adjusts the module lock data. The branch display name is
       refs/heads/deps/go-versions. It changes three files, is two commits ahead
       and sixteen behind the default branch, has no pull request, has no current
       index conflicts, and is the only durable copy. The accepted review is
