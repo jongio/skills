@@ -193,3 +193,14 @@ Report private per-run counts for scanned/backfilled/updated/assessed/changed/
 verified/pending/conflicted/blocked, pages and candidate coverage, main/source
 SHAs, exhausted budgets, remaining cursors and next reconciliation. Separate
 direct verification from aggregate/UI gaps; never call a partial run fully groomed.
+
+## Dynamic Maintainer Resolution, 3-Tier PR Gatekeeper & SLA Radar
+
+Resolve the active `maintainer` identity dynamically (1. `.github/repo-maintain.json` / `.github/maintain.json` / `.maintain.json` / `--policy` `reviewer`/`maintainer`, 2. `.github/CODEOWNERS`, 3. `gh repo view --json owner --jq '.owner.login'`, 4. `gh api user --jq '.login'`). Never hardcode a personal GitHub login or static label name.
+
+When evaluating inbound issues and external PRs (`author != maintainer` and not in `trustedAuthors`):
+- **Inbound Issue Agent:** Verify against mapped source SHAs whether the request is already implemented (citing file, commit, or release), link duplicates, and prepare code-cited answers for usage questions within policy boundaries.
+- **Tier 1 (Maintainer Quarantine Queue):** Unsolicited marketing, spam, or unapproved `.github/workflows/` / dependency tampering receives zero public comments and is routed only to the private quarantine report.
+- **Tier 2 (Maintainer Direction Queue):** External feature proposals or medium/high-complexity changes are routed for direction with the configured escalation label (default `needs-maintainer-review`) and a maintainer brief.
+- **Tier 3 (Auto-Assist Queue):** Verified small bug, documentation, or test fixes are queued for `maintainer` assignment with constructive code/test/security review findings.
+- **Stale SLA Radar & Merge Order:** Surface items unresponded `>24h`, PRs waiting on maintainer action ("ball in maintainer's court"), items stale `>14d`, and a conflict-minimizing PR merge order calculated from file-touch overlap.

@@ -25,7 +25,7 @@ import {
   runCli as nativeRunCi,
   saveState,
   stateFileForRepo,
-} from "../../ci-hound/scripts/ci-hound-daemon.mjs";
+} from "../../ci-doctor/scripts/ci-doctor-daemon.mjs";
 
 function authenticatedFixture(execute) {
   const adapter = fixtureRequest(execute);
@@ -1453,7 +1453,7 @@ test("CI quota merge excludes a different OS writer between latest read and atom
   original.metrics.lastStatus = { summary: "first identity only" };
   saveState(file, original);
   const script = path.join(dir, "writer.mjs");
-  const daemon = new URL("../../ci-hound/scripts/ci-hound-daemon.mjs", import.meta.url).href;
+  const daemon = new URL("../../ci-doctor/scripts/ci-doctor-daemon.mjs", import.meta.url).href;
   writeFileSync(script, `
     import { loadState, saveState } from ${JSON.stringify(daemon)};
     const file = ${JSON.stringify(file)};

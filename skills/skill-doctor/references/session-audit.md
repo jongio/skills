@@ -49,6 +49,15 @@ packing sentences onto one line, cryptic abbreviations, or deleting necessary
 conditions. Recheck representative decisions and existing tests/evals. There is
 no required reduction quota; skip already concise skills.
 
+Also run `npx @microsoft/vally skill lint` on every target `SKILL.md` (verifying
+required YAML frontmatter `name`, `description` with `USE FOR` / `DO NOT USE FOR`
+routing triggers, `metadata.version`, `## Workflow`, `## Safety`, and `## Exit Criteria`
+sections, plus word/line budgets) and audit cross-host plugin manifest parity across
+`plugin.json`, `marketplace.json`, `.claude-plugin/`, `.codex-plugin/`,
+`.cursor-plugin/`, and `gemini-extension.json`. Keep a clean separation of concerns
+with `eval-doctor`, which owns `.vally.yaml`, `evals/<name>/eval.yaml` suite linting,
+graders, and `github/evals-action` CI integration.
+
 Cache this pass independently with the helper's same snapshot schema: set
 `source` to `skill-source-v1`, `account` to `target-local`, `id` to the canonical
 target-relative skill path, and `revision` to SHA-256 of its sorted relative paths

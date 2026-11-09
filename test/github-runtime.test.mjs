@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { createServer } from "node:http";
 import { createGitHubClient } from "../extensions/github-client.mjs";
-import { ghApiWithEtag, loadState } from "../skills/ci-hound/scripts/ci-hound-daemon.mjs";
+import { ghApiWithEtag, loadState } from "../skills/ci-doctor/scripts/ci-doctor-daemon.mjs";
 import { createPrWatchState, evaluatePrPollTick, parsePrWatchArgs } from "../skills/pr/scripts/pr-watch-daemon.mjs";
 import { configureStatuslines, SHARED_RUNTIME_FILES } from "../scripts/setup-statusline.mjs";
 import { statuslineGitHub, requestedGitHubEnvironment, gitHubEnvironmentForHost } from "../extensions/github-transport.mjs";
@@ -196,10 +196,10 @@ function fixture(t) {
 
 test("individually copied daemons import without node_modules or sibling skills", (t) => {
   const home = fixture(t);
-  for (const id of ["ci-hound", "pr"]) {
+  for (const id of ["ci-doctor", "pr"]) {
     const folder = join(home, id);
     cpSync(join(root, "skills", id, "scripts"), folder, { recursive: true });
-    const daemon = join(folder, id === "pr" ? "pr-watch-daemon.mjs" : "ci-hound-daemon.mjs");
+    const daemon = join(folder, id === "pr" ? "pr-watch-daemon.mjs" : "ci-doctor-daemon.mjs");
     const result = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(daemon).href)})`], {
       cwd: home, encoding: "utf8", windowsHide: true, timeout: 30000,
     });
@@ -352,7 +352,7 @@ test("live full-plugin notifications take priority without disabling standalone 
       const standaloneTool = configurations.standalone.tools.find((tool) => tool.name === "daemon_notifications");
       const fullTool = configurations.full.tools.find((tool) => tool.name === "daemon_notifications");
       const { file } = JSON.parse(standaloneTool.handler({ action: "subscribe", watcher: "ci" }));
-      const emit = createEventWriter(file, "ci-hound");
+      const emit = createEventWriter(file, "ci-doctor");
       emit({ events: [{ type: "JOB_FAILED", repo: "fixture/repo" }] });
       for (const poll of [...timers.values()]) await poll();
       assert.equal(logs.length, 1, "one event is delivered by exactly one active provider");
@@ -368,7 +368,7 @@ test("live full-plugin notifications take priority without disabling standalone 
       assert.equal(logs.length, 1, "unsubscribe through either copy is authoritative");
       const fallback = JSON.parse(standaloneTool.handler({ action: "subscribe", watcher: "fallback" }));
       for (const observe of observers.full) observe({ type: "session.shutdown" });
-      createEventWriter(fallback.file, "ci-hound")({ events: [{ type: "JOB_FAILED", repo: "fixture/repo" }] });
+      createEventWriter(fallback.file, "ci-doctor")({ events: [{ type: "JOB_FAILED", repo: "fixture/repo" }] });
       for (const poll of [...timers.values()]) await poll();
       assert.equal(logs.length, 2);
       assert.equal(logs[1].kind, "standalone", "full provider shutdown enables standalone fallback");

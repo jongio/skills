@@ -137,7 +137,7 @@ test("merge consent defaults to a fresh head-bound approval, with an invocation-
   assert.match(skill, /plain-language.*auto.merge.*ask.*before merging/i);
   assert.match(skill, /Conflicting or unclear.*ask.*do not merge/);
   assert.match(skill, /standing.*do not override.*default/);
-  assert.match(skill, /validated `go` handoff.*user-authorization source/);
+  assert.match(skill, /validated `go`(?: or `repo-maintain`)? handoff.*user-authorization source/);
   assert.match(skill, /only to this invocation/);
   assert.match(skill, /PR, repository, full head OID, and merge strategy/);
   assert.match(skill, /new head or changed strategy invalidates.*confirmation/);
@@ -1045,6 +1045,65 @@ test("Copilot reviewer aliases match without weakening review gates", async (t) 
       (await poll({ author: "ALICE", expected: "alice", noCopilot: true })).events[0]?.type,
       "PR_READY_TO_MERGE",
     );
+
+    const cancelledRunIds = [];
+    const autoTriggeredArgs = parsePrWatchArgs([
+      "once", "--repo", "example/skills", "--pr", "7", "--head", head,
+      "--no-copilot",
+    ]);
+    const autoTriggeredRes = await evaluatePrPollTick(autoTriggeredArgs, (ghArgs) => {
+      if (ghArgs[1] === "graphql") {
+        return {
+          ok: true,
+          stdout: JSON.stringify({
+            data: {
+              repository: {
+                pullRequest: {
+                  state: "OPEN",
+                  headRefOid: head,
+                  mergeable: "MERGEABLE",
+                  mergeStateStatus: "CLEAN",
+                  reviewDecision: "APPROVED",
+                  reviewRequests: { nodes: [] },
+                  reviews: { nodes: [] },
+                  reviewThreads: { nodes: [] },
+                  comments: { nodes: [] },
+                  commits: {
+                    nodes: [{
+                      commit: {
+                        statusCheckRollup: {
+                          state: "SUCCESS",
+                          contexts: {
+                            nodes: [{
+                              __typename: "CheckRun", name: "tests", status: "COMPLETED", conclusion: "SUCCESS",
+                            }],
+                          },
+                        },
+                      },
+                    }],
+                  },
+                },
+              },
+            },
+          }),
+          stderr: "",
+        };
+      }
+      if (ghArgs.includes("-X") && ghArgs.includes("POST") && ghArgs.some((a) => /\/actions\/runs\/999\/cancel$/.test(a))) {
+        cancelledRunIds.push(999);
+        return { ok: true, stdout: "{}", stderr: "" };
+      }
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          workflow_runs: [{ id: 999, name: "Copilot Code Review", status: "in_progress", head_sha: head }],
+        }),
+        stderr: "",
+      };
+    });
+    assert.deepEqual(cancelledRunIds, [999]);
+    assert.equal(autoTriggeredRes.events[0]?.type, "PR_READY_TO_MERGE");
+    assert.deepEqual(autoTriggeredRes.events[0]?.cancelledCopilotRunIds, [999]);
   });
 });
 

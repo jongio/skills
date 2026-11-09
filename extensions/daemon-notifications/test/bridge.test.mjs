@@ -21,14 +21,14 @@ test("notifications are opt-in, session-bound, bounded, replay-aware, and never 
   const unrelated = join(home, "settings.json");
   writeFileSync(unrelated, '{"custom":"preserve"}\n');
   t.mock.method(console, "error", () => {});
-  createEventWriter(unrelated, "ci-hound")({ events: [{ type: "JOB_FAILED" }] });
+  createEventWriter(unrelated, "ci-doctor")({ events: [{ type: "JOB_FAILED" }] });
   assert.equal(readFileSync(unrelated, "utf8"), '{"custom":"preserve"}\n');
   assert.throws(() => bridge.manage("subscribe", "../other"), /Watcher/);
   bridge.manage("subscribe", "constructor");
   assert.equal(bridge.manage("status")[0].watcher, "constructor");
   bridge.manage("unsubscribe", "constructor");
   const { file } = bridge.manage("subscribe", "ci");
-  const emit = createEventWriter(file, "ci-hound");
+  const emit = createEventWriter(file, "ci-doctor");
   emit({ statuses: [{ repo: "fixture/repo", phase: "running", summary: "1/2 passed", secret: "not included" }] });
   assert.ok(!readFileSync(file, "utf8").includes("not included"));
   await bridge.poll();
@@ -48,7 +48,7 @@ test("notifications are opt-in, session-bound, bounded, replay-aware, and never 
   bridge = createNotificationBridge(session, { home, now: () => time });
   await bridge.poll();
   assert.equal(logs.length, 3, "completed records are not replayed after restart");
-  const restartedWriter = createEventWriter(file, "ci-hound");
+  const restartedWriter = createEventWriter(file, "ci-doctor");
   restartedWriter({ events: [{ type: "ALL_GREEN" }] });
   await bridge.poll();
   await bridge.poll();
@@ -68,7 +68,7 @@ test("status coalescing is target-scoped, replay-aware, and bounded", async (t) 
   let bridge = createNotificationBridge(session, { home, now: () => time });
   t.after(() => { bridge.stop(); rmSync(home, { recursive: true, force: true }); });
   const { file } = bridge.manage("subscribe", "ci");
-  const emit = createEventWriter(file, "ci-hound");
+  const emit = createEventWriter(file, "ci-doctor");
   const targets = [
     { repo: "fixture/one" }, { repo: "fixture/two" },
     { repo: "fixture/one", pr: 1 }, { repo: "fixture/one", pr: 2 },
@@ -111,7 +111,7 @@ for (const order of ["standalone-first", "full-first"]) {
     t.after(() => { Object.values(bridges).forEach((bridge) => bridge.stop()); rmSync(home, { recursive: true, force: true }); });
     const { file } = bridges.standalone.manage("subscribe", "ci");
     assert.equal(bridges.full.manage("status").length, 1, "opt-in is shared, not copied per provider");
-    const emit = createEventWriter(file, "ci-hound");
+    const emit = createEventWriter(file, "ci-doctor");
     emit({ events: [{ type: "JOB_FAILED" }] });
     await Promise.all(Object.values(bridges).map((bridge) => bridge.poll()));
     assert.deepEqual(logs.map(({ provider }) => provider), ["full"]);
@@ -133,7 +133,7 @@ test("standalone delivery falls back when a full provider stops or loses its liv
   let full;
   t.after(() => { standalone.stop(); full?.stop(); rmSync(home, { recursive: true, force: true }); });
   const { file } = standalone.manage("subscribe", "ci");
-  const emit = createEventWriter(file, "ci-hound");
+  const emit = createEventWriter(file, "ci-doctor");
   emit({ events: [{ type: "JOB_FAILED" }] });
   await standalone.poll();
   full = make("full");
@@ -161,7 +161,7 @@ test("full-provider takeover and unsubscribe cannot duplicate or resurrect an in
   let full;
   t.after(() => { finish.resolve(); standalone.stop(); full?.stop(); rmSync(home, { recursive: true, force: true }); });
   const { file } = standalone.manage("subscribe", "ci");
-  const emit = createEventWriter(file, "ci-hound");
+  const emit = createEventWriter(file, "ci-doctor");
   emit({ events: [{ type: "JOB_FAILED" }] });
   const running = standalone.poll();
   await entered.promise;
@@ -184,7 +184,7 @@ test("same-role providers serialize delivery and inherit acknowledged watermarks
   }, { home, provider: "full" }));
   t.after(() => { bridges.forEach((bridge) => bridge.stop()); rmSync(home, { recursive: true, force: true }); });
   const { file } = bridges[0].manage("subscribe", "ci");
-  const emit = createEventWriter(file, "ci-hound");
+  const emit = createEventWriter(file, "ci-doctor");
   emit({ events: [{ type: "JOB_FAILED" }] });
   await Promise.all(bridges.map((bridge) => bridge.poll()));
   assert.equal(logs.length, 1);
@@ -202,7 +202,7 @@ test("failed logging releases delivery authority without acknowledging the event
   }, { home });
   t.after(() => { bridge.stop(); rmSync(home, { recursive: true, force: true }); });
   const { file } = bridge.manage("subscribe", "ci");
-  createEventWriter(file, "ci-hound")({ events: [{ type: "JOB_FAILED" }] });
+  createEventWriter(file, "ci-doctor")({ events: [{ type: "JOB_FAILED" }] });
   await assert.rejects(bridge.poll(), /Host unavailable/);
   await bridge.poll(); await bridge.poll();
   assert.equal(calls, 2, "only the successful retry advances the shared watermark");
@@ -216,7 +216,7 @@ test("full-provider authority is session-local and unreadable authority fails cl
   const standalone = createNotificationBridge({ sessionId: "this-session", log: async () => logs.push("standalone") }, { home });
   t.after(() => { full.stop(); standalone.stop(); rmSync(home, { recursive: true, force: true }); });
   const { file } = standalone.manage("subscribe", "ci");
-  createEventWriter(file, "ci-hound")({ events: [{ type: "JOB_FAILED" }] });
+  createEventWriter(file, "ci-doctor")({ events: [{ type: "JOB_FAILED" }] });
   await standalone.poll(); await full.poll();
   assert.deepEqual(logs, ["standalone"]);
   const authority = join(home, "daemon-notifications", "this-session", "providers.json");
@@ -247,7 +247,7 @@ test("graceful stop renews pending log authority until delayed handover complete
   }, { home, now: () => time });
   t.after(() => { finish.resolve(); full.stop(); standalone.stop(); rmSync(home, { recursive: true, force: true }); });
   const { file } = standalone.manage("subscribe", "ci");
-  const emit = createEventWriter(file, "ci-hound");
+  const emit = createEventWriter(file, "ci-doctor");
   emit({ events: [{ type: "JOB_FAILED" }] });
   const running = full.poll();
   await entered.promise;

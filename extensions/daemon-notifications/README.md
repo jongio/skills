@@ -34,7 +34,7 @@ installed extension files, then subscribe:
 Use the returned session-local file with the existing daemon command:
 
 ```powershell
-node skills\ci-hound\scripts\ci-hound-daemon.mjs watch --events-file "<returned-file>"
+node skills\ci-doctor\scripts\ci-doctor-daemon.mjs watch --events-file "<returned-file>"
 ```
 
 Use a distinct watcher identifier/file for each daemon process. The PR watcher

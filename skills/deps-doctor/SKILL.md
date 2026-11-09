@@ -318,13 +318,12 @@ a low EPSS score. Fix the one being exploited first. Do not claim a package is
 safe merely because it has a low severity score, and do not claim an ecosystem
 is clean when its audit did not run.
 
-Screen every package that is newly resolved into the graph, not only the ones
-that appear in a manifest. Check source, advisory status, and executable install
-hooks for all of them, because a package pulled in transitively by a routine
-minor bump runs its install scripts exactly like a direct one. Apply the full
-checklist, which adds maintainership, license, provenance, and typosquat review,
-to every new direct dependency and to any new transitive package that ships an
-install hook, resolves from outside the registry, or lands on a critical path.
+Screen every newly resolved package in the graph—not only manifest entries—for
+source, advisory status, and executable install hooks, since transitive minor
+bumps run install scripts just like direct ones. Apply the full maintainership,
+license, provenance, and typosquat checklist to every new direct dependency and
+any new transitive package with an install hook, off-registry source, or critical
+path, including **License Compatibility Screening** to flag copyleft (`GPL`, `AGPL`, `SSPL`) transitive additions in permissive (`MIT`, `Apache-2.0`) repos alongside the 7-day cooldown and CISA KEV bypass.
 
 ### 7. Validate
 

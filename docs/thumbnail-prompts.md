@@ -410,7 +410,7 @@ endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 8534a4def6471e615015c6c0f93e64eb82ff2e180cb78c0858550cf0d1937d5e
 
-## ci-hound (08baa9ed97ba)
+## ci-doctor (08baa9ed97ba)
 
 Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One large rounded dark-navy CI pipeline console panel is the hero surface. Inside it, show a clear left-to-right transformation: on the left, a workflow pipeline node with a coral-red failure dot and a small amber alert bell badge branches down into an isolated git worktree folder card with a teal repair wrench badge in the center, then merges back up on the right into three sleek parallel workflow nodes with circular green check badges and a speed gauge icon. A subtle cyan radar pulse ring around the center node suggests continuous zero-token background monitoring. Place a small GitHub Octocat mark in the upper-right with a dotted tether to the console, never the main subject. Deep navy, electric cyan, health green, and warm amber palette; clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and rounded pills instead of labels. No words, letters, numerals, fake text, photorealism, 3D, cartoon dog mascot, or clutter."
 
@@ -442,3 +442,35 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 540b36af8d3f05e61f14db979615ce69c708166d44da55bf6e8cd43198d97eaa
+
+## repo-maintain (22eb98744cf7)
+
+Prompt: "Create a square thumbnail for the repo-maintain agent skill. Run an end-to-end repository maintenance pass across governance, dependencies, security, refactoring, coverage, docs, skills, and evals on a single rolling branch. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+
+Provider: placeholder
+model: deterministic-local-v1
+SHA-256: 22eb98744cf7
+
+## eval-doctor (8f3d12ab91e0)
+
+Prompt: "Create a square thumbnail for the eval-doctor agent skill. Audit, author, and harden AI skill and prompt evaluations with Vally, github/evals, deterministic graders, and safe github/evals-action CI workflows. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+
+Provider: placeholder
+model: deterministic-local-v1
+SHA-256: 8f3d12ab91e0
+
+## secops-doctor (3a19bc44e201)
+
+Prompt: "Create a square thumbnail for the secops-doctor agent skill. Audit repository and application security across OWASP/STRIDE, secrets, workflows, containers, and Cloudflare with Public Repo Stealth Mode. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+
+Provider: placeholder
+model: deterministic-local-v1
+SHA-256: 3a19bc44e201
+
+## release-doctor (9c02d714a812)
+
+Prompt: "Create a square thumbnail for the release-doctor agent skill. Verify post-merge release readiness, unreleased commits, semver recommendations, and cross-manifest version parity before cutting a release. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+
+Provider: placeholder
+model: deterministic-local-v1
+SHA-256: 9c02d714a812

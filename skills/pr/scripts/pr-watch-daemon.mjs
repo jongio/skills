@@ -1074,7 +1074,7 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
 
   const cancelledRunIds = [];
   for (const run of matchingActiveRuns) {
-    if (run.head_sha !== pr.headRefOid && run.id) {
+    if ((!args.expectCopilot || run.head_sha !== pr.headRefOid) && run.id) {
       const cancelRes = await scopedRequest({ method: "POST", endpoint: `repos/${args.repo}/actions/runs/${run.id}/cancel` });
       if (!cancelRes || !cancelRes.ok) {
         return {
@@ -1090,6 +1090,32 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
     }
   }
 
+  const copilotCurrentlyRequested = (pr.reviewRequests?.nodes || []).some((n) =>
+    isCopilotBotLogin(n?.requestedReviewer?.login)
+  );
+
+  if (!args.expectCopilot) {
+    if (copilotCurrentlyRequested) {
+      const removeRes = await scopedRequest({ kind: "reviewer", repo: args.repo, pr: args.pr, remove: true });
+      if (!removeRes || !removeRes.ok) {
+        return {
+          ok: false,
+          status: "remove_reviewer_failed",
+          headRefOid: pr.headRefOid,
+          cancelledRunIds,
+          error: removeRes?.error || "Failed to remove existing @copilot reviewer request",
+        };
+      }
+    }
+    return {
+      ok: true,
+      status: "cancelled_no_copilot",
+      headRefOid: pr.headRefOid,
+      cancelledRunIds,
+      removedReviewer: copilotCurrentlyRequested,
+    };
+  }
+
   if (currentHeadRun) {
     return {
       ok: true,
@@ -1100,9 +1126,6 @@ export async function requestCopilotReview(args, execFn = defaultRequest) {
     };
   }
 
-  const copilotCurrentlyRequested = (pr.reviewRequests?.nodes || []).some((n) =>
-    isCopilotBotLogin(n?.requestedReviewer?.login)
-  );
   const toggledExistingRequest = Boolean(copilotCurrentlyRequested || cancelledRunIds.length > 0);
   if (toggledExistingRequest) {
     const removeRes = await scopedRequest({ kind: "reviewer", repo: args.repo, pr: args.pr, remove: true });
@@ -1645,11 +1668,28 @@ async function evaluatePrPollTickInner(args, execFn, state) {
     };
   }
 
+  const cancelledCopilotRunIds = [];
   const latestByWorkflowKey = new Map();
   for (const run of runsData.workflow_runs) {
     if (/Copilot Code Review/i.test(run.name || "")) {
       if (run.status !== "completed") {
-        copilotWorkflowActive = true;
+        if (!args.expectCopilot && run.id) {
+          if (state?.metrics) {
+            state.metrics.apiCalls = (state.metrics.apiCalls || 0) + 1;
+          }
+          const cancelRes = await execFn({
+            method: "POST",
+            endpoint: `repos/${args.repo}/actions/runs/${run.id}/cancel`,
+          });
+          if (cancelRes?.ok !== false) {
+            cancelledCopilotRunIds.push(run.id);
+            if (state?.etags) {
+              delete state.etags[runsEndpoint];
+            }
+          }
+        } else {
+          copilotWorkflowActive = true;
+        }
       }
       continue;
     }
@@ -1988,6 +2028,7 @@ async function evaluatePrPollTickInner(args, execFn, state) {
           mergeStateStatus: pr.mergeStateStatus,
           mergeable: pr.mergeable,
           reviewDecision: pr.reviewDecision,
+          ...(cancelledCopilotRunIds.length > 0 ? { cancelledCopilotRunIds } : {}),
         },
       ],
     };
@@ -2026,6 +2067,7 @@ async function evaluatePrPollTickInner(args, execFn, state) {
     validHeadCopilotReviewsCount: validHeadCopilotReviews.length,
     unresolvedThreadsCount: unresolvedThreads.length,
     bodyFindingsCount: bodyFindings.length,
+    ...(cancelledCopilotRunIds.length > 0 ? { cancelledCopilotRunIds } : {}),
   };
 
   const phaseTransitioned = Boolean(args.lastPhase && phaseInfo.phase !== args.lastPhase);

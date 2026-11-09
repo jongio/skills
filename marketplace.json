@@ -129,9 +129,9 @@
       "version": "1.0.0"
     },
     {
-      "name": "ci-hound",
-      "source": "./skills/ci-hound",
-      "description": "Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows.",
+      "name": "ci-doctor",
+      "source": "./skills/ci-doctor",
+      "description": "Diagnose, check, and optimize GitHub Actions workflows with stateless ETag-cached checkups, main failure root-cause repair in isolated worktrees, and workflow cost/security hardening.",
       "version": "1.1.0"
     },
     {
@@ -145,6 +145,30 @@
       "source": "./skills/create-session-board-canvas",
       "description": "Show a live session progress board with canonical tasks, blockers, and primary/subagent updates.",
       "version": "1.0.1"
+    },
+    {
+      "name": "repo-maintain",
+      "source": "./skills/repo-maintain",
+      "description": "Run an end-to-end repository maintenance pass across governance, dependencies, security, refactoring, coverage, docs, skills, and evals on a single rolling branch.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "eval-doctor",
+      "source": "./skills/eval-doctor",
+      "description": "Audit, author, and harden AI skill and prompt evaluations with Vally, github/evals, deterministic graders, and safe github/evals-action CI workflows.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "secops-doctor",
+      "source": "./skills/secops-doctor",
+      "description": "Audit repository and application security across OWASP/STRIDE, secrets, workflows, containers, and Cloudflare with Public Repo Stealth Mode.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "release-doctor",
+      "source": "./skills/release-doctor",
+      "description": "Verify post-merge release readiness, unreleased commits, semver recommendations, and cross-manifest version parity before cutting a release.",
+      "version": "1.0.0"
     }
   ]
 }
