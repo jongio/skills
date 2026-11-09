@@ -37,9 +37,9 @@ An assessment choice is not implementation or merge authorization.
 
 | Level | Allowed scope and examples | Required approval and evidence |
 | --- | --- | --- |
-| 1. Small wins | Local mechanical cleanup: redundant setup, equivalent expressions, identical test registration | One coherent batch; independent equivalence checks and unchanged scenarios/assertions |
-| 2. Local restructuring | Within one module: extract a cohesive helper, consolidate equivalent internal logic, simplify branching | Specific transformation and module; characterization tests and caller/contract checks |
-| 3. Cross-module restructuring | Across a named subsystem: move responsibilities, consolidate implementations, revise internal interfaces and callers | Specific design, affected callers, compatibility evidence, staged plan and rollback |
+| 1. Small wins | Local mechanical cleanup: redundant setup, equivalent expressions, identical test registration, modern language idioms, AI anti-slop cleanup | One coherent batch; independent equivalence checks and unchanged scenarios/assertions |
+| 2. Local restructuring | Within one module: extract a cohesive helper, consolidate equivalent internal logic, simplify branching, resolve Fowler code smells (bloaters, couplers, change preventers) and code-level perf anti-patterns (O(n²), N+1 queries, sync I/O in hot paths) | Specific transformation and module; characterization tests and caller/contract checks |
+| 3. Cross-module restructuring | Across a named subsystem: move responsibilities, consolidate implementations, revise internal interfaces and callers (file deduplicated `[Refactor L3]` issues in automated fleet mode) | Specific design, affected callers, compatibility evidence, staged plan and rollback |
 
 Levels are scope ceilings, not safety guarantees. A one-line lifecycle edit can be
 riskier than a large pure-function move. Do not classify by file count or test filename.
@@ -74,8 +74,11 @@ without making unrelated fixes prerequisites; retain preservation and approval b
 No speculative generalized abstraction, mass formatting, or arbitrary large-file split.
 
 Idiomatic means appropriate for the actual language/framework version and local
-conventions, not a stylistic preference. Similar syntax is not proof of equivalent
-behavior. If a candidate needs a product decision, park it outside this batch.
+conventions, not a stylistic preference. Screen for modern language idioms, Fowler
+code smells (bloaters, couplers, change preventers), AI anti-slop convergence patterns
+(redundant wrapper abstractions, dead pass-through layers, restating comments), and
+code-level performance anti-patterns (`O(n^2)` nested scans, N+1 queries, sync I/O in
+hot paths). Similar syntax is not proof of equivalent behavior. If a candidate needs a product decision, park it outside this batch.
 Zero candidates is better than forcing a cleanup.
 All scope, source, semantics, test-strength, proof, boundary and reviewability gates
 must pass independently. No score or small-diff label can cancel a failed gate.

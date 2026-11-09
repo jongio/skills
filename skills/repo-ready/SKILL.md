@@ -82,7 +82,7 @@ Every file this skill knows about, grouped by category. The generator
 | `.prettierrc` | Code formatter config | JS/TS projects |
 | `.eslintrc` / `eslint.config.js` | Linting config | JS/TS projects |
 
-### Tier 5: Repo metadata (GitHub API settings)
+### Tier 5: Repo metadata & security settings (GitHub API settings)
 
 These aren't files; they're repository settings managed via `gh` CLI / GitHub
 API. The skill audits and updates them as part of both init and update modes.
@@ -93,6 +93,9 @@ API. The skill audits and updates them as part of both init and update modes.
 | Topics | Searchable tags (shown as badges) | `gh repo view --json repositoryTopics` | `gh api -X PUT repos/{owner}/{repo}/topics -f "names[]=..."` |
 | Website | Homepage URL in repo sidebar | `gh repo view --json homepageUrl` | `gh repo edit --homepage "..."` |
 | Social preview | OpenGraph image for link sharing | GitHub web UI only | Cannot be set via API (inform user) |
+| Private Vulnerability Reporting | Enable confidential advisory reporting | `gh api repos/{owner}/{repo}/private-vulnerability-reporting` | `gh api -X PUT repos/{owner}/{repo}/private-vulnerability-reporting` |
+| Secret Scanning & Push Protection | Block leaked credentials on push | `gh api repos/{owner}/{repo} --jq '.security_and_analysis'` | `gh api -X PATCH repos/{owner}/{repo} -f 'security_and_analysis[secret_scanning][status]=enabled' -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled'` |
+| Actions Default Permissions | Enforce `read` default `GITHUB_TOKEN` scope | `gh api repos/{owner}/{repo}/actions/permissions/workflow` | `gh api -X PUT repos/{owner}/{repo}/actions/permissions/workflow -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false` |
 
 ### Tier 6: Supplementary (situational)
 
@@ -359,9 +362,21 @@ When running in update mode (`repo-ready update`):
    - **Outdated**: Check for known issues (e.g., old action versions in CI,
      legacy `.eslintrc` format, Markdown issue templates instead of YAML forms)
 
-2. **Audit repo metadata**: Check description, topics, and homepage via
-   `gh repo view --json description,repositoryTopics,homepageUrl`. Flag
-   empty or missing values.
+2. **Audit repo metadata & security settings**: Check description, topics, and
+   homepage via `gh repo view --json description,repositoryTopics,homepageUrl`.
+   Also audit **GitHub Repo Security Settings**: Private Vulnerability Reporting
+   (`repos/{owner}/{repo}/private-vulnerability-reporting`), Secret Scanning &
+   Push Protection (`.security_and_analysis`), and Actions default `read-only`
+   workflow token permissions (`repos/{owner}/{repo}/actions/permissions/workflow`).
+   Flag empty, disabled, or over-permissive (`write` default token) settings.
+
+2a. **Runtime Version Parity check**: In `update` mode, compare declared
+    language/runtime versions across `.nvmrc`, `.node-version`,
+    `package.json#engines`, `go.mod`, `Dockerfile`, `.devcontainer/devcontainer.json`,
+    and `.github/workflows/*.yml` (`node-version`, `python-version`, `go-version`,
+    `dotnet-version`). Flag any drift between local version pins, container
+    base images, and CI workflow matrices, and propose synchronizing them to
+    the canonical project runtime version.
 
 3. **Report**: Show a summary table with status for every file AND repo
    metadata settings.

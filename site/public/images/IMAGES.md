@@ -27,7 +27,7 @@ validate all catalog mappings and generate byte-identical public copies.
 | File | Used by | Notes |
 | --- | --- | --- |
 | `thumb-backlog-groom.png` | `backlog-groom` card/detail | Azure GPT Image 2 planning console with multi-repository issues, evidence checks, and pending work. |
-| `thumb-ci-hound.png` | `ci-hound` card/detail | Azure GPT Image 2 CI pipeline console with failure alert, isolated worktree repair card, and parallel green workflow nodes. |
+| `thumb-ci-doctor.png` | `ci-doctor` card/detail | Azure GPT Image 2 CI pipeline console with failure alert, isolated worktree repair card, and parallel green workflow nodes. |
 | `thumb-create-canvas-app.png` | `create-canvas-app` card/detail | Canvas extension panel beside the Copilot composer. |
 | `thumb-create-gh-pages-site.png` | `create-gh-pages-site` card/detail | Astro site scaffold deploying to GitHub Pages. |
 | `thumb-create-session-board-canvas.png` | `create-session-board-canvas` card/detail | Azure GPT Image 2 session-board canvas window transforming a plan card into a three-column kanban board with agent badges and a progress bar. |
@@ -47,6 +47,10 @@ validate all catalog mappings and generate byte-identical public copies.
 | `thumb-pr.png` | `pr` card/detail | Pull request checklist workflow from local commit and preflight checks through review resolution, CI, and merge. |
 | `thumb-go.png` | `go` card/detail | Azure GPT Image 2 workflow dashboard from plan and tests through implementation, review, and merge. |
 | `thumb-refactor.png` | `refactor` card/detail | Azure GPT Image 2 code cleanup diagram with three depth choices and a behavior-preservation shield. |
+| `thumb-repo-maintain.png` | `repo-maintain` card/detail | End-to-end repository maintenance orchestrator console with 0-100 health score and rolling branch badge. |
+| `thumb-eval-doctor.png` | `eval-doctor` card/detail | AI skill and prompt evaluation diagnostic console with Vally graders and safe CI badges. |
+| `thumb-secops-doctor.png` | `secops-doctor` card/detail | Security diagnostic console across OWASP/STRIDE, secrets, workflows, and Stealth Public Mode shield. |
+| `thumb-release-doctor.png` | `release-doctor` card/detail | Post-merge release readiness console verifying unreleased commits, semver tags, and manifest parity. |
 
 ## Statusline diagrams
 

@@ -49,6 +49,15 @@ test("checklist preserves independent evidence rather than blanket style rules",
   assert.match(reference, /unique regression/);
   assert.match(skill, /Retries of failures are not repetitions of every test/);
   assert.match(skill, /absence of Playwright does not/);
+  assert.match(skill, /Branch-vs-Line Gap Analysis/);
+  assert.match(skill, /Diff Coverage Gate/);
+  assert.match(skill, /Untested Critical\s+Entrypoint Detection/);
+  assert.match(skill, /Playwright Runtime Console Gate/);
+  assert.match(reference, /--experimental-test-coverage/);
+  assert.match(reference, /pytest-cov/);
+  assert.match(reference, /go test -race -covermode=atomic -coverprofile=coverage\.out/);
+  assert.match(reference, /cargo llvm-cov/);
+  assert.match(reference, /XPlat Code Coverage/);
 });
 
 test("capability cases are specific and behavioral graders remain decisive", () => {

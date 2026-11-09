@@ -43,17 +43,21 @@ installed individually or all at once as one plugin.
 | [`backlog-groom`](skills/backlog-groom/) | Groom GitHub backlogs across issue and source repositories, with or without Projects, using scoped evidence and approved changes. |
 | [`refactor`](skills/refactor/) | Plan behavior-preserving refactoring with explicit scope, depth and risk choices. |
 | [`skill-doctor`](skills/skill-doctor/) | Learn from recent session feedback and trim skill bloat, with cached audits, a dedicated worktree, and one improvement PR. |
-| [`ci-hound`](skills/ci-hound/) | Continuously monitor GitHub Actions workflows with a zero-token ETag-cached background daemon, alert on main failures, repair broken builds in isolated worktrees, and optimize slow or flaky workflows. |
+| [`ci-doctor`](skills/ci-doctor/) | Diagnose, check, and optimize GitHub Actions workflows with stateless ETag-cached checkups, main failure root-cause repair in isolated worktrees, and workflow cost/security hardening. |
 | [`session-statusline`](skills/session-statusline/) | Manage only the current session's active statusline pills and clear entries without deleting work or changing enabled components. |
 | [`create-session-board-canvas`](skills/create-session-board-canvas/) | Show a live session progress board with canonical tasks, blockers, and primary/subagent updates. |
+| [`repo-maintain`](skills/repo-maintain/) | Run an end-to-end repository maintenance pass across governance, dependencies, security, refactoring, coverage, docs, skills, and evals on a single rolling branch. |
+| [`eval-doctor`](skills/eval-doctor/) | Audit, author, and harden AI skill and prompt evaluations with Vally, github/evals, deterministic graders, and safe github/evals-action CI workflows. |
+| [`secops-doctor`](skills/secops-doctor/) | Audit repository and application security across OWASP/STRIDE, secrets, workflows, containers, and Cloudflare with Public Repo Stealth Mode. |
+| [`release-doctor`](skills/release-doctor/) | Verify post-merge release readiness, unreleased commits, semver recommendations, and cross-manifest version parity before cutting a release. |
 
 **How the delivery workflow skills fit together:** triage issues with
 [`backlog-groom`](skills/backlog-groom/), plan and implement with
 [`go`](skills/go/) (or scope structural changes with
 [`refactor`](skills/refactor/)), audit tests and docs with
 [`test-doctor`](skills/test-doctor/) and [`doc-doctor`](skills/doc-doctor/),
-ship and merge with [`pr`](skills/pr/), monitor main CI with
-[`ci-hound`](skills/ci-hound/), and close out or refine skills with
+ship and merge with [`pr`](skills/pr/), diagnose and optimize CI with
+[`ci-doctor`](skills/ci-doctor/), and close out or refine skills with
 [`retro`](skills/retro/), [`skill-doctor`](skills/skill-doctor/), and
 [`git-tidy`](skills/git-tidy/). Track live progress in the terminal footer with
 [`session-statusline`](skills/session-statusline/) or in a side-panel board
@@ -136,7 +140,7 @@ Alerts are off by default. See [window attention settings and behavior](extensio
 
 **Optional CI/PR daemon timeline bridge:** the
 [`daemon-notifications`](extensions/daemon-notifications/) extension logs
-background [`ci-hound`](skills/ci-hound/) and [`pr`](skills/pr/) watcher events
+background [`ci-doctor`](skills/ci-doctor/) and [`pr`](skills/pr/) watcher events
 into the active Copilot CLI session timeline without calling a model or
 starting repairs. Enable it with `node scripts/setup-statusline.mjs --notifications`,
 run `/daemon-notifications subscribe <watcher>`, and pass the returned file to
@@ -414,7 +418,7 @@ skills/
     kit/  scripts/  docs/     Skill-specific assets
 docs/                         Specs, test plans, thumbnail prompts
 site/                         Astro catalog published to GitHub Pages (jongio.github.io/skills)
-.github/workflows/            skill-lint, skill-eval, statusline-performance, deploy
+.github/workflows/            skill-lint, skill-eval, deps-doctor-public, refactor-public, doc-doctor-public, needs-release-public, pipeline-public, statusline-performance, deploy
 ```
 
 ### Local validation

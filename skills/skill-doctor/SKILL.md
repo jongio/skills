@@ -48,10 +48,11 @@ Create one focused improvement PR, not a merge. No justified changes means no PR
    Never edit the original checkout, reset, stash, force, or overwrite work.
 7. **Fix.** Save a private pending receipt once diagnosis is complete, before
    editing. Apply only supported skill changes and focused regression cases in
-   that worktree. Follow local instructions. Run affected deterministic tests
-   and lint; verify equivalent decisions for terseness-only edits. Paid
-   capability evals need separate consent. Update the pending receipt before
-   delivery; keep cache and evidence outside Git.
+   that worktree. Follow local instructions. Run `npx @microsoft/vally skill lint`,
+   check cross-host plugin manifest parity, and run affected deterministic tests;
+   verify equivalent decisions for terseness-only edits. Paid capability evals
+   need separate consent. Update the pending receipt before delivery; keep cache
+   and evidence outside Git.
 8. **Deliver.** Before retrying PR creation, look up the target repository and
    head branch; reuse any existing PR. Use `pr` for commit, push, review, and CI.
    State and preserve required approvals before those actions; stop before merge.

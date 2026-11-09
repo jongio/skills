@@ -9,7 +9,7 @@ import test from "node:test";
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const bundle = pathToFileURL(path.join(root, "extensions", "github-client.mjs")).href;
 
-for (const skill of ["pr", "ci-hound"]) {
+for (const skill of ["pr", "ci-doctor"]) {
   for (const boundary of ["credential", "response-body"]) {
     test(`${skill} CLI exits its chunk with a genuinely pending SDK ${boundary} and drains final events`, { timeout: 15000 }, async () => {
       const fixtureRoot = path.join(root, ".watch-process-fixtures");
@@ -53,7 +53,7 @@ for (const skill of ["pr", "ci-hound"]) {
         writeFileSync(path.join(home, "auth"),
           `setInterval(()=>{},1000);`);
         const daemon = path.join(root, "skills", skill, "scripts",
-          skill === "pr" ? "pr-watch-daemon.mjs" : "ci-hound-daemon.mjs");
+          skill === "pr" ? "pr-watch-daemon.mjs" : "ci-doctor-daemon.mjs");
         const shim = path.join(home, "sdk.mjs");
         writeFileSync(shim, `
           export { createEventWriter, githubHost, httpDetails, runGh } from ${JSON.stringify(bundle)};

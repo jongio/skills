@@ -77,6 +77,22 @@ Keep implementation, executed tests, installed qualification, live evaluation
 and release approval distinct. Keep partial work open, explain external/shared
 parent gates, and mark unavailable or ambiguous source evidence unknown.
 
+#### Dynamic Maintainer Resolution & Inbound Triage
+
+Resolve the repository `maintainer` dynamically—never hardcode an account login:
+1. `.github/repo-maintain.json` (or `.github/maintain.json` / `.maintain.json` / `--policy` / CLI flags: `maintainer`, `trustedAuthors`, `escalationLabel`).
+2. `.github/CODEOWNERS` (default global `*` owner).
+3. Repository owner (`gh repo view --json owner --jq '.owner.login'`).
+4. Authenticated GitHub user (`gh api user --jq '.login'`).
+
+Run the **Maintainer Triage Agent** across inbound issues and external PRs:
+- **Inbound Issue Agent:** Check whether a reported feature or fix is already implemented (citing exact `file:line`, commit SHA, or release tag), link exact or semantic duplicates, draft evidence-backed usage answers with code/documentation citations, and propose labels/assignment for valid issues.
+- **3-Tier External PR Gatekeeper** (for PRs where `author != maintainer` and `author` is not in `trustedAuthors` or `MEMBER`/`OWNER`):
+  - **Tier 1 (Maintainer Quarantine Queue — Unsolicited Marketing / Spam / Unapproved Workflow or Dependency Tampering):** Post **zero** public bot review comments so spam or promotional PRs are never legitimized; flag silently into the private Maintainer Quarantine Queue for rejection.
+  - **Tier 2 (Maintainer Direction Queue — External Features or Architectural Changes):** Apply `needs-maintainer-review` (or configured `escalationLabel`) and generate a concise maintainer decision brief before spending review or CI cycles.
+  - **Tier 3 (Simple Bug / Doc / Test Fix Auto-Assist):** Propose/apply assignment to the resolved `maintainer` and run a full code, test, and security review to help get the PR approved and merge-ready.
+- **Stale SLA Radar & Conflict-Minimizing PR Merge Order:** Flag issues/PRs unresponded `>24h`, "ball in maintainer's court" PRs where contributor updates await maintainer follow-up, and stale items `>14d`. Compute a conflict-minimizing PR merge sequence ordered by touched-file overlap so independent PRs land cleanly first.
+
 ### 4. Organize
 
 Follow [organization and views](references/organization.md) for hierarchy,

@@ -60,9 +60,13 @@
     "backlog-groom",
     "refactor",
     "skill-doctor",
-    "ci-hound",
+    "ci-doctor",
     "session-statusline",
-    "create-session-board-canvas"
+    "create-session-board-canvas",
+    "repo-maintain",
+    "eval-doctor",
+    "secops-doctor",
+    "release-doctor"
   ],
   "repository": "https://github.com/jongio/skills"
 }

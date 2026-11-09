@@ -40,6 +40,33 @@ Do not demand unreachable defensive branches, one test per source file, or
 tests of type declarations merely to raise counts. Explain why a gap matters.
 Also inspect coverage inclusion: omitted production code can inflate the result.
 
+## Multi-ecosystem coverage runners & coverage gap gates
+
+Select the repository's native coverage runner before falling back to manual
+inspection:
+
+| Ecosystem | Coverage command / runner |
+| --- | --- |
+| Node.js / TypeScript | `vitest run --coverage` (`v8`/`istanbul`), `jest --coverage`, or `node --test --experimental-test-coverage` |
+| Python | `pytest --cov=<pkg> --cov-branch --cov-report=term-missing` (`pytest-cov` / `coverage.py`) |
+| Go | `go test -race -covermode=atomic -coverprofile=coverage.out ./...` + `go tool cover -func=coverage.out` |
+| Rust | `cargo llvm-cov --branch --summary-only` |
+| .NET | `dotnet test --collect:"XPlat Code Coverage"` (Cobertura XML) |
+
+Apply three structural coverage gates whenever coverage metrics are available:
+
+1. **Branch-vs-Line Gap Analysis**: Flag any file with `>80%` line coverage but
+   `<50%` branch or error-path coverage. High line coverage with low branch
+   coverage indicates happy-path-only tests that skip `catch` blocks, fallback
+   branches, and guard clauses.
+2. **Diff Coverage Gate (`repo-maintain` / PR mode)**: Require `>=80%` line and
+   branch coverage across all touched source files (`git diff --name-only
+   <base>...HEAD`). In `fix` mode, automatically write missing edge-case and
+   branch tests for uncovered lines/branches in touched files.
+3. **Untested Critical Entrypoint Detection**: Flag `0%`-covered source modules
+   and untested public CLI commands, exported SDK functions, HTTP route
+   handlers, and state mutations as high-priority findings.
+
 ## Why might a test be unreliable?
 
 - Missing awaits, promises that outlive the test, callbacks never observed.
@@ -73,7 +100,10 @@ Do not rewrite valid tests simply to adopt parameterization or concurrency.
 Inspect configured unit/component/E2E tools before suggesting additions. Prefer
 accessible, user-facing locators where the chosen tool supports them, but do
 not blanket-ban CSS selectors needed for a genuine style or structural contract.
-Check rendered content as well as console/network signals. Expected validation
+Check rendered content as well as console/network signals. When a web UI is
+present and runnable, enforce the **Playwright Runtime Console Gate**: `0`
+`console.error` emissions, `0` uncaught `pageerror` exceptions, and `0`
+unexpected HTTP `500` responses during critical user journeys. Expected validation
 errors or intentional failed requests are not automatically runtime defects.
 
 Verify framework support/deprecation claims against current official sources.

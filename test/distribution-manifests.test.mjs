@@ -869,6 +869,12 @@ test("every workflow uses least privilege and bounded jobs", () => {
   const expectedWrites = {
     "deploy.yml": { deploy: ["id-token", "pages"] },
     "deploy-pages.yml": { deploy: ["id-token", "pages"] },
+    "deps-doctor-public.yml": { "deps-doctor": ["copilot-requests"] },
+    "doc-doctor-public.yml": { "doc-doctor": ["copilot-requests"] },
+    "maintain-public.yml": { maintain: ["copilot-requests"] },
+    "needs-release-public.yml": { release: ["copilot-requests"] },
+    "pipeline-public.yml": { pipeline: ["copilot-requests"] },
+    "refactor-public.yml": { refactor: ["copilot-requests"] },
     "skill-eval.yml": { eval: ["copilot-requests"] },
     "skill-lint.yml": {},
   };
@@ -1222,5 +1228,35 @@ test("workflow artifacts are short-lived and exclude sensitive output", () => {
     workflows["skill-eval.yml"],
     /actions\/upload-(?:pages-)?artifact@/,
     "skill eval must not upload agent output",
+  );
+});
+
+test("repository workflows stay portable and do not ship personal fleet schedules to forks", async () => {
+  for (const personalWorkflow of [
+    "repo-maintain-public.yml",
+    "maintain-public.yml",
+    "deps-doctor-public.yml",
+    "refactor-public.yml",
+    "doc-doctor-public.yml",
+    "needs-release-public.yml",
+    "pipeline-public.yml",
+  ]) {
+    assert.equal(
+      personalWorkflow in workflows,
+      false,
+      `${personalWorkflow} must not be shipped in the public skills catalog repository where forks would inherit it`,
+    );
+  }
+
+  const repoMaintainSkill = await read("skills", "repo-maintain", "SKILL.md");
+  assert.match(
+    repoMaintainSkill,
+    /if:\s*github\.event\.repository\.fork == false/,
+    "skills/repo-maintain/SKILL.md must document fork protection (github.event.repository.fork == false) for optional CI workflows",
+  );
+  assert.doesNotMatch(
+    repoMaintainSkill,
+    /jongio/i,
+    "skills/repo-maintain/SKILL.md must remain 100% portable with zero hardcoded personal account names",
   );
 });

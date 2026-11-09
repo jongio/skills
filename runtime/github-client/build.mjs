@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..", "..");
 const outputs = [
-  "skills/ci-hound/scripts/lib/github-client.mjs",
+  "skills/ci-doctor/scripts/lib/github-client.mjs",
   "skills/pr/scripts/lib/github-client.mjs",
   "extensions/github-client.mjs",
 ];
@@ -48,7 +48,7 @@ for (const output of outputs) {
   }
   const fixtureSource = "// Generated from test/github-fixtures.mjs; do not edit.\n" +
     readFileSync(resolve(root, "test", "github-fixtures.mjs"), "utf8");
-  for (const id of ["ci-hound", "pr"]) {
+  for (const id of ["ci-doctor", "pr"]) {
     const file = resolve(root, "skills", id, "test", "github-fixtures.mjs");
     if (process.argv.includes("--check")) {
       if (!existsSync(file) || readFileSync(file, "utf8") !== fixtureSource) throw new Error(`Fixture adapter out of date: ${file}`);

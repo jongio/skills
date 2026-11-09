@@ -75,6 +75,10 @@ test("exhaustion stops rather than escalating or reopening deferred work", () =>
 
 test("idiomatic cleanup requires independent preservation evidence", () => {
   assert.match(skill, /Idiomatic means appropriate for the actual language\/framework version/);
+  assert.match(skill, /Fowler\s+code smells/);
+  assert.match(skill, /AI anti-slop/);
+  assert.match(skill, /N\+1 queries, sync I\/O in\s+hot paths/);
+  assert.match(skill, /\[Refactor L3\]/);
   assert.match(skill, /Similar syntax is not proof of equivalent\s+behavior/);
   assert.match(skill, /independent before\/after checks/);
   assert.match(skill, /do not derive expected values from the replacement helper or weaken assertions/);

@@ -58,7 +58,7 @@ The default is to ask for final merge approval once all readiness gates pass:
 Use `--merge=auto` (or "auto merge") to authorize merging without another merge
 prompt after all CI, reviews, approvals, and feedback gates pass. Use
 `--merge=approval` (or "ask me before merging") to require final confirmation.
-A validated `go` handoff carries the user's choice; a later explicit choice
+A validated `go` or `repo-maintain` handoff (`"autoMerge": true`) carries the choice; a later explicit choice
 overrides it. Conflicting choices require clarification. This is invocation-only,
 not a saved preference; standing policies and reviewer approvals do not override
 the default.
@@ -272,8 +272,8 @@ transient `Copilot encountered an error` reviews are automatically retried up to
 `action_required` workflow runs on bot-authored PRs surface `actionRequiredRuns`
 with approval/rerun commands, and live stdout status emits on phase/summary
 transitions and 60s heartbeats.
-Only an explicit user-authorized exception for a verified private repository with the exact allowed
-owner skips requesting and waiting, including already-pending requests. Posted
+Only `--no-copilot` (or `"copilotReview": false` from `.github/repo-maintain.json` / `repo-maintain`, or explicit user instruction to skip Copilot review) or an explicit user-authorized exception for a verified private repository with the exact allowed
+owner skips requesting and waiting, including already-pending requests. When `--no-copilot` is active, any auto-triggered in-flight `Copilot Code Review` workflow run is cancelled so zero Actions minutes are billed. Posted
 feedback and other required reviews still apply.
 
 Every expected reviewer must submit a non-dismissed review on the full current

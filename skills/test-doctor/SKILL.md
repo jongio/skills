@@ -24,6 +24,7 @@ protocol directory, or particular test framework is required.
 | --- | --- |
 | `test-doctor [path]` | Audit, report findings, stop. Do not edit project files. |
 | `test-doctor fix [path]` | Audit, repair material test gaps, verify, report. |
+| `test-doctor diff [base-ref]` | Enforce the **Diff Coverage Gate** (`>=80%` line and branch coverage on touched source files); auto-write missing branch/edge-case tests when paired with `fix` or `repo-maintain`. |
 
 An explicit natural-language request to write or repair tests also selects fix
 mode. A question about test quality selects audit mode. Ask only when the
@@ -69,10 +70,18 @@ duration when available. Distinguish assertion failures from environment,
 configuration, missing dependency, and unavailable service failures.
 
 Use the existing coverage command when available; a coverage run that executes
-the suite can supply the baseline too. Collect line, branch, and function
-coverage, per-file gaps, configured exclusions, and policy results. Check that
-reports describe the current source/configuration, not stale artifacts.
-No coverage tool is a measurement gap, not evidence of zero or full coverage.
+the suite can supply the baseline too. Use the ecosystem's native coverage
+runner (`v8`/`istanbul` for Vitest/Jest or `node --test --experimental-test-coverage`,
+`pytest --cov` / `coverage.py`, `go test -coverprofile=coverage.out`,
+`cargo llvm-cov`, or `dotnet test --collect:"XPlat Code Coverage"`). Collect
+line, branch, and function coverage, per-file gaps, configured exclusions, and
+policy results. Perform **Branch-vs-Line Gap Analysis** (flagging any module with
+`>80%` line coverage but `<50%` branch/error-path coverage), **Untested Critical
+Entrypoint Detection** (`0%`-covered source modules and public CLI/API
+entrypoints), and the **Diff Coverage Gate** (`>=80%` line and branch coverage on
+touched source files in PR/`repo-maintain` mode). Check that reports describe the
+current source/configuration, not stale artifacts. No coverage tool is a
+measurement gap, not evidence of zero or full coverage.
 
 Audit mode must not install dependencies, change configuration, update
 snapshots, or save reports inside the project. Test-runner artifacts are allowed;
@@ -126,7 +135,9 @@ attempts; successful repeats do not prove the suite is flake-free.
 For browser-facing projects, use the existing E2E framework, whether Playwright,
 Cypress, Selenium, or another supported tool. Missing coverage of a critical
 journey matters; absence of Playwright does not. With an available local app and
-browser tools, inspect rendering, console errors, and unexpected failed requests.
+browser tools, run the **Playwright Runtime Console Gate**: inspect rendering and
+verify `0` `console.error` messages, `0` uncaught `pageerror` exceptions, and `0`
+unexpected HTTP `500` responses across primary routes.
 Distinguish expected negative responses from broken application requests.
 If the app, browser, credentials, or services are unavailable, mark runtime
 verification blocked. Never call an unobserved frontend healthy.

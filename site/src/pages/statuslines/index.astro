@@ -314,13 +314,13 @@ node ./scripts/setup-statusline.mjs --prs --issues --subagents --worktrees</code
       <div class="sl-shot-header">
         <div>
           <h2 id="daemon-notifications">Optional CI/PR daemon timeline bridge</h2>
-          <p class="sl-shot-sub">Log background <code>ci-hound</code> and <code>pr</code> watcher events into the active Copilot CLI session timeline without calling a model, starting repairs, or authorizing a merge.</p>
+          <p class="sl-shot-sub">Log background <code>ci-doctor</code> and <code>pr</code> watcher events into the active Copilot CLI session timeline without calling a model, starting repairs, or authorizing a merge.</p>
         </div>
         <span><a href="https://github.com/jongio/skills/tree/main/extensions/daemon-notifications" target="_blank" rel="noopener">View source →</a></span>
       </div>
       <pre><code>node scripts/setup-statusline.mjs --notifications
 /daemon-notifications subscribe ci
-node skills/ci-hound/scripts/ci-hound-daemon.mjs watch --events-file "&lt;returned-file&gt;"</code></pre>
+node skills/ci-doctor/scripts/ci-doctor-daemon.mjs watch --events-file "&lt;returned-file&gt;"</code></pre>
       <p class="sl-shot-sub" style="margin-top:0.75rem;">Included in the <code>jongio-skills</code> and <code>statuslines</code> plugins. Use <code>/daemon-notifications status</code> to list subscriptions or <code>/daemon-notifications unsubscribe ci</code> to disable one.</p>
     </div>
   </section>

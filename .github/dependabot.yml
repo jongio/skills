@@ -153,7 +153,7 @@ updates:
       interval: weekly
     open-pull-requests-limit: 2
   - package-ecosystem: npm
-    directory: /skills/ci-hound
+    directory: /skills/ci-doctor
     cooldown:
       default-days: 7
     schedule:
@@ -168,6 +168,34 @@ updates:
     open-pull-requests-limit: 2
   - package-ecosystem: npm
     directory: /skills/create-session-board-canvas
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: npm
+    directory: /skills/repo-maintain
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: npm
+    directory: /skills/eval-doctor
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: npm
+    directory: /skills/secops-doctor
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
+  - package-ecosystem: npm
+    directory: /skills/release-doctor
     cooldown:
       default-days: 7
     schedule:
