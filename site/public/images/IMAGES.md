@@ -47,10 +47,10 @@ validate all catalog mappings and generate byte-identical public copies.
 | `thumb-pr.png` | `pr` card/detail | Pull request checklist workflow from local commit and preflight checks through review resolution, CI, and merge. |
 | `thumb-go.png` | `go` card/detail | Azure GPT Image 2 workflow dashboard from plan and tests through implementation, review, and merge. |
 | `thumb-refactor.png` | `refactor` card/detail | Azure GPT Image 2 code cleanup diagram with three depth choices and a behavior-preservation shield. |
-| `thumb-repo-maintain.png` | `repo-maintain` card/detail | End-to-end repository maintenance orchestrator console with 0-100 health score and rolling branch badge. |
-| `thumb-eval-doctor.png` | `eval-doctor` card/detail | AI skill and prompt evaluation diagnostic console with Vally graders and safe CI badges. |
-| `thumb-secops-doctor.png` | `secops-doctor` card/detail | Security diagnostic console across OWASP/STRIDE, secrets, workflows, and Stealth Public Mode shield. |
-| `thumb-release-doctor.png` | `release-doctor` card/detail | Post-merge release readiness console verifying unreleased commits, semver tags, and manifest parity. |
+| `thumb-repo-maintain.png` | `repo-maintain` card/detail | Azure GPT Image 2 repository maintenance orchestrator console transforming diagnostic cards across a rolling git-branch loop into a consolidated pull-request card with a circular health gauge. |
+| `thumb-eval-doctor.png` | `eval-doctor` card/detail | Azure GPT Image 2 AI evaluation diagnostic console passing prompt and skill cards through a deterministic grading scale and lens into verified scorecard tiles and a locked CI shield. |
+| `thumb-secops-doctor.png` | `secops-doctor` card/detail | Azure GPT Image 2 security diagnostic console transforming exposed key, container, and workflow cards through a radar shield into a hardened vault, locked container, cloud edge shield, and Stealth Public Mode badge. |
+| `thumb-release-doctor.png` | `release-doctor` card/detail | Azure GPT Image 2 post-merge release readiness console aligning commit timeline and manifest cards through an inspection bracket into synchronized manifests and an emerald release tag badge. |
 
 ## Statusline diagrams
 

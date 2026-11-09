@@ -443,34 +443,46 @@ endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: 540b36af8d3f05e61f14db979615ce69c708166d44da55bf6e8cd43198d97eaa
 
-## repo-maintain (22eb98744cf7)
+## repo-maintain (1e37bce680c1)
 
-Prompt: "Create a square thumbnail for the repo-maintain agent skill. Run an end-to-end repository maintenance pass across governance, dependencies, security, refactoring, coverage, docs, skills, and evals on a single rolling branch. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One large rounded dark-navy repository maintenance orchestrator console panel is the hero surface. Inside it, show a clear left-to-right transformation: on the left, a vertical stack of four diagnostic cards with amber warning dots for dependencies, security shield, code blocks, and test flask feeds through smooth dashed guide lines into a central rolling git-branch loop with a teal gear badge, then resolves on the right into a clean consolidated pull-request merge card topped by a large emerald circular health gauge ring and three circular green check badges. Place a small GitHub Octocat mark in the upper-right with a dotted tether to the console, never the main subject. Deep navy, teal, emerald health green, and warm amber palette; clean modern rounded shapes, soft long shadows, subtle dashed connectors, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and rounded pills instead of labels. No words, letters, numerals, percentages, fake text, photorealism, 3D, extra floating windows, or clutter."
 
-Provider: placeholder
-model: deterministic-local-v1
-SHA-256: 22eb98744cf7
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 1e37bce680c189b3f4c67cdd34c31b1e58a5b9f6f9ed639a9ba7e33145b84085
 
-## eval-doctor (8f3d12ab91e0)
+## eval-doctor (164732b18954)
 
-Prompt: "Create a square thumbnail for the eval-doctor agent skill. Audit, author, and harden AI skill and prompt evaluations with Vally, github/evals, deterministic graders, and safe github/evals-action CI workflows. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One large rounded dark-slate AI evaluation diagnostic console panel is the hero surface. Inside it, show a clear left-to-right transformation: on the left, two prompt and skill cards with abstract dash lines and an amber warning badge pass through a central violet-and-teal balance scale and magnifying lens representing deterministic grading, then emerge on the right as three aligned evaluation scorecard tiles with circular green check badges, a segmented pass-rate bar, and a small locked CI shield badge. Place a small GitHub Octocat mark in the upper-right with a dotted tether to the console, never the main subject. Dark slate, electric teal, soft violet, emerald health green, and warm amber palette; clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and rounded pills instead of labels. No words, letters, numerals, fake text, photorealism, 3D, stethoscope tubes, or clutter."
 
-Provider: placeholder
-model: deterministic-local-v1
-SHA-256: 8f3d12ab91e0
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 164732b189546879f9b0f916c697c4ab3dfd7497b1bc5c6885f9884e2b1a7b90
 
-## secops-doctor (3a19bc44e201)
+## secops-doctor (7c322d72368e)
 
-Prompt: "Create a square thumbnail for the secops-doctor agent skill. Audit repository and application security across OWASP/STRIDE, secrets, workflows, containers, and Cloudflare with Public Repo Stealth Mode. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One large rounded dark-navy security diagnostic console panel is the hero surface. Inside it, show a clear left-to-right transformation: on the left, three exposed infrastructure cards showing an unlocked key icon, a container cube with an amber warning badge, and a workflow node with a coral alert dot pass through a central cyan radar scanner and defensive shield barrier, transforming on the right into a hardened vault card, a locked container cube, and a cloud edge shield each carrying a circular green check badge, plus a subtle cloaked stealth-shield icon. Place a small GitHub Octocat mark in the upper-right with a dotted tether to the console, never the main subject. Deep GitHub navy, electric cyan, emerald health green, warm amber, and restrained coral palette; clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and rounded pills instead of labels. No words, letters, numerals, fake text, photorealism, 3D, skull icons, or clutter."
 
-Provider: placeholder
-model: deterministic-local-v1
-SHA-256: 3a19bc44e201
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: 7c322d72368e439ca1b1bd8fccb3fecb6e814a72d45a66a3c28a56c5835f591d
 
-## release-doctor (9c02d714a812)
+## release-doctor (d0064a410357)
 
-Prompt: "Create a square thumbnail for the release-doctor agent skill. Verify post-merge release readiness, unreleased commits, semver recommendations, and cross-manifest version parity before cutting a release. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+Prompt: "Flat vector illustration on a pure white background, 1024x1024, centered composition. One large rounded dark-navy release readiness console panel is the hero surface. Inside it, show a clear left-to-right transformation: on the left, a git commit timeline with three commit nodes and a stack of slightly misaligned manifest file cards with an amber warning badge flow through a central teal alignment bracket and magnifying glass, resolving on the right into a synchronized stack of manifest cards with circular green check badges and a polished emerald release tag badge with a small package box icon. Place a small GitHub Octocat mark in the upper-right with a dotted tether to the console, never the main subject. Deep navy, teal, emerald health green, and warm amber palette; clean modern rounded shapes, soft long shadows, subtle dashed guide lines, tiny sparkles, strong silhouette legible at 175 pixels. Diagram treatment only: abstract dashes and rounded pills instead of labels. No words, letters, numerals, version strings, fake text, photorealism, 3D, rockets, or clutter."
 
-Provider: placeholder
-model: deterministic-local-v1
-SHA-256: 9c02d714a812
+Provider: azure-openai
+model: gpt-image-2
+deployment: gpt-image-2
+endpoint: https://jong-image-westus3.openai.azure.com
+apiVersion: 2025-04-01-preview
+SHA-256: d0064a4103571a1886395552f201d292cda6fef3b7dafad7169dc4861de9c07b
