@@ -54,12 +54,17 @@ installed individually or all at once as one plugin.
 **How the delivery workflow skills fit together:** triage issues with
 [`backlog-groom`](skills/backlog-groom/), plan and implement with
 [`go`](skills/go/) (or scope structural changes with
-[`refactor`](skills/refactor/)), audit tests and docs with
-[`test-doctor`](skills/test-doctor/) and [`doc-doctor`](skills/doc-doctor/),
-ship and merge with [`pr`](skills/pr/), diagnose and optimize CI with
-[`ci-doctor`](skills/ci-doctor/), and close out or refine skills with
-[`retro`](skills/retro/), [`skill-doctor`](skills/skill-doctor/), and
-[`git-tidy`](skills/git-tidy/). Track live progress in the terminal footer with
+[`refactor`](skills/refactor/)), audit dependencies, security, tests, docs, and
+evals with [`deps-doctor`](skills/deps-doctor/),
+[`secops-doctor`](skills/secops-doctor/),
+[`test-doctor`](skills/test-doctor/), [`doc-doctor`](skills/doc-doctor/), and
+[`eval-doctor`](skills/eval-doctor/), ship and merge with [`pr`](skills/pr/),
+diagnose and optimize CI with [`ci-doctor`](skills/ci-doctor/), verify release
+readiness with [`release-doctor`](skills/release-doctor/), orchestrate
+full-repo upkeep with [`repo-maintain`](skills/repo-maintain/), and close out or
+refine skills with [`retro`](skills/retro/),
+[`skill-doctor`](skills/skill-doctor/), and [`git-tidy`](skills/git-tidy/).
+Track live progress in the terminal footer with
 [`session-statusline`](skills/session-statusline/) or in a side-panel board
 with [`create-session-board-canvas`](skills/create-session-board-canvas/).
 

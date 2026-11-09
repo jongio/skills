@@ -17,11 +17,16 @@ const skills = (await getCollection("skills")).sort((a, b) =>
       <strong>How the delivery workflow skills fit together:</strong> triage issues with
       <a href={`${base}catalog/backlog-groom/`}><code>backlog-groom</code></a>, plan and implement with
       <a href={`${base}catalog/go/`}><code>go</code></a> (or scope structural changes with
-      <a href={`${base}catalog/refactor/`}><code>refactor</code></a>), audit tests and docs with
-      <a href={`${base}catalog/test-doctor/`}><code>test-doctor</code></a> and
-      <a href={`${base}catalog/doc-doctor/`}><code>doc-doctor</code></a>, ship and merge with
-      <a href={`${base}catalog/pr/`}><code>pr</code></a>, monitor main CI with
-      <a href={`${base}catalog/ci-doctor/`}><code>ci-doctor</code></a>, and close out or refine skills with
+      <a href={`${base}catalog/refactor/`}><code>refactor</code></a>), audit dependencies, security, tests, docs, and evals with
+      <a href={`${base}catalog/deps-doctor/`}><code>deps-doctor</code></a>,
+      <a href={`${base}catalog/secops-doctor/`}><code>secops-doctor</code></a>,
+      <a href={`${base}catalog/test-doctor/`}><code>test-doctor</code></a>,
+      <a href={`${base}catalog/doc-doctor/`}><code>doc-doctor</code></a>, and
+      <a href={`${base}catalog/eval-doctor/`}><code>eval-doctor</code></a>, ship and merge with
+      <a href={`${base}catalog/pr/`}><code>pr</code></a>, diagnose and optimize CI with
+      <a href={`${base}catalog/ci-doctor/`}><code>ci-doctor</code></a>, verify release readiness with
+      <a href={`${base}catalog/release-doctor/`}><code>release-doctor</code></a>, orchestrate full-repo upkeep with
+      <a href={`${base}catalog/repo-maintain/`}><code>repo-maintain</code></a>, and close out or refine skills with
       <a href={`${base}catalog/retro/`}><code>retro</code></a>,
       <a href={`${base}catalog/skill-doctor/`}><code>skill-doctor</code></a>, and
       <a href={`${base}catalog/git-tidy/`}><code>git-tidy</code></a>. Track live progress in the terminal footer with
