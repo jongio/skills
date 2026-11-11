@@ -1012,7 +1012,8 @@ unchanged. They do not fetch, prune, checkout, switch, apply, pop, clean,
 reset, create or update refs, rebase, merge, push, add/remove worktrees,
 expire reflogs, run garbage collection, or invoke GitHub writes.
 
-Remote verification is a separate approved action. `verify-remote.mjs` uses a
+Read-only verification of the intended origin is part of the audit. It needs
+no separate confirmation. `verify-remote.mjs` uses a
 disposable bare repository, an exact caller-supplied URL, `--no-prune`, disabled
 hooks and credential helpers, and an isolated environment with no system,
 global, or target-repository configuration. Its closed baseline expires after
@@ -1089,16 +1090,16 @@ No phase may loosen the last-copy invariant or extend a cleanup request beyond i
 7. `applyReview` is strict and monotone.
 8. Analysis and revalidation do not mutate local Git or GitHub state and never
    perform remote refresh.
-9. Optional analysis, recovery, each mutation class, and each GitHub write
-   have separate approvals.
+9. One explicit confirmation covers the displayed local cleanup plan and its
+   listed prerequisites. Mutation classes are internal revalidation batches.
+   Recovery outside that plan and GitHub writes require explicit scope.
 10. Node.js `>=22` is preflighted; missing or older Node limits orchestration to
     metadata and suppresses work-bearing destructive offers.
 11. Existing scopes and compatibility presentation remain available through
     the staged rollout.
-12. Normal interactive output uses a numbered Git Clean style report with safe,
-    review, keep, and protected sections. Every visible safe row names its
-    retained copy before selection, and internal outcomes and proof mechanics
-    remain behind `Show full evidence`.
+12. The audit report shows every proposed removal, its exact identity, and
+    preservation evidence before the single confirmation. Report retained
+    work, protected items, and coverage gaps.
 13. Dirty linked worktrees present the ordered preservation sequence before any
     deletion decision.
 
@@ -1156,8 +1157,8 @@ incomplete evidence always resolves to `defer`.
 - Stashes, branches, worktrees, remotes, pull requests, tags, artifacts, blobs,
   and maintenance state have explicit keep, resume, update, merge, open, delete,
   inspect, or defer guidance as applicable.
-- Destructive work remains inert until exact selection, fresh revalidation, and
-  separate user approval.
+- Destructive work remains inert until the user confirms the displayed plan.
+  Each approved action is revalidated immediately before execution.
 - Tests, coverage, lint, build, documentation, accessibility, security, and
   adversarial gates pass with no errors or warnings.
 - The certified skill is installed from the repository source without changing

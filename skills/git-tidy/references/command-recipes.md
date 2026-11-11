@@ -19,7 +19,7 @@ For every Git invocation:
   `-c core.pager=cat`, `-c pager.<command>=false`,
   `-c diff.external=`, `-c diff.trustExitCode=false`,
   and `-c filter.<name>.required=false` as applicable;
-- allow only `file` for analyzer object reads; the separately approved verifier
+- allow only `file` for analyzer object reads; the isolated verifier
   allows only canonical credential-free HTTPS repository URLs and absolute local
   repository paths or local `file` URLs. Reject SSH, `ext::`, local
   executable transports, unknown schemes, and arbitrary remote helpers;
@@ -89,7 +89,9 @@ outputs. Reading or hashing payloads requires separate user direction.
 scope or options into shell source. `analyze` emits a closed result with
 `operation: "analyze"` and `actionPlan: null`.
 
-Pass `{"remoteUrl":"<exact-approved-url>"}` to `verify-remote` over stdin.
+Pass `{"remoteUrl":"<exact-origin-url>"}` to `verify-remote` over stdin.
+Read-only verification is part of the audit. Ask once about the displayed
+cleanup plan and revalidate its mutation classes internally.
 Pass its closed result as `{"remoteBaseline":<result>}` to `analyze-verified`.
 The verifier uses a disposable bare repository, explicit `--no-prune`, disabled
 hooks and credential helpers, and no target-repository configuration.
