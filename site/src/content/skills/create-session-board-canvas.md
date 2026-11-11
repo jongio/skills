@@ -1,7 +1,7 @@
 ---
 title: create-session-board-canvas
-tagline: "Show a live session progress board with canonical tasks, blockers, and primary/subagent updates."
-useWhen: "create a canvas that shows session progress, session progress board, session kanban, show session tasks and agents, go progress board"
+tagline: "Show a live session and opt-in project status board with canonical tasks, blockers, subagents, and an operator inbox."
+useWhen: "create a canvas that shows session progress, session progress board, session kanban, show session tasks and agents, go progress board, project status board, all sessions board, session attention inbox"
 repoPath: skills/create-session-board-canvas
 thumb: images/thumb-create-session-board-canvas.png
 install:

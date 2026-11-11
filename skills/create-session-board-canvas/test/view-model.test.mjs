@@ -114,14 +114,21 @@ test("native plan approval attention is visible without task assignment and clea
     const kit = new SyntheticModule(["html", "mountCanvas", "useState", "Icon"], function () {
       for (const name of ["html", "mountCanvas", "useState", "Icon"]) this.setExport(name, () => null);
     });
+    const modules = new Map();
+    const resolveLocal = async (specifier, referencingModule) => {
+      if (specifier === "/kit/core-client.mjs" || specifier === "/kit/icons.mjs") return kit;
+      if (!["./view-model.mjs", "./fleet-view.mjs", "./deeplinks.mjs"].includes(specifier)) {
+        throw new Error("Unexpected UI dependency: " + specifier);
+      }
+      const url = new URL(specifier, referencingModule.identifier);
+      if (!modules.has(url.href)) {
+        modules.set(url.href, new SourceTextModule(await readFile(url, "utf8"), { identifier: url.href }));
+      }
+      return modules.get(url.href);
+    };
     const source = await readFile(new URL(appUrl), "utf8");
     const app = new SourceTextModule(source + "\\nexport { operatorAttention };", { identifier: appUrl });
-    await app.link(async (specifier) => {
-      if (specifier === "/kit/core-client.mjs" || specifier === "/kit/icons.mjs") return kit;
-      if (specifier !== "./view-model.mjs") throw new Error("Unexpected UI dependency: " + specifier);
-      const url = new URL(specifier, appUrl);
-      return new SourceTextModule(await readFile(url, "utf8"), { identifier: url.href });
-    });
+    await app.link(resolveLocal);
     await app.evaluate();
     const state = {
       activeGoalId: "active",
@@ -144,6 +151,135 @@ test("native plan approval attention is visible without task assignment and clea
       message: "Approve the plan", at: "2026-10-27T19:00:00Z",
     }],
     cleared: [],
+  });
+});
+
+test("unified App, FleetWorkspace, AttentionInbox, and SessionDrillDown templates compile and render cleanly with real Preact htm", () => {
+  const appUrl = new URL("../runtime/web/app.mjs", import.meta.url).href;
+  const preactUrl = new URL("../runtime/canvas-kit/vendor/preact-htm-standalone.mjs", import.meta.url).href;
+  const result = spawnSync(process.execPath, ["--experimental-vm-modules", "--input-type=module", "-e", `
+    import { readFile } from "node:fs/promises";
+    import { SourceTextModule, SyntheticModule } from "node:vm";
+    const { html } = await import(${JSON.stringify(preactUrl)});
+    let capturedView = null;
+    const kit = new SyntheticModule(["html", "mountCanvas", "useState", "Icon"], function () {
+      this.setExport("html", html);
+      this.setExport("mountCanvas", ({ view }) => { capturedView = view; });
+      this.setExport("useState", (initial) => [initial, () => {}]);
+      this.setExport("Icon", ({ name }) => html\`<span data-icon=\${name}></span>\`);
+    });
+    const modules = new Map();
+    const resolveLocal = async (specifier, referencingModule) => {
+      if (specifier === "/kit/core-client.mjs" || specifier === "/kit/icons.mjs") return kit;
+      const url = new URL(specifier, referencingModule.identifier);
+      if (!modules.has(url.href)) {
+        modules.set(url.href, new SourceTextModule(await readFile(url, "utf8"), { identifier: url.href }));
+      }
+      return modules.get(url.href);
+    };
+    const appUrl = ${JSON.stringify(appUrl)};
+    const app = new SourceTextModule(await readFile(new URL(appUrl), "utf8"), { identifier: appUrl });
+    await app.link(resolveLocal);
+    await app.evaluate();
+
+    function collectText(vnode, acc = []) {
+      if (vnode == null || typeof vnode === "boolean") return acc;
+      if (typeof vnode === "string" || typeof vnode === "number") { acc.push(String(vnode)); return acc; }
+      if (Array.isArray(vnode)) { for (const c of vnode) collectText(c, acc); return acc; }
+      if (typeof vnode.type === "function") {
+        return collectText(vnode.type({ ...(vnode.props || {}), children: vnode.props?.children }), acc);
+      }
+      if (vnode.props?.children !== undefined) collectText(vnode.props.children, acc);
+      return acc;
+    }
+
+    const sampleSession = {
+      id: "sess-1",
+      title: "Feature Worker",
+      surface: "desktop",
+      projectName: "jongio/skills",
+      branch: "feat-board",
+      mode: "autopilot",
+      activity: "waiting",
+      taskProgress: { done: 1, total: 2, percent: 50 },
+      todos: [{ id: "t1", title: "Write tests", status: "done" }, { id: "t2", title: "Ship UI", status: "in_progress" }],
+      subagents: [{ id: "sub-1", name: "explore", state: "completed" }],
+      prs: [{ url: "https://github.com/jongio/skills/pull/99", reference: "jongio/skills#99", ciStatus: "passed", ciPassed: 4, ciTotal: 4 }],
+      plan: { exists: true, content: "# Plan" },
+      deepLink: "ghapp://sessions/sess-1",
+      restartDeepLink: "ghapp://sessions/sess-1/restart",
+    };
+    const baseFleet = {
+      revision: 2,
+      coordinatorScoped: true,
+      recoveryPolicy: "autopilot_only",
+      recoveryHistory: [{ sessionId: "sess-1", attempt: 1, mode: "auto", reason: "stream reset" }],
+      summary: { totalProjects: 1, totalSessions: 1, busy: 0, waiting: 1, attention: 2, idle: 0 },
+      selectedSessionId: "sess-1",
+      selectedDetail: sampleSession,
+      projects: [{
+        key: "jongio/skills",
+        name: "jongio/skills",
+        newSessionDeepLink: "ghapp://session/new?repo=jongio%2Fskills",
+        busyCount: 0,
+        attentionCount: 2,
+        workflowCount: 1,
+        taskProgress: { done: 1, total: 2, percent: 50 },
+        sessions: [sampleSession],
+      }],
+      inbox: [
+        {
+          id: "ask:sess-1:r1",
+          kind: "ask_user",
+          sessionId: "sess-1",
+          sessionTitle: "Feature Worker",
+          projectName: "jongio/skills",
+          surface: "desktop",
+          requestId: "r1",
+          question: "Use SQLite WAL?",
+          choices: ["Yes", "No"],
+          allowFreeform: true,
+          canAnswerInline: true,
+          deepLink: "ghapp://sessions/sess-1",
+        },
+        {
+          id: "plan:sess-1:p1",
+          kind: "pending_plan",
+          sessionId: "sess-1",
+          sessionTitle: "Feature Worker",
+          projectName: "jongio/skills",
+          surface: "desktop",
+          requestId: "p1",
+          summary: "Approve unified board",
+          planContent: "# Full plan",
+          canRespondInline: true,
+          deepLink: "ghapp://sessions/sess-1",
+        },
+      ],
+    };
+
+    const projectsText = collectText(capturedView({
+      state: { sessionId: "host", revision: 1, activeScope: "projects", fleet: baseFleet, tasks: [], goals: [], agents: [], reports: [] },
+      invoke: async () => ({}),
+      connected: true,
+    })).join(" ");
+    const inboxText = collectText(capturedView({
+      state: { sessionId: "host", revision: 1, activeScope: "inbox", fleet: baseFleet, tasks: [], goals: [], agents: [], reports: [] },
+      invoke: async () => ({}),
+      connected: true,
+    })).join(" ");
+
+    console.log(JSON.stringify({
+      hasProjectsHeading: projectsText.includes("Projects & active sessions"),
+      hasDrilldown: projectsText.includes("Feature Worker") && projectsText.includes("jongio/skills#99"),
+      hasInboxPrompt: inboxText.includes("Use SQLite WAL?") && inboxText.includes("Approve unified board"),
+    }));
+  `], { encoding: "utf8", timeout: 10000, windowsHide: true });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    hasProjectsHeading: true,
+    hasDrilldown: true,
+    hasInboxPrompt: true,
   });
 });
 

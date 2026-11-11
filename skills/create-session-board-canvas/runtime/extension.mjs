@@ -1,13 +1,17 @@
 import { createCanvas, joinSession, CanvasError } from "@github/copilot-sdk/extension";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { createProgressService } from "./progress.mjs";
-import { createProgressCanvas } from "./canvas.mjs";
+import { attachCanvasLifecycle, createProgressCanvas } from "./canvas.mjs";
 import { createCanvasRuntime } from "./canvas-kit/server.mjs";
-import { workspaceStore, sessionStore } from "./canvas-kit/storage.mjs";
+import { userStore, workspaceStore, sessionStore } from "./canvas-kit/storage.mjs";
 import { validate } from "./canvas-kit/validate.mjs";
+import { createFleetService } from "./fleet-service.mjs";
+import { createFleetWorkerClient } from "./fleet-worker-client.mjs";
 import { actorFor, createFeedbackGate, createProgressEventGate, isProgressEvent, progressInputSchema, readSessionSources } from "./host.mjs";
 import { acquireProvider } from "./provider.mjs";
 import { createTrackingSync, trackingChangeKind, trackingResult } from "./references.mjs";
+import { acquireFleetLeader, createRecoveryWatchdog } from "./watchdog.mjs";
 
 // One SDK connection is required: disconnect/rejoin loses canvas callbacks on
 // the supported host. An OS-owned session lease prevents duplicate loaders.
@@ -15,6 +19,8 @@ const lease = await acquireProvider(process.env.SESSION_ID);
 
 if (lease) {
   let service;
+  let fleetService;
+  let fleetLeader = null;
   let runtime;
   let tracking;
   let resolveReady;
@@ -23,14 +29,35 @@ if (lease) {
   const checkSession = (ctx, session) => {
     if (ctx.sessionId !== session.sessionId) throw new CanvasError("wrong_session", "Cross-session canvas rejected");
   };
+  const canvasInputSchema = {
+    type: "object",
+    properties: { scope: { type: "string", enum: ["session", "fleet", "projects", "inbox"] } },
+    additionalProperties: false,
+  };
+  const agentCanvasActions = [
+    { name: "get_status", description: "Read session progress", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+    { name: "refresh", description: "Refresh canonical session sources", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+    {
+      name: "set_scope",
+      description: "Switch board view between current session, project fleet rollup, and operator attention inbox",
+      inputSchema: {
+        type: "object",
+        properties: { scope: { type: "string", enum: ["session", "projects", "inbox"] }, instanceId: { type: "string" } },
+        required: ["scope"],
+        additionalProperties: false,
+      },
+    },
+    { name: "refresh_fleet", description: "Refresh cross-session and project rollup state", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
+  ];
   const canvas = createCanvas({
     id: "session-progress",
     displayName: "Session Board Canvas",
-    description: "Live session kanban, team, blockers, and delivery status.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
-    actions: ["get_status", "refresh"].map((name) => ({
-      name, description: name === "refresh" ? "Refresh canonical session sources" : "Read session progress",
-      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    description: "Live session kanban, team, blockers, delivery status, and opt-in cross-session project rollup.",
+    inputSchema: canvasInputSchema,
+    actions: agentCanvasActions.map(({ name, description, inputSchema }) => ({
+      name,
+      description,
+      inputSchema,
       handler: async (ctx) => {
         await ready;
         checkSession(ctx, session);
@@ -134,9 +161,36 @@ if (lease) {
       },
     });
     tracking = createTrackingSync(session, service);
-    runtime = createCanvasRuntime(createProgressCanvas(service, session.sessionId, {
+    const copilotHome = process.env.COPILOT_HOME || join(homedir(), ".copilot");
+    const workerClient = createFleetWorkerClient({ copilotHome });
+    fleetService = createFleetService({
+      hostSessionId: session.sessionId,
+      executeHostTool: (name, args) => session.rpc.tools.execute({ name, arguments: args }),
+      askHostAgent: (prompt) => session.send({ prompt }),
+      workerClient,
+      createWatchdog: async () => {
+        fleetLeader ||= await acquireFleetLeader(copilotHome).catch(() => null);
+        return createRecoveryWatchdog({
+          store: userStore("session-progress", "fleet-recovery.json"),
+          isLeader: () => fleetLeader !== null,
+          recoverSession: async ({ sessionId: targetId, prompt }) => {
+            await session.rpc.tools.execute({
+              name: "send_session_message",
+              arguments: { session_id: targetId, message: prompt, delivery_mode: "immediate" },
+            });
+          },
+        });
+      },
+      onChange: async () => {
+        if (runtime) await runtime.invoke("get_status", {}, { domainId: session.sessionId });
+      },
+    });
+    const canvasConfig = createProgressCanvas(service, session.sessionId, {
       refreshTracking,
-    }));
+      fleetService,
+    });
+    runtime = attachCanvasLifecycle(createCanvasRuntime(canvasConfig), canvasConfig);
+    runtime.setHost({ askAgent: (prompt) => session.send({ prompt }) });
     await service.refresh();
     try {
       const history = await session.getEvents();
@@ -156,6 +210,7 @@ if (lease) {
     clearTimeout(refreshTimer);
     unsubscribe();
     await runtime.shutdown();
+    await fleetLeader?.close?.().catch(() => {});
     await session.disconnect();
     await lease.close();
   };

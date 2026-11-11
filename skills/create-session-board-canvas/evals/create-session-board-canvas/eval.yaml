@@ -138,3 +138,29 @@ stimuli:
       - Keeps report sequences independent per reporter, task, and goal instead of relabelling updates as the active goal.
       - Honors confirmed removals in the active goal while retaining archived history.
     graders: *checks
+
+  - name: fleet-scope-isolation-and-performance
+    prompt: >-
+      Load create-session-board-canvas. Explain how opening the board for a
+      normal single-session go run avoids interfering with other Copilot
+      sessions' performance, and what changes when the operator switches to
+      Projects & sessions view. Explanation only: no commands, canvas/tool
+      calls beyond skill loading, or writes.
+    rubric:
+      - Keeps default session scope isolated with zero cross-session scans, workers, or fleet timers.
+      - Uses viewer-gated off-main-thread reads and short-lived read-only SQLite handles only while fleet views are open, stopping on close.
+      - Preserves current-session caller attribution on session_progress and never grants cross-session actions to subagents.
+    graders: *checks
+
+  - name: operator-inbox-and-watchdog-boundaries
+    prompt: >-
+      Load create-session-board-canvas. In the opt-in Attention inbox, one root
+      session has a pending plan, a second session is waiting on ask_user, and
+      a third failed with 401 OAuth expired. Explain how each item is handled
+      and what the recovery watchdog does. Explanation only: no commands,
+      tools beyond skill loading, or writes.
+    rubric:
+      - Uses answer_session_input with exact request_id for eligible ask_user prompts and ghapp://sessions/<id> deep-link confirmation for uncoordinated root plan approvals.
+      - Keeps auto-recovery off by default, waits for the grace window when enabled, and uses a progress-gated circuit breaker.
+      - Excludes 401/OAuth, repository trust, quota, user aborts, and pending operator prompts from automatic retries.
+    graders: *checks

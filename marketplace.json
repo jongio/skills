@@ -12,7 +12,7 @@
       "name": "jongio-skills",
       "source": "./",
       "description": "Install the complete Jon Gallant skills collection as one plugin.",
-      "version": "2.1.15"
+      "version": "2.1.16"
     },
     {
       "name": "statuslines",
@@ -144,7 +144,7 @@
       "name": "create-session-board-canvas",
       "source": "./skills/create-session-board-canvas",
       "description": "Show a live session progress board with canonical tasks, blockers, and primary/subagent updates.",
-      "version": "1.0.1"
+      "version": "1.1.0"
     },
     {
       "name": "repo-maintain",
