@@ -140,7 +140,7 @@ test("focused references are present and routed from the contract and skill", ()
       `contract does not route to ${reference}`,
     );
   }
-  assert.match(evidenceModel, /contract `1\.2\.0`/);
+  assert.match(evidenceModel, /contract `2\.0\.0`/);
   assert.match(contentReview, /applyReview/);
   assert.match(approvalFlow, /## Revalidation/);
   assert.match(commandRecipes, /## Forbidden analysis commands/);
@@ -272,7 +272,7 @@ test("contract schema vocabulary is closed and stable", () => {
     '"evidence": "complete" | "partial" | "blocked"',
     '"confidence": "proven" | "strong" | "indicative" | "unknown"',
     '"action": "keep" | "delete-ref" | "drop-stash" |',
-    '"schemaVersion": "1.2.0"',
+    '"schemaVersion": "2.0.0"',
   ]) {
     assert.ok(contract.includes(value), `contract dropped schema vocabulary: ${value}`);
   }

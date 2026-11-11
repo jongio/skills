@@ -280,7 +280,7 @@ test("exact duplicate stash is eligible only while a durable copy remains", asyn
         selected,
         [stash.id, branch.id],
       ),
-      /closed analyze 1\.2\.0 result/u,
+      /closed analyze 2\.0\.0 result/u,
     );
   } finally {
     await fixture.cleanup();
@@ -816,7 +816,7 @@ test("offline revalidation blocks plans and still reports material drift", async
         proofTampered,
         [stash.id],
       ),
-      /closed analyze 1\.2\.0 result/u,
+      /closed analyze 2\.0\.0 result/u,
     );
 
     await fixture.write("drift.txt", "new stash\n");
@@ -843,7 +843,7 @@ test("offline revalidation blocks plans and still reports material drift", async
       mutate(tampered);
       await assert.rejects(
         revalidateRepository(fixture.root, tampered, [stash.id]),
-        /closed analyze 1\.2\.0 result/u,
+        /closed analyze 2\.0\.0 result/u,
       );
     }
 
@@ -1061,7 +1061,7 @@ test("legacy inventories are typed, bounded, and read-only", async () => {
           scope: "tags",
           depth: "proof",
         });
-        assert.equal(tags.schemaVersion, "1.2.0");
+        assert.equal(tags.schemaVersion, "2.0.0");
         assert.equal(tags.inventory.tags.length, 2);
         assert.equal(tags.inventory.tags.some(({ peeledOid }) => peeledOid), true);
         assert.deepEqual(tags.inventory.artifacts, []);
@@ -1308,6 +1308,7 @@ test("exact squash tree makes detached worktree and local branch removable", asy
 
     const result = await analyzeRepository(fixture.root);
     assert.ok(validateMechanicalResult(result).valid);
+    assert.equal(validateMechanicalResult({ ...result, schemaVersion: "1.2.0" }).valid, false);
     const topic = findCarrier(result, "local-branch", (c) => c.displayName === "refs/heads/squashed");
     assert.equal(topic.observed.ancestry.integrationCommitOid, integrationOid);
     assert.equal(topic.observed.ancestry.reachableFromDefault, false);

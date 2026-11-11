@@ -36,7 +36,7 @@ Windows, macOS, and Linux.
 
 | ID | Contract behavior | Level | Planned test |
 |---|---|---|---|
-| T01 | Emits the closed `1.2.0` result schema with execution mode and verified baseline identity, stable ordering, and rejects unknown versions | unit | `test/hardening.test.mjs` and result schema tests |
+| T01 | Emits the closed `2.0.0` result schema with execution mode and verified baseline identity, stable ordering, and rejects unknown versions | unit | `test/hardening.test.mjs` and result schema tests |
 | T02 | Keeps all seven user-requestable dispositions as work outcomes; destructive operations exist only as explicit per-carrier actions and are never inferred from `delete` | unit | `test/classify.test.mjs` -> disposition/action separation |
 | T03 | Enforces categorical confidence caps and never uses age as preservation proof | unit | `test/classify.test.mjs` -> confidence lattice |
 | T04 | Rejects a selected set that removes the final durable witness | unit/integration | `test/classify.test.mjs` -> selection-set last copy |

@@ -50,7 +50,7 @@ worktree cleanup. `worktrees` and `stashes` use branch refs as evidence only.
    tracked changes. Include line-ending and file-mode evidence where relevant.
    Inspect ignored entries in otherwise removable worktrees using the
    [cleanup and revalidation flow](references/approval-flow.md). Treat a verified
-   index refresh or removal of reproducible outputs as a proposed prerequisite.
+   index refresh or removal of byte-verified outputs as a proposed prerequisite.
    Preserve real or uncertain overlays and unmerged committed changes.
 4. **Show the report and confirm once.** Show the full audit summary in chat,
    with proposed removals, retained items and why they remain, coverage gaps,

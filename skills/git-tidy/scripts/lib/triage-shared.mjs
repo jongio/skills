@@ -5,7 +5,7 @@ import {
   stableId,
 } from "./mechanical-core.mjs";
 
-export const SCHEMA_VERSION = "1.2.0";
+export const SCHEMA_VERSION = "2.0.0";
 export const SCOPES = Object.freeze([
   "all",
   "branches",

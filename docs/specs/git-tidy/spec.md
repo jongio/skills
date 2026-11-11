@@ -11,7 +11,7 @@ owner: "@jongio"
 
 ## Status and scope
 
-This document freezes contract version `1.2.0`. It governs content-aware
+This document freezes contract version `2.0.0`. It governs content-aware
 triage of stashes, local and remote branches, and all registered worktrees.
 Tags, artifacts, ignored-but-tracked files, large blobs, remotes, and
 maintenance retain their existing scopes but must obey the mutation and
@@ -74,12 +74,12 @@ explicit compatibility mode, and `review` remains opt-in.
 
 ## Result schema
 
-The analyzer emits one UTF-8 JSON object. Contract version `1.2.0` has this
+The analyzer emits one UTF-8 JSON object. Contract version `2.0.0` has this
 closed top-level shape:
 
 ```text
 {
-  "schemaVersion": "1.2.0",
+  "schemaVersion": "2.0.0",
   "operation": "analyze" | "revalidate",
   "executionMode": "offline" | "verified",
   "remoteBaseline": RemoteBaseline,
@@ -96,6 +96,9 @@ closed top-level shape:
   "compatibility": CompatibilityProjection
 }
 ```
+
+Version 2.0 changes the meaning of `mergedIntoDefault` to include exact squash
+integration. Re-run older audits before reviewing or revalidating their results.
 
 Unknown `schemaVersion` values must be rejected. Consumers must reject missing
 required fields and type or enum mismatches. Additive fields require a minor
@@ -959,7 +962,7 @@ shape:
 
 ```text
 ReviewApplicationInput = {
-  "result": <closed analyze 1.2.0 result with actionPlan: null>,
+  "result": <closed analyze 2.0.0 result with actionPlan: null>,
   "review": <strict review object>
 }
 ReviewDiagnostic =
@@ -1025,7 +1028,7 @@ guaranteed, authoritative simulation is unavailable and the outcome is
 
 ## Revalidation and approval
 
-`revalidate` receives a prior `1.2.0` verified-mode result, one mutation class,
+`revalidate` receives a prior `2.0.0` verified-mode result, one mutation class,
 selected carrier IDs, the exact approved remote URL, and optional approved
 `planId` through stdin. It freshly verifies the remote/default/head OID
 baseline, then re-reads every selected and witness identity, local and remote OID,
@@ -1103,7 +1106,7 @@ No phase may loosen the last-copy invariant or extend a cleanup request beyond i
 
 - Runtime impact is limited to the `git-tidy` analyzer, review adapter, and
   their Git and GitHub read boundaries.
-- Contract impact covers schema `1.2.0`, skill orchestration, focused
+- Contract impact covers schema `2.0.0`, skill orchestration, focused
   references, deterministic tests, capability evals, and catalog mapping.
 - Repository quality impact covers the shared Vally dependency, lint workflow,
   and catalog accessibility surfaces exercised by this change.

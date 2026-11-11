@@ -7,7 +7,7 @@ requests end with the report.
 
 ## Revalidation
 
-1. Pass the exact verified schema 1.2 result, selected carrier IDs, one mutation
+1. Pass the exact verified schema 2.0 result, selected carrier IDs, one mutation
    class, and the verified remote URL to `revalidate`.
 2. Present exact targets and commands, expected OIDs and status, retained
    witnesses and the proof for each, effects, recovery limits, and execution order. Include
@@ -76,17 +76,19 @@ read-only audit before revalidating any remaining confirmed batches.
 
 The analyzer counts ignored entries without persisting names or reading payloads.
 For otherwise removable worktrees, check ignored paths privately using
-NUL-delimited Git output. Inspect names and filesystem metadata only, and use
-repository build or install configuration to establish which exact outputs are
-reproducible. Ignore rules alone do not establish that. Never include ignored
-names or payloads in audit artifacts. `--include-ignored` requests this check
+NUL-delimited Git output. Names, metadata, and build configuration only identify
+candidate outputs. Require user-authorized byte-for-byte comparison against a
+trusted copy of the exact output. If regeneration is needed, obtain explicit
+authorization and regenerate in an isolated directory. Without an exact match,
+keep the entry and worktree blocked. Keep ignored names and payloads out of audit artifacts. `--include-ignored` requests this check
 for the report even when cleanup is not enabled.
 
 Before clearing verified outputs, confirm the worktree's exact registered
 absolute root. Resolve every target under that root, reject symlinks, reparse
 points, submodules and nested repositories, and preview the exact literal
 targets in the confirmation plan. Require that each target remains ignored,
-contains no tracked or unignored files, and still has only reproducible outputs. Use native
+contains no tracked or unignored files, and still matches the verified bytes.
+Use native
 filesystem operations without shell interpolation. Rerun proof after cleanup and
 use ordinary worktree removal. Unknown entries, credentials, local configuration,
 or irreplaceable data keep the worktree blocked. Do not use blanket

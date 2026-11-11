@@ -17,8 +17,8 @@ verified recovery bundle is required. The final audit lists removals and why
 each remaining branch or worktree was retained.
 
 Exact ancestry and exact tree comparisons catch squash merges. Dirty worktrees
-and unmerged work are kept. Reproducible ignored outputs can be cleared after
-targeted verification, and unknown ignored files still block removal.
+and unmerged work are kept. Ignored outputs can be cleared after exact
+content verification. Unverified ignored files block removal.
 
 ## Install
 

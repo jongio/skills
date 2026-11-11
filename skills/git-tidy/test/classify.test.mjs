@@ -108,7 +108,7 @@ function workItem(id = "work-1", overrides = {}) {
 
 function mechanicalResult(items = [workItem()]) {
   return {
-    schemaVersion: "1.2.0",
+    schemaVersion: "2.0.0",
     operation: "analyze",
     executionMode: "offline",
     remoteBaseline: {

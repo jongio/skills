@@ -133,7 +133,7 @@ For `revalidate`, pass exactly one bounded UTF-8 JSON object over stdin:
 
 ```text
 {
-  "result": <prior closed analyze 1.2.0 verified-mode result>,
+  "result": <prior closed analyze 2.0.0 verified-mode result>,
   "selectedCarrierIds": ["<stable-carrier-id>", "..."],
   "approvalClass": "<one-mutation-class>",
   "approvedPlan": null | {

@@ -168,7 +168,7 @@ test("remote verification ignores repository-controlled configuration", async ()
   }
 });
 
-test("schema 1.2 binds verified mode and baseline into result identity", async () => {
+test("schema 2.0 binds verified mode and baseline into result identity", async () => {
   const remote = await remoteFixture("hardening-schema");
   try {
     const baseline = await verifyRemoteBaseline(remote.remotePath);
@@ -176,7 +176,7 @@ test("schema 1.2 binds verified mode and baseline into result identity", async (
       executionMode: "verified",
       remoteBaseline: baseline,
     });
-    assert.equal(analyzed.schemaVersion, "1.2.0");
+    assert.equal(analyzed.schemaVersion, "2.0.0");
     assert.equal(analyzed.executionMode, "verified");
     assert.equal(validateMechanicalResult(analyzed).valid, true);
     const cli = spawnSync(
