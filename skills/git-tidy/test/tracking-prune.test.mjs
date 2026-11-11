@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rmdir, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rmdir, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -67,7 +67,7 @@ test("tracking prune confirms exact refs and verifies recovery before deletion",
 
   const result = await run("apply", approved, local.root);
   assert.deepEqual(result.pruned, plan.rows.map(({ ref }) => ref));
-  assert.equal(result.bundle, bundlePath);
+  assert.equal(result.bundle, await realpath(bundlePath));
   assert.equal(local.oid("refs/remotes/origin/HEAD"), base);
   assert.equal(local.oid("refs/remotes/origin/main"), base);
   const recovered = local.git(["bundle", "list-heads", bundlePath]).stdout.toString("utf8");
