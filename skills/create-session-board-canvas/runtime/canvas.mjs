@@ -17,18 +17,24 @@ export function attachCanvasLifecycle(runtime, canvasConfig = runtime?.config) {
   const origShutdown = runtime.shutdown.bind(runtime);
 
   runtime.openInstance = async (args) => {
-    await canvasConfig.authorizeOpen?.(args?.instanceId, args?.input, args?.ctx);
+    const instanceId = args?.instanceId;
+    if (instanceId && runtime._instances?.has?.(instanceId) && canvasConfig.didOpenerTrustChange?.(instanceId, args?.ctx)) {
+      // Recreate the instance when opener trust changes so existing SSE streams disconnect and a fresh capability token is issued.
+      await canvasConfig.onCloseInstance?.(instanceId);
+      await origClose(instanceId);
+    }
+    await canvasConfig.authorizeOpen?.(instanceId, args?.input, args?.ctx);
     const out = await origOpen(args);
-    const inst = runtime._instances?.get?.(args?.instanceId);
+    const inst = runtime._instances?.get?.(instanceId);
     if (inst?.server && !inst._fleetCloseBound) {
       inst._fleetCloseBound = true;
       inst.server.once("close", () => {
-        void canvasConfig.onCloseInstance?.(args.instanceId);
+        void canvasConfig.onCloseInstance?.(instanceId);
       });
     }
-    const changed = await canvasConfig.onOpenInstance?.(args?.instanceId, args?.input, args?.ctx);
-    if (changed && inst?.domainId) {
-      await runtime.invoke("get_status", {}, { domainId: inst.domainId, instanceId: args?.instanceId, source: "ui" });
+    await canvasConfig.onOpenInstance?.(instanceId, args?.input, args?.ctx);
+    if (inst?.domainId) {
+      await runtime.invoke("get_status", {}, { domainId: inst.domainId, instanceId, source: "ui" });
     }
     return out;
   };
@@ -51,6 +57,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
   const operatorDomainId = `${sessionId}:operator`;
   const openPanels = new Set();
   const trustedPanels = new Set();
+  const panelTrustByInstance = new Map();
   const isTrustedOpener = (ctx) => {
     try {
       return actorFor(ctx || {}, sessionId).primary === true;
@@ -269,8 +276,13 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
     description: "Live session tasks, kanban, agents, blockers, delivery status, and opt-in cross-session project rollup.",
     assetsDir: fileURLToPath(new URL("./web/", import.meta.url)),
     inputSchema: openInputSchema,
+    didOpenerTrustChange: (instanceId, ctx) => {
+      if (!fleetService || !instanceId || !panelTrustByInstance.has(instanceId)) return false;
+      return panelTrustByInstance.get(instanceId) !== isTrustedOpener(ctx);
+    },
     authorizeOpen: (instanceId, input, ctx) => {
       if (!fleetService) return;
+      const trusted = isTrustedOpener(ctx);
       const requested = input?.scope;
       if (requested === "fleet" || requested === "projects" || requested === "inbox") {
         const actor = actorFor(ctx || {}, sessionId);
@@ -279,7 +291,8 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         }
       }
       if (instanceId) {
-        if (isTrustedOpener(ctx)) trustedPanels.add(instanceId);
+        panelTrustByInstance.set(instanceId, trusted);
+        if (trusted) trustedPanels.add(instanceId);
         else trustedPanels.delete(instanceId);
       }
     },
@@ -315,6 +328,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       if (instanceId) {
         openPanels.delete(instanceId);
         trustedPanels.delete(instanceId);
+        panelTrustByInstance.delete(instanceId);
       }
       await fleetService.setViewerActive(instanceId, false);
       if (openPanels.size === 0 || !fleetService.isPolling()) activeScope = "session";
@@ -323,6 +337,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       if (!fleetService) return;
       openPanels.clear();
       trustedPanels.clear();
+      panelTrustByInstance.clear();
       await fleetService.shutdown();
     },
     resolveDomainId: (_input, ctx) => {

@@ -646,7 +646,12 @@ export function createFleetService({
           pendingPlan,
           pendingPermission,
           pendingElicitation,
-          taskProgress: { done: leafMetrics.done, total: leafMetrics.total, percent: leafMetrics.percent },
+          taskProgress: {
+            done: leafMetrics.done,
+            total: leafMetrics.total,
+            percent: leafMetrics.percent,
+            truncated: Boolean(leafMetrics.truncated),
+          },
           incompleteLeafCount: leafMetrics.incomplete,
           resumableWorkflowCount: (loc?.workflows || []).filter((w) => w.status === "paused" || w.status === "failed").length,
           todos,
@@ -714,7 +719,12 @@ export function createFleetService({
           pendingPlan,
           pendingPermission,
           pendingElicitation,
-          taskProgress: { done: leafMetrics.done, total: leafMetrics.total, percent: leafMetrics.percent },
+          taskProgress: {
+            done: leafMetrics.done,
+            total: leafMetrics.total,
+            percent: leafMetrics.percent,
+            truncated: Boolean(leafMetrics.truncated),
+          },
           incompleteLeafCount: leafMetrics.incomplete,
           resumableWorkflowCount: (loc.workflows || []).filter((w) => w.status === "paused" || w.status === "failed").length,
           todos,
@@ -859,6 +869,7 @@ export function createFleetService({
         .map((group) => {
           const done = group.sessions.reduce((sum, s) => sum + (s.taskProgress.done || 0), 0);
           const total = group.sessions.reduce((sum, s) => sum + (s.taskProgress.total || 0), 0);
+          const truncated = group.sessions.some((s) => s.taskProgress?.truncated === true);
           const attentionCount = inbox.filter((item) => group.sessions.some((s) => s.id === item.sessionId)).length;
           return {
             key: group.key,
@@ -872,7 +883,8 @@ export function createFleetService({
             taskProgress: {
               done,
               total,
-              percent: total > 0 ? Math.floor((done * 100) / total) : null,
+              percent: !truncated && total > 0 ? Math.floor((done * 100) / total) : null,
+              truncated,
             },
             workflowCount: group.workflows.length,
             sessions: group.sessions,

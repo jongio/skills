@@ -163,10 +163,13 @@ if (lease) {
           store: userStore("session-progress", "fleet-recovery.json"),
           isLeader,
           recoverSession: async ({ sessionId: targetId, prompt }) => {
-            await session.rpc.tools.execute({
+            const toolResult = await session.rpc.tools.execute({
               name: "send_session_message",
               arguments: { session_id: targetId, message: prompt, delivery_mode: "immediate" },
             });
+            if (toolResult && typeof toolResult === "object" && toolResult.resultType && toolResult.resultType !== "success") {
+              throw new Error(String(toolResult.error || toolResult.textResultForLlm || "Recovery wake failed"));
+            }
           },
         }),
       onChange: async () => {

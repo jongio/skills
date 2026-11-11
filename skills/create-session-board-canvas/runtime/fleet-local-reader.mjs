@@ -625,10 +625,10 @@ export function readLocalFleetSnapshot({
         const tail = readBoundedUtf8(eventsPath, EVENTS_TAIL_BYTES, true);
         if (tail) {
           const lastNl = tail.content.lastIndexOf("\n");
-          const completeLines = lastNl >= 0 ? tail.content.slice(0, lastNl + 1) : tail.content;
-          const remainder = lastNl >= 0 ? tail.content.slice(lastNl + 1) : "";
+          const completeLines = lastNl >= 0 ? tail.content.slice(0, lastNl + 1) : "";
+          const remainder = lastNl >= 0 ? tail.content.slice(lastNl + 1) : tail.content;
           const parserState = createTailParserState({ truncatedStart: tail.offset > 0 });
-          applyEventsChunk(parserState, completeLines);
+          if (completeLines) applyEventsChunk(parserState, completeLines);
           cached.parserState = parserState;
           cached.eventsReadEnd = tail.size;
           cached.eventsRemainder = remainder;

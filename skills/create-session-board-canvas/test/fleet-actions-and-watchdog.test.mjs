@@ -161,11 +161,14 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
   const truncatedSess = state.sessions.find((s) => s.id === "truncated-cli");
   assert.equal(truncatedSess?.taskProgress.percent, null);
   assert.ok((truncatedSess?.incompleteLeafCount || 0) >= 1);
+  const truncatedProj = state.projects.find((p) => p.key === "jongio/other");
+  assert.equal(truncatedProj?.taskProgress.percent, null);
+  assert.equal(truncatedProj?.taskProgress.truncated, true);
 
   const skillsProject = state.projects.find((p) => p.key === "jongio/skills");
   assert.ok(skillsProject);
   // Leaf-only progress across sess-a (1/2 leaves; parent excluded!) + cli-only-1 (1/1 leaf) = 2/3 leaves = 66%.
-  assert.deepEqual(skillsProject.taskProgress, { done: 2, total: 3, percent: 66 });
+  assert.deepEqual(skillsProject.taskProgress, { done: 2, total: 3, percent: 66, truncated: false });
   const mergedPr = skillsProject.sessions.find((s) => s.id === "sess-a")?.prs[0];
   assert.equal(mergedPr?.state, "MERGED");
   assert.equal(mergedPr?.ciStatus, "passed");
@@ -480,6 +483,30 @@ test("HTTP capability token gates all fleet operator actions and serves unified 
     body: JSON.stringify({ actionName: "set_scope", input: { scope: "projects" } }),
   });
   assert.equal(downgradedEscalation.status, 500);
+
+  // Elevating a subagent-opened instance rotates its capability & closes the old server so the subagent's saved URL cannot read fleet state!
+  const elevated = await runtime.openInstance({
+    instanceId: "sub-default",
+    input: { scope: "fleet" },
+    ctx: { sessionId: "cap-host", agentId: null },
+  });
+  assert.notEqual(elevated.url, subDefaultPanel.url);
+  await assert.rejects(fetch(subStateUrl));
+
+  // Closing the last fleet panel and reopening with {} publishes fresh "session" scope immediately.
+  await runtime.closeInstance("fleet-panel");
+  await runtime.closeInstance("fleet-panel-2");
+  await runtime.closeInstance("sub-default");
+  assert.equal(fleetService.isPolling(), false);
+  const freshSessionOpen = await runtime.openInstance({
+    instanceId: "fresh-session-panel",
+    input: {},
+    ctx: { sessionId: "cap-host", agentId: null },
+  });
+  const freshStateUrl = new URL("/state", freshSessionOpen.url);
+  freshStateUrl.search = new URL(freshSessionOpen.url).search;
+  const freshState = await (await fetch(freshStateUrl)).json();
+  assert.equal(freshState.activeScope, "session");
 });
 
 test("leader handover, viewer-close cancellation, cross-instance policy sync, RPC failure accounting, subagent auth exclusions, and untimestamped grace windows hold", async (t) => {
@@ -658,6 +685,46 @@ test("leader handover, viewer-close cancellation, cross-instance policy sync, RP
   const secondObs = await resetWatchdog.evaluate([untimestamped]);
   assert.equal(secondObs["grace-reset-1"].action, "grace_wait");
   assert.equal(graceCalls, 0);
+
+  // Cancelled retry rollback during async persist must NOT be undone by mergeEntries on disk!
+  let allowDispatch = true;
+  let cancelPersistData = null;
+  const cancelStore = {
+    load: async (fb = null) => (cancelPersistData ? structuredClone(cancelPersistData) : fb),
+    save: async (next) => {
+      cancelPersistData = structuredClone(next);
+      // Simulate the last fleet view closing while the pre-dispatch persist() is awaiting!
+      if (next.entries?.["cancel-mid-persist"]?.pendingAttemptId) {
+        allowDispatch = false;
+      }
+    },
+  };
+  let cancelledDispatches = 0;
+  const cancelWatchdog = await createRecoveryWatchdog({
+    store: cancelStore,
+    now: () => nowMs,
+    graceMs: 60_000,
+    isLeader: () => true,
+    recoverSession: async () => { cancelledDispatches += 1; },
+  });
+  await cancelWatchdog.setPolicy("all_active");
+  allowDispatch = true;
+  await cancelWatchdog.evaluate(
+    [{
+      id: "cancel-mid-persist",
+      surface: "desktop",
+      mode: "autopilot",
+      activity: "idle",
+      wasInterrupted: true,
+      failedAtMs: nowMs - 120_000,
+      incompleteLeafCount: 1,
+      progressFingerprint: "todos:x|head:y",
+    }],
+    { canDispatch: () => allowDispatch },
+  );
+  assert.equal(cancelledDispatches, 0);
+  assert.equal(cancelWatchdog.snapshot().entries["cancel-mid-persist"].attempts, 0);
+  assert.equal(cancelPersistData.entries["cancel-mid-persist"].attempts, 0);
 });
 
 

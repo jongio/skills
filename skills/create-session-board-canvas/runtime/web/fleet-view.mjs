@@ -529,7 +529,7 @@ export function FleetWorkspace({ fleet, activeScope, invoke, onSelectScope }) {
                   ${proj.workflowCount > 0 && html`<${Badge}>${proj.workflowCount} ${proj.workflowCount === 1 ? "automation" : "automations"}</${Badge}>`}
                 </div>
                 <div class="inbox-links">
-                  ${proj.taskProgress.total > 0 && html`<span class="ck-caption">${proj.taskProgress.done}/${proj.taskProgress.total} leaves (${proj.taskProgress.percent}%)</span>`}
+                  ${proj.taskProgress.total > 0 && html`<span class="ck-caption">${proj.taskProgress.done}/${proj.taskProgress.total} leaves${proj.taskProgress.percent != null ? ` (${proj.taskProgress.percent}%)` : " · % unknown"}</span>`}
                   ${safeNew && html`<a class="ck-btn ck-btn-sm" href=${safeNew} target="_blank" rel="noopener noreferrer">
                     <${Icon} name="plus" size=${12} /> New session
                   </a>`}

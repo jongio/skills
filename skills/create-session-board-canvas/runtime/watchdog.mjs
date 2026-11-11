@@ -228,6 +228,46 @@ export async function createRecoveryWatchdog({
     }
   }
 
+  async function rollbackCancelledAttempt(sessionId, attemptId, { priorAttempts, priorLastAttemptMs, priorReason }) {
+    if (!store?.save) {
+      const local = state.entries[sessionId];
+      if (local && local.pendingAttemptId === attemptId) {
+        local.attempts = priorAttempts;
+        local.lastAttemptMs = priorLastAttemptMs;
+        local.lastReason = priorReason ?? null;
+        local.pendingAttemptId = null;
+      }
+      state.history = state.history.filter((item) => item.attemptId !== attemptId);
+      return state.entries[sessionId];
+    }
+    const disk = normalizeStoreData(await store.load(null));
+    if (disk) {
+      state.policy = disk.policy;
+      mergeEntries(state.entries, disk.entries);
+      if (disk.history.length > state.history.length) {
+        state.history = disk.history.slice(-50);
+      }
+      const diskTarget = disk.entries[sessionId];
+      if (diskTarget && diskTarget.pendingAttemptId && diskTarget.pendingAttemptId !== attemptId) {
+        // A newer attempt was already recorded by another active leader; preserve that newer accounting!
+        state.entries[sessionId] = structuredClone(diskTarget);
+        state.history = disk.history.filter((item) => item.attemptId !== attemptId).slice(-50);
+        await store.save(state);
+        return state.entries[sessionId];
+      }
+    }
+    const target = state.entries[sessionId];
+    if (target && target.pendingAttemptId === attemptId) {
+      target.attempts = priorAttempts;
+      target.lastAttemptMs = priorLastAttemptMs;
+      target.lastReason = priorReason ?? null;
+      target.pendingAttemptId = null;
+    }
+    state.history = state.history.filter((item) => item.attemptId !== attemptId).slice(-50);
+    await store.save(state);
+    return state.entries[sessionId];
+  }
+
   async function persist({ preservePolicy = false } = {}) {
     if (!store?.save) return;
     const disk = normalizeStoreData(await store?.load?.(null));
@@ -335,11 +375,15 @@ export async function createRecoveryWatchdog({
               const prompt = buildRecoveryPrompt(session, classified);
               const priorAttempts = prev.attempts;
               const priorLastAttemptMs = prev.lastAttemptMs;
+              const priorReason = prev.lastReason ?? null;
+              const attemptId = `${session.id}:${currentMs}:${Math.random().toString(36).slice(2, 8)}`;
               prev.attempts += 1;
               prev.lastAttemptMs = currentMs;
               prev.lastReason = classified.reason;
+              prev.pendingAttemptId = attemptId;
               state.entries[session.id] = prev;
               state.history.push({
+                attemptId,
                 sessionId: session.id,
                 at: new Date(currentMs).toISOString(),
                 attempt: prev.attempts,
@@ -357,15 +401,16 @@ export async function createRecoveryWatchdog({
                 isLeader() &&
                 canDispatch();
               if (!stillAllowed) {
-                prev.attempts = priorAttempts;
-                prev.lastAttemptMs = priorLastAttemptMs;
-                state.history.pop();
-                state.entries[session.id] = prev;
-                await persist();
-                evaluations[session.id].attempts = prev.attempts;
+                const rolledBack = await rollbackCancelledAttempt(session.id, attemptId, {
+                  priorAttempts,
+                  priorLastAttemptMs,
+                  priorReason,
+                });
+                evaluations[session.id].attempts = rolledBack?.attempts ?? priorAttempts;
                 continue;
               }
 
+              prev.pendingAttemptId = null;
               evaluations[session.id].attempts = prev.attempts;
               try {
                 await recoverSession({

@@ -192,6 +192,23 @@ test("Windows SQLite reader releases file handles immediately, caches by mtime, 
   assert.equal(sanitizedSnap.sessions[0].tailState?.pendingPermission, null);
   assert.equal(sanitizedSnap.sessions[0].tailState?.awaitingInput?.requestId, "ask-b");
   assert.equal(sanitizedSnap.sessions[0].tailState?.awaitingInput?.question, "Second?");
+
+  // Unterminated initial JSONL line is preserved as remainder and completed on subsequent append!
+  const partialSessionDir = join(home, "session-state", "partial-jsonl-1");
+  mkdirSync(partialSessionDir, { recursive: true });
+  writeFileSync(join(partialSessionDir, "workspace.yaml"), "id: partial-jsonl-1\nrepository: jongio/demo\nclient_name: github/cli\n");
+  const fullRecord = JSON.stringify({ type: "user_input.requested", timestamp: "2026-11-11T12:00:00Z", data: { requestId: "frag-1", question: "Fragmented?" } }) + "\n";
+  const halfIdx = Math.floor(fullRecord.length / 2);
+  const partialEventsPath = join(partialSessionDir, "events.jsonl");
+  writeFileSync(partialEventsPath, fullRecord.slice(0, halfIdx));
+  const partialRead1 = readLocalFleetSnapshot({ copilotHome: home, cache, sqliteTimeoutMs: 40 });
+  assert.equal(partialRead1.sessions.find((s) => s.id === "partial-jsonl-1")?.tailState?.awaitingInput, null);
+
+  writeFileSync(partialEventsPath, fullRecord);
+  const nextTick = new Date(Date.now() + 8000);
+  utimesSync(partialEventsPath, nextTick, nextTick);
+  const partialRead2 = readLocalFleetSnapshot({ copilotHome: home, cache, sqliteTimeoutMs: 40 });
+  assert.equal(partialRead2.sessions.find((s) => s.id === "partial-jsonl-1")?.tailState?.awaitingInput?.question, "Fragmented?");
   assert.deepEqual(
     sanitizedSnap.sessions[0].tailState?.subagents.filter((s) => s.state === "failed"),
     [],
