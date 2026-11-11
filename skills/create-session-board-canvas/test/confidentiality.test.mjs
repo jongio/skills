@@ -34,7 +34,15 @@ export function findForbiddenTokens(content, blockedHashes = FORBIDDEN_TOKEN_HAS
   const lower = String(content).toLowerCase();
   const candidates = new Set();
   for (const match of lower.matchAll(/[a-z0-9_.-]+(?:\/[a-z0-9_.-]+)+/g)) {
-    candidates.add(match[0].replace(/^[./-]+|[./-]+$/g, ""));
+    const cleaned = match[0].replace(/^[./-]+|[./-]+$/g, "");
+    candidates.add(cleaned);
+    const segments = cleaned.split("/").map((s) => s.replace(/^[.-]+|[.-]+$/g, "")).filter(Boolean);
+    for (let i = 0; i < segments.length; i += 1) {
+      candidates.add(segments[i]);
+      if (i + 1 < segments.length) {
+        candidates.add(`${segments[i]}/${segments[i + 1]}`);
+      }
+    }
   }
   for (const match of lower.matchAll(/[a-z0-9][a-z0-9_.-]*[a-z0-9]/g)) {
     candidates.add(match[0]);
@@ -66,7 +74,7 @@ test("token scanner detects hashed forbidden slugs and filenames without false n
   ]);
   assert.deepEqual(findForbiddenTokens("Public docs for @github/copilot-sdk and $COPILOT_HOME.", syntheticBlocked), []);
   assert.deepEqual(
-    findForbiddenTokens("See Acme-Private/Secret-Core:src/main.rs and internal-vault.db.", syntheticBlocked).sort(),
+    findForbiddenTokens("See https://github.com/Acme-Private/Secret-Core/blob/main/src/main.rs and internal-vault.db.", syntheticBlocked).sort(),
     ["acme-private/secret-core", "internal-vault.db"],
   );
 });

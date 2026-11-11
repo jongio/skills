@@ -203,8 +203,18 @@ function readSessionSqliteEphemeral(dbPath, timeoutMs) {
   }
 }
 
+function computeDbSignature(dbPath) {
+  const dbStat = safeStat(dbPath);
+  if (!dbStat) return null;
+  const walStat = safeStat(`${dbPath}-wal`);
+  // A 0-byte WAL file contains zero uncheckpointed frames (identical to an absent -wal file).
+  const walPart = walStat && walStat.size > 0 ? `${walStat.mtimeMs}:${walStat.size}` : "0:0";
+  return `${dbStat.mtimeMs}:${dbStat.size}:${walPart}`;
+}
+
 function parseEventsTail(content) {
   let activity = "idle";
+  let rootCancelled = false;
   let awaitingInput = null;
   let pendingPlan = null;
   let pendingPermission = null;
@@ -227,9 +237,16 @@ function parseEventsTail(content) {
     if (at) lastEventAt = at;
     const data = event?.data && typeof event.data === "object" ? event.data : {};
 
-    if (type === "assistant.turn_start") {
-      activity = "busy";
+    if (type === "user.message") {
+      rootCancelled = false;
       lastError = null;
+    } else if (type === "assistant.turn_start") {
+      activity = "busy";
+      rootCancelled = false;
+      lastError = null;
+      for (const [subId, sub] of subagents.entries()) {
+        if (sub.state === "failed") subagents.delete(subId);
+      }
     } else if (type === "assistant.turn_end") {
       activity = "idle";
       completedTurns += 1;
@@ -238,6 +255,16 @@ function parseEventsTail(content) {
     } else if (type === "abort" || type === "session.shutdown") {
       if (!event.agentId && !data.agentId) {
         activity = "idle";
+        if (type === "abort") {
+          rootCancelled = true;
+          lastError = null;
+          for (const sub of subagents.values()) {
+            if (sub.state === "failed" || sub.state === "working") {
+              sub.state = "cancelled";
+              sub.error = null;
+            }
+          }
+        }
         awaitingInput = null;
         pendingPlan = null;
         pendingPermission = null;
@@ -307,6 +334,7 @@ function parseEventsTail(content) {
 
   return {
     activity,
+    rootCancelled,
     awaitingInput,
     pendingPlan,
     pendingPermission,
@@ -403,22 +431,18 @@ export function readLocalFleetSnapshot({
 
     // 3. Ephemeral read-only SQLite (todos, todo_deps, workflow_runs, factory_runs)
     const dbPath = join(item.sessionDir, "session.db");
-    const dbStat = safeStat(dbPath);
-    const walStat = dbStat ? safeStat(`${dbPath}-wal`) : null;
-    const dbSignature = dbStat ? `${dbStat.mtimeMs}:${walStat?.mtimeMs || 0}:${walStat?.size || 0}` : null;
+    const preSignature = computeDbSignature(dbPath);
 
     let todos = cached.todos || [];
     let dependencies = cached.dependencies || [];
     let workflows = cached.workflows || [];
     let factories = cached.factories || [];
 
-    if (dbStat && dbSignature !== cached.dbSignature) {
+    if (preSignature && preSignature !== cached.dbSignature) {
       stats.sqliteOpens += 1;
       const dbResult = readSessionSqliteEphemeral(dbPath, sqliteTimeoutMs);
       if (dbResult.ok) {
-        const postDbStat = safeStat(dbPath) || dbStat;
-        const postWalStat = safeStat(`${dbPath}-wal`);
-        const postSignature = `${postDbStat.mtimeMs}:${postWalStat?.mtimeMs || 0}:${postWalStat?.size || 0}`;
+        const postSignature = computeDbSignature(dbPath);
         todos = dbResult.todos;
         dependencies = dbResult.dependencies;
         workflows = dbResult.workflows;
@@ -427,11 +451,12 @@ export function readLocalFleetSnapshot({
         cached.dependencies = dependencies;
         cached.workflows = workflows;
         cached.factories = factories;
-        cached.dbSignature = postSignature;
+        // Only mark the cache current if no concurrent commit altered the DB or non-empty WAL during our read.
+        cached.dbSignature = postSignature === preSignature ? postSignature : null;
       } else {
         stats.sqliteBusySkips += 1;
       }
-    } else if (!dbStat) {
+    } else if (!preSignature) {
       todos = [];
       dependencies = [];
       workflows = [];
@@ -503,10 +528,13 @@ export function readLocalFleetSnapshot({
     }
 
     cache.sessions.set(item.id, cached);
-    const sessionId = String(workspace.id || item.id);
+    const rawWorkspaceId = workspace.id != null ? String(workspace.id).trim() : "";
+    const sessionId = SAFE_SESSION_ID.test(rawWorkspaceId) ? rawWorkspaceId : item.id;
+    const rawMcId = workspace.mc_session_id != null ? String(workspace.mc_session_id).trim() : "";
+    const mcSessionId = SAFE_SESSION_ID.test(rawMcId) ? rawMcId : null;
     sessions.push({
       id: sessionId,
-      mcSessionId: workspace.mc_session_id ? String(workspace.mc_session_id) : null,
+      mcSessionId,
       name: workspace.name ? String(workspace.name) : null,
       cwd: workspace.cwd ? String(workspace.cwd) : null,
       gitRoot: workspace.git_root ? String(workspace.git_root) : null,

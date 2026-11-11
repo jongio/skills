@@ -467,6 +467,7 @@ export function FleetWorkspace({ fleet, activeScope, invoke, onSelectScope }) {
     </div>`}
 
     ${model.selectedDetail && html`<${SessionDrillDown}
+      key=${model.selectedDetail.id}
       session=${model.selectedDetail}
       recoveryHistory=${model.recoveryHistory}
       invoke=${invoke}

@@ -108,16 +108,92 @@ function normalizePendingPlan(raw) {
   };
 }
 
-function buildProgressFingerprint({ todos = [], completedTurns = 0, headSha = "", statusRevision = 0 }) {
+function buildProgressFingerprint({ todos = [], headSha = "" }) {
   const todoSummary = todos.map((t) => `${t.id}:${t.status}`).sort().join(",");
   const hash = createHash("sha256").update(todoSummary).digest("hex").slice(0, 12);
-  return `turns:${completedTurns}|todos:${hash}|head:${headSha || "-"}|rev:${statusRevision || 0}`;
+  return `todos:${hash}|head:${headSha || "-"}`;
 }
 
 function normalizeRepoSlug(raw) {
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
   return isRepoFullName(trimmed) ? trimmed : null;
+}
+
+function normalizeCachedPr(cached) {
+  if (!cached || typeof cached !== "object") return null;
+  // Support canonical pr-statusline/pr-cache.json format: { info: { state, title, mergedAt, statusCheckRollup }, checkedAt, lastError }
+  if ("info" in cached || "checkedAt" in cached || "lastError" in cached) {
+    const info = cached.info && typeof cached.info === "object" ? cached.info : null;
+    if (!info) {
+      return {
+        state: null,
+        title: null,
+        headRefOid: null,
+        ciStatus: "unknown",
+        ciPassed: null,
+        ciTotal: null,
+        checkedAt: Number.isFinite(cached.checkedAt) ? cached.checkedAt : null,
+        stale: Boolean(cached.lastError),
+      };
+    }
+    const rawState = String(info.state || "").toUpperCase();
+    const state = rawState === "MERGED" || info.mergedAt ? "MERGED" : rawState === "CLOSED" ? "CLOSED" : rawState === "OPEN" ? "OPEN" : null;
+    const checks = Array.isArray(info.statusCheckRollup) ? info.statusCheckRollup : null;
+    let ciStatus = "unknown";
+    let ciPassed = null;
+    let ciTotal = null;
+    if (checks && checks.length > 0 && !cached.lastError) {
+      let passed = 0;
+      let running = 0;
+      let failed = 0;
+      for (const check of checks) {
+        const conclusion = String(check?.conclusion ?? "").toUpperCase();
+        const status = String(check?.status ?? "").toUpperCase();
+        const checkState = String(check?.state ?? "").toUpperCase();
+        if (
+          ["IN_PROGRESS", "QUEUED", "PENDING", "WAITING", "REQUESTED"].includes(status) ||
+          checkState === "PENDING" ||
+          (status && status !== "COMPLETED" && !conclusion)
+        ) {
+          running += 1;
+        } else if (
+          ["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(conclusion) ||
+          ["FAILURE", "ERROR"].includes(checkState)
+        ) {
+          failed += 1;
+        } else if (["SUCCESS", "NEUTRAL", "SKIPPED"].includes(conclusion) || checkState === "SUCCESS") {
+          passed += 1;
+        }
+      }
+      const total = passed + running + failed;
+      if (total > 0) {
+        ciPassed = passed;
+        ciTotal = total;
+        ciStatus = running > 0 ? "running" : failed > 0 ? "failed" : "passed";
+      }
+    }
+    return {
+      state,
+      title: typeof info.title === "string" && info.title.trim() ? info.title.trim() : null,
+      headRefOid: typeof info.headRefOid === "string" ? info.headRefOid : null,
+      ciStatus,
+      ciPassed,
+      ciTotal,
+      checkedAt: Number.isFinite(cached.checkedAt) ? cached.checkedAt : null,
+      stale: Boolean(cached.lastError),
+    };
+  }
+  return {
+    state: typeof cached.state === "string" ? cached.state.toUpperCase() : null,
+    title: typeof cached.title === "string" ? cached.title : null,
+    headRefOid: typeof cached.headRefOid === "string" ? cached.headRefOid : null,
+    ciStatus: cached.status || cached.ciStatus || "unknown",
+    ciPassed: cached.passed ?? null,
+    ciTotal: cached.total ?? null,
+    checkedAt: null,
+    stale: false,
+  };
 }
 
 function enrichPrList(catalogEntry, localEntry, prCache = {}) {
@@ -145,18 +221,20 @@ function enrichPrList(catalogEntry, localEntry, prCache = {}) {
   const catNum = Number(catalogEntry?.pr_number || catalogEntry?.pull_request_number || catalogEntry?.created_pr_number || 0);
   const synthesizedUrl = catUrl || (catRepo && catNum > 0 ? `https://github.com/${catRepo}/pull/${catNum}` : null);
   if (synthesizedUrl && !byUrl.has(synthesizedUrl)) {
-    const cached = prCache[synthesizedUrl] || (catRepo && catNum > 0 ? prCache[`${catRepo}#${catNum}`] : null) || null;
+    const rawCached = prCache[synthesizedUrl] || (catRepo && catNum > 0 ? prCache[`${catRepo}#${catNum}`] : null) || null;
+    const cached = normalizeCachedPr(rawCached);
     const parts = catRepo ? catRepo.split("/") : [];
     byUrl.set(synthesizedUrl, {
       url: synthesizedUrl,
       deepLink: parts.length === 2 && catNum > 0 ? buildPullRequestDeepLink({ owner: parts[0], repo: parts[1], number: catNum }) : null,
       reference: catRepo && catNum > 0 ? `${catRepo}#${catNum}` : synthesizedUrl,
-      title: String(catalogEntry?.pr_title || `${catRepo || "PR"} #${catNum || ""}`).trim(),
+      title: String(catalogEntry?.pr_title || cached?.title || `${catRepo || "PR"} #${catNum || ""}`).trim(),
       state: String(catalogEntry?.pr_state || cached?.state || "OPEN").toUpperCase(),
       headRefOid: catalogEntry?.pr_head_sha || cached?.headRefOid || null,
-      ciStatus: cached?.status || cached?.ciStatus || "unknown",
-      ciPassed: cached?.passed ?? null,
-      ciTotal: cached?.total ?? null,
+      ciStatus: cached?.ciStatus || "unknown",
+      ciPassed: cached?.ciPassed ?? null,
+      ciTotal: cached?.ciTotal ?? null,
+      stale: Boolean(cached?.stale),
     });
   }
 
@@ -170,6 +248,7 @@ export function createFleetService({
   workerClient,
   watchdog = null,
   createWatchdog = null,
+  acquireLeader = null,
   pollIntervalMs = 5000,
   maxPollIntervalMs = 30000,
   slowRpcThresholdMs = 250,
@@ -177,19 +256,35 @@ export function createFleetService({
   now = Date.now,
 } = {}) {
   const activeViewers = new Set();
+  let viewerEpoch = 0;
   let pollTimer = null;
   let effectivePollMs = pollIntervalMs;
   let inFlightRefresh = null;
   let hostToolsAvailable = Boolean(executeHostTool);
   let selectedSessionId = null;
   let stopped = false;
+  let leaderLease = null;
   let resolvedWatchdog = watchdog;
   let watchdogInitPromise = null;
+
+  async function releaseLeader() {
+    if (!leaderLease) return;
+    const current = leaderLease;
+    leaderLease = null;
+    await current.close?.().catch(() => {});
+  }
+
+  async function ensureLeaderIfActive() {
+    if (stopped || activeViewers.size === 0 || !acquireLeader || leaderLease) return;
+    leaderLease = await Promise.resolve(acquireLeader()).catch(() => null);
+  }
 
   async function ensureWatchdog() {
     if (resolvedWatchdog) return resolvedWatchdog;
     if (!createWatchdog) return null;
-    watchdogInitPromise ||= Promise.resolve(createWatchdog()).then((instance) => {
+    watchdogInitPromise ||= Promise.resolve(
+      createWatchdog({ isLeader: () => leaderLease !== null }),
+    ).then((instance) => {
       resolvedWatchdog = instance;
       return instance;
     });
@@ -248,6 +343,17 @@ export function createFleetService({
     pollTimer.unref?.();
   }
 
+  async function clearAllViewers() {
+    if (activeViewers.size > 0) viewerEpoch += 1;
+    activeViewers.clear();
+    clearTimeout(pollTimer);
+    pollTimer = null;
+    await Promise.all([
+      workerClient?.stop?.().catch(() => {}),
+      releaseLeader(),
+    ]);
+  }
+
   async function setViewerActive(instanceId, active) {
     if (!instanceId) return;
     if (active) {
@@ -260,15 +366,20 @@ export function createFleetService({
     } else {
       activeViewers.delete(instanceId);
       if (activeViewers.size === 0) {
+        viewerEpoch += 1;
         clearTimeout(pollTimer);
         pollTimer = null;
-        await workerClient?.stop?.().catch(() => {});
+        await Promise.all([
+          workerClient?.stop?.().catch(() => {}),
+          releaseLeader(),
+        ]);
       }
     }
   }
 
   async function refreshFleet() {
     if (inFlightRefresh) return inFlightRefresh;
+    const refreshEpoch = viewerEpoch;
     inFlightRefresh = (async () => {
       const rpcStart = performance.now();
       const [localResult, reposRes, catalogRes, statusRes, workflowsRes] = await Promise.all([
@@ -366,7 +477,7 @@ export function createFleetService({
         const interruptionReason = st?.interruption_reason ? String(st.interruption_reason) : null;
         const lastError = loc?.tailState?.lastError || null;
         const errorStamp = lastError?.at ? Date.parse(lastError.at) : NaN;
-        const failedAtMs = Number.isFinite(errorStamp) ? errorStamp : loc?.recencyMs || null;
+        const failedAtMs = Number.isFinite(errorStamp) ? errorStamp : null;
 
         const deepLink = safeDeepLinkUrl(cat.app_url) || buildSessionDetailDeepLink(id);
         const restartDeepLink = buildSessionRestartDeepLink(id);
@@ -380,6 +491,7 @@ export function createFleetService({
           branch: String(cat.branch || st?.branch || loc?.branch || ""),
           mode: String(st?.mode || cat.mode || "interactive"),
           activity,
+          rootCancelled: Boolean(loc?.tailState?.rootCancelled),
           busyDurationMs: Number.isFinite(st?.busy_duration_ms) ? st.busy_duration_ms : null,
           wasInterrupted,
           interruptionReason,
@@ -403,9 +515,7 @@ export function createFleetService({
           updatedAt: String(cat.updated_at || loc?.updatedAt || new Date(now()).toISOString()),
           progressFingerprint: buildProgressFingerprint({
             todos,
-            completedTurns: loc?.tailState?.completedTurns || 0,
             headSha: prs[0]?.headRefOid || "",
-            statusRevision: loc?.liveServer?.statusRevision || 0,
           }),
         });
       }
@@ -449,11 +559,12 @@ export function createFleetService({
           branch: String(loc.branch || loc.liveServer?.branch || ""),
           mode: "interactive",
           activity,
+          rootCancelled: Boolean(loc.tailState?.rootCancelled),
           busyDurationMs: null,
           wasInterrupted: false,
           interruptionReason: null,
           lastError: loc.tailState?.lastError || null,
-          failedAtMs: Number.isFinite(errorStamp) ? errorStamp : loc.recencyMs || null,
+          failedAtMs: Number.isFinite(errorStamp) ? errorStamp : null,
           lockState: loc.lockState,
           awaitingInput,
           pendingPlan,
@@ -473,16 +584,24 @@ export function createFleetService({
           updatedAt: loc.updatedAt,
           progressFingerprint: buildProgressFingerprint({
             todos,
-            completedTurns: loc.tailState?.completedTurns || 0,
             headSha: prs[0]?.headRefOid || "",
-            statusRevision: loc.liveServer?.statusRevision || 0,
           }),
         });
       }
 
-      // Evaluate recovery watchdog on merged sessions.
+      // Evaluate recovery watchdog on merged sessions; retry leader acquisition only while fleet views remain active.
+      if (!stopped && activeViewers.size > 0 && refreshEpoch === viewerEpoch) {
+        await ensureLeaderIfActive();
+      }
       const activeWatchdog = await ensureWatchdog();
-      const recoveryEvaluations = activeWatchdog ? await activeWatchdog.evaluate(mergedSessions) : {};
+      const canDispatchRecovery = () =>
+        !stopped &&
+        activeViewers.size > 0 &&
+        refreshEpoch === viewerEpoch &&
+        (acquireLeader ? leaderLease !== null : true);
+      const recoveryEvaluations = activeWatchdog
+        ? await activeWatchdog.evaluate(mergedSessions, { canDispatch: canDispatchRecovery })
+        : {};
 
       // Build unified operator Attention Inbox.
       const inbox = [];
@@ -648,8 +767,14 @@ export function createFleetService({
       };
       await onChange(state);
       return structuredClone(state);
-    })().finally(() => {
+    })().finally(async () => {
       inFlightRefresh = null;
+      if (stopped || activeViewers.size === 0) {
+        await Promise.all([
+          workerClient?.stop?.().catch(() => {}),
+          releaseLeader(),
+        ]);
+      }
     });
     return inFlightRefresh;
   }
@@ -792,15 +917,20 @@ export function createFleetService({
 
   async function shutdown() {
     stopped = true;
+    viewerEpoch += 1;
     activeViewers.clear();
     clearTimeout(pollTimer);
     pollTimer = null;
-    await workerClient?.stop?.().catch(() => {});
+    await Promise.all([
+      workerClient?.stop?.().catch(() => {}),
+      releaseLeader(),
+    ]);
   }
 
   return {
     refreshFleet,
     setViewerActive,
+    clearAllViewers,
     selectSession,
     answerInput,
     respondPlan,

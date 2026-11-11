@@ -80,7 +80,18 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
           },
         ],
         prCache: {
-          "https://github.com/jongio/skills/pull/101": { status: "passed", passed: 5, total: 5 },
+          "https://github.com/jongio/skills/pull/101": {
+            checkedAt: Date.now(),
+            info: {
+              state: "MERGED",
+              title: "Unified board",
+              statusCheckRollup: [
+                { name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+                { name: "unit", status: "COMPLETED", conclusion: "SUCCESS" },
+                { context: "vally", state: "SUCCESS" },
+              ],
+            },
+          },
         },
         stats: {},
       }),
@@ -99,6 +110,11 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
   assert.ok(skillsProject);
   // Leaf-only progress across sess-a (1/2 leaves; parent excluded!) + cli-only-1 (1/1 leaf) = 2/3 leaves = 66%.
   assert.deepEqual(skillsProject.taskProgress, { done: 2, total: 3, percent: 66 });
+  const mergedPr = skillsProject.sessions.find((s) => s.id === "sess-a")?.prs[0];
+  assert.equal(mergedPr?.state, "MERGED");
+  assert.equal(mergedPr?.ciStatus, "passed");
+  assert.equal(mergedPr?.ciPassed, 3);
+  assert.equal(mergedPr?.ciTotal, 3);
   assert.equal(state.inbox.length, 1);
   assert.equal(state.inbox[0].kind, "ask_user");
   assert.equal(state.inbox[0].requestId, "req-ask-1");
@@ -336,5 +352,181 @@ test("HTTP capability token gates all fleet operator actions and serves unified 
     const assetRes = await fetch(new URL(assetPath, opened.url));
     assert.equal(assetRes.status, 200, `expected 200 for ${assetPath}`);
   }
+
+  // Agent callers (non-UI ctx) never receive cross-session fleet state and cannot invoke fleet actions.
+  const agentStatus = await runtime.invokeFromAgent("get_status", {}, { sessionId: "cap-host", instanceId: "fleet-panel" });
+  assert.equal("fleet" in agentStatus, false);
+  assert.equal("activeScope" in agentStatus, false);
+  await assert.rejects(
+    runtime.invokeFromAgent("set_scope", { scope: "projects" }, { sessionId: "cap-host", instanceId: "fleet-panel" }),
+    /restricted to capability-authenticated UI/i,
+  );
+
+  // Multi-panel symmetry: opening a second panel in fleet mode and switching scope to "session" stops polling for all panels.
+  const second = await runtime.openInstance({
+    instanceId: "fleet-panel-2",
+    input: { scope: "inbox" },
+    ctx: { sessionId: "cap-host" },
+  });
+  assert.equal(fleetService.isPolling(), true);
+  const switchRes = await fetch(capAction, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actionName: "set_scope", input: { scope: "session" } }),
+  });
+  assert.equal(switchRes.status, 200);
+  assert.equal(fleetService.isPolling(), false);
+
+  // Reopening with default {} keeps session scope and zero polling even if fleet was previously active.
+  await runtime.openInstance({ instanceId: "fleet-panel-2", input: { scope: "projects" }, ctx: { sessionId: "cap-host" } });
+  assert.equal(fleetService.isPolling(), true);
+  await runtime.openInstance({ instanceId: second.url ? "fleet-panel" : "fleet-panel", input: {}, ctx: { sessionId: "cap-host" } });
+  assert.equal(fleetService.isPolling(), false);
 });
+
+test("leader handover, viewer-close cancellation, cross-instance policy sync, RPC failure accounting, subagent auth exclusions, and untimestamped grace windows hold", async (t) => {
+  let nowMs = Date.parse("2026-11-11T15:00:00.000Z");
+  const sharedStore = memoryStore();
+  const scopeKey = `handover-${process.pid}-${Date.now()}`;
+  const recoveredByA = [];
+  const recoveredByB = [];
+
+  const makeBoard = (bucket) =>
+    createFleetService({
+      hostSessionId: "host",
+      now: () => nowMs,
+      acquireLeader: () => acquireFleetLeader(scopeKey),
+      createWatchdog: ({ isLeader }) =>
+        createRecoveryWatchdog({
+          store: sharedStore,
+          now: () => nowMs,
+          graceMs: 60_000,
+          baseBackoffMs: 10_000,
+          maxRetries: 3,
+          isLeader,
+          recoverSession: async (action) => { bucket.push(action); },
+        }),
+      executeHostTool: async (name) => {
+        if (name === "list_sessions_and_chats") {
+          return [
+            { id: "stalled-auto", name: "Auto Worker", repo_full_name: "jongio/skills" },
+            { id: "subagent-401", name: "Subagent OAuth", repo_full_name: "jongio/skills" },
+          ];
+        }
+        if (name === "get_sessions_status") {
+          return [
+            { id: "stalled-auto", activity: "idle", mode: "autopilot", was_interrupted: true, interruption_reason: "network stream reset" },
+            { id: "subagent-401", activity: "idle", mode: "autopilot" },
+          ];
+        }
+        return [];
+      },
+      workerClient: {
+        scan: async () => ({
+          sessions: [
+            {
+              id: "stalled-auto",
+              repository: "jongio/skills",
+              recencyMs: nowMs - 7_200_000, // 2 hours old workspace mtime MUST NOT bypass 60s grace window!
+              todos: [{ id: "t1", title: "Work", status: "in_progress" }],
+              tailState: { completedTurns: 1, activity: "idle" },
+            },
+            {
+              id: "subagent-401",
+              repository: "jongio/skills",
+              todos: [{ id: "t2", title: "Auth work", status: "in_progress" }],
+              tailState: {
+                activity: "idle",
+                subagents: [{ id: "sub-auth", name: "research", state: "failed", error: "401 Unauthorized: OAuth token expired" }],
+              },
+            },
+          ],
+          stats: {},
+        }),
+        stop: async () => {},
+        isRunning: () => false,
+      },
+    });
+
+  const boardA = makeBoard(recoveredByA);
+  const boardB = makeBoard(recoveredByB);
+  t.after(async () => { await boardA.shutdown(); await boardB.shutdown(); });
+
+  await boardA.setRecoveryPolicy("autopilot_only");
+  await boardA.setViewerActive("panel-a", true);
+  await boardB.setViewerActive("panel-b", true);
+
+  // First observation has no error timestamp: must enter 60s grace wait despite 2h-old workspace recencyMs!
+  assert.equal(recoveredByA.length, 0);
+  assert.equal(recoveredByB.length, 0);
+  // Failed subagent with 401 OAuth error is classified attention_only, never auto-woken.
+  const snap1 = boardA.snapshot();
+  assert.equal(snap1.sessions.find((s) => s.id === "subagent-401")?.recovery?.action, "attention_only");
+  assert.equal(snap1.sessions.find((s) => s.id === "stalled-auto")?.recovery?.action, "grace_wait");
+
+  // Advance past 60s grace window: Board A (leader) dispatches attempt 1; Board B does not double-dispatch.
+  nowMs += 65_000;
+  await boardA.refreshFleet();
+  await boardB.refreshFleet();
+  assert.equal(recoveredByA.length, 1);
+  assert.equal(recoveredByB.length, 0);
+
+  // Cross-instance policy sync: operator turns policy "off" on Board B; Board A honors "off" on next refresh without clobbering it!
+  await boardB.setRecoveryPolicy("off");
+  nowMs += 65_000;
+  await boardA.refreshFleet();
+  assert.equal(recoveredByA.length, 1);
+  assert.equal(boardA.snapshot().recoveryPolicy, "off");
+
+  // Re-enable on Board B, then close Board A's viewer -> Board A releases leadership and Board B takes over automatically!
+  await boardB.setRecoveryPolicy("autopilot_only");
+  await boardA.setViewerActive("panel-a", false);
+  nowMs += 65_000;
+  await boardB.refreshFleet();
+  assert.equal(recoveredByB.length, 1);
+
+  // Activity-only changes (completedTurns / statusRevision) without todo or headSha change do NOT reset attempts;
+  // and rejected recovery RPCs still increment attempts up to maxRetries=3 without throwing out of refreshFleet!
+  let failRpcCalls = 0;
+  const flakyWatchdog = await createRecoveryWatchdog({
+    store: memoryStore(),
+    now: () => nowMs,
+    graceMs: 60_000,
+    baseBackoffMs: 1_000,
+    maxRetries: 3,
+    isLeader: () => true,
+    recoverSession: async () => {
+      failRpcCalls += 1;
+      throw new Error("Transient IPC timeout");
+    },
+  });
+  await flakyWatchdog.setPolicy("all_active");
+  const failingCandidate = {
+    id: "rpc-fail-1",
+    surface: "desktop",
+    mode: "interactive",
+    activity: "idle",
+    wasInterrupted: true,
+    failedAtMs: nowMs - 120_000,
+    incompleteLeafCount: 1,
+    progressFingerprint: "todos:abc|head:-",
+  };
+  for (let i = 0; i < 4; i += 1) {
+    nowMs += 30_000;
+    await flakyWatchdog.evaluate([failingCandidate]);
+  }
+  assert.equal(failRpcCalls, 3);
+  assert.equal(flakyWatchdog.snapshot().entries["rpc-fail-1"].circuitOpen, true);
+
+  // Manual recovery rejects pending operator prompts and root-cancelled sessions.
+  await assert.rejects(
+    flakyWatchdog.triggerManual({ ...failingCandidate, awaitingInput: { requestId: "q1", question: "Confirm?" } }),
+    /waiting on operator input/i,
+  );
+  await assert.rejects(
+    flakyWatchdog.triggerManual({ ...failingCandidate, rootCancelled: true }),
+    /cancelled by the operator/i,
+  );
+});
+
 

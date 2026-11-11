@@ -20,7 +20,6 @@ const lease = await acquireProvider(process.env.SESSION_ID);
 if (lease) {
   let service;
   let fleetService;
-  let fleetLeader = null;
   let runtime;
   let tracking;
   let resolveReady;
@@ -34,30 +33,15 @@ if (lease) {
     properties: { scope: { type: "string", enum: ["session", "fleet", "projects", "inbox"] } },
     additionalProperties: false,
   };
-  const agentCanvasActions = [
-    { name: "get_status", description: "Read session progress", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-    { name: "refresh", description: "Refresh canonical session sources", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-    {
-      name: "set_scope",
-      description: "Switch board view between current session, project fleet rollup, and operator attention inbox",
-      inputSchema: {
-        type: "object",
-        properties: { scope: { type: "string", enum: ["session", "projects", "inbox"] }, instanceId: { type: "string" } },
-        required: ["scope"],
-        additionalProperties: false,
-      },
-    },
-    { name: "refresh_fleet", description: "Refresh cross-session and project rollup state", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
-  ];
   const canvas = createCanvas({
     id: "session-progress",
     displayName: "Session Board Canvas",
     description: "Live session kanban, team, blockers, delivery status, and opt-in cross-session project rollup.",
     inputSchema: canvasInputSchema,
-    actions: agentCanvasActions.map(({ name, description, inputSchema }) => ({
+    actions: ["get_status", "refresh"].map((name) => ({
       name,
-      description,
-      inputSchema,
+      description: name === "refresh" ? "Refresh canonical session sources" : "Read session progress",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
       handler: async (ctx) => {
         await ready;
         checkSession(ctx, session);
@@ -168,19 +152,18 @@ if (lease) {
       executeHostTool: (name, args) => session.rpc.tools.execute({ name, arguments: args }),
       askHostAgent: (prompt) => session.send({ prompt }),
       workerClient,
-      createWatchdog: async () => {
-        fleetLeader ||= await acquireFleetLeader(copilotHome).catch(() => null);
-        return createRecoveryWatchdog({
+      acquireLeader: () => acquireFleetLeader(copilotHome),
+      createWatchdog: async ({ isLeader }) =>
+        createRecoveryWatchdog({
           store: userStore("session-progress", "fleet-recovery.json"),
-          isLeader: () => fleetLeader !== null,
+          isLeader,
           recoverSession: async ({ sessionId: targetId, prompt }) => {
             await session.rpc.tools.execute({
               name: "send_session_message",
               arguments: { session_id: targetId, message: prompt, delivery_mode: "immediate" },
             });
           },
-        });
-      },
+        }),
       onChange: async () => {
         if (runtime) await runtime.invoke("get_status", {}, { domainId: session.sessionId });
       },
@@ -210,7 +193,6 @@ if (lease) {
     clearTimeout(refreshTimer);
     unsubscribe();
     await runtime.shutdown();
-    await fleetLeader?.close?.().catch(() => {});
     await session.disconnect();
     await lease.close();
   };

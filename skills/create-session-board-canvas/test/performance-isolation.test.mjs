@@ -160,6 +160,32 @@ test("Windows SQLite reader releases file handles immediately, caches by mtime, 
     writer.close();
   }
 
+  // After writer commits, next read picks up all 3 todos cleanly.
+  const afterCommit = readLocalFleetSnapshot({ copilotHome: home, cache, sqliteTimeoutMs: 40 });
+  assert.equal(afterCommit.sessions[0].todos.length, 3);
+
+  // Also verify unvalidated workspace.yaml IDs and root abort markers are sanitized safely.
+  writeFileSync(
+    join(sessionDir, "workspace.yaml"),
+    "id: \"cli-session-1; calc.exe\"\nrepository: jongio/demo\nclient_name: github/cli\n",
+  );
+  writeFileSync(
+    join(sessionDir, "events.jsonl"),
+    [
+      JSON.stringify({ type: "session.error", timestamp: "2026-11-11T10:00:00Z", data: { message: "503 overloaded" } }),
+      JSON.stringify({ type: "subagent.failed", timestamp: "2026-11-11T10:00:01Z", data: { agentId: "s1", error: "boom" } }),
+      JSON.stringify({ type: "abort", timestamp: "2026-11-11T10:00:05Z", data: {} }),
+    ].join("\n") + "\n",
+  );
+  const sanitizedSnap = readLocalFleetSnapshot({ copilotHome: home, cache, sqliteTimeoutMs: 40 });
+  assert.equal(sanitizedSnap.sessions[0].id, "cli-session-1");
+  assert.equal(sanitizedSnap.sessions[0].tailState?.rootCancelled, true);
+  assert.equal(sanitizedSnap.sessions[0].tailState?.lastError, null);
+  assert.deepEqual(
+    sanitizedSnap.sessions[0].tailState?.subagents.filter((s) => s.state === "failed"),
+    [],
+  );
+
   // Prove zero Windows handles remain open: renaming and deleting the session directory succeeds immediately on Windows.
   const renamedDir = join(home, "session-state", "cli-session-1-archived");
   renameSync(sessionDir, renamedDir);
@@ -280,7 +306,21 @@ test("fleet service coalesces concurrent refreshes and backs off polling when ho
   });
   t.after(() => fleetService.shutdown());
 
-  // Concurrent refresh calls coalesce into a single host RPC flight.
+  // Concurrent refresh calls coalesce into a single host RPC flight, and viewerless refresh stops any worker on exit.
+  let workerStopped = 0;
+  const viewerlessFleet = createFleetService({
+    hostSessionId: "host-2",
+    executeHostTool: async () => [],
+    workerClient: {
+      scan: async () => ({ sessions: [], stats: {} }),
+      stop: async () => { workerStopped += 1; },
+      isRunning: () => false,
+    },
+  });
+  t.after(() => viewerlessFleet.shutdown());
+  await viewerlessFleet.refreshFleet();
+  assert.ok(workerStopped >= 1, "expected viewerless refreshFleet to stop workerClient in finally");
+
   const [a, b, c] = await Promise.all([
     fleetService.refreshFleet(),
     fleetService.refreshFleet(),

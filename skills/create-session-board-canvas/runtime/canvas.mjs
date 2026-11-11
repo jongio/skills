@@ -46,6 +46,12 @@ export function attachCanvasLifecycle(runtime, canvasConfig = runtime?.config) {
 
 export function createProgressCanvas(service, sessionId, { refreshTracking = async () => {}, fleetService = null } = {}) {
   let activeScope = "session";
+  const openPanels = new Set();
+  const requireOperatorUi = (ctx) => {
+    if (ctx?.source !== "ui") {
+      throw new Error("Fleet operator actions are restricted to capability-authenticated UI clients");
+    }
+  };
   const composeSnapshot = () => {
     const snapshot = service.snapshot();
     if (fleetService) {
@@ -59,24 +65,25 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
     get_status: {
       description: "Read this session's board without changing tasks.",
       inputSchema: emptyInput,
-      handler: ({ set }) => {
-        const snapshot = composeSnapshot();
-        set(snapshot);
-        return snapshot;
+      handler: ({ set, ctx }) => {
+        const uiSnapshot = composeSnapshot();
+        set(uiSnapshot);
+        // Agent callers receive strictly current-session state, never cross-session fleet snapshots.
+        return ctx?.source === "ui" ? uiSnapshot : service.snapshot();
       },
     },
     refresh: {
       description: "Refresh canonical plan/tasks and request current owned references; never mutates tasks.",
       inputSchema: emptyInput,
-      handler: async ({ set }) => {
+      handler: async ({ set, ctx }) => {
         await service.refresh();
         await refreshTracking();
-        if (fleetService && activeScope !== "session") {
+        if (fleetService && ctx?.source === "ui" && activeScope !== "session") {
           await fleetService.refreshFleet();
         }
-        const snapshot = composeSnapshot();
-        set(snapshot);
-        return { revision: snapshot.revision, source: snapshot.source };
+        const uiSnapshot = composeSnapshot();
+        set(uiSnapshot);
+        return { revision: uiSnapshot.revision, source: uiSnapshot.source };
       },
     },
   };
@@ -94,9 +101,17 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         additionalProperties: false,
       },
       handler: async ({ input, set, ctx }) => {
+        requireOperatorUi(ctx);
         activeScope = input.scope;
-        const viewerKey = ctx?.instanceId || input.instanceId || "__default_panel__";
-        await fleetService.setViewerActive(viewerKey, input.scope !== "session");
+        if (input.scope === "session") {
+          await fleetService.clearAllViewers();
+        } else {
+          const viewerKey = ctx?.instanceId || input.instanceId || "__default_panel__";
+          openPanels.add(viewerKey);
+          for (const panelId of openPanels) {
+            await fleetService.setViewerActive(panelId, true);
+          }
+        }
         const snapshot = composeSnapshot();
         set(snapshot);
         return { scope: activeScope, fleetRevision: snapshot.fleet?.revision ?? 0 };
@@ -105,7 +120,11 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
     actions.refresh_fleet = {
       description: "Refresh cross-session and project rollup state on demand.",
       inputSchema: emptyInput,
-      handler: async ({ set }) => {
+      handler: async ({ set, ctx }) => {
+        requireOperatorUi(ctx);
+        if (activeScope === "session") {
+          throw new Error("Switch to Projects & sessions or Attention inbox before refreshing fleet state");
+        }
         await fleetService.refreshFleet();
         const snapshot = composeSnapshot();
         set(snapshot);
@@ -122,7 +141,8 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         required: ["targetSessionId"],
         additionalProperties: false,
       },
-      handler: async ({ input, set }) => {
+      handler: async ({ input, set, ctx }) => {
+        requireOperatorUi(ctx);
         const detail = await fleetService.selectSession(input.targetSessionId);
         set(composeSnapshot());
         return { selectedSessionId: input.targetSessionId, found: Boolean(detail) };
@@ -140,7 +160,8 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         required: ["targetSessionId", "requestId", "answer"],
         additionalProperties: false,
       },
-      handler: async ({ input, set }) => {
+      handler: async ({ input, set, ctx }) => {
+        requireOperatorUi(ctx);
         const result = await fleetService.answerInput(input);
         set(composeSnapshot());
         return result;
@@ -160,7 +181,8 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         required: ["targetSessionId", "requestId", "approved"],
         additionalProperties: false,
       },
-      handler: async ({ input, set }) => {
+      handler: async ({ input, set, ctx }) => {
+        requireOperatorUi(ctx);
         const result = await fleetService.respondPlan(input);
         set(composeSnapshot());
         return result;
@@ -179,7 +201,8 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         required: ["targetSessionId", "message"],
         additionalProperties: false,
       },
-      handler: async ({ input, set }) => {
+      handler: async ({ input, set, ctx }) => {
+        requireOperatorUi(ctx);
         const result = await fleetService.sendMessage(input);
         set(composeSnapshot());
         return result;
@@ -195,7 +218,8 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         required: ["policy"],
         additionalProperties: false,
       },
-      handler: async ({ input, set }) => {
+      handler: async ({ input, set, ctx }) => {
+        requireOperatorUi(ctx);
         const result = await fleetService.setRecoveryPolicy(input.policy);
         set(composeSnapshot());
         return result;
@@ -211,7 +235,8 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         required: ["targetSessionId"],
         additionalProperties: false,
       },
-      handler: async ({ input, set }) => {
+      handler: async ({ input, set, ctx }) => {
+        requireOperatorUi(ctx);
         const result = await fleetService.triggerRecovery(input);
         set(composeSnapshot());
         return result;
@@ -228,22 +253,25 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
     inputSchema: openInputSchema,
     onOpenInstance: async (instanceId, input) => {
       if (!fleetService) return false;
+      if (instanceId) openPanels.add(instanceId);
       const requested = input?.scope;
       if (requested === "fleet" || requested === "projects" || requested === "inbox") {
         activeScope = requested === "inbox" ? "inbox" : "projects";
-        await fleetService.setViewerActive(instanceId, true);
+        for (const panelId of openPanels) {
+          await fleetService.setViewerActive(panelId, true);
+        }
         return true;
       }
-      if (!fleetService.isPolling() && activeScope !== "session") {
-        activeScope = "session";
-        return true;
-      }
-      return false;
+      const hadFleetScope = activeScope !== "session" || fleetService.isPolling();
+      activeScope = "session";
+      await fleetService.clearAllViewers();
+      return hadFleetScope;
     },
     onCloseInstance: async (instanceId) => {
       if (!fleetService) return;
+      if (instanceId) openPanels.delete(instanceId);
       await fleetService.setViewerActive(instanceId, false);
-      if (!fleetService.isPolling()) activeScope = "session";
+      if (openPanels.size === 0 || !fleetService.isPolling()) activeScope = "session";
     },
     onShutdown: async () => {
       if (!fleetService) return;
