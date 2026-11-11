@@ -1,4 +1,5 @@
 import { fileURLToPath } from "node:url";
+import { actorFor } from "./host.mjs";
 
 const emptyInput = { type: "object", properties: {}, additionalProperties: false };
 const openInputSchema = {
@@ -16,6 +17,7 @@ export function attachCanvasLifecycle(runtime, canvasConfig = runtime?.config) {
   const origShutdown = runtime.shutdown.bind(runtime);
 
   runtime.openInstance = async (args) => {
+    await canvasConfig.authorizeOpen?.(args?.input, args?.ctx);
     const out = await origOpen(args);
     const inst = runtime._instances?.get?.(args?.instanceId);
     if (inst?.server && !inst._fleetCloseBound) {
@@ -251,6 +253,16 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
     description: "Live session tasks, kanban, agents, blockers, delivery status, and opt-in cross-session project rollup.",
     assetsDir: fileURLToPath(new URL("./web/", import.meta.url)),
     inputSchema: openInputSchema,
+    authorizeOpen: (input, ctx) => {
+      if (!fleetService) return;
+      const requested = input?.scope;
+      if (requested === "fleet" || requested === "projects" || requested === "inbox") {
+        const actor = actorFor(ctx || {}, sessionId);
+        if (!actor.primary) {
+          throw new Error("Only the primary session agent may open fleet-scoped views");
+        }
+      }
+    },
     onOpenInstance: async (instanceId, input) => {
       if (!fleetService) return false;
       if (instanceId) openPanels.add(instanceId);

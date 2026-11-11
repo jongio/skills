@@ -10,28 +10,37 @@ export function createFleetWorkerClient({
   let inFlight = null;
   const pending = new Map();
 
+  function cleanupWorker(instance, message) {
+    for (const [reqId, entry] of pending.entries()) {
+      if (entry.instance === instance) {
+        pending.delete(reqId);
+        entry.reject(message instanceof Error ? message : new Error(String(message)));
+      }
+    }
+    if (worker === instance) {
+      worker = null;
+    }
+  }
+
   function ensureWorker() {
     if (worker) return worker;
-    worker = new Worker(new URL("./fleet-worker.mjs", import.meta.url));
-    worker.unref();
-    worker.on("message", (msg) => {
+    const instance = new Worker(new URL("./fleet-worker.mjs", import.meta.url));
+    instance.unref();
+    instance.on("message", (msg) => {
       const entry = pending.get(msg?.id);
-      if (!entry) return;
+      if (!entry || entry.instance !== instance) return;
       pending.delete(msg.id);
       if (msg.ok) entry.resolve(msg.result);
       else entry.reject(new Error(msg.error || "Fleet worker scan failed"));
     });
-    worker.on("error", (error) => {
-      for (const entry of pending.values()) entry.reject(error);
-      pending.clear();
-      worker = null;
+    instance.on("error", (error) => {
+      cleanupWorker(instance, error);
     });
-    worker.on("exit", () => {
-      for (const entry of pending.values()) entry.reject(new Error("Fleet worker exited"));
-      pending.clear();
-      worker = null;
+    instance.on("exit", () => {
+      cleanupWorker(instance, "Fleet worker exited");
     });
-    return worker;
+    worker = instance;
+    return instance;
   }
 
   function scan() {
@@ -39,7 +48,7 @@ export function createFleetWorkerClient({
     inFlight = new Promise((resolve, reject) => {
       const id = nextId++;
       const instance = ensureWorker();
-      pending.set(id, { resolve, reject });
+      pending.set(id, { resolve, reject, instance });
       instance.postMessage({ id, copilotHome, maxSessions, sqliteTimeoutMs });
     }).finally(() => {
       inFlight = null;
@@ -51,8 +60,7 @@ export function createFleetWorkerClient({
     if (!worker) return;
     const current = worker;
     worker = null;
-    for (const entry of pending.values()) entry.reject(new Error("Fleet worker stopped"));
-    pending.clear();
+    cleanupWorker(current, "Fleet worker stopped");
     await current.terminate();
   }
 

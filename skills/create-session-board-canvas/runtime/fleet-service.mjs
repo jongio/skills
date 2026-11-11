@@ -173,10 +173,12 @@ function normalizeCachedPr(cached) {
         ciStatus = running > 0 ? "running" : failed > 0 ? "failed" : "passed";
       }
     }
+    const headFromCommits = info.commits?.nodes?.[0]?.commit?.oid;
+    const rawHead = info.headRefOid || info.headOid || headFromCommits || null;
     return {
       state,
       title: typeof info.title === "string" && info.title.trim() ? info.title.trim() : null,
-      headRefOid: typeof info.headRefOid === "string" ? info.headRefOid : null,
+      headRefOid: typeof rawHead === "string" && rawHead.trim() ? rawHead.trim().toLowerCase() : null,
       ciStatus,
       ciPassed,
       ciTotal,
@@ -187,7 +189,7 @@ function normalizeCachedPr(cached) {
   return {
     state: typeof cached.state === "string" ? cached.state.toUpperCase() : null,
     title: typeof cached.title === "string" ? cached.title : null,
-    headRefOid: typeof cached.headRefOid === "string" ? cached.headRefOid : null,
+    headRefOid: typeof cached.headRefOid === "string" && cached.headRefOid.trim() ? cached.headRefOid.trim().toLowerCase() : null,
     ciStatus: cached.status || cached.ciStatus || "unknown",
     ciPassed: cached.passed ?? null,
     ciTotal: cached.total ?? null,
@@ -196,46 +198,168 @@ function normalizeCachedPr(cached) {
   };
 }
 
+function mergeSubagentRecords(boardAgents = [], tailAgents = []) {
+  const merged = new Map();
+  for (const agent of Array.isArray(boardAgents) ? boardAgents : []) {
+    if (!agent?.id || agent.role === "primary" || agent.id === "primary") continue;
+    merged.set(String(agent.id), {
+      id: String(agent.id),
+      name: String(agent.name || agent.id),
+      state: String(agent.state || "unknown"),
+      error: typeof agent.error === "string" && agent.error ? agent.error : null,
+      updatedAt: typeof agent.updatedAt === "string" ? agent.updatedAt : null,
+    });
+  }
+  for (const tail of Array.isArray(tailAgents) ? tailAgents : []) {
+    if (!tail?.id || tail.id === "primary") continue;
+    const id = String(tail.id);
+    const existing = merged.get(id);
+    if (!existing) {
+      merged.set(id, {
+        id,
+        name: String(tail.name || id),
+        state: String(tail.state || "working"),
+        error: typeof tail.error === "string" && tail.error ? tail.error : null,
+        updatedAt: typeof tail.updatedAt === "string" ? tail.updatedAt : null,
+      });
+      continue;
+    }
+    const existingMs = existing.updatedAt ? Date.parse(existing.updatedAt) : NaN;
+    const tailMs = tail.updatedAt ? Date.parse(tail.updatedAt) : NaN;
+    const tailIsNewerOrSame = !Number.isFinite(existingMs) || (Number.isFinite(tailMs) && tailMs >= existingMs);
+    if (tailIsNewerOrSame) {
+      existing.state = String(tail.state || existing.state);
+      if (tail.updatedAt) existing.updatedAt = tail.updatedAt;
+    }
+    if (existing.state === "failed" && !existing.error && typeof tail.error === "string" && tail.error) {
+      existing.error = tail.error;
+    } else if (existing.state !== "failed") {
+      existing.error = null;
+    }
+  }
+  return [...merged.values()];
+}
+
 function enrichPrList(catalogEntry, localEntry, prCache = {}) {
   const byUrl = new Map();
+  const catUrl = catalogEntry?.pr_url || catalogEntry?.pull_request_url || catalogEntry?.created_pr_html_url || null;
+  const catRepo = normalizeRepoSlug(catalogEntry?.repo_full_name || catalogEntry?.repository || localEntry?.repository);
+  const catNum = Number(catalogEntry?.pr_number || catalogEntry?.pull_request_number || catalogEntry?.created_pr_number || 0);
+  const synthesizedCatUrl = catUrl || (catRepo && catNum > 0 ? `https://github.com/${catRepo}/pull/${catNum}` : null);
+  const catHead = typeof catalogEntry?.pr_head_sha === "string" && catalogEntry.pr_head_sha.trim()
+    ? catalogEntry.pr_head_sha.trim().toLowerCase()
+    : null;
+  const catState = typeof catalogEntry?.pr_state === "string" && catalogEntry.pr_state.trim()
+    ? catalogEntry.pr_state.trim().toUpperCase()
+    : null;
+  const catTitle = typeof catalogEntry?.pr_title === "string" && catalogEntry.pr_title.trim()
+    ? catalogEntry.pr_title.trim()
+    : null;
+
+  function buildReconciledPr({ url, reference, boardPr = null, matchesCatalog = false }) {
+    const rawCached = prCache[url] || (reference ? prCache[reference] : null) || null;
+    const cached = normalizeCachedPr(rawCached);
+    const boardHead = typeof boardPr?.headRefOid === "string" && boardPr.headRefOid.trim()
+      ? boardPr.headRefOid.trim().toLowerCase()
+      : null;
+    const boardObservedMs = boardPr?.ci?.observedAt ? Date.parse(boardPr.ci.observedAt) : NaN;
+    const cacheNewerThanBoard =
+      cached &&
+      !cached.stale &&
+      cached.checkedAt != null &&
+      (!Number.isFinite(boardObservedMs) || cached.checkedAt >= boardObservedMs);
+
+    const selectedHead =
+      (matchesCatalog && catHead) ||
+      (cacheNewerThanBoard && cached?.headRefOid ? cached.headRefOid : null) ||
+      boardHead ||
+      cached?.headRefOid ||
+      null;
+
+    // State reconciliation: prefer explicit catalog state, then terminal/newer non-stale cache state, then board state.
+    const boardState = typeof boardPr?.state === "string" ? boardPr.state.toUpperCase() : null;
+    const cachedTerminalUpgrade =
+      cached && !cached.stale && cached.state && (cached.state === "MERGED" || cached.state === "CLOSED");
+    const state =
+      (matchesCatalog && catState) ||
+      (cached && !cached.stale && cached.state && (cacheNewerThanBoard || cachedTerminalUpgrade || !boardState) ? cached.state : null) ||
+      boardState ||
+      "OPEN";
+
+    const title =
+      (matchesCatalog && catTitle) ||
+      (cached && !cached.stale && cached.title && (cacheNewerThanBoard || !boardPr?.title) ? cached.title : null) ||
+      boardPr?.title ||
+      reference ||
+      "Pull request";
+
+    // Strict head-verified CI selection: reuse CI only when its recorded head matches selectedHead!
+    const cacheHeadMatches = Boolean(
+      cached &&
+      !cached.stale &&
+      selectedHead &&
+      cached.headRefOid &&
+      cached.headRefOid === selectedHead,
+    );
+    const boardCiHead = typeof boardPr?.ci?.headRefOid === "string" ? boardPr.ci.headRefOid.trim().toLowerCase() : null;
+    const boardHeadMatches = Boolean(selectedHead && boardCiHead && boardCiHead === selectedHead);
+
+    let ciStatus = "unknown";
+    let ciPassed = null;
+    let ciTotal = null;
+    if (cacheHeadMatches && (!boardHeadMatches || cacheNewerThanBoard)) {
+      ciStatus = cached.ciStatus || "unknown";
+      ciPassed = cached.ciPassed ?? null;
+      ciTotal = cached.ciTotal ?? null;
+    } else if (boardHeadMatches) {
+      ciStatus = boardPr.ci?.status || "unknown";
+      ciPassed = boardPr.ci?.passed ?? null;
+      ciTotal = boardPr.ci?.total ?? null;
+    }
+
+    const parts = catRepo ? catRepo.split("/") : [];
+    const parsedNum = Number((url.match(/\/pull\/([1-9]\d*)/) || [])[1] || (matchesCatalog ? catNum : 0));
+    return {
+      url,
+      deepLink: parts.length === 2 && parsedNum > 0 ? buildPullRequestDeepLink({ owner: parts[0], repo: parts[1], number: parsedNum }) : null,
+      reference: reference || url,
+      title: String(title).trim(),
+      state,
+      headRefOid: selectedHead,
+      ciStatus,
+      ciPassed,
+      ciTotal,
+      stale: Boolean(cached?.stale),
+    };
+  }
+
   const boardPrs = localEntry?.board?.references?.prs;
   if (Array.isArray(boardPrs)) {
     for (const pr of boardPrs) {
       if (pr?.url) {
-        byUrl.set(pr.url, {
-          url: pr.url,
-          reference: pr.reference || pr.url,
-          title: pr.title || pr.reference || "Pull request",
-          state: pr.state || "OPEN",
-          headRefOid: pr.headRefOid || null,
-          ciStatus: pr.ci?.status || "unknown",
-          ciPassed: pr.ci?.passed ?? null,
-          ciTotal: pr.ci?.total ?? null,
-        });
+        byUrl.set(
+          pr.url,
+          buildReconciledPr({
+            url: pr.url,
+            reference: pr.reference || pr.url,
+            boardPr: pr,
+            matchesCatalog: Boolean(synthesizedCatUrl && pr.url === synthesizedCatUrl),
+          }),
+        );
       }
     }
   }
 
-  const catUrl = catalogEntry?.pr_url || catalogEntry?.pull_request_url || catalogEntry?.created_pr_html_url;
-  const catRepo = normalizeRepoSlug(catalogEntry?.repo_full_name || catalogEntry?.repository || localEntry?.repository);
-  const catNum = Number(catalogEntry?.pr_number || catalogEntry?.pull_request_number || catalogEntry?.created_pr_number || 0);
-  const synthesizedUrl = catUrl || (catRepo && catNum > 0 ? `https://github.com/${catRepo}/pull/${catNum}` : null);
-  if (synthesizedUrl && !byUrl.has(synthesizedUrl)) {
-    const rawCached = prCache[synthesizedUrl] || (catRepo && catNum > 0 ? prCache[`${catRepo}#${catNum}`] : null) || null;
-    const cached = normalizeCachedPr(rawCached);
-    const parts = catRepo ? catRepo.split("/") : [];
-    byUrl.set(synthesizedUrl, {
-      url: synthesizedUrl,
-      deepLink: parts.length === 2 && catNum > 0 ? buildPullRequestDeepLink({ owner: parts[0], repo: parts[1], number: catNum }) : null,
-      reference: catRepo && catNum > 0 ? `${catRepo}#${catNum}` : synthesizedUrl,
-      title: String(catalogEntry?.pr_title || cached?.title || `${catRepo || "PR"} #${catNum || ""}`).trim(),
-      state: String(catalogEntry?.pr_state || cached?.state || "OPEN").toUpperCase(),
-      headRefOid: catalogEntry?.pr_head_sha || cached?.headRefOid || null,
-      ciStatus: cached?.ciStatus || "unknown",
-      ciPassed: cached?.ciPassed ?? null,
-      ciTotal: cached?.ciTotal ?? null,
-      stale: Boolean(cached?.stale),
-    });
+  if (synthesizedCatUrl && !byUrl.has(synthesizedCatUrl)) {
+    byUrl.set(
+      synthesizedCatUrl,
+      buildReconciledPr({
+        url: synthesizedCatUrl,
+        reference: catRepo && catNum > 0 ? `${catRepo}#${catNum}` : synthesizedCatUrl,
+        boardPr: null,
+        matchesCatalog: true,
+      }),
+    );
   }
 
   return [...byUrl.values()];
@@ -468,9 +592,7 @@ export function createFleetService({
         const hierarchy = loc?.board?.hierarchy || [];
         const leafMetrics = computeLeafMetrics(todos, hierarchy);
         const prs = enrichPrList(cat, loc, localResult.prCache);
-        const subagents = loc?.board?.agents
-          ? loc.board.agents.filter((a) => a.role !== "primary" && a.id !== "primary")
-          : loc?.tailState?.subagents || [];
+        const subagents = mergeSubagentRecords(loc?.board?.agents, loc?.tailState?.subagents);
         const failedSubagents = subagents.filter((a) => a.state === "failed");
 
         const wasInterrupted = Boolean(st?.was_interrupted || st?.interrupted);
@@ -530,9 +652,7 @@ export function createFleetService({
         const hierarchy = loc.board?.hierarchy || [];
         const leafMetrics = computeLeafMetrics(todos, hierarchy);
         const prs = enrichPrList(null, loc, localResult.prCache);
-        const subagents = loc.board?.agents
-          ? loc.board.agents.filter((a) => a.role !== "primary" && a.id !== "primary")
-          : loc.tailState?.subagents || [];
+        const subagents = mergeSubagentRecords(loc.board?.agents, loc.tailState?.subagents);
         const failedSubagents = subagents.filter((a) => a.state === "failed");
 
         const awaitingInput = loc.tailState?.awaitingInput || null;

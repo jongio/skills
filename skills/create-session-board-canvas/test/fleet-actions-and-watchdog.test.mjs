@@ -23,8 +23,8 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
       }
       if (name === "list_sessions_and_chats") {
         return [
-          { id: "sess-a", name: "Feature A", repo_full_name: "jongio/skills", branch: "feat-a", app_url: "ghapp://sessions/sess-a", pr_number: 101, pr_url: "https://github.com/jongio/skills/pull/101" },
-          { id: "sess-b", name: "Unscoped sibling", repo_full_name: "jongio/skills", branch: "feat-b", app_url: "ghapp://sessions/sess-b" },
+          { id: "sess-a", name: "Feature A", repo_full_name: "jongio/skills", branch: "feat-a", app_url: "ghapp://sessions/sess-a", pr_number: 101, pr_url: "https://github.com/jongio/skills/pull/101", pr_head_sha: "a".repeat(40) },
+          { id: "sess-b", name: "Unscoped sibling", repo_full_name: "jongio/skills", branch: "feat-b", app_url: "ghapp://sessions/sess-b", pr_number: 102, pr_url: "https://github.com/jongio/skills/pull/102", pr_head_sha: "c".repeat(40) },
           { id: "chat-1", name: "Design chat", session_kind: "chat", app_url: "ghapp://sessions/chat-1" },
         ];
       }
@@ -66,6 +66,16 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
             board: {
               hierarchy: [{ parentId: "parent", childIds: ["leaf-1", "leaf-2"] }],
               agents: [{ id: "primary", role: "primary", state: "working" }, { id: "sub-1", role: "subagent", name: "explore", state: "completed" }],
+              references: {
+                prs: [{
+                  url: "https://github.com/jongio/skills/pull/101",
+                  reference: "jongio/skills#101",
+                  title: "Old title",
+                  state: "OPEN",
+                  headRefOid: "a".repeat(40),
+                  ci: { status: "unknown", headRefOid: "a".repeat(40), observedAt: "2026-11-11T00:00:00Z" },
+                }],
+              },
             },
           },
           {
@@ -85,11 +95,20 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
             info: {
               state: "MERGED",
               title: "Unified board",
+              headRefOid: "a".repeat(40),
               statusCheckRollup: [
                 { name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
                 { name: "unit", status: "COMPLETED", conclusion: "SUCCESS" },
                 { context: "vally", state: "SUCCESS" },
               ],
+            },
+          },
+          "https://github.com/jongio/skills/pull/102": {
+            checkedAt: Date.now(),
+            info: {
+              state: "OPEN",
+              headRefOid: "b".repeat(40), // Stale head != pr_head_sha ("c"*40) => CI must be cleared to unknown!
+              statusCheckRollup: [{ name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }],
             },
           },
         },
@@ -115,6 +134,10 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
   assert.equal(mergedPr?.ciStatus, "passed");
   assert.equal(mergedPr?.ciPassed, 3);
   assert.equal(mergedPr?.ciTotal, 3);
+  const mismatchedHeadPr = skillsProject.sessions.find((s) => s.id === "sess-b")?.prs[0];
+  assert.equal(mismatchedHeadPr?.ciStatus, "unknown");
+  assert.equal(mismatchedHeadPr?.ciPassed, null);
+  assert.equal(mismatchedHeadPr?.ciTotal, null);
   assert.equal(state.inbox.length, 1);
   assert.equal(state.inbox[0].kind, "ask_user");
   assert.equal(state.inbox[0].requestId, "req-ask-1");
@@ -318,10 +341,20 @@ test("HTTP capability token gates all fleet operator actions and serves unified 
   const runtime = attachCanvasLifecycle(createCanvasRuntime(canvasConfig), canvasConfig);
   t.after(() => runtime.shutdown());
 
+  // Unattributed or subagent callers cannot open fleet-scoped panels.
+  await assert.rejects(
+    runtime.openInstance({ instanceId: "unattributed", input: { scope: "fleet" }, ctx: { sessionId: "cap-host" } }),
+    /attribution unavailable/i,
+  );
+  await assert.rejects(
+    runtime.openInstance({ instanceId: "sub-open", input: { scope: "fleet" }, ctx: { sessionId: "cap-host", agentId: "worker-1" } }),
+    /Only the primary session agent/i,
+  );
+
   const opened = await runtime.openInstance({
     instanceId: "fleet-panel",
     input: { scope: "fleet" },
-    ctx: { sessionId: "cap-host" },
+    ctx: { sessionId: "cap-host", agentId: null },
   });
   assert.equal(fleetService.isPolling(), true);
 
@@ -366,7 +399,7 @@ test("HTTP capability token gates all fleet operator actions and serves unified 
   const second = await runtime.openInstance({
     instanceId: "fleet-panel-2",
     input: { scope: "inbox" },
-    ctx: { sessionId: "cap-host" },
+    ctx: { sessionId: "cap-host", agentId: null },
   });
   assert.equal(fleetService.isPolling(), true);
   const switchRes = await fetch(capAction, {
@@ -378,7 +411,7 @@ test("HTTP capability token gates all fleet operator actions and serves unified 
   assert.equal(fleetService.isPolling(), false);
 
   // Reopening with default {} keeps session scope and zero polling even if fleet was previously active.
-  await runtime.openInstance({ instanceId: "fleet-panel-2", input: { scope: "projects" }, ctx: { sessionId: "cap-host" } });
+  await runtime.openInstance({ instanceId: "fleet-panel-2", input: { scope: "projects" }, ctx: { sessionId: "cap-host", agentId: null } });
   assert.equal(fleetService.isPolling(), true);
   await runtime.openInstance({ instanceId: second.url ? "fleet-panel" : "fleet-panel", input: {}, ctx: { sessionId: "cap-host" } });
   assert.equal(fleetService.isPolling(), false);
@@ -435,6 +468,10 @@ test("leader handover, viewer-close cancellation, cross-instance policy sync, RP
               id: "subagent-401",
               repository: "jongio/skills",
               todos: [{ id: "t2", title: "Auth work", status: "in_progress" }],
+              board: {
+                // board.agents omits error details (just like progress.mjs); mergeSubagentRecords must preserve tailState error!
+                agents: [{ id: "sub-auth", name: "research", role: "subagent", state: "failed" }],
+              },
               tailState: {
                 activity: "idle",
                 subagents: [{ id: "sub-auth", name: "research", state: "failed", error: "401 Unauthorized: OAuth token expired" }],

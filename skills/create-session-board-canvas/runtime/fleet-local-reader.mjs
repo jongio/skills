@@ -215,13 +215,13 @@ function computeDbSignature(dbPath) {
 function parseEventsTail(content) {
   let activity = "idle";
   let rootCancelled = false;
-  let awaitingInput = null;
-  let pendingPlan = null;
-  let pendingPermission = null;
-  let pendingElicitation = null;
   let lastError = null;
   let completedTurns = 0;
   let lastEventAt = null;
+  const pendingInputs = new Map();
+  const pendingPlans = new Map();
+  const pendingPermissions = new Map();
+  const pendingElicitations = new Map();
   const subagents = new Map();
 
   for (const line of String(content || "").split(/\r?\n/)) {
@@ -236,24 +236,34 @@ function parseEventsTail(content) {
     const at = typeof event?.timestamp === "string" ? event.timestamp : null;
     if (at) lastEventAt = at;
     const data = event?.data && typeof event.data === "object" ? event.data : {};
+    const isChildEvent = Boolean(event.agentId || data.agentId || data.parentToolCallId);
+    const reqKey = String(data.requestId || data.request_id || "").trim() || "__default__";
 
     if (type === "user.message") {
-      rootCancelled = false;
-      lastError = null;
+      if (!isChildEvent) {
+        rootCancelled = false;
+        lastError = null;
+      }
     } else if (type === "assistant.turn_start") {
-      activity = "busy";
-      rootCancelled = false;
-      lastError = null;
-      for (const [subId, sub] of subagents.entries()) {
-        if (sub.state === "failed") subagents.delete(subId);
+      if (!isChildEvent) {
+        activity = "busy";
+        rootCancelled = false;
+        lastError = null;
+        for (const [subId, sub] of subagents.entries()) {
+          if (sub.state === "failed") subagents.delete(subId);
+        }
       }
     } else if (type === "assistant.turn_end") {
-      activity = "idle";
-      completedTurns += 1;
+      if (!isChildEvent) {
+        activity = "idle";
+        completedTurns += 1;
+      }
     } else if (type === "session.idle") {
-      activity = "idle";
+      if (!isChildEvent) {
+        activity = "idle";
+      }
     } else if (type === "abort" || type === "session.shutdown") {
-      if (!event.agentId && !data.agentId) {
+      if (!isChildEvent) {
         activity = "idle";
         if (type === "abort") {
           rootCancelled = true;
@@ -265,68 +275,86 @@ function parseEventsTail(content) {
             }
           }
         }
-        awaitingInput = null;
-        pendingPlan = null;
-        pendingPermission = null;
-        pendingElicitation = null;
+        pendingInputs.clear();
+        pendingPlans.clear();
+        pendingPermissions.clear();
+        pendingElicitations.clear();
       }
     } else if (type === "session.error") {
-      activity = "idle";
-      lastError = {
-        message: String(data.message || data.error || "Session error").slice(0, 500),
-        at,
-      };
+      if (!isChildEvent) {
+        activity = "idle";
+        lastError = {
+          message: String(data.message || data.error || "Session error").slice(0, 500),
+          at,
+        };
+      }
     } else if (type === "user_input.requested") {
-      awaitingInput = {
-        requestId: String(data.requestId || data.request_id || ""),
+      if (data.resolvedByHook) continue;
+      pendingInputs.set(reqKey, {
+        requestId: reqKey === "__default__" ? "" : reqKey,
         question: String(data.question || data.prompt || "Input requested").slice(0, 1000),
         choices: Array.isArray(data.choices) ? data.choices.map((c) => String(c)) : [],
         allowFreeform: data.allowFreeform !== false && data.allow_freeform !== false,
         at,
-      };
+      });
     } else if (type === "user_input.completed") {
-      awaitingInput = null;
+      if (reqKey === "__default__") pendingInputs.clear();
+      else pendingInputs.delete(reqKey);
     } else if (type === "exit_plan_mode.requested") {
-      pendingPlan = {
-        requestId: String(data.requestId || data.request_id || ""),
+      if (data.resolvedByHook) continue;
+      pendingPlans.set(reqKey, {
+        requestId: reqKey === "__default__" ? "" : reqKey,
         summary: String(data.summary || "").slice(0, 2000),
         at,
-      };
+      });
     } else if (type === "exit_plan_mode.completed") {
-      pendingPlan = null;
+      if (reqKey === "__default__") pendingPlans.clear();
+      else pendingPlans.delete(reqKey);
     } else if (type === "permission.requested") {
-      pendingPermission = {
-        requestId: String(data.requestId || data.request_id || ""),
+      if (data.resolvedByHook) continue;
+      pendingPermissions.set(reqKey, {
+        requestId: reqKey === "__default__" ? "" : reqKey,
         message: String(data.message || data.toolName || "Permission approval required").slice(0, 500),
         at,
-      };
+      });
     } else if (type === "permission.completed") {
-      pendingPermission = null;
+      if (reqKey === "__default__") pendingPermissions.clear();
+      else pendingPermissions.delete(reqKey);
     } else if (type === "elicitation.requested") {
-      pendingElicitation = {
-        requestId: String(data.requestId || data.request_id || ""),
+      if (data.resolvedByHook) continue;
+      pendingElicitations.set(reqKey, {
+        requestId: reqKey === "__default__" ? "" : reqKey,
         message: String(data.message || "MCP input required").slice(0, 500),
         at,
-      };
+      });
     } else if (type === "elicitation.completed") {
-      pendingElicitation = null;
+      if (reqKey === "__default__") pendingElicitations.clear();
+      else pendingElicitations.delete(reqKey);
     } else if (type.startsWith("subagent.")) {
       const id = String(data.agentId || event.agentId || data.name || "");
       if (id) {
-        const current = subagents.get(id) || { id, name: String(data.name || id), state: "working", error: null };
+        const current = subagents.get(id) || { id, name: String(data.name || id), state: "working", error: null, updatedAt: at };
+        if (at) current.updatedAt = at;
         if (type === "subagent.completed") {
-          current.state = "completed";
+          current.state = data.cancelled ? "cancelled" : "completed";
           current.error = null;
         } else if (type === "subagent.failed") {
           current.state = "failed";
           current.error = String(data.error || data.message || "Subagent failed").slice(0, 300);
         } else if (type === "subagent.started") {
           current.state = "working";
+          current.error = null;
         }
         subagents.set(id, current);
       }
     }
   }
+
+  const awaitingInputs = [...pendingInputs.values()];
+  const awaitingInput = awaitingInputs[0] || null;
+  const pendingPlan = [...pendingPlans.values()][0] || null;
+  const pendingPermission = [...pendingPermissions.values()][0] || null;
+  const pendingElicitation = [...pendingElicitations.values()][0] || null;
 
   if (awaitingInput || pendingPlan || pendingPermission || pendingElicitation) {
     activity = "waiting";
@@ -336,6 +364,7 @@ function parseEventsTail(content) {
     activity,
     rootCancelled,
     awaitingInput,
+    awaitingInputs,
     pendingPlan,
     pendingPermission,
     pendingElicitation,

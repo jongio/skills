@@ -164,7 +164,7 @@ test("Windows SQLite reader releases file handles immediately, caches by mtime, 
   const afterCommit = readLocalFleetSnapshot({ copilotHome: home, cache, sqliteTimeoutMs: 40 });
   assert.equal(afterCommit.sessions[0].todos.length, 3);
 
-  // Also verify unvalidated workspace.yaml IDs and root abort markers are sanitized safely.
+  // Also verify unvalidated workspace.yaml IDs, root abort vs child events, hook-resolved prompts, and overlapping request IDs.
   writeFileSync(
     join(sessionDir, "workspace.yaml"),
     "id: \"cli-session-1; calc.exe\"\nrepository: jongio/demo\nclient_name: github/cli\n",
@@ -175,12 +175,23 @@ test("Windows SQLite reader releases file handles immediately, caches by mtime, 
       JSON.stringify({ type: "session.error", timestamp: "2026-11-11T10:00:00Z", data: { message: "503 overloaded" } }),
       JSON.stringify({ type: "subagent.failed", timestamp: "2026-11-11T10:00:01Z", data: { agentId: "s1", error: "boom" } }),
       JSON.stringify({ type: "abort", timestamp: "2026-11-11T10:00:05Z", data: {} }),
+      // Child turn_start after root abort MUST NOT clear parent rootCancelled!
+      JSON.stringify({ type: "assistant.turn_start", agentId: "child-1", timestamp: "2026-11-11T10:00:06Z", data: { agentId: "child-1" } }),
+      // Hook-resolved permission request MUST NOT mark session waiting!
+      JSON.stringify({ type: "permission.requested", timestamp: "2026-11-11T10:00:07Z", data: { requestId: "hook-1", resolvedByHook: true } }),
+      // Overlapping user_input A and B where A completes leaves B pending!
+      JSON.stringify({ type: "user_input.requested", timestamp: "2026-11-11T10:00:08Z", data: { requestId: "ask-a", question: "First?" } }),
+      JSON.stringify({ type: "user_input.requested", timestamp: "2026-11-11T10:00:09Z", data: { requestId: "ask-b", question: "Second?" } }),
+      JSON.stringify({ type: "user_input.completed", timestamp: "2026-11-11T10:00:10Z", data: { requestId: "ask-a" } }),
     ].join("\n") + "\n",
   );
   const sanitizedSnap = readLocalFleetSnapshot({ copilotHome: home, cache, sqliteTimeoutMs: 40 });
   assert.equal(sanitizedSnap.sessions[0].id, "cli-session-1");
   assert.equal(sanitizedSnap.sessions[0].tailState?.rootCancelled, true);
   assert.equal(sanitizedSnap.sessions[0].tailState?.lastError, null);
+  assert.equal(sanitizedSnap.sessions[0].tailState?.pendingPermission, null);
+  assert.equal(sanitizedSnap.sessions[0].tailState?.awaitingInput?.requestId, "ask-b");
+  assert.equal(sanitizedSnap.sessions[0].tailState?.awaitingInput?.question, "Second?");
   assert.deepEqual(
     sanitizedSnap.sessions[0].tailState?.subagents.filter((s) => s.state === "failed"),
     [],
