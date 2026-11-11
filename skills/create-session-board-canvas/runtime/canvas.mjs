@@ -17,7 +17,7 @@ export function attachCanvasLifecycle(runtime, canvasConfig = runtime?.config) {
   const origShutdown = runtime.shutdown.bind(runtime);
 
   runtime.openInstance = async (args) => {
-    await canvasConfig.authorizeOpen?.(args?.input, args?.ctx);
+    await canvasConfig.authorizeOpen?.(args?.instanceId, args?.input, args?.ctx);
     const out = await origOpen(args);
     const inst = runtime._instances?.get?.(args?.instanceId);
     if (inst?.server && !inst._fleetCloseBound) {
@@ -26,9 +26,9 @@ export function attachCanvasLifecycle(runtime, canvasConfig = runtime?.config) {
         void canvasConfig.onCloseInstance?.(args.instanceId);
       });
     }
-    const changed = await canvasConfig.onOpenInstance?.(args?.instanceId, args?.input);
+    const changed = await canvasConfig.onOpenInstance?.(args?.instanceId, args?.input, args?.ctx);
     if (changed && inst?.domainId) {
-      await runtime.invoke("get_status", {}, { domainId: inst.domainId });
+      await runtime.invoke("get_status", {}, { domainId: inst.domainId, instanceId: args?.instanceId, source: "ui" });
     }
     return out;
   };
@@ -48,15 +48,29 @@ export function attachCanvasLifecycle(runtime, canvasConfig = runtime?.config) {
 
 export function createProgressCanvas(service, sessionId, { refreshTracking = async () => {}, fleetService = null } = {}) {
   let activeScope = "session";
+  const operatorDomainId = `${sessionId}:operator`;
   const openPanels = new Set();
-  const requireOperatorUi = (ctx) => {
-    if (ctx?.source !== "ui") {
-      throw new Error("Fleet operator actions are restricted to capability-authenticated UI clients");
+  const trustedPanels = new Set();
+  const isTrustedOpener = (ctx) => {
+    try {
+      return actorFor(ctx || {}, sessionId).primary === true;
+    } catch {
+      return false;
     }
   };
-  const composeSnapshot = () => {
+  const requireOperatorUi = (ctx) => {
+    if (
+      ctx?.source !== "ui" ||
+      ctx?.domainId !== operatorDomainId ||
+      !ctx?.instanceId ||
+      !trustedPanels.has(ctx.instanceId)
+    ) {
+      throw new Error("Fleet operator actions are restricted to capability-authenticated UI clients opened by the primary session");
+    }
+  };
+  const composeSnapshot = (domainId) => {
     const snapshot = service.snapshot();
-    if (fleetService) {
+    if (fleetService && domainId === operatorDomainId) {
       snapshot.activeScope = activeScope;
       snapshot.fleet = fleetService.snapshot();
     }
@@ -68,10 +82,10 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       description: "Read this session's board without changing tasks.",
       inputSchema: emptyInput,
       handler: ({ set, ctx }) => {
-        const uiSnapshot = composeSnapshot();
-        set(uiSnapshot);
-        // Agent callers receive strictly current-session state, never cross-session fleet snapshots.
-        return ctx?.source === "ui" ? uiSnapshot : service.snapshot();
+        const domainSnapshot = composeSnapshot(ctx?.domainId);
+        set(domainSnapshot);
+        // Agent callers and untrusted panels receive strictly current-session state, never cross-session fleet snapshots.
+        return ctx?.source === "ui" && ctx?.domainId === operatorDomainId ? domainSnapshot : service.snapshot();
       },
     },
     refresh: {
@@ -80,12 +94,12 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       handler: async ({ set, ctx }) => {
         await service.refresh();
         await refreshTracking();
-        if (fleetService && ctx?.source === "ui" && activeScope !== "session") {
+        if (fleetService && ctx?.source === "ui" && ctx?.domainId === operatorDomainId && activeScope !== "session") {
           await fleetService.refreshFleet();
         }
-        const uiSnapshot = composeSnapshot();
-        set(uiSnapshot);
-        return { revision: uiSnapshot.revision, source: uiSnapshot.source };
+        const domainSnapshot = composeSnapshot(ctx?.domainId);
+        set(domainSnapshot);
+        return { revision: domainSnapshot.revision, source: domainSnapshot.source };
       },
     },
   };
@@ -108,13 +122,15 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         if (input.scope === "session") {
           await fleetService.clearAllViewers();
         } else {
-          const viewerKey = ctx?.instanceId || input.instanceId || "__default_panel__";
+          const viewerKey = ctx?.instanceId;
           openPanels.add(viewerKey);
           for (const panelId of openPanels) {
-            await fleetService.setViewerActive(panelId, true);
+            if (trustedPanels.has(panelId)) {
+              await fleetService.setViewerActive(panelId, true);
+            }
           }
         }
-        const snapshot = composeSnapshot();
+        const snapshot = composeSnapshot(operatorDomainId);
         set(snapshot);
         return { scope: activeScope, fleetRevision: snapshot.fleet?.revision ?? 0 };
       },
@@ -128,7 +144,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
           throw new Error("Switch to Projects & sessions or Attention inbox before refreshing fleet state");
         }
         await fleetService.refreshFleet();
-        const snapshot = composeSnapshot();
+        const snapshot = composeSnapshot(operatorDomainId);
         set(snapshot);
         return { fleetRevision: snapshot.fleet?.revision ?? 0 };
       },
@@ -146,7 +162,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       handler: async ({ input, set, ctx }) => {
         requireOperatorUi(ctx);
         const detail = await fleetService.selectSession(input.targetSessionId);
-        set(composeSnapshot());
+        set(composeSnapshot(operatorDomainId));
         return { selectedSessionId: input.targetSessionId, found: Boolean(detail) };
       },
     };
@@ -165,7 +181,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       handler: async ({ input, set, ctx }) => {
         requireOperatorUi(ctx);
         const result = await fleetService.answerInput(input);
-        set(composeSnapshot());
+        set(composeSnapshot(operatorDomainId));
         return result;
       },
     };
@@ -186,7 +202,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       handler: async ({ input, set, ctx }) => {
         requireOperatorUi(ctx);
         const result = await fleetService.respondPlan(input);
-        set(composeSnapshot());
+        set(composeSnapshot(operatorDomainId));
         return result;
       },
     };
@@ -206,7 +222,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       handler: async ({ input, set, ctx }) => {
         requireOperatorUi(ctx);
         const result = await fleetService.sendMessage(input);
-        set(composeSnapshot());
+        set(composeSnapshot(operatorDomainId));
         return result;
       },
     };
@@ -223,7 +239,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       handler: async ({ input, set, ctx }) => {
         requireOperatorUi(ctx);
         const result = await fleetService.setRecoveryPolicy(input.policy);
-        set(composeSnapshot());
+        set(composeSnapshot(operatorDomainId));
         return result;
       },
     };
@@ -240,7 +256,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       handler: async ({ input, set, ctx }) => {
         requireOperatorUi(ctx);
         const result = await fleetService.triggerRecovery(input);
-        set(composeSnapshot());
+        set(composeSnapshot(operatorDomainId));
         return result;
       },
     };
@@ -253,7 +269,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
     description: "Live session tasks, kanban, agents, blockers, delivery status, and opt-in cross-session project rollup.",
     assetsDir: fileURLToPath(new URL("./web/", import.meta.url)),
     inputSchema: openInputSchema,
-    authorizeOpen: (input, ctx) => {
+    authorizeOpen: (instanceId, input, ctx) => {
       if (!fleetService) return;
       const requested = input?.scope;
       if (requested === "fleet" || requested === "projects" || requested === "inbox") {
@@ -262,15 +278,30 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
           throw new Error("Only the primary session agent may open fleet-scoped views");
         }
       }
+      if (instanceId) {
+        if (isTrustedOpener(ctx)) trustedPanels.add(instanceId);
+        else trustedPanels.delete(instanceId);
+      }
     },
-    onOpenInstance: async (instanceId, input) => {
+    onOpenInstance: async (instanceId, input, ctx) => {
       if (!fleetService) return false;
+      const trusted = instanceId ? trustedPanels.has(instanceId) : isTrustedOpener(ctx);
+      if (!trusted) {
+        if (instanceId) {
+          openPanels.delete(instanceId);
+          await fleetService.setViewerActive(instanceId, false);
+        }
+        if (openPanels.size === 0 || !fleetService.isPolling()) activeScope = "session";
+        return false;
+      }
       if (instanceId) openPanels.add(instanceId);
       const requested = input?.scope;
       if (requested === "fleet" || requested === "projects" || requested === "inbox") {
         activeScope = requested === "inbox" ? "inbox" : "projects";
         for (const panelId of openPanels) {
-          await fleetService.setViewerActive(panelId, true);
+          if (trustedPanels.has(panelId)) {
+            await fleetService.setViewerActive(panelId, true);
+          }
         }
         return true;
       }
@@ -281,19 +312,24 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
     },
     onCloseInstance: async (instanceId) => {
       if (!fleetService) return;
-      if (instanceId) openPanels.delete(instanceId);
+      if (instanceId) {
+        openPanels.delete(instanceId);
+        trustedPanels.delete(instanceId);
+      }
       await fleetService.setViewerActive(instanceId, false);
       if (openPanels.size === 0 || !fleetService.isPolling()) activeScope = "session";
     },
     onShutdown: async () => {
       if (!fleetService) return;
+      openPanels.clear();
+      trustedPanels.clear();
       await fleetService.shutdown();
     },
     resolveDomainId: (_input, ctx) => {
       if (ctx?.sessionId && ctx.sessionId !== sessionId) throw new Error("Cross-session canvas rejected");
-      return sessionId;
+      return fleetService && isTrustedOpener(ctx) ? operatorDomainId : sessionId;
     },
-    createInitialState: () => composeSnapshot(),
+    createInitialState: (ctx) => composeSnapshot(fleetService && isTrustedOpener(ctx) ? operatorDomainId : sessionId),
     statusLine: (_ctx, state) => `${state.metrics?.done || 0}/${state.metrics?.total || 0} tasks`,
     actions,
   };

@@ -141,7 +141,12 @@ if (lease) {
     service = await createProgressService({
       sessionId: session.sessionId, store, readSources: () => readSessionSources(session),
       onChange: async () => {
-        if (runtime) await runtime.invoke("get_status", {}, { domainId: session.sessionId });
+        if (runtime) {
+          await Promise.all([
+            runtime.invoke("get_status", {}, { domainId: session.sessionId }),
+            runtime.invoke("get_status", {}, { domainId: `${session.sessionId}:operator` }),
+          ]);
+        }
       },
     });
     tracking = createTrackingSync(session, service);
@@ -165,7 +170,7 @@ if (lease) {
           },
         }),
       onChange: async () => {
-        if (runtime) await runtime.invoke("get_status", {}, { domainId: session.sessionId });
+        if (runtime) await runtime.invoke("get_status", {}, { domainId: `${session.sessionId}:operator` });
       },
     });
     const canvasConfig = createProgressCanvas(service, session.sessionId, {

@@ -30,10 +30,11 @@ function readBoundedUtf8(filePath, maxBytes, fromEnd = false) {
   const info = safeStat(filePath);
   if (!info || !info.isFile()) return null;
   const length = Math.min(info.size, maxBytes);
-  if (length <= 0) return { content: "", size: info.size, mtimeMs: info.mtimeMs };
+  if (length <= 0) return { content: "", size: info.size, mtimeMs: info.mtimeMs, offset: 0 };
   const offset = fromEnd ? Math.max(0, info.size - length) : 0;
-  const fd = openSync(filePath, "r");
+  let fd = null;
   try {
+    fd = openSync(filePath, "r");
     const buffer = Buffer.allocUnsafe(length);
     const bytesRead = readSync(fd, buffer, 0, length, offset);
     let content = buffer.subarray(0, bytesRead).toString("utf8");
@@ -41,9 +42,27 @@ function readBoundedUtf8(filePath, maxBytes, fromEnd = false) {
       const firstNewline = content.indexOf("\n");
       content = firstNewline >= 0 ? content.slice(firstNewline + 1) : "";
     }
-    return { content, size: info.size, mtimeMs: info.mtimeMs };
+    return { content, size: info.size, mtimeMs: info.mtimeMs, offset };
+  } catch {
+    return null;
   } finally {
-    closeSync(fd);
+    try { if (fd != null) closeSync(fd); } catch { /* ignore close race */ }
+  }
+}
+
+function readUtf8Slice(filePath, startOffset, endOffset) {
+  const length = Math.max(0, endOffset - startOffset);
+  if (length === 0) return "";
+  let fd = null;
+  try {
+    fd = openSync(filePath, "r");
+    const buffer = Buffer.allocUnsafe(length);
+    const bytesRead = readSync(fd, buffer, 0, length, startOffset);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } catch {
+    return null;
+  } finally {
+    try { if (fd != null) closeSync(fd); } catch { /* ignore close race */ }
   }
 }
 
@@ -168,8 +187,8 @@ function readSessionSqliteEphemeral(dbPath, timeoutMs) {
     const tables = new Set(
       db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)),
     );
-    const todos = tables.has("todos")
-      ? db.prepare("SELECT id, title, description, status, updated_at FROM todos LIMIT 500").all().map((row) => ({
+    const rawTodos = tables.has("todos")
+      ? db.prepare("SELECT id, title, description, status, updated_at FROM todos LIMIT 2001").all().map((row) => ({
           id: String(row.id || ""),
           title: String(row.title || row.id || ""),
           description: String(row.description || ""),
@@ -177,12 +196,15 @@ function readSessionSqliteEphemeral(dbPath, timeoutMs) {
           updatedAt: row.updated_at ? String(row.updated_at) : null,
         })).filter((row) => row.id)
       : [];
-    const dependencies = tables.has("todo_deps")
-      ? db.prepare("SELECT todo_id, depends_on FROM todo_deps LIMIT 1000").all().map((row) => ({
+    const rawDeps = tables.has("todo_deps")
+      ? db.prepare("SELECT todo_id, depends_on FROM todo_deps LIMIT 5001").all().map((row) => ({
           todoId: String(row.todo_id || ""),
           dependsOn: String(row.depends_on || ""),
         })).filter((row) => row.todoId && row.dependsOn)
       : [];
+    const todosTruncated = rawTodos.length > 2000 || rawDeps.length > 5000;
+    const todos = todosTruncated ? rawTodos.slice(0, 2000) : rawTodos;
+    const dependencies = todosTruncated ? rawDeps.slice(0, 5000) : rawDeps;
     const workflows = tables.has("workflow_runs")
       ? db.prepare("SELECT id, status FROM workflow_runs LIMIT 50").all().map((row) => ({
           id: String(row.id || ""),
@@ -195,7 +217,7 @@ function readSessionSqliteEphemeral(dbPath, timeoutMs) {
           status: String(row.status || ""),
         }))
       : [];
-    return { ok: true, todos, dependencies, workflows, factories };
+    return { ok: true, todos, dependencies, todosTruncated, workflows, factories };
   } catch (error) {
     return { ok: false, locked: true, error: String(error?.message || error).slice(0, 200) };
   } finally {
@@ -212,18 +234,23 @@ function computeDbSignature(dbPath) {
   return `${dbStat.mtimeMs}:${dbStat.size}:${walPart}`;
 }
 
-function parseEventsTail(content) {
-  let activity = "idle";
-  let rootCancelled = false;
-  let lastError = null;
-  let completedTurns = 0;
-  let lastEventAt = null;
-  const pendingInputs = new Map();
-  const pendingPlans = new Map();
-  const pendingPermissions = new Map();
-  const pendingElicitations = new Map();
-  const subagents = new Map();
+function createTailParserState({ truncatedStart = false } = {}) {
+  return {
+    lifecycleKnown: !truncatedStart,
+    activity: truncatedStart ? "unknown" : "idle",
+    rootCancelled: false,
+    lastError: null,
+    completedTurns: 0,
+    lastEventAt: null,
+    pendingInputs: new Map(),
+    pendingPlans: new Map(),
+    pendingPermissions: new Map(),
+    pendingElicitations: new Map(),
+    subagents: new Map(),
+  };
+}
 
+function applyEventsChunk(parserState, content) {
   for (const line of String(content || "").split(/\r?\n/)) {
     if (!line.trim()) continue;
     let event;
@@ -234,63 +261,69 @@ function parseEventsTail(content) {
     }
     const type = String(event?.type || "");
     const at = typeof event?.timestamp === "string" ? event.timestamp : null;
-    if (at) lastEventAt = at;
+    if (at) parserState.lastEventAt = at;
     const data = event?.data && typeof event.data === "object" ? event.data : {};
     const isChildEvent = Boolean(event.agentId || data.agentId || data.parentToolCallId);
     const reqKey = String(data.requestId || data.request_id || "").trim() || "__default__";
 
     if (type === "user.message") {
       if (!isChildEvent) {
-        rootCancelled = false;
-        lastError = null;
+        parserState.lifecycleKnown = true;
+        parserState.rootCancelled = false;
+        parserState.lastError = null;
       }
     } else if (type === "assistant.turn_start") {
       if (!isChildEvent) {
-        activity = "busy";
-        rootCancelled = false;
-        lastError = null;
-        for (const [subId, sub] of subagents.entries()) {
-          if (sub.state === "failed") subagents.delete(subId);
+        parserState.lifecycleKnown = true;
+        parserState.activity = "busy";
+        parserState.rootCancelled = false;
+        parserState.lastError = null;
+        for (const [subId, sub] of parserState.subagents.entries()) {
+          if (sub.state === "failed") parserState.subagents.delete(subId);
         }
       }
     } else if (type === "assistant.turn_end") {
       if (!isChildEvent) {
-        activity = "idle";
-        completedTurns += 1;
+        parserState.lifecycleKnown = true;
+        parserState.activity = "idle";
+        parserState.completedTurns += 1;
       }
     } else if (type === "session.idle") {
       if (!isChildEvent) {
-        activity = "idle";
+        parserState.lifecycleKnown = true;
+        parserState.activity = "idle";
       }
     } else if (type === "abort" || type === "session.shutdown") {
       if (!isChildEvent) {
-        activity = "idle";
+        parserState.lifecycleKnown = true;
+        parserState.activity = "idle";
         if (type === "abort") {
-          rootCancelled = true;
-          lastError = null;
-          for (const sub of subagents.values()) {
+          parserState.rootCancelled = true;
+          parserState.lastError = null;
+          for (const sub of parserState.subagents.values()) {
             if (sub.state === "failed" || sub.state === "working") {
               sub.state = "cancelled";
               sub.error = null;
             }
           }
         }
-        pendingInputs.clear();
-        pendingPlans.clear();
-        pendingPermissions.clear();
-        pendingElicitations.clear();
+        parserState.pendingInputs.clear();
+        parserState.pendingPlans.clear();
+        parserState.pendingPermissions.clear();
+        parserState.pendingElicitations.clear();
       }
     } else if (type === "session.error") {
       if (!isChildEvent) {
-        activity = "idle";
-        lastError = {
+        parserState.lifecycleKnown = true;
+        parserState.activity = "idle";
+        parserState.lastError = {
           message: String(data.message || data.error || "Session error").slice(0, 500),
           at,
         };
       }
     } else if (type === "user_input.requested") {
       if (data.resolvedByHook) continue;
-      pendingInputs.set(reqKey, {
+      parserState.pendingInputs.set(reqKey, {
         requestId: reqKey === "__default__" ? "" : reqKey,
         question: String(data.question || data.prompt || "Input requested").slice(0, 1000),
         choices: Array.isArray(data.choices) ? data.choices.map((c) => String(c)) : [],
@@ -298,42 +331,42 @@ function parseEventsTail(content) {
         at,
       });
     } else if (type === "user_input.completed") {
-      if (reqKey === "__default__") pendingInputs.clear();
-      else pendingInputs.delete(reqKey);
+      if (reqKey === "__default__") parserState.pendingInputs.clear();
+      else parserState.pendingInputs.delete(reqKey);
     } else if (type === "exit_plan_mode.requested") {
       if (data.resolvedByHook) continue;
-      pendingPlans.set(reqKey, {
+      parserState.pendingPlans.set(reqKey, {
         requestId: reqKey === "__default__" ? "" : reqKey,
         summary: String(data.summary || "").slice(0, 2000),
         at,
       });
     } else if (type === "exit_plan_mode.completed") {
-      if (reqKey === "__default__") pendingPlans.clear();
-      else pendingPlans.delete(reqKey);
+      if (reqKey === "__default__") parserState.pendingPlans.clear();
+      else parserState.pendingPlans.delete(reqKey);
     } else if (type === "permission.requested") {
       if (data.resolvedByHook) continue;
-      pendingPermissions.set(reqKey, {
+      parserState.pendingPermissions.set(reqKey, {
         requestId: reqKey === "__default__" ? "" : reqKey,
         message: String(data.message || data.toolName || "Permission approval required").slice(0, 500),
         at,
       });
     } else if (type === "permission.completed") {
-      if (reqKey === "__default__") pendingPermissions.clear();
-      else pendingPermissions.delete(reqKey);
+      if (reqKey === "__default__") parserState.pendingPermissions.clear();
+      else parserState.pendingPermissions.delete(reqKey);
     } else if (type === "elicitation.requested") {
       if (data.resolvedByHook) continue;
-      pendingElicitations.set(reqKey, {
+      parserState.pendingElicitations.set(reqKey, {
         requestId: reqKey === "__default__" ? "" : reqKey,
         message: String(data.message || "MCP input required").slice(0, 500),
         at,
       });
     } else if (type === "elicitation.completed") {
-      if (reqKey === "__default__") pendingElicitations.clear();
-      else pendingElicitations.delete(reqKey);
+      if (reqKey === "__default__") parserState.pendingElicitations.clear();
+      else parserState.pendingElicitations.delete(reqKey);
     } else if (type.startsWith("subagent.")) {
       const id = String(data.agentId || event.agentId || data.name || "");
       if (id) {
-        const current = subagents.get(id) || { id, name: String(data.name || id), state: "working", error: null, updatedAt: at };
+        const current = parserState.subagents.get(id) || { id, name: String(data.name || id), state: "working", error: null, updatedAt: at };
         if (at) current.updatedAt = at;
         if (type === "subagent.completed") {
           current.state = data.cancelled ? "cancelled" : "completed";
@@ -345,33 +378,34 @@ function parseEventsTail(content) {
           current.state = "working";
           current.error = null;
         }
-        subagents.set(id, current);
+        parserState.subagents.set(id, current);
       }
     }
   }
+}
 
-  const awaitingInputs = [...pendingInputs.values()];
+function snapshotParserState(parserState) {
+  const awaitingInputs = [...parserState.pendingInputs.values()];
   const awaitingInput = awaitingInputs[0] || null;
-  const pendingPlan = [...pendingPlans.values()][0] || null;
-  const pendingPermission = [...pendingPermissions.values()][0] || null;
-  const pendingElicitation = [...pendingElicitations.values()][0] || null;
-
-  if (awaitingInput || pendingPlan || pendingPermission || pendingElicitation) {
-    activity = "waiting";
-  }
+  const pendingPlan = [...parserState.pendingPlans.values()][0] || null;
+  const pendingPermission = [...parserState.pendingPermissions.values()][0] || null;
+  const pendingElicitation = [...parserState.pendingElicitations.values()][0] || null;
+  const hasWaitingPrompt = Boolean(awaitingInput || pendingPlan || pendingPermission || pendingElicitation);
+  const activity = hasWaitingPrompt ? "waiting" : parserState.lifecycleKnown ? parserState.activity : "unknown";
 
   return {
     activity,
-    rootCancelled,
+    lifecycleUnknown: !parserState.lifecycleKnown && !hasWaitingPrompt,
+    rootCancelled: parserState.rootCancelled,
     awaitingInput,
     awaitingInputs,
     pendingPlan,
     pendingPermission,
     pendingElicitation,
-    lastError,
-    completedTurns,
-    lastEventAt,
-    subagents: [...subagents.values()],
+    lastError: parserState.lastError,
+    completedTurns: parserState.completedTurns,
+    lastEventAt: parserState.lastEventAt,
+    subagents: [...parserState.subagents.values()],
   };
 }
 
@@ -421,28 +455,39 @@ export function readLocalFleetSnapshot({
   for (const entry of dirEntries) {
     if (!entry.isDirectory() || !SAFE_SESSION_ID.test(entry.name)) continue;
     const sessionDir = join(stateRoot, entry.name);
+    let subEntries = null;
+    try {
+      subEntries = readdirSync(sessionDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
     const wsStat = safeStat(join(sessionDir, "workspace.yaml"));
+    const eventsStat = safeStat(join(sessionDir, "events.jsonl"));
+    const dbStat = safeStat(join(sessionDir, "session.db"));
+    const walStat = dbStat ? safeStat(join(sessionDir, "session.db-wal")) : null;
     const dirStat = safeStat(sessionDir);
-    if (!wsStat && !dirStat) continue;
-    const recencyMs = Math.max(wsStat?.mtimeMs || 0, dirStat?.mtimeMs || 0);
-    candidates.push({ id: entry.name, sessionDir, wsStat, recencyMs });
+    if (!wsStat && !dirStat && !eventsStat && !dbStat) continue;
+    const lockState = probeSessionLocks(sessionDir, subEntries, pidAlive);
+    const isLive = Boolean(lockState.alive || serversBySession.has(entry.name));
+    const recencyMs = Math.max(
+      wsStat?.mtimeMs || 0,
+      eventsStat?.mtimeMs || 0,
+      dbStat?.mtimeMs || 0,
+      walStat?.mtimeMs || 0,
+      dirStat?.mtimeMs || 0,
+    );
+    candidates.push({ id: entry.name, sessionDir, subEntries, lockState, isLive, wsStat, eventsStat, recencyMs });
   }
 
   stats.totalDiscoveredDirs = candidates.length;
-  candidates.sort((a, b) => b.recencyMs - a.recencyMs);
+  // Prioritize live sessions first, then activity-file recency, before applying the inspection cap.
+  candidates.sort((a, b) => Number(b.isLive) - Number(a.isLive) || b.recencyMs - a.recencyMs);
   const selected = candidates.slice(0, Math.max(1, maxSessions));
 
   const sessions = [];
   for (const item of selected) {
     stats.inspectedSessions += 1;
     const cached = cache.sessions.get(item.id) || {};
-
-    let subEntries = [];
-    try {
-      subEntries = readdirSync(item.sessionDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
 
     // 1. workspace.yaml
     let workspace = cached.workspace || {};
@@ -456,7 +501,7 @@ export function readLocalFleetSnapshot({
     }
 
     // 2. Lock / PID liveness
-    const lockState = probeSessionLocks(item.sessionDir, subEntries, pidAlive);
+    const lockState = item.lockState;
 
     // 3. Ephemeral read-only SQLite (todos, todo_deps, workflow_runs, factory_runs)
     const dbPath = join(item.sessionDir, "session.db");
@@ -464,6 +509,7 @@ export function readLocalFleetSnapshot({
 
     let todos = cached.todos || [];
     let dependencies = cached.dependencies || [];
+    let todosTruncated = Boolean(cached.todosTruncated);
     let workflows = cached.workflows || [];
     let factories = cached.factories || [];
 
@@ -474,10 +520,12 @@ export function readLocalFleetSnapshot({
         const postSignature = computeDbSignature(dbPath);
         todos = dbResult.todos;
         dependencies = dbResult.dependencies;
+        todosTruncated = Boolean(dbResult.todosTruncated);
         workflows = dbResult.workflows;
         factories = dbResult.factories;
         cached.todos = todos;
         cached.dependencies = dependencies;
+        cached.todosTruncated = todosTruncated;
         cached.workflows = workflows;
         cached.factories = factories;
         // Only mark the cache current if no concurrent commit altered the DB or non-empty WAL during our read.
@@ -488,6 +536,7 @@ export function readLocalFleetSnapshot({
     } else if (!preSignature) {
       todos = [];
       dependencies = [];
+      todosTruncated = false;
       workflows = [];
       factories = [];
       cached.dbSignature = null;
@@ -509,12 +558,20 @@ export function readLocalFleetSnapshot({
       cached.planMtimeMs = null;
     }
 
-    // 5. Optional session-progress board.json
-    const boardPath = join(item.sessionDir, "files", "session-progress", "board.json");
-    const boardStat = safeStat(boardPath);
+    // 5. Optional session-progress board.json (workspaceStore location first, then sessionStore scratch fallback)
+    const wsBoardPath = join(item.sessionDir, "files", "session-progress", "board.json");
+    const scratchBoardPath = join(item.sessionDir, "extensions", "session-progress", "board.json");
+    const wsBoardStat = safeStat(wsBoardPath);
+    const scratchBoardStat = safeStat(scratchBoardPath);
+    const chosenBoard = wsBoardStat && (!scratchBoardStat || wsBoardStat.mtimeMs >= scratchBoardStat.mtimeMs)
+      ? { path: wsBoardPath, stat: wsBoardStat }
+      : scratchBoardStat
+        ? { path: scratchBoardPath, stat: scratchBoardStat }
+        : null;
+    const boardSig = chosenBoard ? `${chosenBoard.path}:${chosenBoard.stat.mtimeMs}` : null;
     let board = cached.board || null;
-    if (boardStat && boardStat.mtimeMs !== cached.boardMtimeMs) {
-      const boundedBoard = readBoundedUtf8(boardPath, MAX_BOARD_BYTES);
+    if (chosenBoard && boardSig !== cached.boardSig) {
+      const boundedBoard = readBoundedUtf8(chosenBoard.path, MAX_BOARD_BYTES);
       if (boundedBoard) {
         try {
           const parsedBoard = JSON.parse(boundedBoard.content);
@@ -528,31 +585,63 @@ export function readLocalFleetSnapshot({
             references: parsedBoard.references || null,
           };
           cached.board = board;
-          cached.boardMtimeMs = boundedBoard.mtimeMs;
+          cached.boardSig = boardSig;
         } catch {
           /* ignore partial write */
         }
       }
-    } else if (!boardStat) {
+    } else if (!chosenBoard) {
       board = null;
-      cached.boardMtimeMs = null;
+      cached.boardSig = null;
     }
 
-    // 6. Bounded 64 KB events.jsonl tail
+    // 6. Stateful incremental events.jsonl reader (bounded 64 KB initial tail, then incremental appends)
     const eventsPath = join(item.sessionDir, "events.jsonl");
-    const eventsStat = safeStat(eventsPath);
+    const eventsStat = item.eventsStat || safeStat(eventsPath);
     const eventsSig = eventsStat ? `${eventsStat.mtimeMs}:${eventsStat.size}` : null;
     let tailState = cached.tailState || null;
     if (eventsStat && eventsSig !== cached.eventsSig) {
       stats.tailReads += 1;
-      const tail = readBoundedUtf8(eventsPath, EVENTS_TAIL_BYTES, true);
-      if (tail) {
-        tailState = parseEventsTail(tail.content);
-        cached.tailState = tailState;
-        cached.eventsSig = eventsSig;
+      const canAppendIncrementally =
+        cached.parserState &&
+        Number.isInteger(cached.eventsReadEnd) &&
+        eventsStat.size >= cached.eventsReadEnd &&
+        eventsStat.size - cached.eventsReadEnd <= 256 * 1024;
+
+      if (canAppendIncrementally) {
+        const deltaText = readUtf8Slice(eventsPath, cached.eventsReadEnd, eventsStat.size);
+        if (deltaText !== null) {
+          const combined = (cached.eventsRemainder || "") + deltaText;
+          const lastNl = combined.lastIndexOf("\n");
+          const completeLines = lastNl >= 0 ? combined.slice(0, lastNl + 1) : "";
+          cached.eventsRemainder = lastNl >= 0 ? combined.slice(lastNl + 1) : combined;
+          if (completeLines) applyEventsChunk(cached.parserState, completeLines);
+          cached.eventsReadEnd = eventsStat.size;
+          tailState = snapshotParserState(cached.parserState);
+          cached.tailState = tailState;
+          cached.eventsSig = eventsSig;
+        }
+      } else {
+        const tail = readBoundedUtf8(eventsPath, EVENTS_TAIL_BYTES, true);
+        if (tail) {
+          const lastNl = tail.content.lastIndexOf("\n");
+          const completeLines = lastNl >= 0 ? tail.content.slice(0, lastNl + 1) : tail.content;
+          const remainder = lastNl >= 0 ? tail.content.slice(lastNl + 1) : "";
+          const parserState = createTailParserState({ truncatedStart: tail.offset > 0 });
+          applyEventsChunk(parserState, completeLines);
+          cached.parserState = parserState;
+          cached.eventsReadEnd = tail.size;
+          cached.eventsRemainder = remainder;
+          tailState = snapshotParserState(parserState);
+          cached.tailState = tailState;
+          cached.eventsSig = eventsSig;
+        }
       }
     } else if (!eventsStat) {
       tailState = null;
+      cached.parserState = null;
+      cached.eventsReadEnd = null;
+      cached.eventsRemainder = "";
       cached.eventsSig = null;
     }
 
@@ -577,6 +666,7 @@ export function readLocalFleetSnapshot({
       liveServer: serversBySession.get(sessionId) || null,
       todos,
       dependencies,
+      todosTruncated,
       workflows,
       factories,
       plan,

@@ -25,6 +25,8 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
         return [
           { id: "sess-a", name: "Feature A", repo_full_name: "jongio/skills", branch: "feat-a", app_url: "ghapp://sessions/sess-a", pr_number: 101, pr_url: "https://github.com/jongio/skills/pull/101", pr_head_sha: "a".repeat(40) },
           { id: "sess-b", name: "Unscoped sibling", repo_full_name: "jongio/skills", branch: "feat-b", app_url: "ghapp://sessions/sess-b", pr_number: 102, pr_url: "https://github.com/jongio/skills/pull/102", pr_head_sha: "c".repeat(40) },
+          { id: "sess-null-check", name: "Null Conclusion PR", repo_full_name: "jongio/skills", branch: "feat-c", pr_number: 103, pr_url: "https://github.com/jongio/skills/pull/103", pr_head_sha: "d".repeat(40) },
+          { id: "archived-mc-alias", name: "Archived Session", repo_full_name: "jongio/skills", archived_at: "2026-11-10T00:00:00Z" },
           { id: "chat-1", name: "Design chat", session_kind: "chat", app_url: "ghapp://sessions/chat-1" },
         ];
       }
@@ -88,6 +90,22 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
             todos: [{ id: "c1", title: "CLI check", status: "done" }],
             dependencies: [],
           },
+          {
+            id: "local-archived-dir",
+            mcSessionId: "archived-mc-alias",
+            repository: "jongio/skills",
+            clientName: "github/autopilot",
+            todos: [{ id: "old", title: "Should be excluded", status: "in_progress" }],
+            dependencies: [],
+          },
+          {
+            id: "truncated-cli",
+            repository: "jongio/other",
+            clientName: "github/cli",
+            todos: [{ id: "t-done", title: "Done sample", status: "done" }],
+            todosTruncated: true,
+            dependencies: [],
+          },
         ],
         prCache: {
           "https://github.com/jongio/skills/pull/101": {
@@ -111,6 +129,17 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
               statusCheckRollup: [{ name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }],
             },
           },
+          "https://github.com/jongio/skills/pull/103": {
+            checkedAt: Date.now(),
+            info: {
+              state: "OPEN",
+              headRefOid: "d".repeat(40),
+              statusCheckRollup: [
+                { name: "lint", status: "COMPLETED", conclusion: "SUCCESS" },
+                { name: "mystery", status: "COMPLETED", conclusion: null }, // Null conclusion must count in total & keep CI unknown!
+              ],
+            },
+          },
         },
         stats: {},
       }),
@@ -122,8 +151,16 @@ test("fleet aggregator rolls up projects with leaf-only progress, deduplicates C
 
   const state = await fleetService.refreshFleet();
   assert.equal(state.coordinatorScoped, true);
-  // sess-a is deduplicated (not listed twice), plus sess-b, chat-1, cli-only-1 => 4 total sessions.
-  assert.equal(state.sessions.length, 4);
+  // Archived local alias ("local-archived-dir") is excluded; sess-a, sess-b, sess-null-check, chat-1, cli-only-1, truncated-cli => 6 sessions.
+  assert.equal(state.sessions.some((s) => s.id === "local-archived-dir" || s.id === "archived-mc-alias"), false);
+  assert.equal(state.sessions.length, 6);
+  const nullCheckPr = state.sessions.find((s) => s.id === "sess-null-check")?.prs[0];
+  assert.equal(nullCheckPr?.ciStatus, "unknown");
+  assert.equal(nullCheckPr?.ciPassed, 1);
+  assert.equal(nullCheckPr?.ciTotal, 2);
+  const truncatedSess = state.sessions.find((s) => s.id === "truncated-cli");
+  assert.equal(truncatedSess?.taskProgress.percent, null);
+  assert.ok((truncatedSess?.incompleteLeafCount || 0) >= 1);
 
   const skillsProject = state.projects.find((p) => p.key === "jongio/skills");
   assert.ok(skillsProject);
@@ -410,11 +447,39 @@ test("HTTP capability token gates all fleet operator actions and serves unified 
   assert.equal(switchRes.status, 200);
   assert.equal(fleetService.isPolling(), false);
 
-  // Reopening with default {} keeps session scope and zero polling even if fleet was previously active.
-  await runtime.openInstance({ instanceId: "fleet-panel-2", input: { scope: "projects" }, ctx: { sessionId: "cap-host", agentId: null } });
-  assert.equal(fleetService.isPolling(), true);
-  await runtime.openInstance({ instanceId: second.url ? "fleet-panel" : "fleet-panel", input: {}, ctx: { sessionId: "cap-host" } });
-  assert.equal(fleetService.isPolling(), false);
+  // Subagent or unattributed {} open receives ONLY single-session state and cannot invoke set_scope even with its capability URL!
+  const subDefaultPanel = await runtime.openInstance({
+    instanceId: "sub-default",
+    input: {},
+    ctx: { sessionId: "cap-host", agentId: "subagent-x" },
+  });
+  const subStateUrl = new URL("/state", subDefaultPanel.url);
+  subStateUrl.search = new URL(subDefaultPanel.url).search;
+  const subState = await (await fetch(subStateUrl)).json();
+  assert.equal("fleet" in subState, false);
+  const subActionUrl = new URL("/action", subDefaultPanel.url);
+  subActionUrl.search = new URL(subDefaultPanel.url).search;
+  const subEscalation = await fetch(subActionUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actionName: "set_scope", input: { scope: "projects" } }),
+  });
+  assert.equal(subEscalation.status, 500);
+
+  // Reusing an existing primary panel from a subagent revokes its fleet privilege too.
+  const downgraded = await runtime.openInstance({
+    instanceId: "fleet-panel-2",
+    input: {},
+    ctx: { sessionId: "cap-host", agentId: "subagent-x" },
+  });
+  const downgradedAction = new URL("/action", downgraded.url);
+  downgradedAction.search = new URL(downgraded.url).search;
+  const downgradedEscalation = await fetch(downgradedAction, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actionName: "set_scope", input: { scope: "projects" } }),
+  });
+  assert.equal(downgradedEscalation.status, 500);
 });
 
 test("leader handover, viewer-close cancellation, cross-instance policy sync, RPC failure accounting, subagent auth exclusions, and untimestamped grace windows hold", async (t) => {
@@ -564,6 +629,35 @@ test("leader handover, viewer-close cancellation, cross-instance policy sync, RP
     flakyWatchdog.triggerManual({ ...failingCandidate, rootCancelled: true }),
     /cancelled by the operator/i,
   );
+
+  // Failure reset persistence: after a healthy/busy observation clears firstObservedFailureMs, a new untimestamped failure enforces a fresh 60s grace window!
+  let graceCalls = 0;
+  const resetWatchdog = await createRecoveryWatchdog({
+    store: memoryStore(),
+    now: () => nowMs,
+    graceMs: 60_000,
+    isLeader: () => true,
+    recoverSession: async () => { graceCalls += 1; },
+  });
+  await resetWatchdog.setPolicy("all_active");
+  const untimestamped = {
+    id: "grace-reset-1",
+    surface: "desktop",
+    mode: "autopilot",
+    activity: "idle",
+    wasInterrupted: true,
+    failedAtMs: null,
+    incompleteLeafCount: 1,
+    progressFingerprint: "todos:same|head:same",
+  };
+  await resetWatchdog.evaluate([untimestamped]); // First observed at nowMs -> enters grace_wait
+  assert.equal(graceCalls, 0);
+  nowMs += 30_000;
+  await resetWatchdog.evaluate([{ ...untimestamped, activity: "busy", wasInterrupted: false }]); // Healthy/busy clears failure
+  nowMs += 40_000; // 70s after original failure, but NEW interruption starts now!
+  const secondObs = await resetWatchdog.evaluate([untimestamped]);
+  assert.equal(secondObs["grace-reset-1"].action, "grace_wait");
+  assert.equal(graceCalls, 0);
 });
 
 

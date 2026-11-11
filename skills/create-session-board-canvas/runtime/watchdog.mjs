@@ -47,6 +47,10 @@ export function classifyRecoveryCandidate(
     return { action: "none", autoEligible: false, reason: "Waiting on operator input or approval", hasSignal: false };
   }
 
+  if (session.activity === "unknown" || session.lifecycleUnknown) {
+    return { action: "none", autoEligible: false, reason: "Session lifecycle state is incomplete", hasSignal: false };
+  }
+
   if (session.activity === "busy") {
     if (Number.isFinite(session.busyDurationMs) && session.busyDurationMs >= zombieThresholdMs) {
       return {
@@ -191,11 +195,23 @@ export async function createRecoveryWatchdog({
           local.lastAttemptMs = diskEntry.lastAttemptMs;
           local.lastReason = diskEntry.lastReason ?? local.lastReason;
         }
-        if (Number.isFinite(diskEntry.firstObservedFailureMs)) {
-          local.firstObservedFailureMs = Number.isFinite(local.firstObservedFailureMs)
-            ? Math.min(local.firstObservedFailureMs, diskEntry.firstObservedFailureMs)
-            : diskEntry.firstObservedFailureMs;
-        }
+        const clearedAt = Math.max(
+          Number.isFinite(local.failureClearedAtMs) ? local.failureClearedAtMs : 0,
+          Number.isFinite(diskEntry.failureClearedAtMs) ? diskEntry.failureClearedAtMs : 0,
+        );
+        local.failureClearedAtMs = clearedAt > 0 ? clearedAt : null;
+        const validLocalObs =
+          Number.isFinite(local.firstObservedFailureMs) && local.firstObservedFailureMs > clearedAt
+            ? local.firstObservedFailureMs
+            : null;
+        const validDiskObs =
+          Number.isFinite(diskEntry.firstObservedFailureMs) && diskEntry.firstObservedFailureMs > clearedAt
+            ? diskEntry.firstObservedFailureMs
+            : null;
+        local.firstObservedFailureMs =
+          validLocalObs != null && validDiskObs != null
+            ? Math.min(validLocalObs, validDiskObs)
+            : validLocalObs ?? validDiskObs;
       } else if ((diskEntry.lastAttemptMs || 0) > (local.lastAttemptMs || 0)) {
         targetEntries[id] = structuredClone(diskEntry);
       }
@@ -256,6 +272,7 @@ export async function createRecoveryWatchdog({
           circuitOpen: false,
           lastAttemptMs: null,
           firstObservedFailureMs: null,
+          failureClearedAtMs: null,
           progressFingerprint: session.progressFingerprint || null,
           lastReason: null,
         };
@@ -264,6 +281,7 @@ export async function createRecoveryWatchdog({
           prev.attempts = 0;
           prev.circuitOpen = false;
           prev.firstObservedFailureMs = null;
+          prev.failureClearedAtMs = currentMs;
           prev.progressFingerprint = session.progressFingerprint;
           dirty = true;
         } else if (session.progressFingerprint && !prev.progressFingerprint) {
@@ -279,11 +297,16 @@ export async function createRecoveryWatchdog({
 
         if (classified.hasSignal) {
           if (prev.firstObservedFailureMs == null) {
-            prev.firstObservedFailureMs = Number.isFinite(session.failedAtMs) ? session.failedAtMs : currentMs;
+            const candidateObs = Number.isFinite(session.failedAtMs) ? session.failedAtMs : currentMs;
+            prev.firstObservedFailureMs =
+              Number.isFinite(prev.failureClearedAtMs) && candidateObs <= prev.failureClearedAtMs
+                ? currentMs
+                : candidateObs;
             dirty = true;
           }
         } else if (prev.firstObservedFailureMs != null) {
           prev.firstObservedFailureMs = null;
+          prev.failureClearedAtMs = currentMs;
           dirty = true;
         }
 

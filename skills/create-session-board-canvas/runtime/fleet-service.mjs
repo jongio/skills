@@ -52,10 +52,10 @@ function asArray(payload, ...keys) {
   return [];
 }
 
-function computeLeafMetrics(todos = [], hierarchy = []) {
+function computeLeafMetrics(todos = [], hierarchy = [], { truncated = false } = {}) {
   const validTodos = Array.isArray(todos) ? todos.filter((t) => t && typeof t.id === "string" && t.id) : [];
   if (validTodos.length === 0) {
-    return { done: 0, total: 0, incomplete: 0, percent: null };
+    return { done: 0, total: 0, incomplete: truncated ? 1 : 0, percent: null, truncated: Boolean(truncated) };
   }
   const byId = new Set(validTodos.map((t) => t.id));
   const parentWithValidChild = new Set();
@@ -68,11 +68,21 @@ function computeLeafMetrics(todos = [], hierarchy = []) {
   const leaves = validTodos.filter((t) => !parentWithValidChild.has(t.id));
   const done = leaves.filter((t) => t.status === "done").length;
   const total = leaves.length;
+  if (truncated) {
+    return {
+      done,
+      total,
+      incomplete: Math.max(1, total - done),
+      percent: null,
+      truncated: true,
+    };
+  }
   return {
     done,
     total,
     incomplete: Math.max(0, total - done),
     percent: total > 0 ? Math.floor((done * 100) / total) : null,
+    truncated: false,
   };
 }
 
@@ -147,6 +157,7 @@ function normalizeCachedPr(cached) {
       let passed = 0;
       let running = 0;
       let failed = 0;
+      let unknown = 0;
       for (const check of checks) {
         const conclusion = String(check?.conclusion ?? "").toUpperCase();
         const status = String(check?.status ?? "").toUpperCase();
@@ -164,14 +175,14 @@ function normalizeCachedPr(cached) {
           failed += 1;
         } else if (["SUCCESS", "NEUTRAL", "SKIPPED"].includes(conclusion) || checkState === "SUCCESS") {
           passed += 1;
+        } else {
+          unknown += 1;
         }
       }
-      const total = passed + running + failed;
-      if (total > 0) {
-        ciPassed = passed;
-        ciTotal = total;
-        ciStatus = running > 0 ? "running" : failed > 0 ? "failed" : "passed";
-      }
+      const total = checks.length;
+      ciPassed = passed;
+      ciTotal = total;
+      ciStatus = running > 0 ? "running" : failed > 0 ? "failed" : unknown > 0 ? "unknown" : "passed";
     }
     const headFromCommits = info.commits?.nodes?.[0]?.commit?.oid;
     const rawHead = info.headRefOid || info.headOid || headFromCommits || null;
@@ -554,6 +565,17 @@ export function createFleetService({
 
       const mergedSessions = [];
       const consumedLocalIds = new Set();
+      for (const item of catalogItems) {
+        if (!item?.archived_at) continue;
+        const archivedId = String(item?.id || item?.session_id || "");
+        if (!archivedId) continue;
+        consumedLocalIds.add(archivedId);
+        const archivedLocal = localById.get(archivedId);
+        if (archivedLocal) {
+          consumedLocalIds.add(archivedLocal.id);
+          if (archivedLocal.mcSessionId) consumedLocalIds.add(archivedLocal.mcSessionId);
+        }
+      }
 
       for (const cat of unarchivedCatalog) {
         const id = String(cat?.id || cat?.session_id || "");
@@ -590,7 +612,7 @@ export function createFleetService({
 
         const todos = loc?.todos || [];
         const hierarchy = loc?.board?.hierarchy || [];
-        const leafMetrics = computeLeafMetrics(todos, hierarchy);
+        const leafMetrics = computeLeafMetrics(todos, hierarchy, { truncated: Boolean(loc?.todosTruncated) });
         const prs = enrichPrList(cat, loc, localResult.prCache);
         const subagents = mergeSubagentRecords(loc?.board?.agents, loc?.tailState?.subagents);
         const failedSubagents = subagents.filter((a) => a.state === "failed");
@@ -613,6 +635,7 @@ export function createFleetService({
           branch: String(cat.branch || st?.branch || loc?.branch || ""),
           mode: String(st?.mode || cat.mode || "interactive"),
           activity,
+          lifecycleUnknown: Boolean(!st?.activity && !st?.status && !loc?.liveServer?.status && loc?.tailState?.lifecycleUnknown && activity !== "waiting"),
           rootCancelled: Boolean(loc?.tailState?.rootCancelled),
           busyDurationMs: Number.isFinite(st?.busy_duration_ms) ? st.busy_duration_ms : null,
           wasInterrupted,
@@ -650,7 +673,7 @@ export function createFleetService({
         const repo = normalizeRepoSlug(loc.repository);
         const todos = loc.todos || [];
         const hierarchy = loc.board?.hierarchy || [];
-        const leafMetrics = computeLeafMetrics(todos, hierarchy);
+        const leafMetrics = computeLeafMetrics(todos, hierarchy, { truncated: Boolean(loc.todosTruncated) });
         const prs = enrichPrList(null, loc, localResult.prCache);
         const subagents = mergeSubagentRecords(loc.board?.agents, loc.tailState?.subagents);
         const failedSubagents = subagents.filter((a) => a.state === "failed");
@@ -679,6 +702,7 @@ export function createFleetService({
           branch: String(loc.branch || loc.liveServer?.branch || ""),
           mode: "interactive",
           activity,
+          lifecycleUnknown: Boolean(!loc.liveServer?.status && loc.tailState?.lifecycleUnknown && activity !== "waiting"),
           rootCancelled: Boolean(loc.tailState?.rootCancelled),
           busyDurationMs: null,
           wasInterrupted: false,

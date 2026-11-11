@@ -85,8 +85,8 @@ test("default session scope performs zero fleet scans, zero host RPCs, and zero 
   const runtime = attachCanvasLifecycle(createCanvasRuntime(canvasConfig), canvasConfig);
   t.after(() => runtime.shutdown());
 
-  // Opening with {} stays in single-session mode: zero fleet activity.
-  const panel = await runtime.openInstance({ instanceId: "panel-1", input: {}, ctx: { sessionId: "perf-host" } });
+  // Opening with {} as attributed primary stays in single-session mode: zero fleet activity.
+  const panel = await runtime.openInstance({ instanceId: "panel-1", input: {}, ctx: { sessionId: "perf-host", agentId: null } });
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(hostRpcCalls, 0);
   assert.equal(workerScans, 0);
@@ -288,6 +288,16 @@ test("worker client bounds large session directories and 512KB event logs off th
   const newest = result.sessions.find((s) => s.id === "bulk-session-064");
   assert.ok(newest);
   assert.equal(newest.tailState?.awaitingInput?.question, "Pick target?");
+  // Cold 512 KB tail with no root lifecycle event and no waiting prompt would mark lifecycleUnknown; verify oldest live session priority & scratch board fallback too:
+  const oldLiveDir = join(stateRoot, "bulk-session-000");
+  writeFileSync(join(oldLiveDir, `inuse.${process.pid}.lock`), "");
+  const scratchDir = join(oldLiveDir, "extensions", "session-progress");
+  mkdirSync(scratchDir, { recursive: true });
+  writeFileSync(join(scratchDir, "board.json"), JSON.stringify({ hierarchy: [{ parentId: "m1", childIds: ["c1"] }], agents: [], reports: [] }));
+  const reprioritized = await client.scan();
+  const prioritizedLive = reprioritized.sessions.find((s) => s.id === "bulk-session-000");
+  assert.ok(prioritizedLive, "expected live older CLI session to be prioritized ahead of inactive newer dirs");
+  assert.deepEqual(prioritizedLive.board?.hierarchy, [{ parentId: "m1", childIds: ["c1"] }]);
   assert.ok(maxLagMs < 100, `expected main-thread event loop to stay responsive, maxLagMs=${maxLagMs}`);
 
   await client.stop();
