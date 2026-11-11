@@ -42,6 +42,28 @@ function incomplete(code, reason) {
   };
 }
 
+async function findIntegratedTree(boundary, mergeBaseOid, defaultOid, tipOid, signal) {
+  const tree = await boundary.run(["rev-parse", tipOid + "^{tree}"], { signal });
+  const treeOid = parseOidOutput(tree.stdout, boundary.objectFormat, "tip tree");
+  const history = await boundary.run([
+    "log", "--first-parent", "--no-show-signature", "--format=%H %T",
+    "--max-count=256", mergeBaseOid + ".." + defaultOid, "--",
+  ], { signal });
+  const lines = history.stdout.toString("ascii").trimEnd().split("\n");
+  for (const line of lines) {
+    const [commit, tree, extra] = line.split(" ");
+    if (tree === treeOid && extra === undefined) {
+      return {
+        commitOid: parseOidOutput(
+          Buffer.from(commit + "\n"), boundary.objectFormat, "integration commit",
+        ),
+        limitReached: false,
+      };
+    }
+  }
+  return { commitOid: null, limitReached: lines.length === 256 };
+}
+
 export async function collectBranchProof(
   boundary,
   defaultOid,
@@ -152,12 +174,53 @@ export async function collectBranchProof(
       units: [],
     };
   }
-  return {
-    ancestry,
-    complete: true,
-    gap: null,
-    units,
-  };
+  // Empty net changes alone do not prove that a diverged branch was integrated.
+  if (units.length > 0 && counts.behind > 0) {
+    try {
+      const { commitOid: integrationCommitOid, limitReached } = await findIntegratedTree(
+        boundary, mergeBaseOid, defaultOid, tipOid, context.signal,
+      );
+      if (integrationCommitOid) {
+        // A historical match alone could erase a branch restoring reverted work.
+        const currentDiff = await diffUnits(
+          boundary, tipOid, defaultOid, "tracked", context,
+        );
+        const changedOnDefault = new Set(currentDiff?.map(({ path }) => path.rawBase64));
+        if (currentDiff && units.every(({ path }) => !changedOnDefault.has(path.rawBase64))) {
+          return {
+            ancestry: { ...ancestry, mergedIntoDefault: true, integrationCommitOid },
+            complete: true,
+            gap: null,
+            units: [],
+          };
+        }
+      }
+      if (limitReached) {
+        return {
+          ancestry,
+          complete: true,
+          gap: {
+            code: "branch-integration-tree-limit",
+            reason: "Exact integration tree comparison reached its 256-commit limit.",
+          },
+          units,
+        };
+      }
+    } catch (error) {
+      if (context.signal?.aborted) throw error;
+      return {
+        ancestry,
+        complete: true,
+        gap: {
+          code: "branch-integration-tree-unavailable",
+          reason: "Exact integration tree comparison was unavailable.",
+        },
+        units,
+      };
+    }
+  }
+
+  return { ancestry, complete: true, gap: null, units };
 }
 
 export function branchAncestryObservations(carrier, ancestry) {

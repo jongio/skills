@@ -168,7 +168,7 @@ test("remote verification ignores repository-controlled configuration", async ()
   }
 });
 
-test("schema 1.2 binds verified mode and baseline into result identity", async () => {
+test("schema 2.0 binds verified mode and baseline into result identity", async () => {
   const remote = await remoteFixture("hardening-schema");
   try {
     const baseline = await verifyRemoteBaseline(remote.remotePath);
@@ -176,7 +176,7 @@ test("schema 1.2 binds verified mode and baseline into result identity", async (
       executionMode: "verified",
       remoteBaseline: baseline,
     });
-    assert.equal(analyzed.schemaVersion, "1.2.0");
+    assert.equal(analyzed.schemaVersion, "2.0.0");
     assert.equal(analyzed.executionMode, "verified");
     assert.equal(validateMechanicalResult(analyzed).valid, true);
     const cli = spawnSync(
@@ -281,6 +281,9 @@ test("fresh revalidation detects remote OID and approval drift", async () => {
   const remote = await remoteFixture("hardening-approval-drift");
   try {
     remote.fixture.git(["branch", "topic"]);
+    remote.fixture.git([
+      "update-ref", "refs/remotes/origin/deleted-upstream", remote.fixture.oid(),
+    ]);
     const baseline = await verifyRemoteBaseline(remote.remotePath);
     const analyzed = await analyzeRepository(remote.fixture.root, {
       executionMode: "verified",
@@ -291,6 +294,7 @@ test("fresh revalidation detects remote OID and approval drift", async () => {
       "local-branch",
       ({ displayName }) => displayName === "refs/heads/topic",
     );
+    assert.ok(analyzed.coverage.gaps.some(({ code }) => code === "remote-baseline-local-drift"));
     const preview = await revalidateRepository(
       remote.fixture.root,
       analyzed,
@@ -305,6 +309,7 @@ test("fresh revalidation detects remote OID and approval drift", async () => {
     assert.equal(preview.actionPlan.approvalRevalidated, false);
     assert.deepEqual(preview.actionPlan.steps[0].argv, [
       "update-ref",
+      "--no-deref",
       "-d",
       "refs/heads/topic",
       topic.identity.tipOid,

@@ -11,7 +11,7 @@ owner: "@jongio"
 
 ## Status and scope
 
-This document freezes contract version `1.2.0`. It governs content-aware
+This document freezes contract version `2.0.0`. It governs content-aware
 triage of stashes, local and remote branches, and all registered worktrees.
 Tags, artifacts, ignored-but-tracked files, large blobs, remotes, and
 maintenance retain their existing scopes but must obey the mutation and
@@ -74,12 +74,12 @@ explicit compatibility mode, and `review` remains opt-in.
 
 ## Result schema
 
-The analyzer emits one UTF-8 JSON object. Contract version `1.2.0` has this
+The analyzer emits one UTF-8 JSON object. Contract version `2.0.0` has this
 closed top-level shape:
 
 ```text
 {
-  "schemaVersion": "1.2.0",
+  "schemaVersion": "2.0.0",
   "operation": "analyze" | "revalidate",
   "executionMode": "offline" | "verified",
   "remoteBaseline": RemoteBaseline,
@@ -96,6 +96,9 @@ closed top-level shape:
   "compatibility": CompatibilityProjection
 }
 ```
+
+Version 2.0 changes the meaning of `mergedIntoDefault` to include exact squash
+integration. Re-run older audits before reviewing or revalidating their results.
 
 Unknown `schemaVersion` values must be rejected. Consumers must reject missing
 required fields and type or enum mismatches. Additive fields require a minor
@@ -814,7 +817,8 @@ BranchAncestry = {
   "behind": nonnegative integer,
   "state": "identical" | "ahead" | "behind" | "diverged",
   "mergedIntoDefault": boolean,
-  "reachableFromDefault": boolean
+  "reachableFromDefault": boolean,
+  "integrationCommitOid"?: string
 }
 ```
 
@@ -823,11 +827,16 @@ It obtains counts from
 `git rev-list --left-right --count <default>...<tip>`: the left count is
 `behind` and the right count is `ahead`. State is `identical` for zero/zero,
 `ahead` for positive/zero, `behind` for zero/positive, and `diverged` when both
-are positive. `mergedIntoDefault` and `reachableFromDefault` are true exactly
-when `ahead` is zero.
+are positive. `reachableFromDefault` is true exactly when `ahead` is zero.
+`mergedIntoDefault` is also true for a nonempty branch delta when its complete
+tree equals a first-parent default commit's tree after the merge base, within
+the 256-commit search, and every path changed by the branch still matches the
+current default tip. The matching commit is recorded as `integrationCommitOid`.
+This proves content preservation and does not assert ancestry of the topic tip.
 
 Branch change units are the exact `mergeBaseOid` to tip diff. When `ahead` is
-zero, the analyzer emits an empty unit set without diffing. Complete proof adds
+zero, the analyzer emits an empty unit set without diffing. An exact integration
+tree match also emits an empty unique unit set. Complete proof adds
 `branch-no-unique-work` when `ahead` is zero and exactly one of
 `branch-identical`, `branch-ahead`, `branch-behind`, or `branch-diverged`.
 
@@ -898,45 +907,15 @@ on that carrier but do not downgrade an independently safe worktree removal.
 When worktree removal is the only blocker preventing later branch deletion, the
 branch records those removable worktree IDs as staged prerequisites.
 
-Normal interactive analysis must invoke a Git Clean style categorized report
-through `ask_user`. A prose-only final response is invalid unless the request
-used `--dry-run` or explicitly requested report-only output. The report contains
-numbered **Safe to Remove**, **Needs Review**, **Keep**, and **Skipped**
-sections. It shows at most ten rows per category and states the remaining count.
-Every safe row includes its exact target, retained durable carrier, and
-analyzer-supported reason. No choice may select a carrier that is not visible in
-the same question. The complete categorized report, summary, remaining counts,
-and no-authorization notice must be the `ask_user.question` body. They may not
-be emitted separately from a context-free choice menu.
-
-The selection choices are all visible safe rows, specific row numbers, review
-of medium items, keep everything, and full evidence. A numbered safe selection
-goes directly to exact command preview and final per-class approval. It does not
-add a redundant per-carrier decision card. The report must state that selection
-only builds a command preview and makes no change without separate approval.
-Destructive execution remains capped at ten actions per batch.
-
-Default decision cards must:
-
-1. lead with one plain-language decision;
-2. give no more than two facts that affect the decision;
-3. name exactly one concrete next action;
-4. translate internal disposition names rather than exposing them; and
-5. name the carrier they concern and, for destructive actions, identify both
-   what would be removed and what remains; and
-6. keep purpose detail, changed-file paths, OIDs, coverage, proof mechanics,
-   blockers, and diagnostics behind `Show full evidence`.
-
-Mechanically proven duplicate cleanup does not require semantic content review
-before it is shown or selected. If an accepted bounded review exists, the
-dashboard may use its summary. Otherwise it describes the group as an exact
-duplicate of the retained carrier. Selection remains intent only and does not
-authorize cleanup.
-
-For a dirty linked worktree, the default decision says not to delete it yet and
-shows the shortest safe sequence: save the changes, remove the worktree, then
-reconsider the branch. Every mutation retains separate approval and fresh
-revalidation.
+Routine cleanup starts with the full audit and evidence for each exact action
+and witness. Obtain one confirmation for the listed plan, including conditional
+branch removals, prerequisites, and stale origin tracking refs. Tracking-ref
+pruning checks live absence and exact local tips. A verified recovery bundle
+precedes pruning when the batch would leave commits unreachable. Remove approved linked worktrees first, rerun
+proof, then delete the listed branches whose eligibility is confirmed. Revalidate
+each class internally. New targets or changed evidence require confirmation. Keep unmerged and dirty
+worktrees. Dry-run, metadata, and report-only requests are read-only. See
+[cleanup and revalidation](../../../skills/git-tidy/references/approval-flow.md).
 
 Age changes review priority only. Dirty, conflicted, locked, or unknown
 worktrees cannot receive `remove-worktree`. Missing objects, truncation,
@@ -983,7 +962,7 @@ shape:
 
 ```text
 ReviewApplicationInput = {
-  "result": <closed analyze 1.2.0 result with actionPlan: null>,
+  "result": <closed analyze 2.0.0 result with actionPlan: null>,
   "review": <strict review object>
 }
 ReviewDiagnostic =
@@ -1033,7 +1012,8 @@ unchanged. They do not fetch, prune, checkout, switch, apply, pop, clean,
 reset, create or update refs, rebase, merge, push, add/remove worktrees,
 expire reflogs, run garbage collection, or invoke GitHub writes.
 
-Remote verification is a separate approved action. `verify-remote.mjs` uses a
+Read-only verification of the intended origin is part of the audit. It needs
+no separate confirmation. `verify-remote.mjs` uses a
 disposable bare repository, an exact caller-supplied URL, `--no-prune`, disabled
 hooks and credential helpers, and an isolated environment with no system,
 global, or target-repository configuration. Its closed baseline expires after
@@ -1049,7 +1029,7 @@ guaranteed, authoritative simulation is unavailable and the outcome is
 
 ## Revalidation and approval
 
-`revalidate` receives a prior `1.2.0` verified-mode result, one mutation class,
+`revalidate` receives a prior `2.0.0` verified-mode result, one mutation class,
 selected carrier IDs, the exact approved remote URL, and optional approved
 `planId` through stdin. It freshly verifies the remote/default/head OID
 baseline, then re-reads every selected and witness identity, local and remote OID,
@@ -1063,7 +1043,7 @@ fetches and never executes a plan.
 
 Selecting a disposition, approving content access, approving a refresh, or
 approving temporary analysis does not authorize recovery or cleanup. Every
-mutation class and every GitHub write receives its own exact approval after
+mutation class is revalidated. Every GitHub write requires explicit scope after
 the command, identities, effects, ordering, recovery, and witnesses are shown.
 Immediately before each action, revalidation runs again. See
 [Approval flow](../../../skills/git-tidy/references/approval-flow.md).
@@ -1091,7 +1071,7 @@ Immediately before each action, revalidation runs again. See
 5. Keep `metadata` as an explicit compatibility mode and `review` as opt-in.
    Any default-on review requires a later proposal and production evidence.
 
-No phase may loosen the last-copy invariant or approval separation.
+No phase may loosen the last-copy invariant or extend a cleanup request beyond its authorized scope.
 
 ## Acceptance criteria
 
@@ -1110,16 +1090,16 @@ No phase may loosen the last-copy invariant or approval separation.
 7. `applyReview` is strict and monotone.
 8. Analysis and revalidation do not mutate local Git or GitHub state and never
    perform remote refresh.
-9. Optional analysis, recovery, each mutation class, and each GitHub write
-   have separate approvals.
+9. One explicit confirmation covers the displayed local cleanup plan and its
+   listed prerequisites. Mutation classes are internal revalidation batches.
+   Recovery outside that plan and GitHub writes require explicit scope.
 10. Node.js `>=22` is preflighted; missing or older Node limits orchestration to
     metadata and suppresses work-bearing destructive offers.
 11. Existing scopes and compatibility presentation remain available through
     the staged rollout.
-12. Normal interactive output uses a numbered Git Clean style report with safe,
-    review, keep, and protected sections. Every visible safe row names its
-    retained copy before selection, and internal outcomes and proof mechanics
-    remain behind `Show full evidence`.
+12. The audit report shows every proposed removal, its exact identity, and
+    preservation evidence before the single confirmation. Report retained
+    work, protected items, and coverage gaps.
 13. Dirty linked worktrees present the ordered preservation sequence before any
     deletion decision.
 
@@ -1127,7 +1107,7 @@ No phase may loosen the last-copy invariant or approval separation.
 
 - Runtime impact is limited to the `git-tidy` analyzer, review adapter, and
   their Git and GitHub read boundaries.
-- Contract impact covers schema `1.2.0`, skill orchestration, focused
+- Contract impact covers schema `2.0.0`, skill orchestration, focused
   references, deterministic tests, capability evals, and catalog mapping.
 - Repository quality impact covers the shared Vally dependency, lint workflow,
   and catalog accessibility surfaces exercised by this change.
@@ -1177,8 +1157,8 @@ incomplete evidence always resolves to `defer`.
 - Stashes, branches, worktrees, remotes, pull requests, tags, artifacts, blobs,
   and maintenance state have explicit keep, resume, update, merge, open, delete,
   inspect, or defer guidance as applicable.
-- Destructive work remains inert until exact selection, fresh revalidation, and
-  separate user approval.
+- Destructive work remains inert until the user confirms the displayed plan.
+  Each approved action is revalidated immediately before execution.
 - Tests, coverage, lint, build, documentation, accessibility, security, and
   adversarial gates pass with no errors or warnings.
 - The certified skill is installed from the repository source without changing

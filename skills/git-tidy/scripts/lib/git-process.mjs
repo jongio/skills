@@ -194,10 +194,14 @@ export function runBoundedProcess(executable, args, options = {}) {
     input,
     signal,
     rejectNonZero = true,
+    stdoutFd,
     timeoutMs = DEFAULT_PROCESS_LIMITS.timeoutMs,
     maxStdoutBytes = DEFAULT_PROCESS_LIMITS.maxStdoutBytes,
     maxStderrBytes = DEFAULT_PROCESS_LIMITS.maxStderrBytes,
   } = options;
+  if (stdoutFd !== undefined && (!Number.isSafeInteger(stdoutFd) || stdoutFd < 0)) {
+    throw new TypeError('stdoutFd must be a valid file descriptor');
+  }
   requireByteLimit(timeoutMs, 'timeoutMs');
   requireByteLimit(maxStdoutBytes, 'maxStdoutBytes');
   requireByteLimit(maxStderrBytes, 'maxStderrBytes');
@@ -212,7 +216,7 @@ export function runBoundedProcess(executable, args, options = {}) {
       env,
       shell: false,
       windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: ['pipe', stdoutFd ?? 'pipe', 'pipe'],
     });
     const stdout = [];
     const stderr = [];
@@ -246,7 +250,7 @@ export function runBoundedProcess(executable, args, options = {}) {
       }
     };
 
-    child.stdout.on('data', capture(stdout, 'stdout', maxStdoutBytes));
+    child.stdout?.on('data', capture(stdout, 'stdout', maxStdoutBytes));
     child.stderr.on('data', capture(stderr, 'stderr', maxStderrBytes));
     child.on('error', (error) => {
       spawnError = error;

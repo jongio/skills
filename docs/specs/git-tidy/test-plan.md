@@ -36,7 +36,7 @@ Windows, macOS, and Linux.
 
 | ID | Contract behavior | Level | Planned test |
 |---|---|---|---|
-| T01 | Emits the closed `1.2.0` result schema with execution mode and verified baseline identity, stable ordering, and rejects unknown versions | unit | `test/hardening.test.mjs` and result schema tests |
+| T01 | Emits the closed `2.0.0` result schema with execution mode and verified baseline identity, stable ordering, and rejects unknown versions | unit | `test/hardening.test.mjs` and result schema tests |
 | T02 | Keeps all seven user-requestable dispositions as work outcomes; destructive operations exist only as explicit per-carrier actions and are never inferred from `delete` | unit | `test/classify.test.mjs` -> disposition/action separation |
 | T03 | Enforces categorical confidence caps and never uses age as preservation proof | unit | `test/classify.test.mjs` -> confidence lattice |
 | T04 | Rejects a selected set that removes the final durable witness | unit/integration | `test/classify.test.mjs` -> selection-set last copy |
@@ -64,7 +64,8 @@ Windows, macOS, and Linux.
 | T26 | Leaves refs, reflogs, index, config, object IDs/count, worktrees, and status unchanged at every depth | safety integration | before/after repository snapshot |
 | T27 | `revalidate` emits a one-class guarded plan only when the remote baseline, selected and witness identities, and optional approved plan identity remain stable | integration | `test/hardening.test.mjs` stale OID and approval drift fixtures |
 | T28 | Any OID, selector, path, status, protection, PR, prerequisite, or witness drift emits no plan | integration/eval | drift matrix |
-| T29 | Selection, optional analysis, recovery, and each mutation/GitHub-write class require separate approval | capability eval | approval separation stimuli |
+| T29 | One explicit confirmation covers listed local cleanup and stale origin tracking refs after evidence is shown. New targets require confirmation | capability eval | cleanup scope stimuli |
+| T29a | Tracking-ref pruning verifies a recovery bundle when commits would become unreachable and rejects drift or archive failure before deletion | integration | `test/tracking-prune.test.mjs` |
 | T30 | PR creation/merge and rebase/worktree operations hand off to established workflows | capability eval | specialist handoff stimuli |
 | T31 | Existing scopes, dry-run, depth modes, and HIGH/MEDIUM/LOW projection remain compatible | registration/eval | `test/registration.test.mjs` parity |
 | T33 | Uses `%00`-terminated `for-each-ref --format` records, parses fixed NUL fields plus Git's exact LF record suffix as bytes, and rejects the unsupported `-z` option for `for-each-ref` | unit/integration | ref framing parser and command allow-list fixtures |
@@ -79,7 +80,7 @@ Windows, macOS, and Linux.
 | T42 | Promotes an exact live GitHub remote-tracking match to complete durable evidence and distinguishes an exact merged head from an open PR | unit/integration | GitHub evidence promotion and PR precedence |
 | T43 | Computes cleanup evidence from proposed cleanup carriers while retaining blockers on kept carriers, and records removable worktrees as staged branch prerequisites | unit | action-scoped blocker and prerequisite fixtures |
 | T44 | Emits stable `github-response-invalid` diagnostics with sanitized schema detail instead of the opaque string `TypeError` | unit | hostile GitHub schema matrix |
-| T45 | Requires `ask_user` for normal interactive runs and preserves every accepted result under an immutable timestamp plus `runId` artifact name | registration/eval | dashboard and artifact persistence contract |
+| T45 | Normal cleanup revalidates and executes all safe actions, rechecks dependent branches, and preserves run artifacts under immutable timestamp plus `runId` names | registration/eval | cleanup completion and artifact persistence |
 | T46 | Leads with count buckets, translates internal outcomes into plain decisions, gives one concrete next action, keeps proof behind details, and orders dirty-worktree preservation safely | registration/eval | decision-first dashboard, active-work card, and dirty-worktree sequence |
 
 ## Scenario matrix

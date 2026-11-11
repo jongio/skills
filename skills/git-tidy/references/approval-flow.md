@@ -1,169 +1,106 @@
-# Approval and Revalidation Flow
+# Cleanup and Revalidation Flow
 
-Triage is advisory. A selected disposition is not authorization. Approval is
-specific to one displayed operation, identity set, command set, and expected
-effect; it does not carry across drift or action classes.
-
-## Lifecycle
-
-1. Preflight Node.js `>=22`. If unavailable, failed, malformed, or older, stop
-   at metadata-only orchestration and offer no work-bearing destructive action.
-2. Run read-only inventory and proof.
-3. For remote verification, request separate approval for the exact URL and run
-   `verify-remote.mjs`. It uses a disposable bare repository, `--no-prune`,
-   disabled hooks and credential helpers, and an isolated environment that
-   ignores repository-controlled Git configuration. Anonymous access is tried
-   first; authentication-required HTTPS reads may use the existing GitHub CLI
-   session for the exact approved host with `--no-refresh`; unsupported CLIs fail
-   closed without retrying a potentially refreshing lookup. Enterprise environment
-   tokens require the caller's existing `GH_HOST` to match the approved host.
-   Credentials exist only in the Git
-   child's URL-scoped environment, never argv, URLs, logs, evidence, or persistent
-   configuration. Redirects remain disabled. No login or credential change is
-   performed. Revalidation uses the same boundary and rejects a changed URL
-   identity before contacting it. An authentication failure blocks cleanup and
-   reports safe guidance for checking existing CLI authentication and access.
-   Feed the closed baseline
-   to `analyze-verified`. Optionally request separate approval
-   for ignored-content review or isolated merge simulation.
-4. Present the Git Clean style categorized report inside the
-   `ask_user.question` field with numbered **Safe to Remove**, **Needs Review**,
-   **Keep**, and **Skipped** sections. Show up to ten rows per category, state
-   the remaining count, and never select an unlisted row. Every safe row names
-   its retained durable carrier. Never separate the report from its choice menu.
-5. Let the user select all visible safe rows, choose row numbers, review medium
-   items, keep everything, or show full evidence. Record the corresponding
-   internal outcomes without exposing analyzer vocabulary by default.
-6. Build explicit per-carrier actions without inferring any action from the
-   outcome, including `delete`; group them by mutation class; then run read-only
-   `revalidate` for one class to validate the selected set's last-copy witnesses
-   and produce an inert guarded plan.
-7. On drift, emit no plan and return to fresh analysis.
-8. Without adding another per-carrier decision round, show the stable plan's
-   exact argv, refs, paths, expected OIDs, ordering, effects, recovery, and
-   approval class.
-9. Obtain approval for that action class only.
-10. Immediately run read-only `revalidate` again with the approved `planId`.
-    Continue only when the remote baseline is freshly verified,
-    `approvalRevalidated` is true, and the relevant steps remain identical.
-11. Execute only the revalidated, approved action through its established
-    workflow; report each result.
-
-## Approval classes
-
-Never combine these classes in one consent:
-
-- remote refresh (`fetch`) or prune;
-- ignored-content read/hash;
-- temporary clone or isolated fetch;
-- isolated temporary Git directory and object directory creation for merge
-  simulation;
-- cleanup of merge-simulation temporary directories;
-- recovery/save, including stash creation or commit;
-- checkout/switch;
-- rebase or base merge;
-- merge;
-- push;
-- pull request creation;
-- pull request merge, per PR;
-- stash drop;
-- local branch deletion;
-- remote ref deletion;
-- worktree removal;
-- tag deletion;
-- remote removal;
-- artifact/file removal or `git rm --cached`;
-- reflog expiration; and
-- garbage collection/repack.
-
-Approval for temporary creation does not imply approval for cleanup. Approval
-for recovery does not imply deletion. Refresh does not imply cleanup. PR
-creation and PR merge always use the established GitHub-write flow, and merge
-requires fresh per-PR approval.
-
-Remote verification approval authorizes only the disposable non-pruning
-verification workflow. It never authorizes a target-repository fetch or prune.
-
-Force deletion, dirty worktree force-removal, or explicit discard of unique or
-unmerged work requires an additional warning and approval. Mechanical review
-does not make such loss safe.
-
-## Prerequisites and ordering
-
-Prerequisites must finish and be verified before dependent actions are offered.
-When applicable:
-
-1. save/recover unique overlays to a named durable carrier;
-2. verify the saved change units and new witness;
-3. remove worktrees that hold branches;
-4. delete local refs;
-5. delete remote refs with an expected-OID lease;
-6. drop stashes in descending revalidated selector order;
-7. delete tags/remotes or clean artifacts;
-8. perform separately approved recovery-destroying maintenance last.
-
-`resume`, `update-rebase`, `merge-as-is`, and `open-pr` hand off rather than
-execute inline. A clean merge simulation proves only mechanical mergeability;
-merge-as-is additionally requires bounded code review, repository policy, and
-passing tests.
-
-All seven dispositions are user-requestable work outcomes. Destructive
-operations are exclusively per-carrier actions. A requested `delete` outcome
-does not identify a carrier to destroy and cannot authorize or imply a
-destructive action.
+Show the audit and exact preservation evidence before asking for one explicit
+confirmation of the listed cleanup plan. Cover all listed local removals and
+their named prerequisites in that confirmation. Read-only, dry-run, and metadata
+requests end with the report.
 
 ## Revalidation
 
-Pass the prior exact `1.2.0` verified-mode result, one mutation class, selected
-carrier IDs, the exact approved remote URL, and optional approved plan identity
-to `revalidate` through stdin. Re-read:
+1. Pass the exact verified schema 2.0 result, selected carrier IDs, one mutation
+   class, and the verified remote URL to `revalidate`.
+2. Present exact targets and commands, expected OIDs and status, retained
+   witnesses and the proof for each, effects, recovery limits, and execution order. Include
+   conditional branch removals with their exact identities and prerequisites.
+   Request confirmation once for the complete listed plan.
+3. After confirmation, bind each current batch's exact `planId` and
+   `approvalClass` as `approvedPlan`. Execute only steps with
+   `approvalRevalidated: true` that match the confirmed targets, identities,
+   proof, and scope. Expected prerequisite changes can unlock listed actions.
+   New targets or changed evidence require fresh confirmation.
+4. Recheck each target immediately before mutation. For a local ref, require an
+   exact non-symbolic ref at its expected OID and confirm it is unchecked out
+   across all worktrees. Delete with `git update-ref --no-deref -d <ref> <oid>`.
+   For a worktree, check its absolute registered path, Git directory, HEAD,
+   status and operation state. Remove with non-force `git worktree remove`.
+   For stashes, remap each selector to its OID immediately before dropping,
+   highest selector index first.
+5. Verify each result and run fresh analysis after removing worktrees. Their
+   attached branches may now be removable. Never reuse a stale plan. On drift
+   or partial failure, re-inventory and continue only with independent confirmed
+   actions whose evidence still holds.
 
-- repository and remote identity;
-- selected and witness OIDs and change-unit identity;
-- local/remote ref targets;
-- stash selector-to-OID mapping;
-- canonical worktree path, registration, and status fingerprint;
-- protection and checked-out state;
-- PR repository/head OID, state, checks, and merge state;
-- prerequisite output; and
-- the complete selected-set witness proof.
+Local cleanup depends on the verified default branch. Before a requested live
+remote deletion,
+verify the remote repository, exact live branch OID, integration into the
+verified default, and current protection. Use an expected-OID lease and verify
+absence afterward. A failed remote lookup never establishes absence.
 
-A stable result returns an inert guarded plan with one approval class, `planId`,
-exact argument arrays, expected values, witnesses, and dependencies. It never
-executes. Before approval, `approvalRevalidated` is false. The immediate
-post-approval call must return the same `planId` and
-`approvalRevalidated: true`.
+## Stale origin tracking refs
 
-Any changed, missing, newly protected, partial, blocked, or unavailable value
-is drift. Emit no plan, name each changed field without exposing secrets, and
-require fresh analysis and approval. Do not continue unaffected steps from the
-old plan because witness relationships are batch-wide.
+Include this section in the same report and confirmation as local branches,
+worktrees, and stashes. Run the helper at the target repository root with JSON
+on stdin. Use the exact verified origin URL and a fresh absolute `.bundle`
+path in the user's private recovery or scratch storage, outside the target
+worktrees. On Windows, use a directory with an access control list restricted
+to the user because the bundle inherits that directory's permissions.
+Resolve the helper from the installed skill directory and use its absolute path.
+Supply any local refs slated for removal as `excludeWitnessRefs`. Include
+`refs/stash` if any stash will be dropped.
 
-Before each stash drop, remap selector to OID again. Before remote deletion,
-require an expected-OID lease; if the provider cannot enforce one atomically,
-abort rather than use an unchecked delete.
+```text
+node "<installed-skill-dir>/scripts/tracking-prune.mjs" plan
+{"remoteUrl":"<origin URL>","bundlePath":"<absolute path>","excludeWitnessRefs":[]}
 
-## Recovery verification
+node "<installed-skill-dir>/scripts/tracking-prune.mjs" apply
+{"input":<plan.input>,"approvedPlanId":"<confirmed plan.planId>"}
+```
 
-A save is successful only after a durable carrier exists and exact change-unit
-comparison confirms preservation. Command success, a new ref name, a PR diff,
-or reflog reachability alone is insufficient. Failed or partial verification
-keeps the original carrier and blocks dependent deletion.
+Planning verifies the standard origin fetch mapping and the live head list
+through the isolated remote verifier. Show the exact absent tracking refs,
+local tip OIDs, per-tip and deduplicated total unreachable commit counts,
+omissions, and any coverage gap. Counts exclude all refs slated for removal.
+The helper guards the default tracking ref and leaves symbolic refs in place.
+A failed check leaves pruning blocked. Dry runs use only `plan`.
 
-Reflog expiration and garbage collection destroy recovery paths. They are
-never preselected, never described as ordinary housekeeping, and each gets
-separate approval after all cleanup results are known.
+Apply the confirmed tracking plan before the other cleanup batches. The helper
+revalidates the live and local evidence. If any commits would become
+unreachable, it creates a self-contained recovery bundle and verifies all
+listed tips, complete history, and the pack checksum. It then rechecks the plan
+and deletes the approved tracking refs atomically using their exact old OIDs.
+If archiving or verification fails, leave the refs in place. After pruning,
+report the exact refs removed and the verified bundle path. Refresh the
+read-only audit before revalidating any remaining confirmed batches.
 
-## Failure handling
+## Ignored worktree entries
 
-- Network/auth/rate-limit failure: mark remote evidence unknown; do not infer
-  absence.
-- Unsupported Git capability: keep overlap evidence, mark the stronger proof
-  unavailable, and defer.
-- Missing, malformed, failed, or pre-22 Node runtime: remain metadata-only and
-  offer no work-bearing destructive action.
-- Protection or command failure: preserve the carrier and report the exact
-  blocker.
-- Any drift: invalidate approval and rebuild the plan.
-- Partial batch execution: stop, re-inventory the repository, and recompute
-  witnesses before offering remaining actions.
+The analyzer counts ignored entries without persisting names or reading payloads.
+For otherwise removable worktrees, check ignored paths privately using
+NUL-delimited Git output. Names, metadata, and build configuration only identify
+candidate outputs. Require user-authorized byte-for-byte comparison against a
+trusted copy of the exact output. If regeneration is needed, obtain explicit
+authorization and regenerate in an isolated directory. Without an exact match,
+keep the entry and worktree blocked. Keep ignored names and payloads out of audit artifacts. `--include-ignored` requests this check
+for the report even when cleanup is not enabled.
+
+Before clearing verified outputs, confirm the worktree's exact registered
+absolute root. Resolve every target under that root, reject symlinks, reparse
+points, submodules and nested repositories, and preview the exact literal
+targets in the confirmation plan. Require that each target remains ignored,
+contains no tracked or unignored files, and still matches the verified bytes.
+Use native
+filesystem operations without shell interpolation. Rerun proof after cleanup and
+use ordinary worktree removal. Unknown entries, credentials, local configuration,
+or irreplaceable data keep the worktree blocked. Do not use blanket
+`git clean` or force-remove a worktree to get around the blocker.
+
+## Exceptions
+
+Keep unique overlays and stashes. If the user requests recovery, verify that a
+durable branch contains the saved change units before removing the original.
+A new ref name, command success, or reflog reachability alone is insufficient.
+
+Report remaining decisions together after routine cleanup. Saving unique work,
+discarding uncertain data, modifying tags/remotes, aborting interrupted operations,
+rebase, merge, PR writes, and recovery-destroying maintenance require their own
+user direction. Use the established specialist workflow for those operations.

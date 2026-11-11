@@ -140,7 +140,7 @@ test("focused references are present and routed from the contract and skill", ()
       `contract does not route to ${reference}`,
     );
   }
-  assert.match(evidenceModel, /contract `1\.2\.0`/);
+  assert.match(evidenceModel, /contract `2\.0\.0`/);
   assert.match(contentReview, /applyReview/);
   assert.match(approvalFlow, /## Revalidation/);
   assert.match(commandRecipes, /## Forbidden analysis commands/);
@@ -272,7 +272,7 @@ test("contract schema vocabulary is closed and stable", () => {
     '"evidence": "complete" | "partial" | "blocked"',
     '"confidence": "proven" | "strong" | "indicative" | "unknown"',
     '"action": "keep" | "delete-ref" | "drop-stash" |',
-    '"schemaVersion": "1.2.0"',
+    '"schemaVersion": "2.0.0"',
   ]) {
     assert.ok(contract.includes(value), `contract dropped schema vocabulary: ${value}`);
   }
@@ -295,7 +295,8 @@ test("eval catalog covers every content-aware triage scenario", () => {
     "enforces-semantic-monotonicity",
     "invalidates-plan-on-revalidation-drift",
     "keeps-analysis-and-revalidation-read-only",
-    "separates-approval-classes",
+    "confirms-stale-ref-cleanup-with-evidence",
+    "blocks-pruning-on-bundle-verification-failure",
     "hands-off-specialist-workflows",
     "defaults-to-git-clean-report",
     "batches-large-git-clean-report",
@@ -312,48 +313,18 @@ test("eval catalog covers every content-aware triage scenario", () => {
     stimuli.find(({ name }) => name === "preserves-ancient-unique-stash").body,
     /Age changes priority only and cannot prove preservation/,
   );
-  assert.match(skillDoc, /Use the Git Clean decision flow/);
-  assert.match(skillDoc, /Project every carrier or work item into one report category/);
-  assert.match(skillDoc, /Safe to Remove \(HIGH confidence\)/);
-  assert.match(skillDoc, /Needs Review \(MEDIUM confidence\)/);
-  assert.match(skillDoc, /Keep \(LOW cleanup confidence\)/);
-  assert.match(skillDoc, /\| # \| Type \| Name \| Reason \| Preserved By \| Last Activity \|/);
-  assert.match(skillDoc, /Select all visible safe items \(Recommended\)/);
-  assert.match(skillDoc, /Choose specific items by number/);
-  assert.match(skillDoc, /Never select, approve, or execute a hidden row/);
-  assert.match(skillDoc, /complete categorized report as its `question`/);
-  assert.match(skillDoc, /Never emit the report as assistant prose[\s\n]+followed by a context-free `ask_user` menu/);
-  assert.match(skillDoc, /Do not add a redundant[\s\S]*per-carrier decision card/i);
-  assert.match(
-    skillDoc,
-    /Selection[\s\n]+builds a command preview only\. Nothing[\s\n]+changes without separate approval\./,
-  );
-  assert.match(skillDoc, /Review[\s\n]+medium items` from the report/);
-  assert.match(
-    skillDoc,
-    /group selected carriers by mutation class[\s\S]*run read-only[\s\n]+`revalidate`[\s\S]*inert guarded[\s\n]+action plan[\s\S]*show its exact commands/i,
-  );
-  assert.match(
-    skillDoc,
-    /Immediately after each approval[\s\S]*`planId`[\s\S]*`approvalRevalidated` is true[\s\S]*remain identical/i,
-  );
-  assert.match(skillDoc, /Mechanically proven cleanup does not require semantic content review/);
-  assert.match(skillDoc, /Review active work only when requested/);
-  assert.match(skillDoc, /Content not reviewed/);
-  assert.match(skillDoc, /at most three[\s\S]*short lines/);
-  assert.match(skillDoc, /stay under 450 characters/);
-  assert.match(skillDoc, /Keep each label under[\s\S]*45 characters/);
-  assert.match(skillDoc, /Every safe-removal row must name at least one durable retained carrier/);
-  assert.match(skillDoc, /Decision: Update branch "deps\/go-versions" before opening a pull request/);
-  assert.match(skillDoc, /Next action: Rebase it onto origin\/main/);
-  assert.match(skillDoc, /Always name the branch, stash, or worktree being discussed/i);
-  assert.match(skillDoc, /save the changes, remove the worktree, then reconsider[\s\S]*the branch/i);
-  assert.match(skillDoc, /OIDs[\s\S]*`Show details`/i);
-  assert.match(skillDoc, /Returning a prose-only analysis[\s\n]+is incomplete/);
-  assert.match(
-    skillDoc,
-    /request final approval for one mutation class at a time\.[\s\S]*Immediately after each approval[\s\S]*revalidate the remote\/default\/OID baseline again/i,
-  );
+  assert.match(skillDoc, /Show the report and confirm once/);
+  assert.match(skillDoc, /Show the preservation evidence for every proposed\s+removal/);
+  assert.match(skillDoc, /Ask once to approve the listed\s+plan or keep everything/);
+  assert.match(skillDoc, /If declined, unanswered, report-only, or there are\s+no eligible actions, finish with the report/);
+  assert.match(skillDoc, /remove approved linked worktrees first\. Rerun proof, then delete approved\s+conditional branches/);
+  assert.match(approvalFlow, /New targets or changed evidence require fresh confirmation/);
+  assert.match(skillDoc, /stale origin tracking refs[\s\S]*by default under \x60all\x60/);
+  assert.match(approvalFlow, /same report and confirmation as local branches/);
+  assert.match(approvalFlow, /verifies all\s+listed tips, complete history, and the pack checksum/);
+  assert.match(skillDoc, /dry run performed only analysis/);
+  assert.match(approvalFlow, /approvedPlan[\s\S]*approvalRevalidated: true/);
+  assert.match(approvalFlow, /Unknown entries, credentials, local configuration/);
   assert.match(skillDoc, /git-tidy-<generatedAt-compact>-<runId-first-12>\.json/);
   assert.match(skillDoc, /Never overwrite a prior run/);
 });
@@ -450,6 +421,8 @@ test("destructive tool-call guards compile and block representative writes", () 
   const guard = compile(commandPatterns.find((source) => source.includes("filter-repo")));
   for (const command of [
     "git fetch --prune origin",
+    "git bundle create /recovery/origin.bundle --all",
+    'node "/skills/tracking-prune.mjs" apply',
     "git branch -D feature/x",
     "git stash drop stash@{0}",
     "git worktree remove linked",
@@ -461,6 +434,8 @@ test("destructive tool-call guards compile and block representative writes", () 
   }
   for (const command of [
     "git status --porcelain=v2 -z",
+    "git bundle verify /recovery/origin.bundle",
+    "node /skills/tracking-prune.mjs plan",
     "git for-each-ref --sort=refname",
     "gh api repos/o/r/pulls/1",
   ]) {

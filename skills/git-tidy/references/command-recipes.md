@@ -19,7 +19,7 @@ For every Git invocation:
   `-c core.pager=cat`, `-c pager.<command>=false`,
   `-c diff.external=`, `-c diff.trustExitCode=false`,
   and `-c filter.<name>.required=false` as applicable;
-- allow only `file` for analyzer object reads; the separately approved verifier
+- allow only `file` for analyzer object reads; the isolated verifier
   allows only canonical credential-free HTTPS repository URLs and absolute local
   repository paths or local `file` URLs. Reject SSH, `ext::`, local
   executable transports, unknown schemes, and arbitrary remote helpers;
@@ -57,6 +57,10 @@ records `node-runtime` unavailable and restricts orchestration to metadata. Do
 not invoke proof, review, or `revalidate`, and do not offer a destructive action
 for any work-bearing carrier.
 
+Squash proof reads a bounded first-parent history of exact commit/tree OIDs.
+The allowlist accepts only `log --first-parent --no-show-signature --format=%H %T
+--max-count=256 <baseOid>..<defaultOid> --` for this comparison.
+
 ## Analyzer invocation
 
 Resolve `scripts/triage.mjs` from the installed skill directory, set the child
@@ -76,15 +80,18 @@ node scripts/apply-review.mjs
 ```
 
 `--include-ignored` records handoff intent in the result. It does not authorize
-or perform ignored-content reads. The analyzer continues to retain only ignored
-counts; a separate approved workflow must perform any content read or hash.
+or perform ignored-content reads. The analyzer retains only ignored counts.
+The cleanup workflow may inspect names and filesystem metadata for reproducible
+outputs. Reading or hashing payloads requires separate user direction.
 
 `scope` is omitted for `all`, or is exactly `branches`, `worktrees`, `remote`,
 `stashes`, `tags`, `artifacts`, `blobs`, or `maintenance`. Do not interpolate
 scope or options into shell source. `analyze` emits a closed result with
 `operation: "analyze"` and `actionPlan: null`.
 
-Pass `{"remoteUrl":"<exact-approved-url>"}` to `verify-remote` over stdin.
+Pass `{"remoteUrl":"<exact-origin-url>"}` to `verify-remote` over stdin.
+Read-only verification is part of the audit. Ask once about the displayed
+cleanup plan and revalidate its mutation classes internally.
 Pass its closed result as `{"remoteBaseline":<result>}` to `analyze-verified`.
 The verifier uses a disposable bare repository, explicit `--no-prune`, disabled
 hooks and credential helpers, and no target-repository configuration.
@@ -128,7 +135,7 @@ For `revalidate`, pass exactly one bounded UTF-8 JSON object over stdin:
 
 ```text
 {
-  "result": <prior closed analyze 1.2.0 verified-mode result>,
+  "result": <prior closed analyze 2.0.0 verified-mode result>,
   "selectedCarrierIds": ["<stable-carrier-id>", "..."],
   "approvalClass": "<one-mutation-class>",
   "approvedPlan": null | {

@@ -150,7 +150,7 @@ function mechanicalResult() {
     ],
   };
   const result = {
-    schemaVersion: "1.2.0",
+    schemaVersion: "2.0.0",
     operation: "analyze",
     executionMode: "offline",
     remoteBaseline: {

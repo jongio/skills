@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { compatibilityCategory } from "./mechanical-core.mjs";
 import { validateInventory } from "./inventory-schema.mjs";
+import { SCHEMA_VERSION } from "./triage-shared.mjs";
 const RESULT_KEYS = ["schemaVersion", "operation", "executionMode", "remoteBaseline", "runId", "generatedAt", "repository", "request", "workItems", "inventory", "coverage", "reviewBundle", "actionPlan", "drift", "compatibility"];
 const LIMIT_KEYS = ["maxRefs", "maxTags", "maxStashes", "maxWorktrees", "maxPullRequests", "maxArtifacts", "maxBlobs", "maxStdoutBytes", "maxStderrBytes", "maxComparisons", "maxChangeUnits", "maxUntrackedFiles",
   "maxUntrackedBytesPerFile", "maxUntrackedBytesTotal", "maxReviewWorkItems", "maxReviewFilesPerItem", "maxReviewChangedLinesPerItem", "maxReviewBytesPerFile",
@@ -106,7 +107,14 @@ function validateEncodedPath(value, path, check, allowEmpty = false) {
   check(value.subjectId === subjectId, "invalid-observation-subject", `${path}.subjectId`); check(nonempty(value.summary), "invalid-observation-summary", `${path}.summary`);
 } function validateAncestry(value, path, objectFormat, check) {
   if (value === null) return;
-  if (!check(exactKeys(value, ["mergeBaseOid", "ahead", "behind", "state", "mergedIntoDefault", "reachableFromDefault"]), "invalid-ancestry", path)) return;
+  const keys = ["mergeBaseOid", "ahead", "behind", "state", "mergedIntoDefault", "reachableFromDefault"];
+  if (value && Object.hasOwn(value, "integrationCommitOid")) keys.push("integrationCommitOid");
+  if (!check(exactKeys(value, keys), "invalid-ancestry", path)) return;
+  if (Object.hasOwn(value, "integrationCommitOid")) {
+    validateOid(value.integrationCommitOid, path, objectFormat, check);
+    check(value.mergedIntoDefault === true && value.reachableFromDefault === false &&
+      value.ahead > 0 && value.behind > 0, "invalid-integration-tree-proof", path);
+  }
   validateOid(value.mergeBaseOid, path, objectFormat, check);
   check(nonnegative(value.ahead) && nonnegative(value.behind), "invalid-ancestry-count", path);
   check(oneOf(value.state, ["identical", "ahead", "behind", "diverged"]), "invalid-ancestry-state", `${path}.state`);
@@ -515,7 +523,7 @@ function validateWorkItems(result, objectFormat, check) {
 export function validateMechanicalResult(result) {
   const { diagnostics, check } = validator();
   if (!check(exactKeys(result, RESULT_KEYS), "invalid-result-root-shape", "$.result")) return Object.freeze({ valid: false, diagnostics: Object.freeze(diagnostics) });
-  check(result.schemaVersion === "1.2.0", "unsupported-result-schema-version", "$.result.schemaVersion");
+  check(result.schemaVersion === SCHEMA_VERSION, "unsupported-result-schema-version", "$.result.schemaVersion");
   check(result.operation === "analyze", "invalid-result-operation", "$.result.operation");
   check(oneOf(result.executionMode, ["offline", "verified"]), "invalid-execution-mode", "$.result.executionMode");
   check(/^[0-9a-f]{64}$/u.test(result.runId), "invalid-result-run-id", "$.result.runId");

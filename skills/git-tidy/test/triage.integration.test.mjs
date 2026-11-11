@@ -280,7 +280,7 @@ test("exact duplicate stash is eligible only while a durable copy remains", asyn
         selected,
         [stash.id, branch.id],
       ),
-      /closed analyze 1\.2\.0 result/u,
+      /closed analyze 2\.0\.0 result/u,
     );
   } finally {
     await fixture.cleanup();
@@ -816,7 +816,7 @@ test("offline revalidation blocks plans and still reports material drift", async
         proofTampered,
         [stash.id],
       ),
-      /closed analyze 1\.2\.0 result/u,
+      /closed analyze 2\.0\.0 result/u,
     );
 
     await fixture.write("drift.txt", "new stash\n");
@@ -843,7 +843,7 @@ test("offline revalidation blocks plans and still reports material drift", async
       mutate(tampered);
       await assert.rejects(
         revalidateRepository(fixture.root, tampered, [stash.id]),
-        /closed analyze 1\.2\.0 result/u,
+        /closed analyze 2\.0\.0 result/u,
       );
     }
 
@@ -1061,7 +1061,7 @@ test("legacy inventories are typed, bounded, and read-only", async () => {
           scope: "tags",
           depth: "proof",
         });
-        assert.equal(tags.schemaVersion, "1.2.0");
+        assert.equal(tags.schemaVersion, "2.0.0");
         assert.equal(tags.inventory.tags.length, 2);
         assert.equal(tags.inventory.tags.some(({ peeledOid }) => peeledOid), true);
         assert.deepEqual(tags.inventory.artifacts, []);
@@ -1278,6 +1278,59 @@ test("detached worktree commits are proved against the default branch", async ()
       Buffer.from(unitPath.rawBase64, "base64").toString("utf8") ===
         "detached-only.txt"));
     assert.equal(detached.eligible, false);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("exact squash tree makes detached worktree and local branch removable", async () => {
+  const fixture = await committedFixture("triage-squash-cleanup");
+  try {
+    fixture.git(["switch", "-c", "squashed"]);
+    await fixture.write("tracked.txt", "delivered\n");
+    fixture.commit("topic work");
+    const topicOid = fixture.oid();
+    fixture.git(["switch", "main"]);
+    fixture.git(["merge", "--squash", "squashed"]);
+    fixture.git(["commit", "-m", "squash on default"]);
+    const integrationOid = fixture.oid();
+    assert.notEqual(topicOid, integrationOid);
+    await fixture.write("later.txt", "unrelated default change\n");
+    fixture.commit("advance default");
+    fixture.git(["update-ref", "refs/remotes/origin/main", fixture.oid()]);
+
+    const linkedPath = path.join(fixture.root, "squash-detached");
+    fixture.git(["worktree", "add", "--detach", linkedPath, topicOid]);
+    fixture.git(["switch", "-c", "advanced", topicOid]);
+    await fixture.write("tracked.txt", "unmerged follow-up\n");
+    fixture.commit("advance topic");
+    fixture.git(["switch", "main"]);
+
+    const result = await analyzeRepository(fixture.root);
+    assert.ok(validateMechanicalResult(result).valid);
+    assert.equal(validateMechanicalResult({ ...result, schemaVersion: "1.2.0" }).valid, false);
+    const topic = findCarrier(result, "local-branch", (c) => c.displayName === "refs/heads/squashed");
+    assert.equal(topic.observed.ancestry.integrationCommitOid, integrationOid);
+    assert.equal(topic.observed.ancestry.reachableFromDefault, false);
+    assert.equal(topic.action, "delete-ref");
+
+    const advanced = findCarrier(result, "local-branch", (c) => c.displayName === "refs/heads/advanced");
+    assert.equal(advanced.observed.ancestry.mergedIntoDefault, false);
+    assert.equal(advanced.action, "keep");
+
+    const linked = findCarrier(result, "worktree", (c) => !c.observed.main);
+    assert.equal(linked.observed.committedAncestry.integrationCommitOid, integrationOid);
+    assert.equal(linked.action, "remove-worktree");
+
+    fixture.git(["revert", "--no-edit", integrationOid]);
+    fixture.git(["update-ref", "refs/remotes/origin/main", fixture.oid()]);
+    const afterRevert = await analyzeRepository(fixture.root);
+    const restoredTopic = findCarrier(
+      afterRevert, "local-branch", (c) => c.displayName === "refs/heads/squashed",
+    );
+    assert.equal(restoredTopic.observed.ancestry.mergedIntoDefault, false);
+    assert.equal(restoredTopic.action, "keep");
+    assert.equal(findCarrier(afterRevert, "worktree", (c) => !c.observed.main).action, "keep");
   } finally {
     await fixture.cleanup();
   }

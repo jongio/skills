@@ -5,7 +5,7 @@ import {
   stableId,
 } from "./mechanical-core.mjs";
 
-export const SCHEMA_VERSION = "1.2.0";
+export const SCHEMA_VERSION = "2.0.0";
 export const SCOPES = Object.freeze([
   "all",
   "branches",
@@ -246,6 +246,7 @@ export function planStep(carrier) {
     const fullRef = decodeFullRef(carrier.identity.refRawBase64);
     argv = [
       "update-ref",
+      "--no-deref",
       "-d",
       fullRef,
       carrier.identity.tipOid,

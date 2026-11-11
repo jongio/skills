@@ -169,6 +169,13 @@ export function assertReadOnlyGitArgs(args) {
     exact(args.slice(0, 3), ['rev-list', '--left-right', '--count']) &&
     /^(?:[0-9a-f]{40}|[0-9a-f]{64})\.\.\.(?:[0-9a-f]{40}|[0-9a-f]{64})$/
       .test(args[3]);
+  const integrationHistory = args.length === 7 &&
+    exact(args.slice(0, 5), [
+      'log', '--first-parent', '--no-show-signature', '--format=%H %T',
+      '--max-count=256',
+    ]) &&
+    /^(?:[0-9a-f]{40}|[0-9a-f]{64})\.\.(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+      .test(args[5]) && args[6] === '--';
   const mergeBase = args.length === 4 &&
     exact(args.slice(0, 2), ['merge-base', '--is-ancestor']) &&
     isOidExpression(args[2]) && isOidExpression(args[3]);
@@ -176,7 +183,7 @@ export function assertReadOnlyGitArgs(args) {
     args[0] === 'merge-base' &&
     isOidExpression(args[1]) && isOidExpression(args[2]);
 
-  if (!allowed && !revList && !mergeBase && !findMergeBase) {
+  if (!allowed && !revList && !integrationHistory && !mergeBase && !findMergeBase) {
     throw new GitBoundaryError(
       'FORBIDDEN_COMMAND',
       `Git argv is not an allowlisted read-only recipe: ${JSON.stringify(args)}`,
@@ -196,6 +203,10 @@ function validateInvocationOids(args, input, objectFormat) {
     }
     validateOid(left, objectFormat);
     validateOid(right, objectFormat);
+  } else if (args[0] === 'log') {
+    const [base, tip] = args[5].split('..');
+    validateOid(base, objectFormat);
+    validateOid(tip, objectFormat);
   } else if (args[0] === 'merge-base') {
     const firstOidIndex = args[1] === '--is-ancestor' ? 2 : 1;
     validateOidExpression(args[firstOidIndex], objectFormat);
@@ -228,7 +239,7 @@ function validateInvocationOids(args, input, objectFormat) {
   }
 }
 
-function isolatedEnvironment(repoPath, isolationRoot, noReplaceObjects) {
+export function isolatedEnvironment(repoPath, isolationRoot, noReplaceObjects) {
   const env = {};
   const inherited = [
     'PATH', 'Path', 'PATHEXT', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'ComSpec',
@@ -253,17 +264,20 @@ function isolatedEnvironment(repoPath, isolationRoot, noReplaceObjects) {
   return env;
 }
 
-function configuredArgs(args, isolationRoot) {
+export function configuredArgs(args, isolationRoot, {
+  hooksPath = path.join(isolationRoot, 'hooks'),
+  fileProtocol = 'always',
+} = {}) {
   const command = args[0];
   return [
-    '-c', `core.hooksPath=${path.join(isolationRoot, 'hooks')}`,
+    '-c', `core.hooksPath=${hooksPath}`,
     '-c', 'core.fsmonitor=false',
     '-c', 'core.pager=cat',
     '-c', `pager.${command}=false`,
     '-c', 'diff.external=',
     '-c', 'diff.trustExitCode=false',
     '-c', 'protocol.allow=never',
-    '-c', 'protocol.file.allow=always',
+    '-c', `protocol.file.allow=${fileProtocol}`,
     ...args,
   ];
 }
