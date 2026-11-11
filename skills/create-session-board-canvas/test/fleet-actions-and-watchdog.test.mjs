@@ -507,6 +507,16 @@ test("HTTP capability token gates all fleet operator actions and serves unified 
   freshStateUrl.search = new URL(freshSessionOpen.url).search;
   const freshState = await (await fetch(freshStateUrl)).json();
   assert.equal(freshState.activeScope, "session");
+
+  // Concurrent primary + subagent opens on the same instanceId serialize cleanly so the final subagent state holds zero operator privilege!
+  const [racePrimary, raceSub] = await Promise.all([
+    runtime.openInstance({ instanceId: "race-panel", input: { scope: "fleet" }, ctx: { sessionId: "cap-host", agentId: null } }),
+    runtime.openInstance({ instanceId: "race-panel", input: {}, ctx: { sessionId: "cap-host", agentId: "sub-racer" } }),
+  ]);
+  assert.notEqual(racePrimary.url, raceSub.url);
+  const raceSubStateUrl = new URL("/state", raceSub.url);
+  raceSubStateUrl.search = new URL(raceSub.url).search;
+  assert.equal("fleet" in (await (await fetch(raceSubStateUrl)).json()), false);
 });
 
 test("leader handover, viewer-close cancellation, cross-instance policy sync, RPC failure accounting, subagent auth exclusions, and untimestamped grace windows hold", async (t) => {
@@ -725,6 +735,15 @@ test("leader handover, viewer-close cancellation, cross-instance policy sync, RP
   assert.equal(cancelledDispatches, 0);
   assert.equal(cancelWatchdog.snapshot().entries["cancel-mid-persist"].attempts, 0);
   assert.equal(cancelPersistData.entries["cancel-mid-persist"].attempts, 0);
+
+  // Reserved prototype keys (__proto__, constructor, prototype) cannot pollute Object.prototype even with recovery off!
+  await cancelWatchdog.setPolicy("off");
+  await cancelWatchdog.evaluate([
+    { id: "__proto__", surface: "desktop", activity: "idle", wasInterrupted: true, incompleteLeafCount: 1, progressFingerprint: "p1" },
+    { id: "constructor", surface: "desktop", activity: "idle", wasInterrupted: true, incompleteLeafCount: 1, progressFingerprint: "p2" },
+  ]);
+  assert.equal(({}).attempts, undefined);
+  assert.equal(Object.hasOwn(cancelWatchdog.snapshot().entries, "__proto__"), false);
 });
 
 

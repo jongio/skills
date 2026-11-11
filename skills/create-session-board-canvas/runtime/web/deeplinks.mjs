@@ -33,6 +33,9 @@ export function isSafeSessionId(value) {
     value.length <= 256 &&
     value !== "." &&
     value !== ".." &&
+    value !== "__proto__" &&
+    value !== "constructor" &&
+    value !== "prototype" &&
     SAFE_ID_RE.test(value)
   );
 }

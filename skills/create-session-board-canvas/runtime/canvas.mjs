@@ -15,39 +15,51 @@ export function attachCanvasLifecycle(runtime, canvasConfig = runtime?.config) {
   const origOpen = runtime.openInstance.bind(runtime);
   const origClose = runtime.closeInstance.bind(runtime);
   const origShutdown = runtime.shutdown.bind(runtime);
+  let lifecycleTail = Promise.resolve();
+  const serializeLifecycle = (work) => {
+    const next = lifecycleTail.catch(() => {}).then(work);
+    lifecycleTail = next;
+    return next;
+  };
 
-  runtime.openInstance = async (args) => {
-    const instanceId = args?.instanceId;
-    if (instanceId && runtime._instances?.has?.(instanceId) && canvasConfig.didOpenerTrustChange?.(instanceId, args?.ctx)) {
-      // Recreate the instance when opener trust changes so existing SSE streams disconnect and a fresh capability token is issued.
+  runtime.openInstance = (args) =>
+    serializeLifecycle(async () => {
+      const instanceId = args?.instanceId;
+      if (instanceId && runtime._instances?.has?.(instanceId) && canvasConfig.didOpenerTrustChange?.(instanceId, args?.ctx)) {
+        // Recreate the instance when opener trust changes so existing SSE streams disconnect and a fresh capability token is issued.
+        await canvasConfig.onCloseInstance?.(instanceId);
+        await origClose(instanceId);
+      }
+      await canvasConfig.authorizeOpen?.(instanceId, args?.input, args?.ctx);
+      const out = await origOpen(args);
+      const inst = runtime._instances?.get?.(instanceId);
+      if (inst?.server && !inst._fleetCloseBound) {
+        inst._fleetCloseBound = true;
+        const boundServer = inst.server;
+        boundServer.once("close", () => {
+          if (runtime._instances?.get?.(instanceId)?.server === boundServer) {
+            void canvasConfig.onCloseInstance?.(instanceId);
+          }
+        });
+      }
+      await canvasConfig.onOpenInstance?.(instanceId, args?.input, args?.ctx);
+      if (inst?.domainId) {
+        await runtime.invoke("get_status", {}, { domainId: inst.domainId, instanceId, source: "ui" });
+      }
+      return out;
+    });
+
+  runtime.closeInstance = (instanceId) =>
+    serializeLifecycle(async () => {
       await canvasConfig.onCloseInstance?.(instanceId);
-      await origClose(instanceId);
-    }
-    await canvasConfig.authorizeOpen?.(instanceId, args?.input, args?.ctx);
-    const out = await origOpen(args);
-    const inst = runtime._instances?.get?.(instanceId);
-    if (inst?.server && !inst._fleetCloseBound) {
-      inst._fleetCloseBound = true;
-      inst.server.once("close", () => {
-        void canvasConfig.onCloseInstance?.(instanceId);
-      });
-    }
-    await canvasConfig.onOpenInstance?.(instanceId, args?.input, args?.ctx);
-    if (inst?.domainId) {
-      await runtime.invoke("get_status", {}, { domainId: inst.domainId, instanceId, source: "ui" });
-    }
-    return out;
-  };
+      return origClose(instanceId);
+    });
 
-  runtime.closeInstance = async (instanceId) => {
-    await canvasConfig.onCloseInstance?.(instanceId);
-    return origClose(instanceId);
-  };
-
-  runtime.shutdown = async () => {
-    await canvasConfig.onShutdown?.();
-    return origShutdown();
-  };
+  runtime.shutdown = () =>
+    serializeLifecycle(async () => {
+      await canvasConfig.onShutdown?.();
+      return origShutdown();
+    });
 
   return runtime;
 }

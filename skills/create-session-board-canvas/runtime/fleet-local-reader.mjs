@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 const MAX_PLAN_BYTES = 64 * 1024;
 const MAX_BOARD_BYTES = 512 * 1024;
 const EVENTS_TAIL_BYTES = 64 * 1024;
-const SAFE_SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/;
+const SAFE_SESSION_ID = /^(?!^(?:__proto__|constructor|prototype)$)[A-Za-z0-9._-]{1,128}$/;
 
 function defaultPidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;

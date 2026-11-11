@@ -5,6 +5,18 @@ import { join } from "node:path";
 
 const POLICIES = new Set(["off", "autopilot_only", "all_active"]);
 const SAFE_SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/;
+const RESERVED_OBJECT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const isSafeKey = (key) => typeof key === "string" && key.length > 0 && !RESERVED_OBJECT_KEYS.has(key);
+
+function createEntryMap(source = null) {
+  const map = Object.create(null);
+  if (!source || typeof source !== "object") return map;
+  for (const [key, value] of Object.entries(source)) {
+    if (!isSafeKey(key) || !value || typeof value !== "object") continue;
+    map[key] = structuredClone(value);
+  }
+  return map;
+}
 
 const NON_RETRYABLE_RE =
   /\b(401|403|unauthorized|forbidden|oauth|mcp\b[\s\S]{0,40}auth|token\s+expired|sign[\s-]?in|quota|billing|insufficient|trust|untrusted|user\s+cancel|cancelled|canceled|aborted|abort)\b/i;
@@ -96,7 +108,8 @@ export function classifyRecoveryCandidate(
   }
 
   if (session.surface === "cli") {
-    const safeId = SAFE_SESSION_ID.test(String(session.id || "")) ? session.id : null;
+    const idStr = String(session.id || "");
+    const safeId = isSafeKey(idStr) && SAFE_SESSION_ID.test(idStr) ? idStr : null;
     return {
       action: "cli_resume",
       autoEligible: false,
@@ -166,13 +179,13 @@ export async function createRecoveryWatchdog({
     return {
       version: 1,
       policy: POLICIES.has(data.policy) ? data.policy : "off",
-      entries: structuredClone(data.entries),
+      entries: createEntryMap(data.entries),
       history: Array.isArray(data.history) ? structuredClone(data.history.slice(-50)) : [],
     };
   }
 
   const initialLoaded = normalizeStoreData(await store?.load?.(null));
-  const state = initialLoaded || { version: 1, policy: "off", entries: {}, history: [] };
+  const state = initialLoaded || { version: 1, policy: "off", entries: createEntryMap(), history: [] };
   let queueTail = Promise.resolve();
   const serialize = (work) => {
     const next = queueTail.catch(() => {}).then(work);
@@ -182,8 +195,8 @@ export async function createRecoveryWatchdog({
 
   function mergeEntries(targetEntries, diskEntries) {
     for (const [id, diskEntry] of Object.entries(diskEntries || {})) {
-      if (!diskEntry || typeof diskEntry !== "object") continue;
-      const local = targetEntries[id];
+      if (!isSafeKey(id) || !diskEntry || typeof diskEntry !== "object") continue;
+      const local = Object.hasOwn(targetEntries, id) ? targetEntries[id] : null;
       if (!local) {
         targetEntries[id] = structuredClone(diskEntry);
         continue;
@@ -229,8 +242,9 @@ export async function createRecoveryWatchdog({
   }
 
   async function rollbackCancelledAttempt(sessionId, attemptId, { priorAttempts, priorLastAttemptMs, priorReason }) {
+    if (!isSafeKey(sessionId)) return null;
     if (!store?.save) {
-      const local = state.entries[sessionId];
+      const local = Object.hasOwn(state.entries, sessionId) ? state.entries[sessionId] : null;
       if (local && local.pendingAttemptId === attemptId) {
         local.attempts = priorAttempts;
         local.lastAttemptMs = priorLastAttemptMs;
@@ -238,7 +252,7 @@ export async function createRecoveryWatchdog({
         local.pendingAttemptId = null;
       }
       state.history = state.history.filter((item) => item.attemptId !== attemptId);
-      return state.entries[sessionId];
+      return local;
     }
     const disk = normalizeStoreData(await store.load(null));
     if (disk) {
@@ -247,7 +261,7 @@ export async function createRecoveryWatchdog({
       if (disk.history.length > state.history.length) {
         state.history = disk.history.slice(-50);
       }
-      const diskTarget = disk.entries[sessionId];
+      const diskTarget = Object.hasOwn(disk.entries, sessionId) ? disk.entries[sessionId] : null;
       if (diskTarget && diskTarget.pendingAttemptId && diskTarget.pendingAttemptId !== attemptId) {
         // A newer attempt was already recorded by another active leader; preserve that newer accounting!
         state.entries[sessionId] = structuredClone(diskTarget);
@@ -256,7 +270,7 @@ export async function createRecoveryWatchdog({
         return state.entries[sessionId];
       }
     }
-    const target = state.entries[sessionId];
+    const target = Object.hasOwn(state.entries, sessionId) ? state.entries[sessionId] : null;
     if (target && target.pendingAttemptId === attemptId) {
       target.attempts = priorAttempts;
       target.lastAttemptMs = priorLastAttemptMs;
@@ -289,7 +303,7 @@ export async function createRecoveryWatchdog({
       const disk = normalizeStoreData(await store?.load?.(null));
       if (disk) {
         // Adopt authoritative persisted retry/breaker entries on policy-only writes so a follower never clobbers leader state.
-        state.entries = structuredClone(disk.entries);
+        state.entries = createEntryMap(disk.entries);
         state.history = structuredClone(disk.history);
       }
       state.policy = nextPolicy;
@@ -303,11 +317,13 @@ export async function createRecoveryWatchdog({
       await syncPolicyFromStore();
       const currentMs = now();
       let dirty = false;
-      const evaluations = {};
+      const evaluations = Object.create(null);
 
       for (const session of sessions) {
-        if (!session?.id) continue;
-        const prev = state.entries[session.id] || {
+        if (!session?.id || !isSafeKey(session.id)) continue;
+        const prev = Object.hasOwn(state.entries, session.id)
+          ? state.entries[session.id]
+          : {
           attempts: 0,
           circuitOpen: false,
           lastAttemptMs: null,
@@ -437,9 +453,9 @@ export async function createRecoveryWatchdog({
 
   function triggerManual(session) {
     return serialize(async () => {
-      if (!session?.id) throw new Error("Target session is required");
+      if (!session?.id || !isSafeKey(session.id)) throw new Error("Target session is required");
       if (session.surface === "cli") {
-        const safeId = SAFE_SESSION_ID.test(String(session.id)) ? session.id : "<session-id>";
+        const safeId = isSafeKey(String(session.id)) && SAFE_SESSION_ID.test(String(session.id)) ? session.id : "<session-id>";
         throw new Error(`Standalone CLI sessions must be resumed in a terminal: copilot --resume ${safeId}`);
       }
       if (session.awaitingInput || session.pendingPlan || session.pendingPermission || session.pendingElicitation) {
@@ -454,7 +470,9 @@ export async function createRecoveryWatchdog({
       if (classified.action === "attention_only") {
         throw new Error(classified.reason || "Session has a non-retryable blocker");
       }
-      const prev = state.entries[session.id] || {
+      const prev = Object.hasOwn(state.entries, session.id)
+        ? state.entries[session.id]
+        : {
         attempts: 0,
         circuitOpen: false,
         lastAttemptMs: null,
