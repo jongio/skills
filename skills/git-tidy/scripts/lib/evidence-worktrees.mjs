@@ -191,6 +191,8 @@ export async function collectWorktrees(
         ? ["worktree-committed-proof-incomplete"]
         : []),
     ];
+    const detachedIntegrated = entry.detached && committed.complete &&
+      committed.ancestry?.mergedIntoDefault === true;
     const carrier = carrierBase(
       "worktree",
       identity,
@@ -205,8 +207,8 @@ export async function collectWorktrees(
         durability: "non-durable",
         protection: index === 0
           ? "protected"
-          : branch?.protection ?? "unknown",
-        protectionEvidence: index === 0
+          : branch?.protection ?? (detachedIntegrated ? "unprotected" : "unknown"),
+        protectionEvidence: index === 0 || detachedIntegrated
           ? "complete"
           : branch?.protectionEvidence ?? "partial",
         identityCurrent: !inspection.unknown && !inspection.missing,

@@ -106,7 +106,14 @@ function validateEncodedPath(value, path, check, allowEmpty = false) {
   check(value.subjectId === subjectId, "invalid-observation-subject", `${path}.subjectId`); check(nonempty(value.summary), "invalid-observation-summary", `${path}.summary`);
 } function validateAncestry(value, path, objectFormat, check) {
   if (value === null) return;
-  if (!check(exactKeys(value, ["mergeBaseOid", "ahead", "behind", "state", "mergedIntoDefault", "reachableFromDefault"]), "invalid-ancestry", path)) return;
+  const keys = ["mergeBaseOid", "ahead", "behind", "state", "mergedIntoDefault", "reachableFromDefault"];
+  if (value && Object.hasOwn(value, "integrationCommitOid")) keys.push("integrationCommitOid");
+  if (!check(exactKeys(value, keys), "invalid-ancestry", path)) return;
+  if (Object.hasOwn(value, "integrationCommitOid")) {
+    validateOid(value.integrationCommitOid, path, objectFormat, check);
+    check(value.mergedIntoDefault === true && value.reachableFromDefault === false &&
+      value.ahead > 0 && value.behind > 0, "invalid-integration-tree-proof", path);
+  }
   validateOid(value.mergeBaseOid, path, objectFormat, check);
   check(nonnegative(value.ahead) && nonnegative(value.behind), "invalid-ancestry-count", path);
   check(oneOf(value.state, ["identical", "ahead", "behind", "diverged"]), "invalid-ancestry-state", `${path}.state`);

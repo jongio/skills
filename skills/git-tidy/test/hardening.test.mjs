@@ -281,6 +281,9 @@ test("fresh revalidation detects remote OID and approval drift", async () => {
   const remote = await remoteFixture("hardening-approval-drift");
   try {
     remote.fixture.git(["branch", "topic"]);
+    remote.fixture.git([
+      "update-ref", "refs/remotes/origin/deleted-upstream", remote.fixture.oid(),
+    ]);
     const baseline = await verifyRemoteBaseline(remote.remotePath);
     const analyzed = await analyzeRepository(remote.fixture.root, {
       executionMode: "verified",
@@ -291,6 +294,7 @@ test("fresh revalidation detects remote OID and approval drift", async () => {
       "local-branch",
       ({ displayName }) => displayName === "refs/heads/topic",
     );
+    assert.ok(analyzed.coverage.gaps.some(({ code }) => code === "remote-baseline-local-drift"));
     const preview = await revalidateRepository(
       remote.fixture.root,
       analyzed,
@@ -305,6 +309,7 @@ test("fresh revalidation detects remote OID and approval drift", async () => {
     assert.equal(preview.actionPlan.approvalRevalidated, false);
     assert.deepEqual(preview.actionPlan.steps[0].argv, [
       "update-ref",
+      "--no-deref",
       "-d",
       "refs/heads/topic",
       topic.identity.tipOid,

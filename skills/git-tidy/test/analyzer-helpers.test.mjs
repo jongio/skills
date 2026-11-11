@@ -751,6 +751,7 @@ test("plan helpers emit guarded local commands and stable ordering", () => {
   });
   assert.deepEqual(branch.argv, [
     "update-ref",
+    "--no-deref",
     "-d",
     "refs/heads/topic",
     oid("a"),

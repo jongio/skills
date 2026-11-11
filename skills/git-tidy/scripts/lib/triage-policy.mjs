@@ -140,9 +140,8 @@ function canonicalCarrier(durable) {
 function isIntegratedLocalBranch(carrier) {
   const ancestry = carrier.observed?.ancestry;
   return carrier.type === "local-branch"
-    && ancestry?.ahead === 0
     && ancestry?.mergedIntoDefault === true
-    && ancestry?.reachableFromDefault === true;
+    && (ancestry.reachableFromDefault === true || Boolean(ancestry.integrationCommitOid));
 }
 
 function hasExactMergedPullRequest(carrier) {

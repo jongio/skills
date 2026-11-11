@@ -246,6 +246,7 @@ export function planStep(carrier) {
     const fullRef = decodeFullRef(carrier.identity.refRawBase64);
     argv = [
       "update-ref",
+      "--no-deref",
       "-d",
       fullRef,
       carrier.identity.tipOid,

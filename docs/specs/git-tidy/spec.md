@@ -814,7 +814,8 @@ BranchAncestry = {
   "behind": nonnegative integer,
   "state": "identical" | "ahead" | "behind" | "diverged",
   "mergedIntoDefault": boolean,
-  "reachableFromDefault": boolean
+  "reachableFromDefault": boolean,
+  "integrationCommitOid"?: string
 }
 ```
 
@@ -823,11 +824,16 @@ It obtains counts from
 `git rev-list --left-right --count <default>...<tip>`: the left count is
 `behind` and the right count is `ahead`. State is `identical` for zero/zero,
 `ahead` for positive/zero, `behind` for zero/positive, and `diverged` when both
-are positive. `mergedIntoDefault` and `reachableFromDefault` are true exactly
-when `ahead` is zero.
+are positive. `reachableFromDefault` is true exactly when `ahead` is zero.
+`mergedIntoDefault` is also true for a nonempty branch delta when its complete
+tree equals a first-parent default commit's tree after the merge base, within
+the 256-commit search, and every path changed by the branch still matches the
+current default tip. The matching commit is recorded as `integrationCommitOid`.
+This proves content preservation and does not assert ancestry of the topic tip.
 
 Branch change units are the exact `mergeBaseOid` to tip diff. When `ahead` is
-zero, the analyzer emits an empty unit set without diffing. Complete proof adds
+zero, the analyzer emits an empty unit set without diffing. An exact integration
+tree match also emits an empty unique unit set. Complete proof adds
 `branch-no-unique-work` when `ahead` is zero and exactly one of
 `branch-identical`, `branch-ahead`, `branch-behind`, or `branch-diverged`.
 
@@ -898,45 +904,15 @@ on that carrier but do not downgrade an independently safe worktree removal.
 When worktree removal is the only blocker preventing later branch deletion, the
 branch records those removable worktree IDs as staged prerequisites.
 
-Normal interactive analysis must invoke a Git Clean style categorized report
-through `ask_user`. A prose-only final response is invalid unless the request
-used `--dry-run` or explicitly requested report-only output. The report contains
-numbered **Safe to Remove**, **Needs Review**, **Keep**, and **Skipped**
-sections. It shows at most ten rows per category and states the remaining count.
-Every safe row includes its exact target, retained durable carrier, and
-analyzer-supported reason. No choice may select a carrier that is not visible in
-the same question. The complete categorized report, summary, remaining counts,
-and no-authorization notice must be the `ask_user.question` body. They may not
-be emitted separately from a context-free choice menu.
-
-The selection choices are all visible safe rows, specific row numbers, review
-of medium items, keep everything, and full evidence. A numbered safe selection
-goes directly to exact command preview and final per-class approval. It does not
-add a redundant per-carrier decision card. The report must state that selection
-only builds a command preview and makes no change without separate approval.
-Destructive execution remains capped at ten actions per batch.
-
-Default decision cards must:
-
-1. lead with one plain-language decision;
-2. give no more than two facts that affect the decision;
-3. name exactly one concrete next action;
-4. translate internal disposition names rather than exposing them; and
-5. name the carrier they concern and, for destructive actions, identify both
-   what would be removed and what remains; and
-6. keep purpose detail, changed-file paths, OIDs, coverage, proof mechanics,
-   blockers, and diagnostics behind `Show full evidence`.
-
-Mechanically proven duplicate cleanup does not require semantic content review
-before it is shown or selected. If an accepted bounded review exists, the
-dashboard may use its summary. Otherwise it describes the group as an exact
-duplicate of the retained carrier. Selection remains intent only and does not
-authorize cleanup.
-
-For a dirty linked worktree, the default decision says not to delete it yet and
-shows the shortest safe sequence: save the changes, remove the worktree, then
-reconsider the branch. Every mutation retains separate approval and fresh
-revalidation.
+Routine cleanup starts with the full audit and evidence for each exact action
+and witness. Obtain one confirmation for the listed plan, including conditional
+branch removals, prerequisites, and stale origin tracking refs. Tracking-ref
+pruning checks live absence and exact local tips. A verified recovery bundle
+precedes pruning when the batch would leave commits unreachable. Remove approved linked worktrees first, rerun
+proof, then delete the listed branches whose eligibility is confirmed. Revalidate
+each class internally. New targets or changed evidence require confirmation. Keep unmerged and dirty
+worktrees. Dry-run, metadata, and report-only requests are read-only. See
+[cleanup and revalidation](../../../skills/git-tidy/references/approval-flow.md).
 
 Age changes review priority only. Dirty, conflicted, locked, or unknown
 worktrees cannot receive `remove-worktree`. Missing objects, truncation,
@@ -1063,7 +1039,7 @@ fetches and never executes a plan.
 
 Selecting a disposition, approving content access, approving a refresh, or
 approving temporary analysis does not authorize recovery or cleanup. Every
-mutation class and every GitHub write receives its own exact approval after
+mutation class is revalidated. Every GitHub write requires explicit scope after
 the command, identities, effects, ordering, recovery, and witnesses are shown.
 Immediately before each action, revalidation runs again. See
 [Approval flow](../../../skills/git-tidy/references/approval-flow.md).
@@ -1091,7 +1067,7 @@ Immediately before each action, revalidation runs again. See
 5. Keep `metadata` as an explicit compatibility mode and `review` as opt-in.
    Any default-on review requires a later proposal and production evidence.
 
-No phase may loosen the last-copy invariant or approval separation.
+No phase may loosen the last-copy invariant or extend a cleanup request beyond its authorized scope.
 
 ## Acceptance criteria
 

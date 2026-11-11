@@ -250,7 +250,7 @@ export async function collectBranches(
     if (remoteEntry && remoteBaseline?.state !== "verified") {
       blockers.push("remote-state-not-refreshed", "remote-protection-unknown");
     }
-    if (!baselineConsistent) {
+    if (remoteEntry && !baselineConsistent) {
       blockers.push("remote-baseline-local-drift");
     }
     if (!remoteEntry && !defaultBranch.resolved) {
@@ -315,7 +315,7 @@ export async function collectBranches(
     addGap(
       context,
       "remote-baseline-local-drift",
-      carriers.map(({ id }) => id),
+      carriers.filter(({ type }) => type === "remote-branch").map(({ id }) => id),
       "local origin remote-tracking refs do not match the verified baseline",
     );
   }

@@ -57,6 +57,10 @@ records `node-runtime` unavailable and restricts orchestration to metadata. Do
 not invoke proof, review, or `revalidate`, and do not offer a destructive action
 for any work-bearing carrier.
 
+Squash proof reads a bounded first-parent history of exact commit/tree OIDs.
+The allowlist accepts only `log --first-parent --no-show-signature --format=%H %T
+--max-count=256 <baseOid>..<defaultOid> --` for this comparison.
+
 ## Analyzer invocation
 
 Resolve `scripts/triage.mjs` from the installed skill directory, set the child
@@ -76,8 +80,9 @@ node scripts/apply-review.mjs
 ```
 
 `--include-ignored` records handoff intent in the result. It does not authorize
-or perform ignored-content reads. The analyzer continues to retain only ignored
-counts; a separate approved workflow must perform any content read or hash.
+or perform ignored-content reads. The analyzer retains only ignored counts.
+The cleanup workflow may inspect names and filesystem metadata for reproducible
+outputs. Reading or hashing payloads requires separate user direction.
 
 `scope` is omitted for `all`, or is exactly `branches`, `worktrees`, `remote`,
 `stashes`, `tags`, `artifacts`, `blobs`, or `maintenance`. Do not interpolate

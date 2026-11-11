@@ -1,6 +1,6 @@
 ---
 title: git-tidy
-tagline: "Review Git work by content, then safely decide what to remove, keep, resume, update, or merge."
+tagline: "Audit Git work, remove proven integrated local branches and worktrees, and verify what remains."
 useWhen: "When Git work needs cleanup without risking unique changes or relying on age and names as deletion proof."
 repoPath: skills/git-tidy
 thumb: images/thumb-git-tidy.png
@@ -14,37 +14,21 @@ install:
 
 ## What It Does
 
-`git-tidy` inspects branches, worktrees, stashes, and remote references so you can
-decide what to remove, keep, resume, update, or turn into a pull request.
+`git-tidy` audits the whole repository and shows the evidence for each proposed
+removal. One confirmation covers the listed cleanup plan, including stale origin
+tracking refs. A verified recovery bundle preserves any history at risk.
+The cleanup removes worktrees
+first and then rechecks their branches. It also drops duplicate stashes when a
+durable copy holds the same changes.
 
-The report groups items into **Safe to Remove**, **Needs Review**, **Keep**, and
-**Skipped**. Each item has a reason; removal recommendations also identify the
-copy of your work that will remain. Choose numbered items and open
-`Show full evidence` when you want the supporting details.
+The audit covers remote refs, tags, ignored tracking, artifacts, large blobs,
+and maintenance. The final summary lists removals, retained work, and blockers.
+Dirty or unmerged work stays in place. Changing live remote branches requires
+an explicit request.
 
-## Before cleanup
-
-Analysis does not delete anything. You review exact actions before they run, and
-the skill checks again that the evidence still holds.
-
-- Unique changes, dirty worktrees, and uncertain results block removal.
-- Old names or old dates are not enough to prove work is safe to delete.
-- The main worktree and protected GitHub branches are protected.
-- Missing remote access is reported as unknown, not treated as proof a remote is gone.
-- Large files are reported, not deleted. Recovery-destroying maintenance is never preselected.
-
-The analyzer requires Node.js 22 or newer. Without it, the skill can list items
-but does not offer destructive cleanup of items that may contain work.
-
-## Choose the level of detail
-
-The default `proof` mode checks content and history before recommending removal.
-Use `metadata` for an inventory only, or `review` for additional content review.
-When the default branch cannot be verified from local remote references,
-destructive local-branch actions are blocked rather than assuming `main` or `master`.
-
-Remote refreshes and changes such as checkout, rebase, merge, push, or cleanup
-require their own approval. Use `--dry-run` when you only want a report.
+Use `--dry-run` for a preview, `--depth metadata` for inventory, or
+`--depth review` for a bounded content review. Proof requires Node.js 22 or
+newer.
 
 ## Use It
 

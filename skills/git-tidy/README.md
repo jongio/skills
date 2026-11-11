@@ -1,69 +1,24 @@
 # git-tidy
 
-Git repository triage with content-aware proof for branches, worktrees, stashes,
-and remote refs, plus protected read-only inventory for tags, remotes, merge
-artifacts, ignored-but-tracked files, large history blobs, and maintenance
-health. No refresh, save, cleanup, or GitHub write runs without its own explicit
-approval.
+Run `git-tidy` to audit the whole repository, review the evidence, and confirm
+the listed cleanup in the same run. Use `--dry-run` to preview or `--depth metadata` for inventory only.
 
-## What it does
+The audit includes branches, all registered worktrees, stashes, remote refs,
+tags, artifacts, ignored tracking, large blobs, and maintenance health. It uses
+typed legacy inventory, records coverage gaps, and saves a run-specific JSON
+artifact when session storage is available.
 
-`git-tidy` separates work decisions from carrier cleanup:
+Cleanup removes clean linked worktrees with integrated changes, then rechecks
+which local branches can be deleted. It drops duplicate stashes only when their
+exact changes survive in a durable copy. One confirmation covers the listed
+targets and prerequisites, including stale origin tracking refs. Each batch is
+revalidated before execution. When pruning would leave commits unreachable, a
+verified recovery bundle is required. The final audit lists removals and why
+each remaining branch or worktree was retained.
 
-1. Inventory carriers and coverage without mutating the repository.
-2. Prove exact relationships from OIDs and complete change units, not age,
-   names, stash messages, or branch-name-only PR matches.
-3. Optionally review bounded sanitized text to explain intent. Review can make a
-   result more conservative, never safer to delete.
-4. Apply review through the no-Git `scripts/apply-review.mjs` adapter, which
-   accepts exact UTF-8 JSON capped at 20 MiB and returns the original or a
-   monotonically weakened result. It never authorizes an action.
-5. Translate the internal outcome into one plain-language decision and one
-   concrete next action.
-6. Show any per-carrier action separately with proof, witnesses, drift checks,
-   exact commands, and a dedicated approval or specialist handoff.
-7. Present the familiar Git Clean audit with numbered **Safe to Remove**,
-   **Needs Review**, **Keep**, and **Skipped** sections before asking the user to
-   select anything.
-8. Preserve each accepted result under a unique timestamp and `runId` artifact
-   name so reruns never replace the evidence behind an earlier recommendation.
-
-Every work item reports mechanical evidence, optional content review, required
-user judgment, preservation witnesses, blockers, and coverage gaps. Pull
-requests are evidence only and join by repository identity, exact head ref
-name, and exact head OID. GitHub branches attach to remote carriers only by
-exact repository ID, ref name, and tip OID.
-
-A normal interactive run starts with a categorized audit, not an abstract
-decision queue. Every visible branch, worktree, stash, and remote ref has a row,
-a confidence category, a concrete reason, and a stable number. Safe-removal rows
-also name the durable copy that remains. Active branches remain unchanged unless
-the user chooses to review them. The complete audit appears inside the
-interactive question, so its choices never become a context-free menu.
-
-The interactive dashboard is mandatory for normal runs. A prose-only report is
-complete only for `--dry-run` or an explicit report-only request.
-
-Mechanically proven duplicates can be selected without a mandatory content
-review round, but never without the categorized report. The user can select all
-visible safe rows, enter specific row numbers, review medium items, keep
-everything, or inspect full evidence. No redundant per-carrier card follows a
-numbered safe selection. Batches contain at most ten destructive actions.
-Selection is not authorization. Selected carriers are revalidated before exact
-commands and separate mutation-class approvals are shown.
-Schema 1.2 binds offline or verified execution mode and the verified
-remote/default-branch/OID baseline into `runId`. Offline, failed, unknown, or
-expired baselines remain advisory and cannot emit a destructive plan.
-
-Active-work decisions use a three-line card: `Decision`, `Why`, and `Next
-action`. Every card names the branch, stash, or worktree it concerns. Before a
-destructive selection, the card names the exact removal target and the durable
-copy that remains. OIDs, changed-file paths, proof mechanics, exclusions, risks,
-and analyzer details appear only after `Show details`.
-
-For a dirty linked worktree, the skill says not to delete yet and gives the
-ordered path: save the changes, remove the worktree, then reconsider the branch.
-Each mutation keeps its own approval and fresh revalidation.
+Exact ancestry and exact tree comparisons catch squash merges. Dirty worktrees
+and unmerged work are kept. Reproducible ignored outputs can be cleared after
+targeted verification, and unknown ignored files still block removal.
 
 ## Install
 
@@ -116,55 +71,17 @@ falls back to metadata-only and offers no destructive work-bearing action.
 
 ## Safety
 
-Analysis and revalidation are read-only in the target repository. After
-separate approval, `verify-remote.mjs` fetches the exact approved URL only into
-a disposable bare repository with `--no-prune`, isolated configuration, no
-hooks, no credential helper, and no repository-controlled Git configuration.
-Public repositories are verified anonymously. When HTTPS authentication is
-required, the verifier uses the existing GitHub CLI session for the exact
-approved host, including Windows, `GH_CONFIG_DIR`, XDG, and Enterprise sessions.
-Existing `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` are preserved only for
-the GitHub CLI so non-default Linux keyring sessions remain reachable.
-Token lookup requires `gh auth token --no-refresh`; unsupported CLIs fail closed
-without a potentially refreshing fallback. Enterprise environment tokens require
-the caller's existing `GH_HOST` to match the approved host; otherwise only stored
-host-specific credentials are eligible.
-Credentials stay in the Git child's URL-scoped environment, never command
-arguments, URLs, evidence, or configuration files. Redirects and executable
-transports are disabled; the verifier never logs in or changes credentials.
-Revalidation uses the same authentication boundary and rejects a different
-remote URL before contacting it. Authentication failures remain blocked and
-include safe guidance for checking CLI authentication and repository access.
-The resulting baseline expires after five minutes and is re-fetched immediately
-after each mutation-class approval. Unknown remote access never proves a remote
-dead. Dirty, conflicted,
-locked, missing, or unknown worktrees aren't removal candidates.
+Analysis and revalidation are read-only in the target repository. The isolated
+remote verifier uses an exact HTTPS URL, disposable storage, disabled hooks and
+credential helpers, and existing authentication when required. The verified
+default tip must match the local tracking ref used as evidence. Unrelated
+tracking drift is reported separately.
 
-Verified mode takes default-branch identity only from the approved remote
-advertisement and requires its OID and complete head set to match local
-`refs/remotes/origin/*`. Offline mode may report the local symbolic ref but
-cannot emit a destructive plan. The analyzer never guesses `main` or `master`.
-
-Age only prioritizes review. A stash or branch is removable only when exact
-mechanical proof shows every change unit survives on an unselected durable
-carrier. Large blobs stay report-only. Reflog expiry, garbage collection, and
-repack can destroy recovery paths, so they're never preselected or described as
-ordinary non-destructive housekeeping.
-
-The main worktree is always protected. Worktree evidence reports categorical
-status counts, nullable sparse state, and an ignored-path count. Ignored entries
-are counted from `! ` records only; names and payloads are not retained or read.
-Conflicts, dirty submodules, intent-to-add, ignored content, or unknown ignored
-state block removal.
-
-Protected GitHub branches block remote deletion. Remote-only content absent
-locally remains partial, `keep`, ineligible, and `defer` until a separately
-approved isolated acquisition satisfies its deterministic prerequisite.
-
-Selecting a work outcome doesn't authorize an operation. Each refresh, optional
-read, save, checkout, rebase, merge, push, PR write, stash drop, ref deletion,
-worktree removal, tag/remote removal, file action, and maintenance action gets
-its own exact approval and fresh revalidation.
+Main worktrees, protected refs, unique stashes, uncertain ignored content, and
+dirty or locked worktrees are preserved. Live remote branch deletion requires an
+explicit remote cleanup request, protection evidence, and an expected-OID
+lease. Tags, artifacts, large blobs, and maintenance are audited. Changing
+those areas requires a separate request.
 
 Detailed contracts:
 
