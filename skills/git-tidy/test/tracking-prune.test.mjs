@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, realpath, rmdir, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -33,6 +33,7 @@ test("tracking prune confirms exact refs and verifies recovery before deletion",
   local.git(["branch", "pending-removal", unique]);
   assert.equal((await run("plan", input, local.root)).bundleRequired, false);
   input.excludeWitnessRefs.push("refs/heads/pending-removal");
+  local.git(["update-ref", "refs/bisect/bad", unique]);
 
   await assert.rejects(
     run("plan", { ...input, bundlePath: path.join(local.root, "recovery.bundle") }, local.root),
@@ -65,9 +66,21 @@ test("tracking prune confirms exact refs and verifies recovery before deletion",
   assert.equal(await readFile(bundlePath, "utf8"), "existing file");
   await unlink(bundlePath);
 
+  await assert.rejects(
+    run("apply", approved, local.root, {
+      verify: async () => { throw new Error("Injected bundle verification failure"); },
+    }),
+    /bundle verification failure/,
+  );
+  for (const { ref, oid } of plan.rows) assert.equal(local.oid(ref), oid);
+  await unlink(bundlePath);
+
   const result = await run("apply", approved, local.root);
   assert.deepEqual(result.pruned, plan.rows.map(({ ref }) => ref));
   assert.equal(result.bundle, await realpath(bundlePath));
+  if (process.platform !== "win32") {
+    assert.equal((await stat(bundlePath)).mode & 0o077, 0);
+  }
   assert.equal(local.oid("refs/remotes/origin/HEAD"), base);
   assert.equal(local.oid("refs/remotes/origin/main"), base);
   const recovered = local.git(["bundle", "list-heads", bundlePath]).stdout.toString("utf8");

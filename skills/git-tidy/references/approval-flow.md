@@ -41,15 +41,18 @@ absence afterward. A failed remote lookup never establishes absence.
 Include this section in the same report and confirmation as local branches,
 worktrees, and stashes. Run the helper at the target repository root with JSON
 on stdin. Use the exact verified origin URL and a fresh absolute `.bundle`
-path in the user's recovery or scratch storage, outside the target worktrees.
+path in the user's private recovery or scratch storage, outside the target
+worktrees. On Windows, use a directory with an access control list restricted
+to the user because the bundle inherits that directory's permissions.
+Resolve the helper from the installed skill directory and use its absolute path.
 Supply any local refs slated for removal as `excludeWitnessRefs`. Include
 `refs/stash` if any stash will be dropped.
 
 ```text
-node scripts/tracking-prune.mjs plan
+node "<installed-skill-dir>/scripts/tracking-prune.mjs" plan
 {"remoteUrl":"<origin URL>","bundlePath":"<absolute path>","excludeWitnessRefs":[]}
 
-node scripts/tracking-prune.mjs apply
+node "<installed-skill-dir>/scripts/tracking-prune.mjs" apply
 {"input":<plan.input>,"approvedPlanId":"<confirmed plan.planId>"}
 ```
 

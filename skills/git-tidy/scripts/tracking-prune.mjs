@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { open, realpath } from "node:fs/promises";
+import { lstat, open, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { configuredArgs, isolatedEnvironment } from "./lib/git-boundary.mjs";
@@ -38,9 +38,9 @@ function gitRunner(cwd) {
     GIT_GRAFT_FILE: hooksPath,
     GIT_NO_LAZY_FETCH: "1",
   };
-  return async (args, input) => {
+  return async (args, input, stdoutFd) => {
     const argv = configuredArgs(args, isolationRoot, { hooksPath, fileProtocol: "never" });
-    const { stdout } = await runBoundedProcess(executable, argv, { cwd, env, input });
+    const { stdout } = await runBoundedProcess(executable, argv, { cwd, env, input, stdoutFd });
     return decoder.decode(stdout).trimEnd();
   };
 }
@@ -141,10 +141,10 @@ async function snapshot(git, input, cwd) {
   const omitted = tracking.filter(({ ref }) =>
     ref !== trackingPrefix + "HEAD" && !live.has(ref) && !targetRefs.has(ref));
   const removed = new Set([...targetRefs, ...input.excludeWitnessRefs]);
-  // Use direct named commit and tag refs as witnesses. Detached tips and
-  // reflogs are deliberately excluded from the preservation claim.
+  // Transient namespaces and reflogs cannot preserve an unarchived commit.
+  const durableRef = /^(?:refs\/(?:heads|tags|remotes)\/|refs\/stash$)/u;
   const witnesses = refs.filter(({ ref, symbolic, type, peeledType }) =>
-    !removed.has(ref) && !symbolic && validRef(ref) && !ref.startsWith("refs/replace/") &&
+    !removed.has(ref) && !symbolic && validRef(ref) && durableRef.test(ref) &&
     (type === "commit" || peeledType === "commit")).map(({ ref, oid }) => ({ ref, oid }));
   const rows = [];
   for (const { ref, oid } of targets) {
@@ -190,10 +190,15 @@ async function verifyPack(bundle, objectFormat) {
 
 async function archive(git, plan) {
   const { bundlePath } = plan.input;
-  // Reserve the exact approved path. Git uses its own lockfile when writing.
-  await (await open(bundlePath, "wx", 0o600)).close();
-  const refs = plan.rows.map(({ ref }) => ref);
-  await git(["bundle", "create", bundlePath, "--stdin"], refs.join("\n") + "\n");
+  const file = await open(bundlePath, "wx", 0o600);
+  try {
+    const refs = plan.rows.map(({ ref }) => ref);
+    // Write directly to the private file. Git never replaces it with a lockfile.
+    await git(["bundle", "create", "-", "--stdin"], refs.join("\n") + "\n", file.fd);
+    await file.sync();
+  } finally {
+    await file.close();
+  }
 }
 
 async function verifyArchive(git, plan) {
@@ -207,7 +212,7 @@ async function verifyArchive(git, plan) {
   await verifyPack(bundlePath, plan.objectFormat);
 }
 
-export async function run(mode, value, cwd = process.cwd()) {
+export async function run(mode, value, cwd = process.cwd(), { verify = verifyArchive } = {}) {
   if (mode !== "plan" && mode !== "apply") throw new Error("Expected plan or apply.");
   if (mode === "apply" && !exactKeys(value, ["input", "approvedPlanId"])) {
     throw new Error("Apply requires the displayed plan ID and original input.");
@@ -220,11 +225,18 @@ export async function run(mode, value, cwd = process.cwd()) {
   if (plan.rows.length === 0) return { pruned: [], bundle: null };
   if (plan.bundleRequired) {
     await archive(git, plan);
+    const bundlePath = plan.input.bundlePath;
+    const archived = await lstat(bundlePath, { bigint: true });
+    await verify(git, plan);
     plan = await snapshot(git, input, cwd);
     if (plan.planId !== value.approvedPlanId) {
       throw new Error("Plan changed after writing the recovery bundle. Review it again.");
     }
-    await verifyArchive(git, plan);
+    const current = await lstat(bundlePath, { bigint: true });
+    if (!archived.isFile() || !current.isFile() ||
+        ["dev", "ino", "size", "mtimeNs", "ctimeNs"].some((key) => archived[key] !== current[key])) {
+      throw new Error("Recovery bundle changed after verification.");
+    }
   }
   const guards = plan.bundleRequired
     ? [{ ref: plan.defaultTracking, oid: plan.defaultOid }]
