@@ -577,18 +577,34 @@ export function readLocalFleetSnapshot({
       if (boundedBoard) {
         try {
           const parsedBoard = JSON.parse(boundedBoard.content);
+          const goals = Array.isArray(parsedBoard.goals) ? parsedBoard.goals : [];
+          const activeGoalId = parsedBoard.activeGoalId || null;
+          const activeGoal = activeGoalId ? goals.find((goal) => goal?.id === activeGoalId) || null : null;
           const allReports = Array.isArray(parsedBoard.reports) ? parsedBoard.reports : [];
+          // Deduplicate latest report per (actorId, goalId, taskId) stream before filtering requiresOperator.
+          const latestByStream = new Map();
+          allReports.forEach((report, idx) => {
+            if (!report || typeof report !== "object") return;
+            const streamKey = JSON.stringify([report.actorId ?? "", report.goalId ?? null, report.taskId ?? null]);
+            const prev = latestByStream.get(streamKey);
+            const prevSeq = Number.isSafeInteger(prev?.report?.sequence) ? prev.report.sequence : -1;
+            const nextSeq = Number.isSafeInteger(report.sequence) ? report.sequence : -1;
+            if (!prev || nextSeq > prevSeq || (nextSeq === prevSeq && idx > prev.idx)) {
+              latestByStream.set(streamKey, { report, idx });
+            }
+          });
           board = {
-            activeGoalId: parsedBoard.activeGoalId || null,
-            goals: Array.isArray(parsedBoard.goals) ? parsedBoard.goals : [],
+            activeGoalId,
+            goals,
             hierarchy: Array.isArray(parsedBoard.hierarchy) ? parsedBoard.hierarchy : [],
             agents: Array.isArray(parsedBoard.agents) ? parsedBoard.agents : [],
             attention: Array.isArray(parsedBoard.attention) ? parsedBoard.attention.slice(0, 20) : [],
-            operatorReports: allReports
-              .filter((r) => r && r.requiresOperator === true && !r.superseded)
+            operatorReports: [...latestByStream.values()]
+              .map(({ report }) => report)
+              .filter((r) => r.requiresOperator === true && r.superseded !== true)
               .slice(-20),
             reports: allReports.slice(-40),
-            delivery: parsedBoard.delivery || null,
+            delivery: activeGoal?.delivery || parsedBoard.delivery || null,
             references: parsedBoard.references || null,
           };
           cached.board = board;

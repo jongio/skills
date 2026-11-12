@@ -708,6 +708,7 @@ test("set_scope transitions do not restart polling after switching back to sessi
       if (name === "list_sessions_and_chats") {
         return [
           { id: "board-attn", name: "Board operator wait", repository: "jongio/skills" },
+          { id: "new-goal-active", name: "New goal supersedes prior merge wait", repository: "jongio/skills" },
           { id: "host-waiting", name: "Host waiting status", repository: "jongio/skills" },
           { id: "omitted-cold-tail", name: "Omitted cold tail", repository: "jongio/skills" },
         ];
@@ -716,6 +717,7 @@ test("set_scope transitions do not restart polling after switching back to sessi
         // Coordinator-scoped: omits "omitted-cold-tail" while reporting "host-waiting" with activity="waiting" and no awaiting_input payload!
         return [
           { id: "board-attn", activity: "idle", mode: "autopilot", was_interrupted: true },
+          { id: "new-goal-active", activity: "idle", mode: "autopilot", was_interrupted: true },
           { id: "host-waiting", activity: "waiting", mode: "autopilot", was_interrupted: true },
         ];
       }
@@ -736,6 +738,25 @@ test("set_scope transitions do not restart polling after switching back to sessi
             tailState: {
               activity: "idle",
               lastError: { message: "Earlier transient hiccup", at: new Date(nowMs - 300_000).toISOString() },
+            },
+          },
+          {
+            id: "new-goal-active",
+            repository: "jongio/skills",
+            todos: [{ id: "g2-task", title: "Implement next goal", status: "in_progress" }],
+            board: {
+              activeGoalId: "g2",
+              goals: [
+                { id: "g1", taskIds: ["g1-task"], delivery: { phase: "awaiting_merge_approval", status: "waiting" } },
+                { id: "g2", taskIds: ["g2-task"], delivery: { phase: "implementing", status: "running" } },
+              ],
+              // Stale top-level delivery from previous goal g1 must NOT block recovery on active goal g2!
+              delivery: { phase: "awaiting_merge_approval", status: "waiting" },
+              operatorReports: [{ id: "old-rep", goalId: "g1", taskId: "g1-task", requiresOperator: true, message: "Old goal prompt" }],
+            },
+            tailState: {
+              activity: "idle",
+              lastError: { message: "Stream dropped on g2", at: new Date(nowMs - 300_000).toISOString() },
             },
           },
           {
@@ -801,14 +822,15 @@ test("set_scope transitions do not restart polling after switching back to sessi
   stateUrl.search = new URL(panelA.url).search;
   assert.equal((await (await fetch(stateUrl)).json()).activeScope, "session");
 
-  // Now switch cleanly to "inbox" and verify all 3 operator-attention / coordinator-omitted sessions block auto and manual wakes!
+  // Switch cleanly to "inbox": the 3 awaiting/omitted sessions stay blocked, while "new-goal-active" (whose active goal g2 superseded stale g1 merge wait) recovers!
   const inboxReq = await fetch(actionUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ actionName: "set_scope", input: { scope: "inbox" } }),
   });
   assert.equal(inboxReq.status, 200);
-  assert.equal(recoveryCalls, 0);
+  assert.equal(recoveryCalls, 1);
+  assert.equal(fleetService.snapshot().sessions.find((s) => s.id === "new-goal-active")?.awaitingOperator, false);
 
   await assert.rejects(
     fleetService.triggerRecovery({ targetSessionId: "board-attn" }),

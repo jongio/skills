@@ -310,11 +310,25 @@ test("worker client bounds large session directories and 512KB event logs off th
   writeFileSync(join(oldLiveDir, `inuse.${process.pid}.lock`), "");
   const scratchDir = join(oldLiveDir, "extensions", "session-progress");
   mkdirSync(scratchDir, { recursive: true });
-  writeFileSync(join(scratchDir, "board.json"), JSON.stringify({ hierarchy: [{ parentId: "m1", childIds: ["c1"] }], agents: [], reports: [] }));
+  writeFileSync(
+    join(scratchDir, "board.json"),
+    JSON.stringify({
+      activeGoalId: "g2",
+      goals: [
+        { id: "g1", taskIds: ["m1"], delivery: { phase: "awaiting_merge_approval", status: "waiting" } },
+        { id: "g2", taskIds: ["m1"], delivery: { phase: "implementing", status: "running" } },
+      ],
+      delivery: { phase: "awaiting_merge_approval", status: "waiting" },
+      hierarchy: [{ parentId: "m1", childIds: ["c1"] }],
+      agents: [],
+      reports: [],
+    }),
+  );
   const reprioritized = await client.scan();
   const prioritizedLive = reprioritized.sessions.find((s) => s.id === "bulk-session-000");
   assert.ok(prioritizedLive, "expected live older CLI session to be prioritized ahead of inactive newer dirs");
   assert.deepEqual(prioritizedLive.board?.hierarchy, [{ parentId: "m1", childIds: ["c1"] }]);
+  assert.equal(prioritizedLive.board?.delivery?.phase, "implementing");
   assert.ok(maxLagMs < 100, `expected main-thread event loop to stay responsive, maxLagMs=${maxLagMs}`);
 
   await client.stop();

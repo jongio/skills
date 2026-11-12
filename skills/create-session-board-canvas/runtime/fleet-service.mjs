@@ -376,6 +376,49 @@ function enrichPrList(catalogEntry, localEntry, prCache = {}) {
   return [...byUrl.values()];
 }
 
+function resolveBoardOperatorState(board, todos, rootCancelled = false) {
+  if (!board || typeof board !== "object" || rootCancelled) {
+    return { waiting: false, message: null };
+  }
+  const activeGoalId = board.activeGoalId || null;
+  const goals = Array.isArray(board.goals) ? board.goals : [];
+  const activeGoal = activeGoalId ? goals.find((goal) => goal?.id === activeGoalId) || null : null;
+  const effectiveDelivery = activeGoal?.delivery || board.delivery || null;
+  const awaitingMergeApproval = effectiveDelivery?.phase === "awaiting_merge_approval";
+
+  const todoStatusById = new Map((todos || []).map((t) => [t.id, t.status]));
+  for (const gt of activeGoal?.tasks || []) {
+    if (gt?.id && !todoStatusById.has(gt.id)) todoStatusById.set(gt.id, gt.status);
+  }
+  const activeTaskIds = activeGoal && Array.isArray(activeGoal.taskIds)
+    ? new Set(activeGoal.taskIds)
+    : new Set(todoStatusById.keys());
+  const agents = Array.isArray(board.agents) ? board.agents : [];
+
+  const boardAttentionItem = Array.isArray(board.attention) && board.attention.length > 0
+    ? board.attention[0]
+    : null;
+  const boardOperatorReport = Array.isArray(board.operatorReports)
+    ? board.operatorReports.find((report) => {
+        if (!report || report.superseded === true || report.requiresOperator !== true) return false;
+        if (report.taskId && todoStatusById.get(report.taskId) === "done") return false;
+        if (report.taskId && activeGoal && !activeTaskIds.has(report.taskId)) return false;
+        if (!report.taskId && report.goalId === null) return true;
+        if (report.goalId != null) return report.goalId === activeGoalId;
+        if (!activeGoalId) return true;
+        if (report.taskId) return activeTaskIds.has(report.taskId);
+        return agents.some((agent) => agent?.id === report.actorId && agent.goalId === activeGoalId);
+      }) || null
+    : null;
+
+  const waiting = Boolean(boardAttentionItem || boardOperatorReport || awaitingMergeApproval);
+  const message =
+    boardAttentionItem?.message ||
+    boardOperatorReport?.message ||
+    (awaitingMergeApproval ? "Awaiting final merge approval." : null);
+  return { waiting, message };
+}
+
 export function createFleetService({
   hostSessionId,
   executeHostTool = null,
@@ -619,19 +662,9 @@ export function createFleetService({
           (awaitingInput?.isElicitation ? awaitingInput : null) || loc?.tailState?.pendingElicitation || null;
 
         const todos = loc?.todos || [];
-        const doneTodoIds = new Set(todos.filter((t) => t?.status === "done").map((t) => t.id));
-        const boardAttentionItem = Array.isArray(loc?.board?.attention) && loc.board.attention.length > 0
-          ? loc.board.attention[0]
-          : null;
-        const boardOperatorReport = Array.isArray(loc?.board?.operatorReports)
-          ? loc.board.operatorReports.find(
-              (r) =>
-                (!r.goalId || r.goalId === loc?.board?.activeGoalId) &&
-                (!r.taskId || !doneTodoIds.has(r.taskId)),
-            ) || null
-          : null;
-        const awaitingMergeApproval = loc?.board?.delivery?.phase === "awaiting_merge_approval";
-        const serverAttention = String(loc?.liveServer?.status || "").toLowerCase() === "attention";
+        const rootCancelled = Boolean(loc?.tailState?.rootCancelled);
+        const boardOp = resolveBoardOperatorState(loc?.board, todos, rootCancelled);
+        const serverAttention = !rootCancelled && String(loc?.liveServer?.status || "").toLowerCase() === "attention";
 
         let activity = String(st?.activity || st?.status || loc?.liveServer?.status || loc?.tailState?.activity || "idle").toLowerCase();
         if (activity === "working") activity = "busy";
@@ -639,9 +672,7 @@ export function createFleetService({
         const awaitingOperator = Boolean(
           activity === "waiting" ||
           serverAttention ||
-          boardAttentionItem ||
-          boardOperatorReport ||
-          awaitingMergeApproval ||
+          boardOp.waiting ||
           awaitingInput ||
           pendingPlan ||
           pendingPermission ||
@@ -649,9 +680,7 @@ export function createFleetService({
         );
         if (awaitingOperator) activity = "waiting";
         const operatorAttentionMessage =
-          boardAttentionItem?.message ||
-          boardOperatorReport?.message ||
-          (awaitingMergeApproval ? "Awaiting final merge approval." : null) ||
+          boardOp.message ||
           (serverAttention ? `Awaiting operator (${loc.liveServer.attentionKind || "attention"}).` : null);
 
         const hierarchy = loc?.board?.hierarchy || [];
@@ -686,7 +715,7 @@ export function createFleetService({
               ((!st?.activity && !st?.status && !loc?.liveServer?.status && loc?.tailState?.lifecycleUnknown) ||
                 unverifiedCoordinatorOmission),
           ),
-          rootCancelled: Boolean(loc?.tailState?.rootCancelled),
+          rootCancelled,
           busyDurationMs: Number.isFinite(st?.busy_duration_ms) ? st.busy_duration_ms : null,
           wasInterrupted,
           interruptionReason,
@@ -740,20 +769,10 @@ export function createFleetService({
         const pendingPermission = loc.tailState?.pendingPermission || null;
         const pendingElicitation = loc.tailState?.pendingElicitation || null;
 
-        const doneTodoIds = new Set(todos.filter((t) => t?.status === "done").map((t) => t.id));
-        const boardAttentionItem = Array.isArray(loc.board?.attention) && loc.board.attention.length > 0
-          ? loc.board.attention[0]
-          : null;
-        const boardOperatorReport = Array.isArray(loc.board?.operatorReports)
-          ? loc.board.operatorReports.find(
-              (r) =>
-                (!r.goalId || r.goalId === loc.board?.activeGoalId) &&
-                (!r.taskId || !doneTodoIds.has(r.taskId)),
-            ) || null
-          : null;
-        const awaitingMergeApproval = loc.board?.delivery?.phase === "awaiting_merge_approval";
         const cliProcessAlive = !(surface === "cli" && loc.lockState?.hasLockFile && !loc.lockState.alive);
-        const serverAttention = cliProcessAlive && String(loc.liveServer?.status || "").toLowerCase() === "attention";
+        const rootCancelled = Boolean(loc.tailState?.rootCancelled);
+        const boardOp = resolveBoardOperatorState(loc.board, todos, rootCancelled || !cliProcessAlive);
+        const serverAttention = cliProcessAlive && !rootCancelled && String(loc.liveServer?.status || "").toLowerCase() === "attention";
 
         let activity = String(loc.liveServer?.status || loc.tailState?.activity || (loc.lockState?.alive ? "idle" : "idle")).toLowerCase();
         if (activity === "working") activity = "busy";
@@ -765,9 +784,7 @@ export function createFleetService({
           cliProcessAlive &&
             (activity === "waiting" ||
               serverAttention ||
-              boardAttentionItem ||
-              boardOperatorReport ||
-              awaitingMergeApproval ||
+              boardOp.waiting ||
               awaitingInput ||
               pendingPlan ||
               pendingPermission ||
@@ -777,9 +794,7 @@ export function createFleetService({
           activity = "waiting";
         }
         const operatorAttentionMessage =
-          boardAttentionItem?.message ||
-          boardOperatorReport?.message ||
-          (awaitingMergeApproval ? "Awaiting final merge approval." : null) ||
+          boardOp.message ||
           (serverAttention ? `Awaiting operator (${loc.liveServer.attentionKind || "attention"}).` : null);
 
         const errorStamp = loc.tailState?.lastError?.at ? Date.parse(loc.tailState.lastError.at) : NaN;
