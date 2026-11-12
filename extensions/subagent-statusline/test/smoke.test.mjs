@@ -218,8 +218,8 @@ try {
 				),
 				true,
 			);
-			const unicodeConverted = toUnicodeIcons("\uE726 microsoft/cae#3494 \uF058 23/23 \uF071 \uF440 \uF164 1/2 \uF075 3/5");
-			assert.equal(unicodeConverted, "\uE0A0 microsoft/cae#3494 \u2713 23/23 \u26A0 \u2691 \u2605 1/2 \u2709 3/5");
+			const unicodeConverted = toUnicodeIcons("\uE726 Azure/azure-dev#3494 \uF058 23/23 \uF071 \uF440 \uF164 1/2 \uF075 3/5");
+			assert.equal(unicodeConverted, "\uE0A0 Azure/azure-dev#3494 \u2713 23/23 \u26A0 \u2691 \u2605 1/2 \u2709 3/5");
 			assert.doesNotMatch(unicodeConverted, /[\uE700-\uF8FF]/);
 			assert.equal(toUnicodeIcons("\uF41B Azure/azure-dev#3315 P1 \uE726 \uF415 jongio \uF075 4"), "\u25CE Azure/azure-dev#3315 P1 \uE0A0 @jongio \u2709 4");
 

@@ -305,7 +305,7 @@ Now turn likes into a decision.
    and wonder if the skill even remembered their choices. The minimum output is:
 
    ```text
-   ## 💚 Winner: Noshcheck
+   ## 💚 Winner: Menucheck
    [scorecard + why it won]
 
    ## The rest of your likes:
