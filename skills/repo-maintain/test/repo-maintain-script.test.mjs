@@ -255,6 +255,25 @@ test("evaluateSkipGate and receipt persistence enforce all 5 Phase 0 fast no-op 
     );
     assert.equal(
       evaluateSkipGate({
+        receipt: { ...loaded, partialRun: "true" },
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
+      false,
+    );
+    const stringPartialSaved = writeReceipt(tempState, repo, {
+      defaultBranch: "main",
+      lastMaintainSha: sha,
+      phasesRun: fullPhases,
+      partialRun: "true",
+      healthScore: 96,
+      grade: "A",
+    });
+    assert.equal(stringPartialSaved.partialRun, true);
+    assert.equal(
+      evaluateSkipGate({
         receipt: { ...loaded, failedPhases: "secops" },
         headSha: sha,
         newAdvisories: 0,
@@ -622,6 +641,25 @@ test("runCli exposes deterministic JSON subcommands", () => {
   assert.throws(
     () => runCli(["resolve-config", "--auto-merge="]),
     /Invalid boolean value/,
+  );
+  assert.throws(
+    () => runCli(["resolve-config", "--cooldown-days", "--coverage-threshold"]),
+    /Invalid numeric value/,
+  );
+  assert.throws(
+    () => runCli(["resolve-config", "--policy"]),
+    /Explicit policy file not found/,
+  );
+  const stealthTextConsumingFlag = runCli([
+    "stealth-check",
+    "--text",
+    "--fleet",
+    "--text",
+    "fix(repo-maintain): harden input validation and configuration defaults",
+  ]);
+  assert.equal(stealthTextConsumingFlag.ok, false);
+  assert.ok(
+    stealthTextConsumingFlag.violations.some((v) => v.includes("missing-private-repos")),
   );
 
   const cfgRes = runCli([

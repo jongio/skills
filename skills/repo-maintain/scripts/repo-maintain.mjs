@@ -188,11 +188,13 @@ export function writeReceipt(stateDir, repo, receipt = {}) {
     !hasFailedPhases &&
     Array.isArray(receipt.phasesRun) &&
     requiredPhases.every((phase) => phasesRun.includes(phase));
+  const explicitCompleteMarker =
+    receipt.partialRun === undefined || receipt.partialRun === false;
   const payload = {
     ...receipt,
     repo,
     phasesRun,
-    partialRun: receipt.partialRun === true || !coversAllPhases,
+    partialRun: !explicitCompleteMarker || !coversAllPhases,
     timestamp: receipt.timestamp || new Date().toISOString(),
   };
   writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, {
@@ -249,7 +251,7 @@ export function evaluateSkipGate({
       ? REQUIRED_CORE_PHASES
       : [...REQUIRED_CORE_PHASES, "skills", "evals"];
   const coversAllPhases =
-    receipt.partialRun !== true &&
+    (receipt.partialRun === undefined || receipt.partialRun === false) &&
     Array.isArray(receipt.phasesRun) &&
     requiredPhases.every((phase) => receipt.phasesRun.includes(phase));
   if (!coversAllPhases) {
@@ -669,7 +671,6 @@ export function classifyDependencyPr({
 }
 
 const BOOLEAN_FLAGS = new Set(["force", "fleet"]);
-const RAW_VALUE_FLAGS = new Set(["text", "json"]);
 
 function parseStrictBooleanFlag(name, rawValue) {
   if (rawValue === undefined) return undefined;
@@ -677,6 +678,26 @@ function parseStrictBooleanFlag(name, rawValue) {
   if (rawValue === "true") return true;
   if (rawValue === "false") return false;
   throw new Error(`Invalid boolean value for --${name}: ${String(rawValue)}`);
+}
+
+function parseStrictNumberFlag(name, rawValue) {
+  if (rawValue === undefined) return undefined;
+  if (typeof rawValue === "number" && Number.isFinite(rawValue) && rawValue >= 0) {
+    return rawValue;
+  }
+  if (typeof rawValue === "string" && rawValue.trim() !== "") {
+    const parsed = Number(rawValue);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+  throw new Error(`Invalid numeric value for --${name}: ${String(rawValue)}`);
+}
+
+function isNextTokenValue(key, nextToken) {
+  if (!nextToken.startsWith("--")) return true;
+  if (key === "text" && /^---/.test(nextToken)) return true;
+  return false;
 }
 
 function parseCliArgs(argv) {
@@ -692,10 +713,7 @@ function parseCliArgs(argv) {
         const key = token.slice(2);
         if (BOOLEAN_FLAGS.has(key)) {
           flags[key] = true;
-        } else if (
-          i + 1 < argv.length &&
-          (RAW_VALUE_FLAGS.has(key) || !argv[i + 1].startsWith("--"))
-        ) {
+        } else if (i + 1 < argv.length && isNextTokenValue(key, argv[i + 1])) {
           flags[key] = argv[i + 1];
           i += 1;
         } else {
@@ -712,6 +730,12 @@ function parseCliArgs(argv) {
 export function runCli(argv = process.argv.slice(2)) {
   const { command, flags } = parseCliArgs(argv);
   if (command === "resolve-config") {
+    if (
+      flags.policy !== undefined &&
+      (typeof flags.policy !== "string" || !flags.policy.trim())
+    ) {
+      throw new Error(`Explicit policy file not found: ${String(flags.policy)}`);
+    }
     return resolveConfig({
       cwd: flags.cwd || process.cwd(),
       policyPath: flags.policy || null,
@@ -721,12 +745,11 @@ export function runCli(argv = process.argv.slice(2)) {
       cliFlags: {
         maintainer: flags.maintainer,
         escalationLabel: flags["escalation-label"],
-        cooldownDays:
-          flags["cooldown-days"] !== undefined ? Number(flags["cooldown-days"]) : undefined,
-        coverageThreshold:
-          flags["coverage-threshold"] !== undefined
-            ? Number(flags["coverage-threshold"])
-            : undefined,
+        cooldownDays: parseStrictNumberFlag("cooldown-days", flags["cooldown-days"]),
+        coverageThreshold: parseStrictNumberFlag(
+          "coverage-threshold",
+          flags["coverage-threshold"],
+        ),
         autoMerge: parseStrictBooleanFlag("auto-merge", flags["auto-merge"]),
         copilotReview: parseStrictBooleanFlag("copilot-review", flags["copilot-review"]),
         repos: flags.repos ? String(flags.repos).split(",").filter(Boolean) : undefined,
@@ -760,6 +783,13 @@ export function runCli(argv = process.argv.slice(2)) {
   if (command === "stealth-check") {
     const normalizedVisibility = String(flags.visibility || "PUBLIC").toUpperCase();
     const stealthMode = normalizedVisibility !== "PRIVATE";
+    if (flags.text !== undefined && typeof flags.text !== "string") {
+      return {
+        ok: false,
+        stealthMode,
+        violations: ["missing-input: non-empty string --text is required"],
+      };
+    }
     if (flags["private-repos-file"] !== undefined) {
       if (
         typeof flags["private-repos-file"] !== "string" ||
