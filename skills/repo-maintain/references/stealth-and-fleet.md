@@ -19,7 +19,7 @@ Query `gh repo view --json visibility,isPrivate,defaultBranchRef` during Phase 0
      `test("rejects non-allowlisted shell metacharacters in argument parser")`.
 3. **Private Local Operator Report:**
    - Write full technical details (`CWE-*` IDs, root cause, affected lines, and verification notes) only to `~/.copilot/repo-maintain/reports/<owner>__<repo>-secops.md` (or a gitignored local artifact outside the repository worktree).
-   - Verify with `git status --ignored` and `node <skill-dir>/scripts/repo-maintain.mjs stealth-check --visibility=PUBLIC --text="<commit-or-pr-text>"` (adding `--fleet --private-repos="<owner/priv1,owner/priv2>"` in fleet mode; block publication if the private-repository inventory is unavailable) before every `git commit` and `gh pr create`/`gh pr edit`.
+   - Verify with `git status --ignored` and `node <skill-dir>/scripts/repo-maintain.mjs stealth-check --visibility=PUBLIC --text-file="<local-draft-path>"` (adding `--fleet --private-repos-file="<protected-local-inventory-path>"` in fleet mode so neither unredacted artifact text nor private repository names appear in process arguments; block publication if the private-repository inventory is unavailable) before every `git commit` and `gh pr create`/`gh pr edit`.
 
 ## 2. Multi-Repository Fleet Mode (`--all [--visibility all|public|private]`)
 

@@ -95,6 +95,11 @@ test("resolveConfig enforces exact maintainer precedence and fail-closed Stealth
       });
       assert.equal(fromAuthUser.maintainer, "auth-login");
       assert.equal(fromAuthUser.maintainerSource, "auth-user");
+
+      assert.throws(
+        () => resolveConfig({ cwd: emptyRoot, policyPath: "missing-policy.json" }),
+        /Explicit policy file not found/,
+      );
     } finally {
       rmSync(emptyRoot, { recursive: true, force: true });
     }
@@ -381,8 +386,17 @@ test("classifyDependencyPr distinguishes companion syncs, cooldown holds, KEV by
   assert.equal(
     classifyDependencyPr({
       semverBump: "minor",
-      license: "AGPL-3.0",
-      repoLicense: "MIT",
+      license: "AGPL-3.0-only",
+      repoLicense: "MIT OR Apache-2.0",
+      releaseAgeDays: 14,
+    }).action,
+    "escalate-needs-attention",
+  );
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
+      license: "MIT",
+      repoLicense: "Custom-Proprietary-1.0",
       releaseAgeDays: 14,
     }).action,
     "escalate-needs-attention",
@@ -539,6 +553,20 @@ test("runCli exposes deterministic JSON subcommands", () => {
       "0",
     ]);
     assert.equal(checked.skip, true);
+
+    const textFile = join(tempState, "draft.txt");
+    const privFile = join(tempState, "priv.txt");
+    writeFileSync(textFile, "Ported from internal-ledger.", "utf8");
+    writeFileSync(privFile, "sample-team/internal-ledger\n", "utf8");
+    const fileStealth = runCli([
+      "stealth-check",
+      "--visibility=PUBLIC",
+      "--fleet",
+      `--text-file=${textFile}`,
+      `--private-repos-file=${privFile}`,
+    ]);
+    assert.equal(fileStealth.ok, false);
+    assert.ok(fileStealth.violations.includes("private-repo-leak: [redacted]"));
   } finally {
     rmSync(tempState, { recursive: true, force: true });
   }

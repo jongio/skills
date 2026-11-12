@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,11 +73,20 @@ export function resolveConfig({
 
   let fileConfig = {};
   let configSource = null;
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      fileConfig = JSON.parse(readFileSync(candidate, "utf8"));
-      configSource = candidate;
-      break;
+  if (policyPath) {
+    const explicitPath = resolve(cwd, policyPath);
+    if (!existsSync(explicitPath)) {
+      throw new Error(`Explicit policy file not found: ${policyPath}`);
+    }
+    fileConfig = JSON.parse(readFileSync(explicitPath, "utf8"));
+    configSource = explicitPath;
+  } else {
+    for (const candidate of candidates) {
+      if (existsSync(candidate)) {
+        fileConfig = JSON.parse(readFileSync(candidate, "utf8"));
+        configSource = candidate;
+        break;
+      }
     }
   }
 
@@ -159,7 +168,9 @@ export const REQUIRED_CORE_PHASES = Object.freeze([
 
 export function writeReceipt(stateDir, repo, receipt) {
   const path = getReceiptPath(stateDir, repo);
-  mkdirSync(dirname(path), { recursive: true });
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
   const phasesRun = Array.isArray(receipt.phasesRun)
     ? receipt.phasesRun
     : [...REQUIRED_CORE_PHASES, "skills", "evals"];
@@ -175,7 +186,11 @@ export function writeReceipt(stateDir, repo, receipt) {
     partialRun: receipt.partialRun ?? !coversAllPhases,
     timestamp: receipt.timestamp || new Date().toISOString(),
   };
-  writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  chmodSync(path, 0o600);
   return payload;
 }
 
@@ -474,7 +489,24 @@ export function classifyDependencyPr({
     };
   }
 
-  const permissiveRepo = /^(?:MIT|Apache-2\.0|BSD-[23]-Clause|ISC|0BSD)$/i.test(repoLicense.trim());
+  const repoTokens = repoLicense
+    .trim()
+    .replace(/[()]/g, " ")
+    .split(/\s+(?:AND|OR|WITH)\s+|\s*\/\s*|\s*,\s*/i)
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const PERMISSIVE_TOKEN = /^(?:MIT|Apache-2\.0|BSD-[23]-Clause|ISC|0BSD|Unlicense|CC0-1\.0)$/i;
+  const recognizedRepoLicense =
+    repoTokens.length > 0 &&
+    repoTokens.every((t) => PERMISSIVE_TOKEN.test(t) || COPYLEFT_LICENSES.test(t));
+  if (!recognizedRepoLicense) {
+    return {
+      action: "escalate-needs-attention",
+      reason: `unrecognized or unsupported repository SPDX expression (${repoLicense}) requires maintainer review`,
+    };
+  }
+  const permissiveRepo = repoTokens.some((t) => PERMISSIVE_TOKEN.test(t)) &&
+    !repoTokens.some((t) => COPYLEFT_LICENSES.test(t));
   if (permissiveRepo && COPYLEFT_LICENSES.test(license)) {
     return {
       action: "escalate-needs-attention",
@@ -598,10 +630,22 @@ export function runCli(argv = process.argv.slice(2)) {
     return computeHealthScore(input);
   }
   if (command === "stealth-check") {
-    const privateRepos = flags["private-repos"]
+    const fileInventory =
+      flags["private-repos-file"] && existsSync(String(flags["private-repos-file"]))
+        ? readFileSync(String(flags["private-repos-file"]), "utf8")
+            .split(/\r?\n|,/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [];
+    const argInventory = flags["private-repos"]
       ? String(flags["private-repos"]).split(",").filter(Boolean)
       : [];
-    return checkStealthViolations(flags.text, {
+    const privateRepos = fileInventory.length > 0 ? fileInventory : argInventory;
+    const textInput =
+      flags["text-file"] && existsSync(String(flags["text-file"]))
+        ? readFileSync(String(flags["text-file"]), "utf8")
+        : flags.text;
+    return checkStealthViolations(textInput, {
       visibility: flags.visibility || "PUBLIC",
       privateRepos,
       fleetMode: Boolean(flags.fleet),
