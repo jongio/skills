@@ -56,25 +56,25 @@ Follow [phase playbooks and worktree lifecycle](references/phase-playbooks.md) a
 
 Create or reuse a single external worktree on rolling branch `repo-maintain/automated` off `origin/<defaultBranch>`. Before resetting or rebasing any existing local or remote `repo-maintain/automated` branch (whether or not a PR is open), inspect its unmerged commits: if unknown manual commits exist on the branch, do not overwrite and escalate to `Needs My Attention`; otherwise rebase automated maintenance commits and reuse any open `repo-maintain/automated` PR. Record one atomic conventional commit per phase that produces verified changes. If a phase fails verification after **2 bounded repair attempts**, reset the worktree to the previous phase's verified commit (`git reset --hard <pre-phase-sha> && git clean -fd`), record the blocker under `Needs My Attention`, and continue subsequent independent phases:
 
-1. **Phase 1 — Governance & Runtime Parity (`repo-ready` + `ci-doctor`):**
+1. **Phase 1 - Governance & Runtime Parity (`repo-ready` + `ci-doctor`):**
    - Audit community health files, GitHub Repo Security Settings (Private Vulnerability Reporting, Secret Scanning, Push Protection, Actions `read` default token permissions), workflow hardening, and **Runtime Version Parity** across `.nvmrc`, `.node-version`, `package.json#engines`, `go.mod`, `Dockerfile`, `.devcontainer`, and `.github/workflows/*.yml`.
    - Commit: `chore(repo-maintain): align repo governance, workflows, and runtime parity`.
-2. **Phase 2 — Dependencies, Companion Syncs & License Screening (`deps-doctor`):**
+2. **Phase 2 - Dependencies, Companion Syncs & License Screening (`deps-doctor`):**
    - Enforce `cooldownDays` (`min-release-age=7` days / `10080` minutes by default), CISA KEV active-exploitation bypass when no older patched version exists outside the window, and **License Compatibility Screening** (blocking copyleft `GPL`/`AGPL`/`SSPL` additions in permissive `MIT`/`Apache-2.0` repos).
    - **Dependabot/Renovate Companion Sync & Auto-Merge (`scripts/repo-maintain.mjs classify-dep-pr`):** Inspect open Dependabot and Renovate PRs. When a dependency PR fails only on mechanical companion syncs (`RequiredAzdVersion` version constants, Go toolchain floors in `go.mod`/workflows for stdlib `govulncheck`, or lockstep GitHub Action SHA pins across `codeql-action/*`), apply the companion sync or rebase, verify local tests and GitHub Actions CI pass (`MERGEABLE`/`CLEAN`), and deliver via `pr` using the resolved `prDeliveryArgs` (`pr --merge=auto --no-copilot` by default when `autoMerge: true` and `copilotReview: false`) without manual intervention.
    - Commit: `chore(deps): apply vetted dependency updates`.
-3. **Phase 3 — Security & Stealth Audit (`secops-doctor`):**
+3. **Phase 3 - Security & Stealth Audit (`secops-doctor`):**
    - Audit application code, workflows, containers, and Cloudflare configuration across OWASP Top 10 / STRIDE and secret hygiene.
    - **Stealth Public Mode (`scripts/repo-maintain.mjs stealth-check`):** When `visibility == "PUBLIC"` (or unknown), never write `CWE-*`, `CVE-*`, `GHSA-*`, CVSS scores, vulnerability labels, or exploit details in commit messages, branch names, PR bodies, test names, or public issues. Save sensitive details to a local gitignored report outside Git and use neutral commit messages (`fix(repo-maintain): harden input validation and configuration defaults`).
-4. **Phase 4 — Idiomatic Refactoring (`refactor`):**
+4. **Phase 4 - Idiomatic Refactoring (`refactor`):**
    - Auto-implement and test-verify behavior-preserving **Level 1 (Small wins)** and **Level 2 (Local restructuring)** candidates (modern idioms, Fowler code smells, AI anti-slop cleanup, and code-level `O(n^2)` / N+1 / sync-I/O performance fixes).
    - Never auto-implement **Level 3 (Cross-module restructuring)**; file or update a deduplicated `[Refactor L3]` issue instead.
    - Commit: `refactor(repo-maintain): apply verified level 1-2 cleanups`.
-5. **Phase 5 — Code Coverage & Runtime Quality Gate (`test-doctor`):**
+5. **Phase 5 - Code Coverage & Runtime Quality Gate (`test-doctor`):**
    - Run ecosystem coverage (`v8`/`istanbul`, `--experimental-test-coverage`, `pytest-cov`, `go test -coverprofile`, `cargo llvm-cov`, `XPlat Code Coverage`).
    - Enforce **Branch-vs-Line Gap Analysis** (`>80%` line / `<50%` branch), **Diff Coverage Gate** (`>= coverageThreshold%` line and branch coverage on touched files), **Untested Critical Entrypoint Detection**, and optional **Playwright Runtime Console Gate** (`0` `console.error`, `0` `pageerror`, `0` HTTP 500s). Write missing branch and edge-case tests for touched files.
    - Commit: `test(repo-maintain): close branch and diff coverage gaps`.
-6. **Phase 6 — Documentation, Skills & Evaluations (`doc-doctor` + `skill-doctor` + `eval-doctor`):**
+6. **Phase 6 - Documentation, Skills & Evaluations (`doc-doctor` + `skill-doctor` + `eval-doctor`):**
    - Run `doc-doctor` to fix stale README/CLI/API/config docs and broken links.
    - When `skills/` is present, run `skill-doctor` (`npx @microsoft/vally skill lint`, cross-host plugin manifest parity, and bloat trimming).
    - When `evals/`, `.vally.yaml`, prompts, or skills are present, run `eval-doctor` (`vally lint`, deterministic/rubric grader audits, `github/evals` authoring/comparison, and safe `github/evals-action` CI workflow verification).

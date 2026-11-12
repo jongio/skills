@@ -9,9 +9,11 @@ defaults:
 
 scoring:
   weights:
-    prompt: 0.5
-    skill-invocation: 0.5
-  threshold: 0.875
+    prompt: 0.46
+    skill-invocation: 0.18
+    diff-empty: 0.18
+    tool-calls: 0.18
+  threshold: 0.85
 
 stimuli:
   - name: session-board-default-and-fallback
@@ -40,6 +42,11 @@ stimuli:
       - type: skill-invocation
         config:
           required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config: &no-go-live-ops
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: plan-to-merge
     prompt: >-
@@ -65,6 +72,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config: *no-go-live-ops
 
   - name: reuse-valid-work
     prompt: >-

@@ -9,10 +9,11 @@ defaults:
 
 scoring:
   weights:
-    prompt: 0.5
-    diff-empty: 0.25
-    skill-invocation: 0.25
-  threshold: 0.875
+    prompt: 0.46
+    diff-empty: 0.18
+    skill-invocation: 0.18
+    tool-calls: 0.18
+  threshold: 0.85
 
 stimuli:
   - name: missing-update-in-unchanged-docs
@@ -44,6 +45,10 @@ stimuli:
       - type: skill-invocation
         config:
           required: [doc-doctor]
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|edit|create|write|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: no-documentation-impact
     prompt: >-

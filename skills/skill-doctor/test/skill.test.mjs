@@ -38,16 +38,24 @@ test("referenced collection and cache protocol exists", async () => {
   }
 });
 
-test("every capability scenario requires actual skill invocation", async () => {
+test("every capability scenario requires actual skill invocation, clean workspace, and no live tools", async () => {
   const spec = await readFile(new URL("../evals/skill-doctor/eval.yaml", import.meta.url), "utf8");
   const stimuli = spec.split(/\r?\n  - name:/).slice(1);
-  assert.ok(stimuli.length > 0);
+  assert.equal(stimuli.length, 8);
   for (const stimulus of stimuli) {
+    const label = stimulus.split(/\r?\n/)[0].trim();
     assert.match(stimulus, /- type: skill-invocation\s+config:\s+required: \[skill-doctor\]/,
-      `Missing mandatory invocation guard: ${stimulus.split(/\r?\n/)[0].trim()}`);
+      `Missing mandatory invocation guard: ${label}`);
+    assert.match(stimulus, /- type: diff-empty\s+name: diff-empty-/,
+      `Missing mandatory diff-empty guard: ${label}`);
+    assert.match(stimulus, /- type: tool-calls\s+name: tool-calls-/,
+      `Missing mandatory tool-calls guard: ${label}`);
   }
-  assert.match(spec, /skill-invocation: 0\.2/);
-  assert.match(spec, /^  threshold: 0\.84$/m);
+  assert.match(spec, /prompt: 0\.46/);
+  assert.match(spec, /skill-invocation: 0\.18/);
+  assert.match(spec, /diff-empty: 0\.18/);
+  assert.match(spec, /tool-calls: 0\.18/);
+  assert.match(spec, /^  threshold: 0\.85$/m);
 });
 
 test("historical cache revisions and probes cover only cutoff-bounded evidence", async () => {

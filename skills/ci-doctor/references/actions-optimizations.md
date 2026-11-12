@@ -30,7 +30,7 @@ Use these verified patterns when `ci-doctor` performs a `status`, `diagnose`, `o
 
 ## 5. Superseded Workflow Runs & Critical-Path Bottlenecks
 
-- **Symptom**: Rapid merges to `main` queue multiple 30–40 minute prerelease or validation runs in parallel, starving runners.
+- **Symptom**: Rapid merges to `main` queue multiple 30-40 minute prerelease or validation runs in parallel, starving runners.
 - **Fix**:
   - Use `concurrency` groups with `cancel-in-progress: true` for PR and non-publishing preview workflows (while keeping `cancel-in-progress: false` for state-mutating release publication jobs).
   - Reuse verified artifact/check outputs across stages instead of re-running identical test matrices on the same SHA.

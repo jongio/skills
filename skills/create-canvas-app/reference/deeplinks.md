@@ -62,7 +62,7 @@ dead link), except where noted that an invalid optional value is dropped.
 | `prompt` | No | Kickoff prompt. Wrap untrusted parts with `quoteUntrusted`. Never include secrets. |
 | `pr` | No | Positive integer. Cannot be combined with `branch` or `sourceBranch`. |
 | `branch` | No | Base branch for a freshly generated worktree branch. Cannot be combined with `pr` or `sourceBranch`. |
-| `sourceBranch` | No | Emits `source_branch`: open an *existing* branch directly (no new branch is created) — for collaboration links. Cannot be combined with `pr` or `branch`. |
+| `sourceBranch` | No | Emits `source_branch`: open an *existing* branch directly (no new branch is created) - for collaboration links. Cannot be combined with `pr` or `branch`. |
 | `parent` | No | Workspace id of an existing session to nest the new one under (same token shape as `sessions/:sessionId`). Cannot be combined with `pr` or `sourceBranch`; may combine with `branch`. A malformed id returns `null`. |
 | `mode` | No | `plan`, `interactive`, or `autopilot`. |
 
@@ -84,7 +84,7 @@ path segments or query keys.
 
 `buildSessionRestartDeepLink(sessionId)` → `ghapp://sessions/<id>/restart`
 
-Restarts the session's Copilot CLI process — kills the child process and spawns a
+Restarts the session's Copilot CLI process - kills the child process and spawns a
 fresh one, the same operation as the `/restart-session` slash command. Use it when
 a canvas needs the app to pick up process-start-resolved state (MCP servers,
 extensions resolved at launch) that a plain `plugins.reload()` / `skills.reload()`
@@ -94,8 +94,8 @@ This route is **destructive** (queued input and any in-flight response are
 discarded) and a global entry point, so it is **always confirmation-gated**: the
 app never navigates directly or self-approves the way `sessions/:sessionId` may for
 a session it already tracks. The id is resolved against the app's own live
-sessions, so an unknown id — or one running on a remote host that can't be
-restarted locally — is rejected before the dialog. `sessionId` uses the same safe
+sessions, so an unknown id - or one running on a remote host that can't be
+restarted locally - is rejected before the dialog. `sessionId` uses the same safe
 token shape as `sessions/:sessionId`.
 
 ### `chats`: open Chats
@@ -114,7 +114,7 @@ creates a new chat and submits the prompt, denying or dismissing is a no-op.
 | `prompt` | Yes | Non-empty kickoff prompt. Wrap untrusted parts with `quoteUntrusted`. Never include secrets. A missing/empty (or whitespace-only) prompt returns `null`. |
 
 Model, mode, reasoning effort, context tier, and agent selection use the app's
-current defaults — `prompt` is the only parameter.
+current defaults - `prompt` is the only parameter.
 
 ### `automations/new`: pre-fill the new-automation dialog
 

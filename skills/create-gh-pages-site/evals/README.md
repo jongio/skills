@@ -12,9 +12,9 @@ the `prompt` rubric adds judgement.
 
 ## Layout
 
-- `../../.vally.yaml` — project config; wires this skill into the executor
+- `../../.vally.yaml` - project config; wires this skill into the executor
   (`paths.skills: "."`) and points at `evals/`.
-- `create-gh-pages-site/eval.yaml` — the spec: stimuli with deterministic graders
+- `create-gh-pages-site/eval.yaml` - the spec: stimuli with deterministic graders
   and an LLM rubric.
 
 ## Run it
@@ -25,7 +25,7 @@ From the skill root (`skills/create-gh-pages-site`):
 npm install                 # one-time: pulls @microsoft/vally-cli (dev only)
 
 # Static validation (fast, no agent, no tokens). This is the CI gate.
-npm run eval:lint           # = vally lint --eval-spec evals/create-gh-pages-site/eval.yaml
+npm run eval:lint           # = vally lint --eval-spec evals/create-gh-pages-site/eval.yaml --strict
 
 # Full run (drives the agent and grades the result; needs Copilot auth).
 npm run eval                # = vally eval --eval-spec evals/create-gh-pages-site/eval.yaml --skill-dir .
@@ -41,10 +41,10 @@ opens the analytics dashboard.
 
 Deterministic (no LLM):
 
-- `file-exists` — the deploy workflow, index page, and config files were created.
-- `file-contains` — base path is correctly injected, workflow uses `actions/deploy-pages`.
-- `file-not-contains` — no leftover `__SENTINEL__` placeholders remain.
-- `run-command` — HTML/config files parse without errors.
+- `skill-invocation` / `tool-calls` - `create-gh-pages-site` is invoked and remote repository/Pages mutations remain blocked.
+- `file-exists` - the deploy workflow, index page, and config files were created.
+- `file-contains` - base path is correctly injected, workflow uses `actions/deploy-pages` / `actions/upload-pages-artifact`.
+- `file-not-contains` - no leftover `__SENTINEL__` placeholders or sample copy remain.
 
 LLM rubric (`prompt`): site content references the repo name, description is not
 generic demo text, and the structure matches the chosen template type.

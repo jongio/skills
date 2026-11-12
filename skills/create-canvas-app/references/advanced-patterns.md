@@ -1,15 +1,15 @@
-## Host AI — call the model from an action handler
+## Host AI - call the model from an action handler
 
-Canvases can use the **host's** AI model — the same model + auth the Copilot app is
-already running — with **no API keys, no model picker, no external `fetch`**. Action
+Canvases can use the **host's** AI model - the same model + auth the Copilot app is
+already running - with **no API keys, no model picker, no external `fetch`**. Action
 handlers get two capabilities on their context, wired once in `extension.mjs` (the
 only SDK file) and exposed by the kit:
 
-- **`ai(question) → Promise<string>`** — a **silent** model query. No tools, and it
+- **`ai(question) → Promise<string>`** - a **silent** model query. No tools, and it
   is **not** added to the conversation history. This is the primitive for
   canvas-internal AI: summarize, suggest, rewrite, classify, extract. It runs
   against the **ambient conversation context**, so write self-contained,
-  function-style prompts and pin the output shape — otherwise the live chat can
+  function-style prompts and pin the output shape - otherwise the live chat can
   bleed into the answer.
 
   ```js
@@ -26,17 +26,17 @@ only SDK file) and exposed by the kit:
   },
   ```
 
-- **`askAgent(prompt)`** — hand a prompt to the **main agent** in the user's
+- **`askAgent(prompt)`** - hand a prompt to the **main agent** in the user's
   conversation. It is **visible in chat** and **tool-capable**. Use it for
   "act in the repo / drive the agent" controls (e.g. an *Apply changes* button),
-  **not** for silent text generation — that's `ai`.
+  **not** for silent text generation - that's `ai`.
 
 Under the hood `ai` is the host's `ephemeralQuery` (a transient, no-tools,
 no-history model call, e2e-tested in the Copilot SDK) and `askAgent` is a normal
 session message. Both reach the host's selected model + auth.
 
 **Why not a sub-session?** Creating an isolated `client.createSession()` from inside
-an extension **hangs** — the host doesn't service a child-created session — so the
+an extension **hangs** - the host doesn't service a child-created session - so the
 kit does not offer it. `ai` (ephemeralQuery) is the supported silent path.
 
 **Footguns:**
@@ -46,12 +46,12 @@ kit does not offer it. `ai` (ephemeralQuery) is the supported silent path.
 - `ai()` throws `ai_unavailable` when the canvas runs outside the Copilot host
   (e.g. a standalone smoke test). Call it from an **action** (button- or
   agent-invoked), never from `createInitialState`/`open`.
-- Don't block the panel on a slow `ai()` — `await` it in the handler, write the
+- Don't block the panel on a slow `ai()` - `await` it in the handler, write the
   result into state, and let SSE push the update, exactly like the data-fetch shape.
 
-Stamp this whole shape — an `ask_ai` handler (silent `ctx.ai`), a `hand_to_agent`
+Stamp this whole shape - an `ask_ai` handler (silent `ctx.ai`), a `hand_to_agent`
 handler (`ctx.askAgent`), model errors captured into state, and an offline smoke
-test that wires a stub host — with `node scripts/new-canvas.mjs <name> --template ai`.
+test that wires a stub host - with `node scripts/new-canvas.mjs <name> --template ai`.
 
 ## Deep links: open a session in github-app
 
@@ -136,10 +136,10 @@ The reference canvas (`reference/decision-log/`) demonstrates every builder: a
 open-by-session-id, and a "web links" toggle that wraps each link with
 `hostedLauncherUrl`.
 
-## Domain strategy — shared board vs personal profile
+## Domain strategy - shared board vs personal profile
 
 State is keyed by the domain id `resolveDomainId` returns. Two intents, identical
-machinery (`fileFor` sanitizes the id to a filename — copy it verbatim):
+machinery (`fileFor` sanitizes the id to a filename - copy it verbatim):
 
 - **Shared board** (most canvases): key off a topic the agent and user both name.
   `resolveDomainId: (input) => (input?.domain ? String(input.domain) : "default")`.
@@ -149,19 +149,19 @@ machinery (`fileFor` sanitizes the id to a filename — copy it verbatim):
   with the input schema property named `profile`. Use this for per-learner /
   per-user data that shouldn't bleed across topics.
 
-Pick the noun (`domain` vs `profile`) deliberately — it's the whole contract for
+Pick the noun (`domain` vs `profile`) deliberately - it's the whole contract for
 who shares what.
 
 ## Sharing canvas state across users (GitHub-backed)
 
 When the user says **"share this canvas state with other users on GitHub"** (or
 wants several people to edit the same board), don't invent a sync mechanism and
-don't round-trip a gist by hand — gists are single-writer. Back the canvas with a
+don't round-trip a gist by hand - gists are single-writer. Back the canvas with a
 file in a **private GitHub repo** using the kit's `githubStore`
 (`kit/github-store.mjs`): GitHub is both the shared store and the access control
 (only repo collaborators can read/write), and there's no server to run.
 
-**Ask the user which repo** to store the data in — a private repo whose
+**Ask the user which repo** to store the data in - a private repo whose
 collaborators are the people who should edit the board. It can be different from
 wherever they installed the canvas. Then wire the runtime to it:
 
@@ -205,15 +205,15 @@ Key facts to tell the user and honor in code:
   (`gh api -X PUT repos/<o>/<r>/collaborators/<user> -f permission=push`); private
   invites must be accepted before they can write.
 - **Token** comes from `GH_TOKEN` / `GITHUB_TOKEN`, else `gh auth token` (needs the
-  `repo` scope), and is only ever sent as an `Authorization` header — never logged
+  `repo` scope), and is only ever sent as an `Authorization` header - never logged
   or written to the repo. Pass `token` explicitly to override.
 - **Conflicts:** every write is optimistic-locked by the blob SHA; a colliding
-  commit re-reads + retries. Default is last-writer-wins for the whole document —
+  commit re-reads + retries. Default is last-writer-wins for the whole document -
   pass `merge(remoteState, myState)` to `githubStore` to resolve field-by-field
   (e.g. union a board's items by id) so two people editing different items never
   clobber each other.
 - **Untrusted remote:** if you set `config.stateSchema`, it guards **sync-adopted**
-  state too — a collaborator's malformed edit (or a hand-edit on github.com) that
+  state too - a collaborator's malformed edit (or a hand-edit on github.com) that
   violates the schema is rejected instead of being broadcast to viewers. Define a
   `stateSchema` for any shared board so a bad remote can't corrupt everyone's panel.
 - **Distribution:** put the extension folder in that same repo (`extension/`) so a
@@ -233,15 +233,15 @@ Key facts to tell the user and honor in code:
 - **Rich-payload actions.** Action `inputSchema`s default to
   `additionalProperties: false` on purpose: the schema is the contract the agent
   fills, and a strict schema keeps the model from smuggling in unvalidated/typo'd
-  fields — only the properties you declare reach your handler. When the UI
+  fields - only the properties you declare reach your handler. When the UI
   genuinely needs to hand the handler a whole object (e.g. the article being
   saved) rather than scalar fields, set `additionalProperties: true` on *that*
   action's `inputSchema` and denormalize what you need into durable state in the
-  handler. Flip it deliberately, per-action — not as a blanket default.
+  handler. Flip it deliberately, per-action - not as a blanket default.
 - **Install layout / SDK resolution.** A shipped extension folder contains only
-  `copilot-extension.json` (`{ "name", "version": 1 }` — no `package.json`),
+  `copilot-extension.json` (`{ "name", "version": 1 }` - no `package.json`),
   `extension.mjs`, `canvas.mjs`, `web/`, and the nested `canvas-kit/`. The kit is
-  plain ESM that Node runs directly — **no bundler, no transpile, no build step,
+  plain ESM that Node runs directly - **no bundler, no transpile, no build step,
   no `package.json`** in the extension (the stamped `test/smoke.test.mjs` runs
   with bare `node`). The host resolves `@github/copilot-sdk/extension` for you;
   `extension.mjs` is the only file that imports it. Don't add a `package.json` or

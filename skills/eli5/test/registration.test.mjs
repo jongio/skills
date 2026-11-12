@@ -25,6 +25,7 @@ const [
   lockfile,
   images,
   skillDoc,
+  evalSpec,
 ] = await Promise.all([
     read("README.md"),
     parse("marketplace.json"),
@@ -37,6 +38,7 @@ const [
     parse("skills", skillId, "package-lock.json"),
     read("site", "public", "images", "IMAGES.md"),
     read("skills", skillId, "SKILL.md"),
+    read("skills", skillId, "evals", skillId, "eval.yaml"),
   ]);
 
 // Anchored to the catalog table row, not a bare substring, so prose or a code
@@ -151,5 +153,18 @@ assert.match(
   /npm ci --prefix \.github\/tools\/vally --ignore-scripts/,
   "skill-lint.yml must install the locked Vally toolchain without scripts",
 );
+
+const normSpec = evalSpec.replace(/\r\n/g, "\n");
+const eli5Cases = [...normSpec.matchAll(/^  - name: (.+)$/gm)].map(([, name]) => name);
+assert.equal(eli5Cases.length, 10, "eli5 must retain all 10 capability stimuli");
+assert.equal((normSpec.match(/^        name: diff-empty-/gm) ?? []).length, eli5Cases.length);
+assert.equal((normSpec.match(/^        name: tool-calls-/gm) ?? []).length, eli5Cases.length);
+const eli5GraderNames = [...normSpec.matchAll(/^        name: (.+)$/gm)].map(([, name]) => name);
+assert.equal(new Set(eli5GraderNames).size, eli5GraderNames.length, "grader names must be unique");
+assert.ok(existsSync(path.join(skillDir, "evals", skillId, "fixtures", "http-cache.md")));
+assert.match(normSpec, /prompt: 0\.48/);
+assert.match(normSpec, /diff-empty: 0\.26/);
+assert.match(normSpec, /tool-calls: 0\.26/);
+assert.match(normSpec, /^  threshold: 0\.8$/m);
 
 console.log("registration parity passed");

@@ -36,7 +36,7 @@ Exit early with `fast no-op: HEAD unchanged and healthy` **only** when all five 
 4. `0` untriaged external issues or PRs updated since `receipt.timestamp`.
 5. Neither `--force` nor an explicit `--stages <csv>` override was requested.
 
-If any condition fails (or if `receipt.phasesRun` is missing or omits any required phase), record the invalidation reason and proceed with the maintenance pass. When writing a receipt via `node <skill-dir>/scripts/repo-maintain.mjs write-receipt --repo <owner/repo> --json '<payload>'`, always include `phasesRun` (only phases actually executed or skipped because their target repository surface is absent—never count phases excluded by `--stages`, which must set `partialRun: true`) and `skillsEvalsApplicable` (`false` only when the repository has no `skills/`, `evals/`, `.vally.yaml`, or `*.prompt.md` files); omitting `phasesRun` marks `partialRun: true` so the next full pass will not skip unperformed audits.
+If any condition fails (or if `receipt.phasesRun` is missing or omits any required phase), record the invalidation reason and proceed with the maintenance pass. When writing a receipt via `node <skill-dir>/scripts/repo-maintain.mjs write-receipt --repo <owner/repo> --json '<payload>'`, always include `phasesRun` (only phases actually executed or skipped because their target repository surface is absent-never count phases excluded by `--stages`, which must set `partialRun: true`) and `skillsEvalsApplicable` (`false` only when the repository has no `skills/`, `evals/`, `.vally.yaml`, or `*.prompt.md` files); omitting `phasesRun` marks `partialRun: true` so the next full pass will not skip unperformed audits.
 
 ## 2. Worktree & Rolling Branch Lifecycle (`repo-maintain/automated`)
 
@@ -46,7 +46,7 @@ If any condition fails (or if `receipt.phasesRun` is missing or omits any requir
   - **No unmerged commits (or branch absent) and no open PR:** Create or reset `repo-maintain/automated` to `origin/<defaultBranch>`.
   - **Only automated maintenance commits present:** Rebase onto `origin/<defaultBranch>` and reuse the existing open PR number (or open a new consolidated PR when none is open).
 
-## 3. Phases 1–6 Execution, Skip Gates & Phase-Scoped Rollback
+## 3. Phases 1-6 Execution, Skip Gates & Phase-Scoped Rollback
 
 Each phase runs against the isolated worktree, verifies its changes with the repository's native test/lint commands, and creates at most **one** atomic commit when files change:
 

@@ -18,13 +18,17 @@ defaults:
 # (does it actually parse?) and the LLM rubric carry the most signal.
 scoring:
   weights:
-    file-exists: 0.10
-    file-contains: 0.10
-    file-not-contains: 0.10
-    file-not-matches: 0.10
-    output-matches: 0.10
-    run-command: 0.25
-    prompt: 0.25
+    skill-invocation: 0.18
+    diff-empty: 0.18
+    tool-calls: 0.18
+    prompt: 0.21
+    run-command: 0.07
+    file-exists: 0.03
+    file-contains: 0.03
+    file-matches: 0.03
+    file-not-contains: 0.03
+    file-not-matches: 0.03
+    output-matches: 0.03
   threshold: 0.8
 
 # Grader `path` globs use the shape
@@ -73,6 +77,15 @@ stimuli:
       canvas: kanban
       cost: high
     graders:
+      - type: skill-invocation
+        name: skill-invocation-kanban-board-canvas
+        config:
+          required: [create-canvas-app]
+      - type: tool-calls
+        name: tool-calls-kanban-no-github-or-network
+        config:
+          disallowed:
+            - name: "(?i)(web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: file-exists
         name: canvas-scaffolded
         config:
@@ -114,7 +127,7 @@ stimuli:
         name: no-innerhtml-repaint
         config:
           # Flag the actual repaint anti-pattern (`el.innerHTML =` or `+=`), NOT the
-          # substring "innerHTML" — the kit legitimately uses Preact's
+          # substring "innerHTML" - the kit legitimately uses Preact's
           # `dangerouslySetInnerHTML` to render Lucide SVGs, and comments may
           # mention innerHTML.
           path: "{,!(node_modules)/}{,!(node_modules)/}{,.github/extensions/,.copilot/extensions/}{,!(node_modules)/}web/app.mjs"
@@ -182,6 +195,15 @@ stimuli:
       canvas: data
       cost: high
     graders:
+      - type: skill-invocation
+        name: skill-invocation-data-canvas-autorefresh
+        config:
+          required: [create-canvas-app]
+      - type: tool-calls
+        name: tool-calls-data-canvas-no-github-writes
+        config:
+          disallowed:
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: file-exists
         name: data-canvas-autorefresh-canvas-scaffolded
         config:
@@ -195,11 +217,11 @@ stimuli:
         config:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,.github/extensions/,.copilot/extensions/}{,!(node_modules)/}web/app.mjs"
           value: "pollWhileVisible"
-      - type: file-contains
+      - type: file-matches
         name: fetch-timeout-in-handler
         config:
           path: "{,!(node_modules)/}{,!(node_modules)/}{,.github/extensions/,.copilot/extensions/}{,!(node_modules)/}canvas.mjs"
-          value: "AbortSignal.timeout"
+          pattern: '(?:safeFetch|AbortSignal\.timeout)'
       - type: file-not-contains
         name: no-fetch-in-view
         config:
@@ -264,3 +286,51 @@ stimuli:
       - A flaky fetch is captured into state.error and the refresh action returns instead of throwing.
       - The view uses the kit's ck-* theme classes and kebab-case Lucide icon names.
       - The agent followed the documented data-template contract end to end.
+
+  - name: loopback-origin-and-sdk-isolation-audit
+    prompt: >-
+      First invoke the create-canvas-app skill, then perform an offline contract
+      audit on these proposed canvas design choices without running commands,
+      making network requests, or writing files: (1) importing @github/copilot-sdk
+      directly inside canvas.mjs and web/app.mjs, (2) setting requireCapability:
+      true for a private report canvas and logging the full panel URL with its
+      query string into a committed artifact, (3) calling raw fetch() from
+      web/app.mjs against a user-supplied URL instead of safeFetch in a server
+      action handler, and (4) updating the panel via root.innerHTML = renderedHtml
+      on every SSE push. Explain why each violates the kit contract and state the
+      exact replacement required by create-canvas-app.
+    tags:
+      canvas: security-contract
+      cost: low
+    graders:
+      - type: skill-invocation
+        name: skill-invocation-loopback-and-sdk-isolation
+        config:
+          required: [create-canvas-app]
+      - type: diff-empty
+        name: diff-empty-loopback-and-sdk-isolation
+      - type: tool-calls
+        name: tool-calls-loopback-and-sdk-isolation
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|open_canvas|invoke_canvas_action|edit|create|write|github[-_]mcp[-_]server|create_issue|create_pull_request)"
+      - type: prompt
+        name: enforces-sdk-capability-host-and-dom-contracts
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response: (1) restricts @github/copilot-sdk imports
+            to extension.mjs only while keeping canvas.mjs and web/app.mjs SDK-free,
+            (2) preserves the requireCapability query string only in-memory for the
+            panel without logging, publishing, or persisting the capability token,
+            (3) moves network calls into a canvas.mjs action handler using safeFetch
+            (blocking loopback/link-local/private ranges plus timeout),
+            and (4) replaces innerHTML repaints with Preact mountCanvas DOM diffing
+            so input focus and keystrokes survive SSE pushes. Score 1 if any of the
+            four violations is approved or if commands/writes are executed.
+    rubric:
+      - Keeps @github/copilot-sdk in extension.mjs only so canvas.mjs and web/app.mjs remain SDK-free.
+      - Never logs, persists, or publishes a requireCapability panel URL query token.
+      - Uses server-side safeFetch in an action handler rather than view-side raw fetch().
+      - Renders through Preact mountCanvas rather than innerHTML repaints.

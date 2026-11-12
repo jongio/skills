@@ -300,7 +300,13 @@ test("eval roster covers each distinct closeout failure mode", () => {
   ]);
   assert.equal((evals.match(/^    rubric:/gm) ?? []).length, names.length);
   assert.equal((evals.match(/^      - type: prompt$/gm) ?? []).length, names.length);
+  assert.equal((evals.match(/^      - type: diff-empty$/gm) ?? []).length, names.length);
+  assert.equal((evals.match(/^      - type: tool-calls$/gm) ?? []).length, names.length);
   assert.equal((evals.match(/^          threshold: 0\.9$/gm) ?? []).length, names.length);
+  assert.match(evals, /prompt: 0\.48/);
+  assert.match(evals, /diff-empty: 0\.26/);
+  assert.match(evals, /tool-calls: 0\.26/);
+  assert.match(evals, /^  threshold: 0\.8$/m);
   includesAll(evalReadme, ["Neither is an agent behavior result", "Only after approval for agent usage"]);
 });
 

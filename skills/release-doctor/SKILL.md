@@ -12,7 +12,7 @@ Evaluate post-merge release readiness on the default branch, analyze unreleased 
 
 ## Dynamic Maintainer & Policy Resolution
 
-Resolve repository ownership and release policy dynamically—never hardcode personal usernames:
+Resolve repository ownership and release policy dynamically-never hardcode personal usernames:
 1. `.github/repo-maintain.json` (or `.github/maintain.json` / `.maintain.json` / `--policy` / CLI flags).
 2. `.github/CODEOWNERS`.
 3. Repository owner (`gh repo view --json owner --jq '.owner.login'`).

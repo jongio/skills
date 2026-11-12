@@ -1,4 +1,4 @@
-# .vally.yaml — Vally project config for the create-gh-pages-site skill eval.
+# .vally.yaml - Vally project config for the create-gh-pages-site skill eval.
 #
 # Wires the skill into the built-in copilot-sdk executor: `vally eval --skill-dir .`
 # reads paths.skills below to discover this skill (node_modules is ignored) and

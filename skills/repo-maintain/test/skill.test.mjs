@@ -99,7 +99,7 @@ const referenceContracts = [
     /Documentation Accuracy/,
     /Skill & Eval Quality/,
     /Backlog SLA/,
-    /97–100/,
+    /97-100/,
     /Before/,
     /After/,
   ]],

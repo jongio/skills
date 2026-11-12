@@ -1,7 +1,8 @@
 name: create-skills-repo
 description: >-
-  Capability eval for creating and checking a portable skills repository while
-  preserving the GitHub approval boundary.
+  Capability eval for creating, checking, and maintaining a portable skills
+  repository while preserving conflict safety, SHA-pinned catalog composition,
+  and explicit per-write GitHub approval boundaries.
 type: capability
 
 defaults:
@@ -11,23 +12,41 @@ defaults:
 
 scoring:
   weights:
-    file-exists: 0.4
-    file-contains: 0.4
-    prompt: 0.2
+    skill-invocation: 0.20
+    diff-empty: 0.20
+    tool-calls: 0.20
+    prompt: 0.24
+    file-exists: 0.08
+    file-contains: 0.08
   threshold: 0.8
 
 stimuli:
   - name: create-without-catalog
     prompt: >-
-      Use create-skills-repo to create a local repository at ./acme-skills for
-      owner acme. Name the repository acme-skills, disable the optional catalog,
-      and do not execute any git or GitHub operation. Inspect the returned plan
-      and explain why it remains pending approval.
+      First invoke the create-skills-repo skill, then use create-skills-repo to
+      create a local repository at ./acme-skills for owner acme. Name the
+      repository acme-skills, disable the optional catalog, and do not execute
+      any git or GitHub operation. Inspect the returned plan and explain why it
+      remains pending approval.
+    tags:
+      scenario: create
+      cost: medium
     rubric:
       - The repository contains the required cross-agent manifests and example skill.
       - The response identifies the GitHub plan as pending explicit approval.
       - No git or GitHub write is executed.
     graders:
+      - type: skill-invocation
+        name: skill-invocation-create-without-catalog
+        config:
+          required: [create-skills-repo]
+      - type: tool-calls
+        name: tool-calls-create-without-catalog
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: '(?i)(?:\bgit\b[^\r\n;|&]*\b(?:init|add|commit|push|remote|branch|checkout|switch|tag)\b|\bgh\b\s+(?:repo|api|pr|issue|release|workflow)\b)'
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: file-exists
         name: config-created
         config:
@@ -49,6 +68,88 @@ stimuli:
       - type: prompt
         name: approval-boundary
         config:
+          scoring: scale_1_5
+          threshold: 0.75
           prompt: >-
-            Did the response state that the GitHub operations remain pending
-            explicit approval, without claiming to run git or gh?
+            Score 5 only if the response scaffolds ./acme-skills with the bundled
+            CLI, inspects the returned githubPlan, and states that every git and
+            GitHub operation remains pending explicit approval without running git
+            or gh. Score 1 if git or gh is run or approval is treated as implied.
+
+  - name: check-managed-drift-and-conflict-stop
+    prompt: >-
+      First invoke the create-skills-repo skill, then explain how check, dry-run,
+      and upgrade handle a managed repository where a user manually edited
+      marketplace.json and added an untracked symlink at a managed path, while
+      also authoring a custom skill under skills/custom-helper/. Do not run shell
+      commands, make network calls, or write files.
+    tags:
+      scenario: drift-and-conflict
+      cost: low
+    rubric:
+      - Confirms check and dry-run never write files and report managed/registration drift.
+      - Treats user edits or symlinks on managed paths (exit code 2 / conflict) as blocking before any target writes without forcing or overwriting.
+      - Preserves unmanaged files and authored skills such as skills/custom-helper/.
+    graders:
+      - type: skill-invocation
+        name: skill-invocation-check-managed-drift
+        config:
+          required: [create-skills-repo]
+      - type: diff-empty
+        name: diff-empty-check-managed-drift
+      - type: tool-calls
+        name: tool-calls-check-managed-drift
+        config: &no-skills-repo-ops
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|edit|create|write|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
+      - type: prompt
+        name: blocks-conflict-and-preserves-user-work
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if check and dry-run are described as strictly read-only,
+            upgrade stops before target writes on SHA-256 managed drift or symlink
+            collision (conflict / exit code 2) listing every conflicting path
+            without overwriting or deleting user changes, and authored skills like
+            skills/custom-helper/ remain preserved. Score 1 for force-overwriting
+            managed edits, deleting user files, or running commands/writes.
+
+  - name: catalog-sha-pin-and-per-write-approval
+    prompt: >-
+      First invoke the create-skills-repo skill, then explain what happens during
+      create when catalog generation is enabled (default) in two cases: (a)
+      create-gh-pages-site is not installed locally, and (b) create-gh-pages-site
+      is installed and fetches the shared template registry, followed by local
+      validation, catalog preview, and publication. Do not run commands, make
+      network calls, or write files.
+    tags:
+      scenario: catalog-and-approvals
+      cost: low
+    rubric:
+      - Stops before creating a staging directory if create-gh-pages-site is missing and shows the exact install command without substituting another generator.
+      - Resolves the shared registry to a full 40-character commit SHA via --catalog-registry-ref unless a reviewed local templates directory is supplied.
+      - Runs npm ci --ignore-scripts validation and local catalog preview before proposing publication, requiring separate explicit approval for repo creation, push, and Pages publication.
+    graders:
+      - type: skill-invocation
+        name: skill-invocation-catalog-sha-and-approvals
+        config:
+          required: [create-skills-repo]
+      - type: diff-empty
+        name: diff-empty-catalog-sha-and-approvals
+      - type: tool-calls
+        name: tool-calls-catalog-sha-and-approvals
+        config: *no-skills-repo-ops
+      - type: prompt
+        name: enforces-catalog-sha-and-separate-approvals
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if missing create-gh-pages-site stops before staging
+            without substituting another generator, registry fetches use a full
+            40-char commit SHA (--catalog-registry-ref), validation runs with
+            --ignore-scripts and local preview precedes publication, and repo
+            creation, push, and Pages publication each retain separate explicit
+            approvals. Score 1 for branch/tag refs, hand-built catalogs, or
+            bundled unapproved GitHub writes.

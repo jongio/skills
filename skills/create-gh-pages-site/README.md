@@ -1,7 +1,7 @@
 # create-gh-pages-site
 
 Scaffold a working **GitHub Pages** website from a vetted template and wire it to
-deploy automatically — packaged as a GitHub Copilot skill.
+deploy automatically - packaged as a GitHub Copilot skill.
 
 Pick a template (static, Astro, React + Vite, Eleventy, Jekyll, or skills catalog); the skill
 injects the correct **base path** for your repo, adds the current official GitHub
@@ -10,8 +10,8 @@ a new one), and tells you how to turn Pages on.
 
 It doesn't stop at the template's demo content, either: it **digests your repo**
 (README, manifests, entry points, docs) and authors a site that's actually about
-your project — a CLI reference, an API/usage page, a feature tour, or a catalog of
-parts — and drops in labeled image placeholders you swap for real art.
+your project - a CLI reference, an API/usage page, a feature tour, or a catalog of
+parts - and drops in labeled image placeholders you swap for real art.
 
 ## Quickstart
 
@@ -21,7 +21,7 @@ parts — and drops in labeled image placeholders you swap for real art.
 npx skills add jongio/skills --skill create-gh-pages-site
 ```
 
-**2. Reload skills** — run `/skills reload`, or start a new session.
+**2. Reload skills** - run `/skills reload`, or start a new session.
 
 **3. Ask Copilot to build a site:**
 
@@ -29,14 +29,14 @@ npx skills add jongio/skills --skill create-gh-pages-site
 /create-gh-pages-site put this repo on GitHub Pages as an Astro blog
 ```
 
-By default the agent scaffolds for the **repo you're in** — it reads the current
+By default the agent scaffolds for the **repo you're in** - it reads the current
 repo from git, picks the `astro` template, sets `site`/`base` for it, lays down the
 deploy workflow, and shows you how to enable Pages. Name a different repo
 (`octocat/blog`) only when you want one.
 
 ## Why this exists
 
-GitHub Pages' hard parts aren't the HTML — they're the deploy plumbing and the
+GitHub Pages' hard parts aren't the HTML - they're the deploy plumbing and the
 **base-path trap**: a project site lives at `https://USER.github.io/REPO/`, so a
 site built for `/` ships with broken assets and links. Every framework fixes this
 differently (Astro `base`, Vite `base` + `404.html`, Eleventy `pathPrefix`, Jekyll
@@ -70,8 +70,8 @@ hosted from the [`jongio/gh-pages-templates`](https://github.com/jongio/gh-pages
 A stamped template is a skeleton, not the deliverable. After stamping, the skill
 reads your repo and rewrites the content to match it:
 
-- **`scripts/digest-repo.mjs`** analyzes the repo and classifies it — `cli`,
-  `library`, `app`, `action`, `collection`, `docs`, or `site` — and pulls out the
+- **`scripts/digest-repo.mjs`** analyzes the repo and classifies it - `cli`,
+  `library`, `app`, `action`, `collection`, `docs`, or `site` - and pulls out the
   name, pitch, install commands, README usage examples, badges, docs, existing
   images, and sub-projects. That drives *which* kind of site gets built: a command
   reference for a CLI, an API/usage page for a library, a feature tour for an app, a
@@ -98,7 +98,7 @@ Once installed, describe the site you want:
 /create-gh-pages-site put this folder of HTML on Pages
 ```
 
-You don't have to name the skill — the agent routes to it whenever you ask to
+You don't have to name the skill - the agent routes to it whenever you ask to
 create or publish a GitHub Pages site.
 
 ## Build it yourself (no agent)
@@ -213,7 +213,7 @@ with each template in a folder containing a `template.json` manifest. The genera
 fetches the built-in registry at a pinned commit. Override it with both
 `--registry owner/repo` and `--registry-ref <full-sha>`, or scaffold offline with
 `--templates-dir <path>`. The browsable gallery + live previews are hosted from the
-registry too. Adding or fixing a template is a PR to that repo — see its
+registry too. Adding or fixing a template is a PR to that repo - see its
 `CONTRIBUTING.md`. This skill owns the generator + the agent workflow, not the
 templates.
 
@@ -246,4 +246,4 @@ test/                        Generator and digest tests (bare node, offline fixt
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT - see [LICENSE](./LICENSE).
