@@ -359,15 +359,22 @@ export function createCanvasRuntime(config) {
       const domainId = inst?.domainId ?? "default";
       const expected = inst?.url ? new URL(inst.url) : null;
       const sensitive = ["/state", "/events", "/action"].includes(path);
+      const isAllowedNavigation =
+        !sensitive &&
+        req.method === "GET" &&
+        (path === "/" || extname(path) === ".html") &&
+        req.headers["sec-fetch-mode"] === "navigate" &&
+        (req.headers["sec-fetch-dest"] === "iframe" || req.headers["sec-fetch-dest"] === "document");
       res.setHeader("Referrer-Policy", "no-referrer");
       res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Vary", "Origin, Sec-Fetch-Site, Sec-Fetch-Mode, Sec-Fetch-Dest");
       if (sensitive) {
         res.setHeader("Cache-Control", "no-store");
       }
       if (
         (expected && req.headers.host !== expected.host) ||
         (expected && req.headers.origin && req.headers.origin !== expected.origin) ||
-        req.headers["sec-fetch-site"] === "cross-site"
+        (req.headers["sec-fetch-site"] === "cross-site" && !isAllowedNavigation)
       ) {
         res.writeHead(403, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: false, code: "forbidden", message: "Forbidden host or origin" }));

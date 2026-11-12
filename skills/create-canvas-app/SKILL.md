@@ -83,11 +83,13 @@ web/app.mjs     ── your Preact view
   (SSE), and `POST /action`. `mountCanvas` wires them up; every state change fans
   out to all open panels.
 - **Loopback origin guards & optional capability.** Every panel server checks
-  `Host`, `Origin`, `Sec-Fetch-Site`, `X-Content-Type-Options: nosniff`, and
-  `Content-Type: application/json` on `POST /action`. Set `requireCapability: true`
-  in the canvas config for private plans or reports so `/state`, `/events`, and
-  `/action` also require a per-panel capability token; preserve that URL's query
-  string and never publish or persist it as evidence.
+  `Host`, `Origin`, `Sec-Fetch-Site` (allowing initial `GET` HTML `iframe`/`document`
+  navigation from the host while rejecting cross-site data, action, and subresource
+  requests), `X-Content-Type-Options: nosniff`, and `Content-Type: application/json`
+  on `POST /action`. Set `requireCapability: true` in the canvas config for private
+  plans or reports so `/state`, `/events`, and `/action` also require a per-panel
+  capability token; preserve that URL's query string and never publish or persist
+  it as evidence.
 - **`server.mjs` is SDK-free** so the whole runtime is testable with plain Node
   HTTP (see `test/http.test.mjs`). Keep SDK calls in `extension.mjs` only.
 

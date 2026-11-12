@@ -296,25 +296,70 @@ async function main() {
   });
 
   await test("default instances enforce Host, Origin, Sec-Fetch-Site, JSON Content-Type, and UI-only askAgent", async () => {
+    const rawGet = (target, headers) =>
+      new Promise((resolve, reject) => {
+        http.get(target, { headers }, (response) => {
+          const chunks = [];
+          response.on("data", (chunk) => chunks.push(chunk));
+          response.on("end", () =>
+            resolve({
+              status: response.statusCode,
+              headers: response.headers,
+              text: Buffer.concat(chunks).toString("utf8"),
+            }),
+          );
+        }).on("error", reject);
+      });
     const before = await get(open.url, "/state");
     const id = before.body.decisions[0].id;
+    const iframeNav = await rawGet(open.url, {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "iframe",
+    });
+    assert.equal(iframeNav.status, 200);
+    assert.match(iframeNav.text, /<!doctype html>/i);
+    assert.match(String(iframeNav.headers.vary || ""), /Sec-Fetch-Site/i);
+    const docNav = await rawGet(open.url, {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "document",
+    });
+    assert.equal(docNav.status, 200);
     const crossOrigin = await fetch(new URL("/action", open.url), {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: "https://foreign.invalid" },
       body: JSON.stringify({ actionName: "add_decision", input: { title: "blocked" } }),
     });
     assert.equal(crossOrigin.status, 403);
-    const crossSite = await fetch(new URL("/state", open.url), {
-      headers: { "Sec-Fetch-Site": "cross-site" },
+    const crossSite = await rawGet(new URL("/state", open.url), {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Dest": "empty",
     });
     assert.equal(crossSite.status, 403);
-    const wrongHost = await new Promise((resolve, reject) => {
-      http.get(new URL("/state", open.url), { headers: { Host: "foreign.invalid" } }, (response) => {
-        response.resume();
-        resolve(response.statusCode);
-      }).on("error", reject);
+    const crossSiteIframeState = await rawGet(new URL("/state", open.url), {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "iframe",
     });
-    assert.equal(wrongHost, 403);
+    assert.equal(crossSiteIframeState.status, 403);
+    const crossSiteScript = await rawGet(new URL("/app.mjs", open.url), {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "no-cors",
+      "Sec-Fetch-Dest": "script",
+    });
+    assert.equal(crossSiteScript.status, 403);
+    const crossSiteIframeScript = await rawGet(new URL("/app.mjs", open.url), {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "iframe",
+    });
+    assert.equal(crossSiteIframeScript.status, 403);
+    const wrongHost = await rawGet(new URL("/state", open.url), {
+      Host: "foreign.invalid",
+    });
+    assert.equal(wrongHost.status, 403);
     const nonJson = await fetch(new URL("/action", open.url), {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
