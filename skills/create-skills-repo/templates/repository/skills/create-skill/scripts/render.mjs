@@ -279,8 +279,9 @@ defaults:
 
 scoring:
   weights:
-    prompt: 0.8
-    skill-invocation: 0.2
+    prompt: 0.5
+    skill-invocation: 0.25
+    diff-empty: 0.25
   threshold: 0.8
 
 stimuli:
@@ -309,6 +310,7 @@ stimuli:
       - type: skill-invocation
         config:
           required: [${manifest.name}]
+      - type: diff-empty
 `;
 }
 

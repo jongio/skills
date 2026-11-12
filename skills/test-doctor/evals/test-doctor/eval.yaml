@@ -36,7 +36,7 @@ stimuli:
           dest: test/shipping.test.mjs
     graders:
       - type: diff-empty
-        name: audit-does-not-edit
+        name: diff-empty-audit-does-not-edit
       - type: prompt
         name: independent-contract-findings
         config:

@@ -17,46 +17,82 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
+function isBlockedIPv4(addr) {
+  const [a, b, c] = addr.split(".").map(Number);
+  if (a === 0 || a === 127 || a === 10) return true; // this-host / loopback / private
+  if (a === 169 && b === 254) return true;           // link-local (incl. cloud IMDS)
+  if (a === 172 && b >= 16 && b <= 31) return true;  // private
+  if (a === 192 && b === 168) return true;           // private
+  if (a === 192 && b === 0 && c === 0) return true;  // IETF protocol assignments
+  if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking / overlay bridges
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  if (a >= 224) return true;                         // multicast / reserved / broadcast
+  if (addr === "168.63.129.16") return true;         // Azure platform host agent
+  return false;
+}
+
+function expandIPv6(address) {
+  let value = address;
+  const dotted = /:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(value);
+  if (dotted) {
+    const quad = dotted[1].split(".").map(Number);
+    if (quad.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+      return null;
+    }
+    const high = ((quad[0] << 8) | quad[1]).toString(16);
+    const low = ((quad[2] << 8) | quad[3]).toString(16);
+    value = `${value.slice(0, dotted.index)}:${high}:${low}`;
+  }
+  const parts = value.split("::");
+  if (parts.length > 2) return null;
+  const [head, tail = ""] = parts;
+  const left = head ? head.split(":").filter(Boolean) : [];
+  const right = tail ? tail.split(":").filter(Boolean) : [];
+  const missing = 8 - left.length - right.length;
+  if (parts.length === 2 ? missing < 1 : left.length !== 8) return null;
+  const groups = parts.length === 2
+    ? [...left, ...Array(missing).fill("0"), ...right]
+    : left;
+  if (groups.some((g) => !/^[0-9a-f]{1,4}$/i.test(g))) return null;
+  return groups.map((g) => parseInt(g, 16));
+}
+
 /**
  * True for addresses a server-side fetch should never reach: loopback,
- * link-local (incl. cloud metadata 169.254.169.254), and private/CGNAT ranges.
+ * link-local (incl. cloud metadata 169.254.169.254 and Azure host agent
+ * 168.63.129.16), private/CGNAT ranges, and non-global-unicast or
+ * IPv4-translating IPv6 prefixes (fe80::/10, fc00::/7, ::ffff:0:0/96,
+ * 64:ff9b::/96, 2002::/16, Teredo).
  * @param {string} ip
  * @returns {boolean}
  */
 export function isBlockedAddress(ip) {
-  const lower = ip.toLowerCase();
-  // Decode an IPv4-mapped/compatible IPv6 literal down to its embedded IPv4 so
-  // the IPv4 range checks apply. Covers BOTH the dotted tail (::ffff:127.0.0.1)
-  // and the HEX tail that `new URL()` normalizes literals to (::ffff:7f00:1) —
-  // without the decode, `[::ffff:127.0.0.1]` reaches loopback and
-  // `[::ffff:a9fe:a9fe]` reaches cloud metadata. Only matches when the high bits
-  // are all zero (leading "::"), so a normal public v6 (e.g. 2001:db8::7f00:1) is
-  // never misread as IPv4.
-  const addr = embeddedIPv4(lower) ?? ip;
-  if (isIP(addr) === 4) {
-    const [a, b] = addr.split(".").map(Number);
-    if (a === 0 || a === 127 || a === 10) return true;     // this-host / loopback / private
-    if (a === 169 && b === 254) return true;               // link-local (incl. cloud IMDS)
-    if (a === 172 && b >= 16 && b <= 31) return true;      // private
-    if (a === 192 && b === 168) return true;               // private
-    if (a === 100 && b >= 64 && b <= 127) return true;     // CGNAT
-    return false;
+  if (typeof ip !== "string" || !ip) return true;
+  const clean = ip.toLowerCase().split("%")[0];
+  if (isIP(clean) === 4) {
+    return isBlockedIPv4(clean);
   }
-  return lower === "::1" || lower === "::" || lower.startsWith("fe80") || lower.startsWith("fc") || lower.startsWith("fd");
-}
-
-// Decode an IPv4-mapped/compatible IPv6 literal (all-zero high groups, i.e. a
-// leading "::", optionally "::ffff:") to its dotted IPv4; else null. Accepts the
-// dotted tail (127.0.0.1) and the two-hex-group tail (7f00:1) that URL
-// normalization produces. Anchored on "::" so it can't misread a public v6.
-function embeddedIPv4(addr) {
-  const m = addr.match(/^::(?:ffff:)?((?:\d{1,3}\.){3}\d{1,3}|[0-9a-f]{1,4}:[0-9a-f]{1,4})$/);
-  if (!m) return null;
-  const tail = m[1];
-  if (tail.includes(".")) return isIP(tail) === 4 ? tail : null;
-  const [h1, h2] = tail.split(":");
-  const hi = parseInt(h1, 16), lo = parseInt(h2, 16);
-  return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  if (isIP(clean) !== 6) return true;
+  if (clean === "::" || clean === "::1") return true;
+  const groups = expandIPv6(clean);
+  if (!groups) return true;
+  const [first, second] = groups;
+  // ::/64 carries embedded IPv4 in low 32 bits (::ffff:<v4>, ::<v4>, ::ffff:0:<v4>).
+  // Permit only IPv4-mapped ::ffff:<v4> when the embedded IPv4 is itself public.
+  if (groups.slice(0, 4).every((g) => g === 0)) {
+    if (groups[4] !== 0 || groups[5] !== 0xffff) return true;
+    const embedded = `${groups[6] >> 8}.${groups[6] & 0xff}.${groups[7] >> 8}.${groups[7] & 0xff}`;
+    return isBlockedIPv4(embedded);
+  }
+  if ((first & 0xfe00) === 0xfc00) return true; // unique local fc00::/7
+  if ((first & 0xffc0) === 0xfe80) return true; // link-local fe80::/10 (fe80..febf)
+  if ((first & 0xffc0) === 0xfec0) return true; // site-local fec0::/10
+  if ((first & 0xff00) === 0xff00) return true; // multicast ff00::/8
+  if (first === 0x0064 && (second === 0xff9b || second === 0xff9c)) return true; // NAT64
+  if ((first & 0xe000) !== 0x2000) return true; // outside IANA global unicast 2000::/3
+  if (first === 0x2002) return true;            // 6to4 transition
+  if (first === 0x2001 && second === 0x0000) return true; // Teredo
+  return false;
 }
 
 /**

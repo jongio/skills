@@ -295,6 +295,82 @@ async function main() {
     assert.equal(after.body.agentError, null, "a successful handoff clears the prior error");
   });
 
+  await test("default instances enforce Host, Origin, Sec-Fetch-Site, JSON Content-Type, and UI-only askAgent", async () => {
+    const rawGet = (target, headers) =>
+      new Promise((resolve, reject) => {
+        http.get(target, { headers }, (response) => {
+          const chunks = [];
+          response.on("data", (chunk) => chunks.push(chunk));
+          response.on("end", () =>
+            resolve({
+              status: response.statusCode,
+              headers: response.headers,
+              text: Buffer.concat(chunks).toString("utf8"),
+            }),
+          );
+        }).on("error", reject);
+      });
+    const before = await get(open.url, "/state");
+    const id = before.body.decisions[0].id;
+    const iframeNav = await rawGet(open.url, {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "iframe",
+    });
+    assert.equal(iframeNav.status, 200);
+    assert.match(iframeNav.text, /<!doctype html>/i);
+    assert.match(String(iframeNav.headers.vary || ""), /Sec-Fetch-Site/i);
+    const docNav = await rawGet(open.url, {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "document",
+    });
+    assert.equal(docNav.status, 200);
+    const crossOrigin = await fetch(new URL("/action", open.url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://foreign.invalid" },
+      body: JSON.stringify({ actionName: "add_decision", input: { title: "blocked" } }),
+    });
+    assert.equal(crossOrigin.status, 403);
+    const crossSite = await rawGet(new URL("/state", open.url), {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Dest": "empty",
+    });
+    assert.equal(crossSite.status, 403);
+    const crossSiteIframeState = await rawGet(new URL("/state", open.url), {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "iframe",
+    });
+    assert.equal(crossSiteIframeState.status, 403);
+    const crossSiteScript = await rawGet(new URL("/app.mjs", open.url), {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "no-cors",
+      "Sec-Fetch-Dest": "script",
+    });
+    assert.equal(crossSiteScript.status, 403);
+    const crossSiteIframeScript = await rawGet(new URL("/app.mjs", open.url), {
+      "Sec-Fetch-Site": "cross-site",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Dest": "iframe",
+    });
+    assert.equal(crossSiteIframeScript.status, 403);
+    const wrongHost = await rawGet(new URL("/state", open.url), {
+      Host: "foreign.invalid",
+    });
+    assert.equal(wrongHost.status, 403);
+    const nonJson = await fetch(new URL("/action", open.url), {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ actionName: "add_decision", input: { title: "blocked" } }),
+    });
+    assert.equal(nonJson.status, 415);
+    const agentAttempt = await runtime.invokeFromAgent("hand_to_agent", { id }, { instanceId: "inst-1" });
+    assert.equal(agentAttempt.ok, false);
+    assert.match(agentAttempt.error, /interactive canvas UI/i);
+  });
+
   await test("opt-in capabilities protect private state, SSE and actions with Host/Origin checks", async () => {
     const secure = createCanvasRuntime({ ...canvasConfig, requireCapability: true, statusLine: undefined,
       loadState: undefined, saveState: undefined, createInitialState: () => ({ secret: "session-private" }) });

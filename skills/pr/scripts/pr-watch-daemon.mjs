@@ -194,7 +194,18 @@ export function parsePrWatchArgs(argv, env = process.env) {
   if (!args.repo) {
     args.repo = detectRepoFromGit();
   }
-  if (!args.repo || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(args.repo)) {
+  const repoParts = typeof args.repo === "string" ? args.repo.split("/") : [];
+  if (
+    repoParts.length !== 2 ||
+    !repoParts[0] ||
+    !repoParts[1] ||
+    repoParts[0] === "." ||
+    repoParts[0] === ".." ||
+    repoParts[1] === "." ||
+    repoParts[1] === ".." ||
+    !/^[A-Za-z0-9_.-]+$/.test(repoParts[0]) ||
+    !/^[A-Za-z0-9_.-]+$/.test(repoParts[1])
+  ) {
     throw new Error(`Invalid or missing --repo "${args.repo}". Expected "<owner>/<repo>".`);
   }
   if (!Number.isSafeInteger(args.pr) || args.pr <= 0) {

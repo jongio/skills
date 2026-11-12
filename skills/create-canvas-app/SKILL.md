@@ -82,11 +82,14 @@ web/app.mjs     ── your Preact view
 - **Live updates are automatic.** The kit serves `GET /state`, `GET /events`
   (SSE), and `POST /action`. `mountCanvas` wires them up; every state change fans
   out to all open panels.
-- **Sensitive session data needs a capability.** Set `requireCapability: true`
-  in the canvas config for private plans or reports. The runtime returns a
-  per-panel capability URL; the client carries it on state/SSE/action requests
-  and the server checks Host/Origin. Preserve that URL's query string; never
-  publish it or persist it as evidence. Assets remain separate from private data.
+- **Loopback origin guards & optional capability.** Every panel server checks
+  `Host`, `Origin`, `Sec-Fetch-Site` (allowing initial `GET` HTML `iframe`/`document`
+  navigation from the host while rejecting cross-site data, action, and subresource
+  requests), `X-Content-Type-Options: nosniff`, and `Content-Type: application/json`
+  on `POST /action`. Set `requireCapability: true` in the canvas config for private
+  plans or reports so `/state`, `/events`, and `/action` also require a per-panel
+  capability token; preserve that URL's query string and never publish or persist
+  it as evidence.
 - **`server.mjs` is SDK-free** so the whole runtime is testable with plain Node
   HTTP (see `test/http.test.mjs`). Keep SDK calls in `extension.mjs` only.
 
@@ -419,7 +422,8 @@ A canvas isn't done because the server boots. Verify the UI:
   `Invalid canvas instance ID` before your canvas ever opens.
 - **Never** reach for the model with `fetch`/API keys or a `client.createSession()`
   sub-session (it hangs from an extension) — use `ctx.ai(...)` for silent
-  generation, `ctx.askAgent(...)` to drive the main agent.
+  generation, `ctx.askAgent(...)` from interactive UI actions to drive the main
+  agent (`askAgent` is rejected on agent-side `invokeFromAgent` calls).
 - **Never** hand-build a `ghapp://` URL, and never omit `target="_blank"` on a
   deep-link anchor. Use the kit builders (`buildSessionDeepLink`, …) and render a
   `target="_blank"` link so the canvas webview routes it into the app.

@@ -1,7 +1,7 @@
 import { fixtureRequest } from "./github-fixtures.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { evaluatePollTick as native_evaluatePollTick, ghApiWithEtag, loadState, parseArgs } from "../scripts/ci-doctor-daemon.mjs";
+import { evaluatePollTick as native_evaluatePollTick, ghApiWithEtag, loadState, parseArgs, sendFailureAlert } from "../scripts/ci-doctor-daemon.mjs";
 
 for (const failure of [
   { ok: false, stdout: "", stderr: "HTTP 401: Bad credentials" },
@@ -69,3 +69,41 @@ test(`credential replacement during ${changeAt} cannot establish watched-run rea
   if (changeAt === "page") assert.equal(secondJobPages, 1, "the credential transition occurs on the second jobs page");
 });
 }
+
+test("sendFailureAlert passes alert strings via environment or discrete argv across all platforms", () => {
+  const trickyTitle = "-uBuild\u2019s check 'failed'";
+  const trickyMsg = "Job\u2018name\u2019 $(Get-Date) \"quoted\"";
+
+  const winCalls = [];
+  sendFailureAlert(trickyTitle, trickyMsg, Date.now() + 60_000, {
+    platform: "win32",
+    env: {},
+    spawnFn: (cmd, argv, opts) => winCalls.push({ cmd, argv, opts }),
+  });
+  assert.equal(winCalls.length, 1);
+  assert.equal(winCalls[0].cmd, "powershell");
+  assert.ok(!winCalls[0].argv[3].includes(trickyTitle), "PowerShell command text must remain constant");
+  assert.ok(!winCalls[0].argv[3].includes(trickyMsg), "PowerShell command text must not interpolate message");
+  assert.equal(winCalls[0].opts.env.CI_DOCTOR_ALERT_TITLE, trickyTitle);
+  assert.equal(winCalls[0].opts.env.CI_DOCTOR_ALERT_MESSAGE, trickyMsg);
+
+  const macCalls = [];
+  sendFailureAlert(trickyTitle, trickyMsg, Date.now() + 60_000, {
+    platform: "darwin",
+    env: {},
+    spawnFn: (cmd, argv, opts) => macCalls.push({ cmd, argv, opts }),
+  });
+  assert.equal(macCalls.length, 1);
+  assert.equal(macCalls[0].cmd, "osascript");
+  assert.ok(!macCalls[0].argv[1].includes(trickyMsg), "AppleScript text must use on run argv");
+  assert.deepEqual(macCalls[0].argv.slice(2), ["--", trickyTitle, trickyMsg]);
+
+  const linuxCalls = [];
+  sendFailureAlert(trickyTitle, trickyMsg, Date.now() + 60_000, {
+    platform: "linux",
+    env: {},
+    spawnFn: (cmd, argv, opts) => linuxCalls.push({ cmd, argv, opts }),
+  });
+  assert.equal(linuxCalls.length, 1);
+  assert.deepEqual(linuxCalls[0].argv, ["-u", "critical", "--", trickyTitle, trickyMsg]);
+});

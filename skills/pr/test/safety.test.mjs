@@ -71,3 +71,12 @@ test(`Copilot request refuses mixed credentials during ${transition}`, async () 
   assert.equal(mutations, 0, "no cancellation or reviewer mutation may use mixed-scope evidence");
 });
 }
+
+test("parsePrWatchArgs rejects dot-segment repository identifiers", () => {
+  for (const invalid of ["../repo", "owner/..", "./repo", "owner/."]) {
+    assert.throws(
+      () => parsePrWatchArgs(["watch", "--repo", invalid, "--pr", "1"]),
+      /Invalid or missing --repo/,
+    );
+  }
+});

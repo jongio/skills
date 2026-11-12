@@ -1099,13 +1099,18 @@ function chunkExec(execFn, deadlineMs) {
   return request;
 }
 
-export function sendFailureAlert(title, message, deadlineMs = Infinity) {
-  if (process.env.CI_DOCTOR_NO_ALERT === "1" || process.env.CI_HOUND_NO_ALERT === "1" || Date.now() >= deadlineMs) {
+export function sendFailureAlert(
+  title,
+  message,
+  deadlineMs = Infinity,
+  { spawnFn = spawnSync, platform = process.platform, env = process.env } = {},
+) {
+  if (env.CI_DOCTOR_NO_ALERT === "1" || env.CI_HOUND_NO_ALERT === "1" || Date.now() >= deadlineMs) {
     return;
   }
-  if (process.platform === "win32") {
-    const safeTitle = title.replace(/'/g, "''");
-    const safeMessage = message.replace(/'/g, "''");
+  const normalizedTitle = String(title ?? "");
+  const normalizedMessage = String(message ?? "");
+  if (platform === "win32") {
     const psScript = `
       try { [console]::Beep(880, 250); [console]::Beep(660, 350) } catch {}
       try {
@@ -1114,25 +1119,41 @@ export function sendFailureAlert(title, message, deadlineMs = Infinity) {
         $n = New-Object System.Windows.Forms.NotifyIcon
         $n.Icon = [System.Drawing.SystemIcons]::Error
         $n.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Error
-        $n.BalloonTipTitle = '${safeTitle}'
-        $n.BalloonTipText = '${safeMessage}'
+        $n.BalloonTipTitle = [string]$env:CI_DOCTOR_ALERT_TITLE
+        $n.BalloonTipText = [string]$env:CI_DOCTOR_ALERT_MESSAGE
         $n.Visible = $true
         $n.ShowBalloonTip(8000)
         Start-Sleep -Seconds 2
         $n.Dispose()
       } catch {}
     `;
-    spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", psScript], {
+    spawnFn("powershell", ["-NoProfile", "-NonInteractive", "-Command", psScript], {
       stdio: "ignore",
+      windowsHide: true,
+      env: {
+        ...env,
+        CI_DOCTOR_ALERT_TITLE: normalizedTitle,
+        CI_DOCTOR_ALERT_MESSAGE: normalizedMessage,
+      },
       timeout: Math.max(1, Math.min(6000, deadlineMs - Date.now())),
     });
-  } else if (process.platform === "darwin") {
-    spawnSync("osascript", ["-e", `display notification ${JSON.stringify(message)} with title ${JSON.stringify(title)} sound name "Basso"`], {
-      stdio: "ignore",
-      timeout: Math.max(1, Math.min(4000, deadlineMs - Date.now())),
-    });
+  } else if (platform === "darwin") {
+    spawnFn(
+      "osascript",
+      [
+        "-e",
+        'on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv) sound name "Basso"\nend run',
+        "--",
+        normalizedTitle,
+        normalizedMessage,
+      ],
+      {
+        stdio: "ignore",
+        timeout: Math.max(1, Math.min(4000, deadlineMs - Date.now())),
+      },
+    );
   } else {
-    spawnSync("notify-send", ["-u", "critical", title, message], {
+    spawnFn("notify-send", ["-u", "critical", "--", normalizedTitle, normalizedMessage], {
       stdio: "ignore",
       timeout: Math.max(1, Math.min(4000, deadlineMs - Date.now())),
     });

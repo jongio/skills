@@ -36,6 +36,30 @@ const STEALTH_PATTERNS = [
   { id: "vuln-class", regex: /\b(?:command injection|path traversal|sql injection|sqli|xss|ssrf|rce)\b/i },
 ];
 
+const GITHUB_LOGIN_RE = /^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9_])?$/;
+const SAFE_BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+
+function normalizeValidLogin(raw) {
+  if (typeof raw !== "string") return null;
+  const candidate = raw.trim().replace(/^@/, "");
+  return GITHUB_LOGIN_RE.test(candidate) ? candidate : null;
+}
+
+function normalizeSafeBranch(raw) {
+  if (typeof raw !== "string") return DEFAULT_CONFIG.branch;
+  const candidate = raw.trim();
+  if (
+    !SAFE_BRANCH_RE.test(candidate) ||
+    candidate.includes("..") ||
+    candidate.includes("//") ||
+    candidate.endsWith("/") ||
+    candidate.endsWith(".lock")
+  ) {
+    return DEFAULT_CONFIG.branch;
+  }
+  return candidate;
+}
+
 export function parseCodeownersMaintainer(content) {
   if (typeof content !== "string" || !content.trim()) return null;
   let globalOwner = null;
@@ -103,24 +127,35 @@ export function resolveConfig({
     ...fileConfig,
     ...Object.fromEntries(Object.entries(cliFlags).filter(([, v]) => v !== undefined)),
   };
+  merged.branch = normalizeSafeBranch(merged.branch);
+  const rawCooldown = merged.cooldownDays;
+  const parsedCooldown =
+    typeof rawCooldown === "number"
+      ? rawCooldown
+      : typeof rawCooldown === "string" && rawCooldown.trim() !== ""
+        ? Number(rawCooldown)
+        : NaN;
+  merged.cooldownDays =
+    Number.isFinite(parsedCooldown) && parsedCooldown >= 0
+      ? parsedCooldown
+      : DEFAULT_CONFIG.cooldownDays;
 
+  const candidatesOrder = [
+    ["cli", cliFlags.maintainer],
+    ["policy-file", fileConfig.maintainer],
+    ["codeowners", codeownersMaintainer],
+    ["repo-owner", repoOwner],
+    ["auth-user", authUser],
+  ];
   let maintainer = null;
   let maintainerSource = null;
-  if (cliFlags.maintainer) {
-    maintainer = String(cliFlags.maintainer).replace(/^@/, "");
-    maintainerSource = "cli";
-  } else if (fileConfig.maintainer) {
-    maintainer = String(fileConfig.maintainer).replace(/^@/, "");
-    maintainerSource = "policy-file";
-  } else if (codeownersMaintainer) {
-    maintainer = codeownersMaintainer;
-    maintainerSource = "codeowners";
-  } else if (repoOwner) {
-    maintainer = String(repoOwner).replace(/^@/, "");
-    maintainerSource = "repo-owner";
-  } else if (authUser) {
-    maintainer = String(authUser).replace(/^@/, "");
-    maintainerSource = "auth-user";
+  for (const [source, rawCandidate] of candidatesOrder) {
+    const valid = normalizeValidLogin(rawCandidate);
+    if (valid) {
+      maintainer = valid;
+      maintainerSource = source;
+      break;
+    }
   }
 
   if (typeof merged.autoMerge !== "boolean") {
@@ -152,9 +187,13 @@ export function resolveConfig({
 }
 
 export function sanitizeRepoKey(repo) {
-  return String(repo || "unknown__repo")
+  const cleaned = String(repo || "unknown__repo")
     .trim()
     .replace(/[^a-zA-Z0-9._-]+/g, "__");
+  if (!cleaned || /^\.+$/.test(cleaned)) {
+    return "unknown__repo";
+  }
+  return cleaned;
 }
 
 export function getReceiptPath(stateDir, repo) {

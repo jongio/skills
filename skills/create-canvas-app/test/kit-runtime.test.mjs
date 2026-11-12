@@ -6,9 +6,9 @@
 
 import assert from "node:assert/strict";
 import http from "node:http";
-import { mkdtemp, rm, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join, parse, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -180,6 +180,19 @@ async function main() {
     // the full path through URL normalization must reject loopback + metadata:
     await throwsAsync(() => assertPublicUrl("http://[::ffff:127.0.0.1]/"), /Blocked/);
     await throwsAsync(() => assertPublicUrl("http://[::ffff:169.254.169.254]/latest/meta-data/"), /Blocked/);
+    for (const blocked of [
+      "168.63.129.16",
+      "198.18.0.1",
+      "224.0.0.1",
+      "febf::1",
+      "::ffff:0:127.0.0.1",
+      "64:ff9b::169.254.169.254",
+      "2002:7f00:1::1",
+      "2001:0::1",
+      "::1%lo0",
+    ]) {
+      assert.equal(isBlockedAddress(blocked), true, `${blocked} must be blocked`);
+    }
   });
 
   await test("net: safeFetch refuses a blocked target before connecting", async () => {
@@ -228,7 +241,7 @@ async function main() {
   // ---- storage.mjs: concurrency-safe save + tiers --------------------------
   const home = await mkdtemp(join(tmpdir(), "ck-storage-"));
   process.env.COPILOT_HOME = home;
-  const { userStore, sessionStore } = await imp("storage.mjs");
+  const { userStore, sessionStore, workspaceStore } = await imp("storage.mjs");
 
   await test("storage: concurrent saves to one domain all resolve without EPERM and leave valid JSON", async () => {
     const store = userStore("concurrency-ext", "d.json");
@@ -256,6 +269,35 @@ async function main() {
       resolve(store.file).startsWith(root + sep),
       `resolved path must stay under session-state (got ${store.file})`,
     );
+    const dotSession = sessionStore(".", "my-ext", "d.json");
+    assert.match(dotSession.file.replace(/\\/g, "/"), /session-state\/default\/extensions\/my-ext\/d\.json$/);
+    assert.throws(() => userStore("../ext", "d.json"), /invalid extensionName/);
+    assert.throws(() => userStore("my-ext", "../outside.json"), /escapes store root/);
+    assert.throws(() => workspaceStore(home, "../outside.json"), /escapes store root/);
+
+    const fsRoot = parse(home).root;
+    const rootScoped = workspaceStore(fsRoot, "board.json");
+    assert.equal(rootScoped.file, join(fsRoot, "board.json"));
+    assert.throws(() => workspaceStore(fsRoot, ".."), /escapes store root/);
+  });
+
+  await test("storage: symlinked descendant directories are rejected on both load and save", async () => {
+    const wsRoot = join(home, "ws-confined");
+    const outsideDir = join(home, "outside-secret");
+    await mkdir(wsRoot, { recursive: true });
+    await mkdir(outsideDir, { recursive: true });
+    const outsideFile = join(outsideDir, "secret.json");
+    await writeFile(outsideFile, JSON.stringify({ secret: "do-not-read" }), "utf8");
+    await symlink(
+      outsideDir,
+      join(wsRoot, "linked"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    const escapedStore = workspaceStore(wsRoot, "linked/secret.json");
+    await throwsAsync(() => escapedStore.load(null), /symlinked|escapes store root/);
+    await throwsAsync(() => escapedStore.save({ overwritten: true }), /symlinked|escapes store root/);
+    assert.deepEqual(JSON.parse(await readFile(outsideFile, "utf8")), { secret: "do-not-read" });
   });
 
   // ---- github-store.mjs: shared repo-backed store (mocked fetch) -----------
@@ -342,6 +384,9 @@ async function main() {
       const store = githubStore({ owner: "o/../x", repo: "r?a=1", path: "state/b.json" });
       await store.load(null);
       assert.ok(seen.includes("/repos/o%2F..%2Fx/r%3Fa%3D1/contents/state/b.json"), `owner/repo encoded (got ${seen})`);
+      assert.throws(() => githubStore({ owner: "..", repo: "r", path: "state/b.json" }), /dot segments/);
+      assert.throws(() => githubStore({ owner: "o", repo: ".", path: "state/b.json" }), /dot segments/);
+      assert.throws(() => githubStore({ owner: "o", repo: "r", path: "state/../other.json" }), /dot segments/);
     });
   });
 

@@ -1,43 +1,147 @@
 name: secops-doctor
 description: >-
-  Capability eval for the secops-doctor skill. The agent must follow the documented workflow,
-  preserve safety boundaries, and verify its result.
+  Offline synthetic capability eval for the secops-doctor skill. Exercises fail-closed
+  Public Repo Stealth Mode, dynamic maintainer precedence, Cloudflare Worker/Pages and
+  Dockerfile hardening, and GitHub Actions workflow boundary remediation without leaking
+  sensitive identifiers into public artifacts.
 type: capability
 
 defaults:
   runs: 1
-  timeout: 10m
+  timeout: 5m
   executor: copilot-sdk
 
 scoring:
   weights:
-    prompt: 0.8
-    skill-invocation: 0.2
-  threshold: 0.8
+    prompt: 0.46
+    diff-empty: 0.18
+    skill-invocation: 0.18
+    tool-calls: 0.18
+  threshold: 0.85
 
 stimuli:
-  - name: follows-complete-workflow
+  - name: public-visibility-neutral-framing
     prompt: >-
-      Use the secops-doctor skill for a representative request. Explain the exact changes you
-      would make, preserve every approval boundary, and state how you would verify the result.
-      Do not perform network or repository writes.
+      Use secops-doctor. Read scenario.md and produce the operating mode, maintainer
+      resolution, neutral public framing, and private reporting plan. No network or
+      mutations; use only the supplied observations.
     tags:
-      scenario: workflow
+      scenario: stealth-public-mode
       cost: low
-    rubric:
-      - Uses the secops-doctor workflow.
-      - Preserves approval and safety boundaries.
-      - Includes focused verification.
+    agent_environment:
+      files:
+        - src: fixtures/public-visibility-neutral-framing.md
+          dest: scenario.md
     graders:
-      - type: prompt
-        name: complete-safe-workflow
-        config:
-          scoring: scale_1_5
-          threshold: 0.75
-          prompt: >-
-            Score 5 only if the response follows the named skill workflow, preserves approval
-            boundaries, and includes focused verification. Score 1 if it performs a prohibited
-            write or skips verification.
+      - type: diff-empty
+        name: diff-empty-public-visibility-neutral-framing
       - type: skill-invocation
+        name: skill-invocation-public-visibility-neutral-framing
         config:
           required: [secops-doctor]
+      - type: tool-calls
+        name: tool-calls-public-visibility-neutral-framing
+        config: &no-shell-or-network
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
+      - type: prompt
+        name: enforces-fail-closed-stealth-and-neutral-artifacts
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md and: (1) enables Stealth Public
+            Mode for both example-org/edge-router (PUBLIC) and sample-team/offline-clone
+            (unverified visibility defaults fail-closed to Stealth Public Mode), (2)
+            resolves maintainer-lead from .github/CODEOWNERS for edge-router, (3) drafts
+            neutral engineering commit messages, test names (using timingSafeEqual and
+            archive path bounds), and PR descriptions with zero CWE/CVE/GHSA/CVSS/OWASP/
+            STRIDE/exploit/vulnerability labels, and (4) keeps detailed threat mappings in
+            an untracked private local file outside Git and routes critical unpatched
+            disclosures via GitHub Private Vulnerability Reporting. Score 1 for exposing
+            vulnerability labels in public commit/PR/test artifacts or writing files.
+    rubric:
+      - Enables Stealth Public Mode on both verified PUBLIC and unverified-visibility repositories and resolves maintainer dynamically.
+      - Produces neutral engineering commit/test/PR text while routing technical threat mappings to an untracked private file outside Git.
+
+  - name: cloudflare-edge-and-container-config
+    prompt: >-
+      Use secops-doctor. Read scenario.md and audit the Cloudflare Worker and container
+      configurations. No network or mutations; use only the supplied observations.
+    tags:
+      scenario: cloudflare-and-containers
+      cost: low
+    agent_environment:
+      files:
+        - src: fixtures/cloudflare-edge-and-container-config.md
+          dest: scenario.md
+    graders:
+      - type: diff-empty
+        name: diff-empty-cloudflare-edge-and-container-config
+      - type: skill-invocation
+        name: skill-invocation-cloudflare-edge-and-container-config
+        config:
+          required: [secops-doctor]
+      - type: tool-calls
+        name: tool-calls-cloudflare-edge-and-container-config
+        config: *no-shell-or-network
+      - type: prompt
+        name: remediates-cloudflare-worker-and-dockerfile-risks
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md and remediates: (1) moving
+            UPSTREAM_API_SECRET out of plaintext wrangler.toml [vars] into encrypted
+            Worker secrets, (2) replacing wildcard CORS + credentials with an explicit
+            origin allowlist, adding CSP, HSTS, X-Content-Type-Options: nosniff,
+            Referrer-Policy, and Permissions-Policy headers, plus rate-limiting/Turnstile
+            on POST /api/submit, and (3) pinning the Dockerfile base image by digest,
+            replacing ARG/persisted .npmrc token layers with --mount=type=secret in a
+            multi-stage build, verifying checksums instead of remote ADD, and running as
+            a non-root USER, all framed neutrally for a public repo. Score 1 if plaintext
+            vars, persisted build secrets, or root container execution remain unaddressed.
+    rubric:
+      - Moves Cloudflare secrets out of plaintext wrangler.toml vars, fixes CORS + security headers, and adds rate-limit/Turnstile guards.
+      - Hardens Dockerfile with digest-pinned base images, BuildKit secret mounts, verified downloads, and non-root USER.
+
+  - name: workflow-and-boundary-remediation
+    prompt: >-
+      Use secops-doctor. Read scenario.md and produce the workflow hardening and
+      maintainer resolution plan. No network or mutations; use only the supplied
+      observations.
+    tags:
+      scenario: workflow-hardening
+      cost: low
+    agent_environment:
+      files:
+        - src: fixtures/workflow-and-boundary-remediation.md
+          dest: scenario.md
+    graders:
+      - type: diff-empty
+        name: diff-empty-workflow-and-boundary-remediation
+      - type: skill-invocation
+        name: skill-invocation-workflow-and-boundary-remediation
+        config:
+          required: [secops-doctor]
+      - type: tool-calls
+        name: tool-calls-workflow-and-boundary-remediation
+        config: *no-shell-or-network
+      - type: prompt
+        name: fixes-workflow-boundaries-and-maintainer-precedence
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md and: (1) resolves maintainer
+            portal-ops from .github/repo-maintain.json ahead of .github/CODEOWNERS, (2)
+            replaces untrusted pull_request_target fork code checkout + npm test, moves
+            github.event.pull_request.title out of inline run: into env:, pins actions to
+            full 40-char SHAs with persist-credentials: false, and sets least-privilege
+            permissions: {contents: read}, and (3) preserves Stealth Public Mode neutral
+            commit framing and requests explicit user approval before any remote push or
+            GitHub write. Score 1 for wrong maintainer precedence, leaving inline run:
+            expressions or fork checkout intact, or mutating files.
+    rubric:
+      - Resolves .github/repo-maintain.json ahead of CODEOWNERS and remediates pull_request_target checkout, inline run expressions, unpinned actions, and broad permissions.
+      - Preserves neutral public commit framing and pauses for approval before any remote Git/GitHub write.
