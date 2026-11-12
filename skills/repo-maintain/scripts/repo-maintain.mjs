@@ -36,7 +36,7 @@ const STEALTH_PATTERNS = [
   { id: "vuln-class", regex: /\b(?:command injection|path traversal|sql injection|sqli|xss|ssrf|rce)\b/i },
 ];
 
-const GITHUB_LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
+const GITHUB_LOGIN_RE = /^[A-Za-z0-9_](?:[A-Za-z0-9_-]{0,37}[A-Za-z0-9_])?$/;
 const SAFE_BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 
 function normalizeValidLogin(raw) {

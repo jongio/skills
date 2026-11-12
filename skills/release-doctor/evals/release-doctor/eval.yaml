@@ -43,7 +43,7 @@ stimuli:
         name: tool-calls-non-releasable-vs-semver-classification
         config: &no-shell-or-network
           disallowed:
-            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|create_issue|create_pull_request)"
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
       - type: prompt
         name: classifies-skip-minor-and-major-bumps-accurately
         config:

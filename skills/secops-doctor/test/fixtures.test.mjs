@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
+import { createRequire } from "node:module";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const localPkg = new URL("../package.json", import.meta.url);
+const sharedPkg = new URL("../../../.github/tools/vally/package.json", import.meta.url);
+const requireFrom = existsSync(new URL("../node_modules/@microsoft/vally/package.json", import.meta.url))
+  ? localPkg
+  : sharedPkg;
+const require = createRequire(requireFrom);
+const { computeMetrics, gradeTrajectory, loadEvalSpec } = await import(
+  pathToFileURL(require.resolve("@microsoft/vally")).href
+);
 
 const root = new URL("../evals/secops-doctor/", import.meta.url);
 const expected = [
@@ -92,4 +105,42 @@ test("scoring weights are decisive in both directions across all declared grader
     passingJudgeFourScore >= threshold,
     `4/5 prompt + passing guards must pass threshold (got ${passingJudgeFourScore} < ${threshold})`,
   );
+});
+
+test("offline tool-calls guard blocks direct GitHub MCP and shell calls while allowing local file reads", async () => {
+  const loaded = await loadEvalSpec(fileURLToPath(new URL("eval.yaml", root)));
+  const toolGrader = loaded.stimuli[0].graders.find((g) => g.type === "tool-calls");
+  assert.ok(toolGrader, "expected a tool-calls guard");
+
+  const makeTrajectory = (toolName) => {
+    const events = [
+      { type: "turn_start", data: { turnId: "t1" } },
+      { type: "tool_call", data: { toolCallId: "c1", toolName, arguments: {} } },
+      { type: "tool_result", data: { toolCallId: "c1", toolName, result: "ok" } },
+      { type: "turn_end", data: { turnId: "t1" } },
+    ];
+    return {
+      id: `trial-${toolName}`,
+      stimulus: { name: "test", prompt: "test" },
+      events,
+      metrics: computeMetrics(events),
+      output: "done",
+      workDir: process.cwd(),
+      metadata: {},
+      diff: "",
+    };
+  };
+
+  for (const blockedTool of [
+    "github-mcp-server-get_file_contents",
+    "github-mcp-server-actions_get",
+    "powershell",
+    "create_pull_request",
+  ]) {
+    const res = await gradeTrajectory(makeTrajectory(blockedTool), [toolGrader]);
+    assert.equal(res.passed, false, `${blockedTool} must fail the offline tool-calls guard`);
+  }
+
+  const allowedRes = await gradeTrajectory(makeTrajectory("view"), [toolGrader]);
+  assert.equal(allowedRes.passed, true, "local view tool must be permitted");
 });

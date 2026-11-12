@@ -853,10 +853,13 @@ test("resolveConfig and sanitizeRepoKey normalize untrusted policy values safely
     }
     writeFileSync(
       join(tempRoot, ".github", "repo-maintain.json"),
-      JSON.stringify({ cooldownDays: 0 }),
+      JSON.stringify({ cooldownDays: 0, maintainer: "maintainer_example" }),
       "utf8",
     );
-    assert.equal(resolveConfig({ cwd: tempRoot }).cooldownDays, 0);
+    const emuResolved = resolveConfig({ cwd: tempRoot, repoOwner: "fallback-owner" });
+    assert.equal(emuResolved.cooldownDays, 0);
+    assert.equal(emuResolved.maintainer, "maintainer_example");
+    assert.equal(emuResolved.maintainerSource, "policy-file");
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }

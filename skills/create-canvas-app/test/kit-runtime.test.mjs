@@ -6,9 +6,9 @@
 
 import assert from "node:assert/strict";
 import http from "node:http";
-import { mkdtemp, rm, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join, parse, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -274,6 +274,30 @@ async function main() {
     assert.throws(() => userStore("../ext", "d.json"), /invalid extensionName/);
     assert.throws(() => userStore("my-ext", "../outside.json"), /escapes store root/);
     assert.throws(() => workspaceStore(home, "../outside.json"), /escapes store root/);
+
+    const fsRoot = parse(home).root;
+    const rootScoped = workspaceStore(fsRoot, "board.json");
+    assert.equal(rootScoped.file, join(fsRoot, "board.json"));
+    assert.throws(() => workspaceStore(fsRoot, ".."), /escapes store root/);
+  });
+
+  await test("storage: symlinked descendant directories are rejected on both load and save", async () => {
+    const wsRoot = join(home, "ws-confined");
+    const outsideDir = join(home, "outside-secret");
+    await mkdir(wsRoot, { recursive: true });
+    await mkdir(outsideDir, { recursive: true });
+    const outsideFile = join(outsideDir, "secret.json");
+    await writeFile(outsideFile, JSON.stringify({ secret: "do-not-read" }), "utf8");
+    await symlink(
+      outsideDir,
+      join(wsRoot, "linked"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+
+    const escapedStore = workspaceStore(wsRoot, "linked/secret.json");
+    await throwsAsync(() => escapedStore.load(null), /symlinked|escapes store root/);
+    await throwsAsync(() => escapedStore.save({ overwritten: true }), /symlinked|escapes store root/);
+    assert.deepEqual(JSON.parse(await readFile(outsideFile, "utf8")), { secret: "do-not-read" });
   });
 
   // ---- github-store.mjs: shared repo-backed store (mocked fetch) -----------

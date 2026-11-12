@@ -12,8 +12,9 @@
 // [A-Za-z0-9._-]); the store never joins caller input as a path, so a domain id
 // can't escape its extension's artifacts directory.
 
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
-import { join, dirname, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 
@@ -34,16 +35,75 @@ function assertSafeSegment(value, label) {
   return value;
 }
 
+function withTrailingSep(dirPath) {
+  return dirPath.endsWith(sep) ? dirPath : dirPath + sep;
+}
+
 function resolveConfinedPath(rootDir, relativeFile, label) {
   if (typeof relativeFile !== "string" || !relativeFile || relativeFile.includes("\0")) {
     throw new Error(`storage: invalid ${label}`);
   }
   const base = resolve(rootDir);
+  const prefix = withTrailingSep(base);
   const target = resolve(base, relativeFile);
-  if (target === base || !target.startsWith(base + sep)) {
+  if (target === base || !target.startsWith(prefix)) {
     throw new Error(`storage: ${label} escapes store root`);
   }
-  return target;
+  return { base, target };
+}
+
+function assertFilesystemConfinedSync(base, target) {
+  const rel = relative(base, target);
+  const parts = rel.split(sep).filter(Boolean);
+  if (parts.length === 0 || parts.some((p) => p === "." || p === "..")) {
+    throw new Error("storage: target escapes store root");
+  }
+  let cursor = base;
+  for (let i = 0; i < parts.length; i++) {
+    cursor = join(cursor, parts[i]);
+    let st;
+    try {
+      st = lstatSync(cursor);
+    } catch (err) {
+      if (err?.code === "ENOENT") break;
+      throw err;
+    }
+    if (st.isSymbolicLink()) {
+      throw new Error("storage: symlinked path inside store root is forbidden");
+    }
+    if (i < parts.length - 1 && !st.isDirectory()) {
+      throw new Error("storage: ancestor in store path is not a directory");
+    }
+    if (i === parts.length - 1 && !st.isFile()) {
+      throw new Error("storage: target is not a regular file");
+    }
+  }
+  let realBase = null;
+  try {
+    realBase = realpathSync(base);
+  } catch (err) {
+    if (err?.code !== "ENOENT") throw err;
+  }
+  if (realBase !== null) {
+    const realPrefix = withTrailingSep(realBase);
+    const basePrefix = withTrailingSep(base);
+    let probe = dirname(target);
+    while (probe === base || probe.startsWith(basePrefix)) {
+      try {
+        const realProbe = realpathSync(probe);
+        if (realProbe !== realBase && !realProbe.startsWith(realPrefix)) {
+          throw new Error("storage: resolved directory escapes store root");
+        }
+        break;
+      } catch (err) {
+        if (err?.code !== "ENOENT") throw err;
+        if (probe === base) break;
+        const parent = dirname(probe);
+        if (parent === probe) break;
+        probe = parent;
+      }
+    }
+  }
 }
 
 // Per-file write queue. Concurrent saves to the SAME durable file (an agent
@@ -53,15 +113,18 @@ function resolveConfinedPath(rootDir, relativeFile, label) {
 // which is both correct (no interleaved writes) and portable.
 const writeQueues = new Map(); // absolute file path -> tail Promise
 
-async function atomicWrite(file, data) {
+async function atomicWrite(base, file, data) {
+  assertFilesystemConfinedSync(base, file);
   await mkdir(dirname(file), { recursive: true });
+  assertFilesystemConfinedSync(base, file);
   // Write to a temp sibling then atomically rename into place, so a crash or
   // interruption mid-write can never truncate the existing durable file.
   // rename(2) is atomic on the same filesystem. The temp name mixes pid + time +
   // RANDOM bytes so two writers can never pick the same temp path.
   const tmp = `${file}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
+  await writeFile(tmp, JSON.stringify(data, null, 2), { encoding: "utf8", flag: "wx" });
   try {
+    assertFilesystemConfinedSync(base, file);
     await rename(tmp, file);
   } catch (err) {
     // Windows can transiently EPERM/EACCES a rename when the destination is
@@ -70,6 +133,7 @@ async function atomicWrite(file, data) {
     if (err?.code === "EPERM" || err?.code === "EACCES") {
       await new Promise((r) => setTimeout(r, 25));
       try {
+        assertFilesystemConfinedSync(base, file);
         await rename(tmp, file);
       } catch (err2) {
         await unlink(tmp).catch(() => {});
@@ -82,12 +146,31 @@ async function atomicWrite(file, data) {
   }
 }
 
-function makeStore(file) {
+async function readConfinedJson(base, file) {
+  assertFilesystemConfinedSync(base, file);
+  if (constants.O_NOFOLLOW) {
+    const fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const st = fstatSync(fd);
+      if (!st.isFile()) {
+        throw new Error("storage: target is not a regular file");
+      }
+      return JSON.parse(readFileSync(fd, "utf8"));
+    } finally {
+      closeSync(fd);
+    }
+  }
+  const raw = await readFile(file, "utf8");
+  assertFilesystemConfinedSync(base, file);
+  return JSON.parse(raw);
+}
+
+function makeStore({ base, target: file }) {
   return {
     file,
     async load(fallback = null) {
       try {
-        return JSON.parse(await readFile(file, "utf8"));
+        return await readConfinedJson(base, file);
       } catch (err) {
         // Only a genuinely absent file means "use the fallback". A transient
         // read/parse failure (EACCES, EIO, a half-written or corrupt file) must
@@ -102,7 +185,7 @@ function makeStore(file) {
     async save(data) {
       // Serialize behind any in-flight save for this exact path (see writeQueues).
       const prev = writeQueues.get(file) ?? Promise.resolve();
-      const run = prev.catch(() => {}).then(() => atomicWrite(file, data));
+      const run = prev.catch(() => {}).then(() => atomicWrite(base, file, data));
       writeQueues.set(file, run);
       try {
         await run;
