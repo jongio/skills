@@ -125,17 +125,21 @@ export function resolveConfig({
 
   const normalizedVisibility = String(visibility || "PUBLIC").toUpperCase();
   const stealthMode = normalizedVisibility !== "PRIVATE";
+  const strictAutoMerge = merged.autoMerge === true;
+  const strictCopilotReview = merged.copilotReview === true;
 
   return {
     ...merged,
+    autoMerge: strictAutoMerge,
+    copilotReview: strictCopilotReview,
     maintainer,
     maintainerSource,
     configSource,
     visibility: normalizedVisibility,
     stealthMode,
     prDeliveryArgs: [
-      `--merge=${merged.autoMerge ? "auto" : "approval"}`,
-      ...(merged.copilotReview ? [] : ["--no-copilot"]),
+      `--merge=${strictAutoMerge ? "auto" : "approval"}`,
+      ...(strictCopilotReview ? [] : ["--no-copilot"]),
     ],
   };
 }
@@ -166,24 +170,29 @@ export const REQUIRED_CORE_PHASES = Object.freeze([
   "docs",
 ]);
 
-export function writeReceipt(stateDir, repo, receipt) {
+export function writeReceipt(stateDir, repo, receipt = {}) {
   const path = getReceiptPath(stateDir, repo);
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
-  const phasesRun = Array.isArray(receipt.phasesRun)
-    ? receipt.phasesRun
-    : [...REQUIRED_CORE_PHASES, "skills", "evals"];
+  const phasesRun = Array.isArray(receipt.phasesRun) ? receipt.phasesRun : [];
+  const hasFailedPhases =
+    receipt.incomplete === true ||
+    (receipt.failedPhases !== undefined &&
+      (!Array.isArray(receipt.failedPhases) || receipt.failedPhases.length > 0));
   const requiredPhases =
     receipt.skillsEvalsApplicable === false
       ? REQUIRED_CORE_PHASES
       : [...REQUIRED_CORE_PHASES, "skills", "evals"];
-  const coversAllPhases = requiredPhases.every((phase) => phasesRun.includes(phase));
+  const coversAllPhases =
+    !hasFailedPhases &&
+    Array.isArray(receipt.phasesRun) &&
+    requiredPhases.every((phase) => phasesRun.includes(phase));
   const payload = {
     ...receipt,
     repo,
     phasesRun,
-    partialRun: receipt.partialRun ?? !coversAllPhases,
+    partialRun: receipt.partialRun === true || !coversAllPhases,
     timestamp: receipt.timestamp || new Date().toISOString(),
   };
   writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, {
@@ -202,20 +211,37 @@ export function evaluateSkipGate({
   untriagedItems = null,
   force = false,
   stages = [],
+  stagesSpecified = false,
 } = {}) {
   if (force) {
     return { skip: false, reason: "forced run requested (--force)" };
   }
-  if (Array.isArray(stages) && stages.length > 0) {
-    return { skip: false, reason: `explicit stages requested (${stages.join(",")})` };
-  }
-  if (!receipt || !receipt.lastMaintainSha) {
-    return { skip: false, reason: "no prior maintenance receipt found" };
-  }
-  if (receipt.incomplete || (Array.isArray(receipt.failedPhases) && receipt.failedPhases.length > 0)) {
+  if (stagesSpecified || (Array.isArray(stages) && stages.length > 0)) {
     return {
       skip: false,
-      reason: `prior maintenance receipt has unresolved failed phases (${(receipt.failedPhases || []).join(",") || "incomplete"})`,
+      reason: `explicit stages requested (${Array.isArray(stages) ? stages.join(",") : ""})`,
+    };
+  }
+  if (!receipt || typeof receipt !== "object" || !receipt.lastMaintainSha) {
+    return { skip: false, reason: "no prior maintenance receipt found" };
+  }
+  const parsedTimestamp =
+    typeof receipt.timestamp === "string" && receipt.timestamp.trim() !== ""
+      ? Date.parse(receipt.timestamp)
+      : NaN;
+  if (!Number.isFinite(parsedTimestamp) || parsedTimestamp > Date.now()) {
+    return {
+      skip: false,
+      reason: "prior maintenance receipt has a missing, malformed, or future timestamp",
+    };
+  }
+  const invalidOrNonEmptyFailedPhases =
+    receipt.failedPhases !== undefined &&
+    (!Array.isArray(receipt.failedPhases) || receipt.failedPhases.length > 0);
+  if (receipt.incomplete || invalidOrNonEmptyFailedPhases) {
+    return {
+      skip: false,
+      reason: `prior maintenance receipt has unresolved failed phases (${Array.isArray(receipt.failedPhases) ? receipt.failedPhases.join(",") : "incomplete"})`,
     };
   }
   const requiredPhases =
@@ -223,9 +249,9 @@ export function evaluateSkipGate({
       ? REQUIRED_CORE_PHASES
       : [...REQUIRED_CORE_PHASES, "skills", "evals"];
   const coversAllPhases =
-    !receipt.partialRun &&
-    (!Array.isArray(receipt.phasesRun) ||
-      requiredPhases.every((phase) => receipt.phasesRun.includes(phase)));
+    receipt.partialRun !== true &&
+    Array.isArray(receipt.phasesRun) &&
+    requiredPhases.every((phase) => receipt.phasesRun.includes(phase));
   if (!coversAllPhases) {
     return {
       skip: false,
@@ -457,7 +483,88 @@ const MECHANICAL_COMPANION_KINDS = new Set([
   "codeql-action-lockstep-sha",
 ]);
 
-const COPYLEFT_LICENSES = /\b(?:AGPL|GPL|LGPL|SSPL|EUPL)\b/i;
+const PERMISSIVE_SPDX_TOKEN =
+  /^(?:MIT|Apache-2\.0|BSD-2-Clause|BSD-3-Clause|ISC|0BSD|Unlicense|CC0-1\.0|BlueOak-1\.0\.0)$/i;
+const COPYLEFT_SPDX_TOKEN =
+  /^(?:(?:A|L)?GPL-(?:2\.0|2\.1|3\.0)(?:-(?:only|or-later))?|SSPL-1\.0|EUPL-1\.2)$/i;
+
+export function evaluateSpdxExpression(expression) {
+  if (typeof expression !== "string" || !expression.trim()) {
+    return { valid: false, canBePermissive: false, hasCopyleft: false };
+  }
+  const tokens = [];
+  const tokenRegex = /\s*(\(|\)|\bAND\b|\bOR\b|\bWITH\b|[A-Za-z0-9._+-]+)\s*/gy;
+  let lastIndex = 0;
+  let match;
+  while ((match = tokenRegex.exec(expression)) !== null) {
+    if (match.index !== lastIndex) {
+      return { valid: false, canBePermissive: false, hasCopyleft: false };
+    }
+    tokens.push(match[1]);
+    lastIndex = tokenRegex.lastIndex;
+  }
+  if (lastIndex !== expression.length || tokens.length === 0) {
+    return { valid: false, canBePermissive: false, hasCopyleft: false };
+  }
+  if (tokens.some((t) => /^WITH$/i.test(t))) {
+    return { valid: false, canBePermissive: false, hasCopyleft: false };
+  }
+
+  let pos = 0;
+  let hasCopyleft = false;
+
+  function parseOr() {
+    let left = parseAnd();
+    if (!left) return null;
+    while (pos < tokens.length && /^OR$/i.test(tokens[pos])) {
+      pos += 1;
+      const right = parseAnd();
+      if (!right) return null;
+      left = { canBePermissive: left.canBePermissive || right.canBePermissive };
+    }
+    return left;
+  }
+
+  function parseAnd() {
+    let left = parsePrimary();
+    if (!left) return null;
+    while (pos < tokens.length && /^AND$/i.test(tokens[pos])) {
+      pos += 1;
+      const right = parsePrimary();
+      if (!right) return null;
+      left = { canBePermissive: left.canBePermissive && right.canBePermissive };
+    }
+    return left;
+  }
+
+  function parsePrimary() {
+    if (pos >= tokens.length) return null;
+    const tok = tokens[pos];
+    if (tok === "(") {
+      pos += 1;
+      const inner = parseOr();
+      if (!inner || pos >= tokens.length || tokens[pos] !== ")") return null;
+      pos += 1;
+      return inner;
+    }
+    if (tok === ")" || /^(?:AND|OR|WITH)$/i.test(tok)) return null;
+    pos += 1;
+    if (PERMISSIVE_SPDX_TOKEN.test(tok)) {
+      return { canBePermissive: true };
+    }
+    if (COPYLEFT_SPDX_TOKEN.test(tok)) {
+      hasCopyleft = true;
+      return { canBePermissive: false };
+    }
+    return null;
+  }
+
+  const ast = parseOr();
+  if (!ast || pos !== tokens.length) {
+    return { valid: false, canBePermissive: false, hasCopyleft: false };
+  }
+  return { valid: true, canBePermissive: ast.canBePermissive, hasCopyleft };
+}
 
 export function classifyDependencyPr({
   companionSyncKind = null,
@@ -480,41 +587,52 @@ export function classifyDependencyPr({
       ? Number(releaseAgeDays)
       : NaN;
   const validAge = Number.isFinite(parsedAge) && parsedAge >= 0;
+  const parsedCooldown =
+    typeof cooldownDays === "number" ||
+    (typeof cooldownDays === "string" && cooldownDays.trim() !== "")
+      ? Number(cooldownDays)
+      : NaN;
+  const validCooldown = Number.isFinite(parsedCooldown) && parsedCooldown >= 0;
 
-  if (!validSemver || !validLicense || !validRepoLicense || !validAge) {
+  if (!validSemver || !validLicense || !validRepoLicense || !validAge || !validCooldown) {
     return {
       action: "escalate-needs-attention",
       reason:
-        "missing or unverified dependency metadata (semverBump, license, repoLicense, and releaseAgeDays are required)",
+        "missing or unverified dependency metadata (semverBump, license, repoLicense, releaseAgeDays, and cooldownDays are required)",
     };
   }
 
-  const repoTokens = repoLicense
-    .trim()
-    .replace(/[()]/g, " ")
-    .split(/\s+(?:AND|OR|WITH)\s+|\s*\/\s*|\s*,\s*/i)
-    .map((t) => t.trim())
-    .filter(Boolean);
-  const PERMISSIVE_TOKEN = /^(?:MIT|Apache-2\.0|BSD-[23]-Clause|ISC|0BSD|Unlicense|CC0-1\.0)$/i;
-  const recognizedRepoLicense =
-    repoTokens.length > 0 &&
-    repoTokens.every((t) => PERMISSIVE_TOKEN.test(t) || COPYLEFT_LICENSES.test(t));
-  if (!recognizedRepoLicense) {
+  const repoSpdx = evaluateSpdxExpression(repoLicense);
+  if (!repoSpdx.valid) {
     return {
       action: "escalate-needs-attention",
       reason: `unrecognized or unsupported repository SPDX expression (${repoLicense}) requires maintainer review`,
     };
   }
-  const permissiveRepo = repoTokens.some((t) => PERMISSIVE_TOKEN.test(t)) &&
-    !repoTokens.some((t) => COPYLEFT_LICENSES.test(t));
-  if (permissiveRepo && COPYLEFT_LICENSES.test(license)) {
+
+  const depSpdx = evaluateSpdxExpression(license);
+  if (!depSpdx.valid) {
+    return {
+      action: "escalate-needs-attention",
+      reason: `unrecognized or unverified dependency SPDX expression (${license}) requires maintainer review`,
+    };
+  }
+
+  if (!repoSpdx.canBePermissive) {
+    return {
+      action: "escalate-needs-attention",
+      reason: `non-permissive repository license (${repoLicense}) requires maintainer review before automatic dependency merge`,
+    };
+  }
+
+  if (!depSpdx.canBePermissive) {
     return {
       action: "escalate-needs-attention",
       reason: `incompatible copyleft license (${license}) in ${repoLicense} repository`,
     };
   }
 
-  if (breakingChange === true || semverBump.trim().toLowerCase() === "major") {
+  if (breakingChange !== false || semverBump.trim().toLowerCase() === "major") {
     return {
       action: "escalate-needs-attention",
       reason: "semver-major or breaking dependency update requires maintainer decision",
@@ -522,12 +640,12 @@ export function classifyDependencyPr({
   }
 
   const cooldownPassed =
-    parsedAge >= Number(cooldownDays) ||
+    parsedAge >= parsedCooldown ||
     (isKevActiveExploit === true && hasOlderPatchedVersion === false);
   if (!cooldownPassed) {
     return {
       action: "hold-cooldown",
-      reason: `release age (${parsedAge}d) is below cooldownDays (${cooldownDays}d) without KEV bypass`,
+      reason: `release age (${parsedAge}d) is below cooldownDays (${parsedCooldown}d) without KEV bypass`,
     };
   }
 
@@ -551,6 +669,15 @@ export function classifyDependencyPr({
 }
 
 const BOOLEAN_FLAGS = new Set(["force", "fleet"]);
+const RAW_VALUE_FLAGS = new Set(["text", "json"]);
+
+function parseStrictBooleanFlag(name, rawValue) {
+  if (rawValue === undefined) return undefined;
+  if (typeof rawValue === "boolean") return rawValue;
+  if (rawValue === "true") return true;
+  if (rawValue === "false") return false;
+  throw new Error(`Invalid boolean value for --${name}: ${String(rawValue)}`);
+}
 
 function parseCliArgs(argv) {
   const flags = {};
@@ -565,7 +692,10 @@ function parseCliArgs(argv) {
         const key = token.slice(2);
         if (BOOLEAN_FLAGS.has(key)) {
           flags[key] = true;
-        } else if (i + 1 < argv.length) {
+        } else if (
+          i + 1 < argv.length &&
+          (RAW_VALUE_FLAGS.has(key) || !argv[i + 1].startsWith("--"))
+        ) {
           flags[key] = argv[i + 1];
           i += 1;
         } else {
@@ -597,20 +727,17 @@ export function runCli(argv = process.argv.slice(2)) {
           flags["coverage-threshold"] !== undefined
             ? Number(flags["coverage-threshold"])
             : undefined,
-        autoMerge:
-          flags["auto-merge"] !== undefined
-            ? String(flags["auto-merge"]) !== "false"
-            : undefined,
-        copilotReview:
-          flags["copilot-review"] !== undefined
-            ? String(flags["copilot-review"]) === "true"
-            : undefined,
+        autoMerge: parseStrictBooleanFlag("auto-merge", flags["auto-merge"]),
+        copilotReview: parseStrictBooleanFlag("copilot-review", flags["copilot-review"]),
         repos: flags.repos ? String(flags.repos).split(",").filter(Boolean) : undefined,
       },
     });
   }
   if (command === "skip-check") {
     const receipt = flags.repo ? readReceipt(flags["state-dir"], flags.repo) : null;
+    const stagesSpecified = flags.stages !== undefined;
+    const parsedStages =
+      typeof flags.stages === "string" ? flags.stages.split(",").filter(Boolean) : [];
     return evaluateSkipGate({
       receipt,
       headSha: flags["head-sha"] || null,
@@ -618,7 +745,8 @@ export function runCli(argv = process.argv.slice(2)) {
       failingCiRuns: flags["failing-ci"],
       untriagedItems: flags["untriaged"],
       force: Boolean(flags.force),
-      stages: flags.stages ? String(flags.stages).split(",").filter(Boolean) : [],
+      stages: parsedStages,
+      stagesSpecified,
     });
   }
   if (command === "write-receipt") {
@@ -630,21 +758,47 @@ export function runCli(argv = process.argv.slice(2)) {
     return computeHealthScore(input);
   }
   if (command === "stealth-check") {
-    const fileInventory =
-      flags["private-repos-file"] && existsSync(String(flags["private-repos-file"]))
-        ? readFileSync(String(flags["private-repos-file"]), "utf8")
-            .split(/\r?\n|,/)
-            .map((s) => s.trim())
-            .filter(Boolean)
-        : [];
+    const normalizedVisibility = String(flags.visibility || "PUBLIC").toUpperCase();
+    const stealthMode = normalizedVisibility !== "PRIVATE";
+    if (flags["private-repos-file"] !== undefined) {
+      if (
+        typeof flags["private-repos-file"] !== "string" ||
+        !flags["private-repos-file"].trim() ||
+        !existsSync(flags["private-repos-file"])
+      ) {
+        return {
+          ok: false,
+          stealthMode,
+          violations: ["missing-private-repos-file: specified --private-repos-file does not exist"],
+        };
+      }
+    }
+    if (flags["text-file"] !== undefined) {
+      if (
+        typeof flags["text-file"] !== "string" ||
+        !flags["text-file"].trim() ||
+        !existsSync(flags["text-file"])
+      ) {
+        return {
+          ok: false,
+          stealthMode,
+          violations: ["missing-text-file: specified --text-file does not exist"],
+        };
+      }
+    }
+    const fileInventory = flags["private-repos-file"]
+      ? readFileSync(String(flags["private-repos-file"]), "utf8")
+          .split(/\r?\n|,/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
     const argInventory = flags["private-repos"]
       ? String(flags["private-repos"]).split(",").filter(Boolean)
       : [];
     const privateRepos = fileInventory.length > 0 ? fileInventory : argInventory;
-    const textInput =
-      flags["text-file"] && existsSync(String(flags["text-file"]))
-        ? readFileSync(String(flags["text-file"]), "utf8")
-        : flags.text;
+    const textInput = flags["text-file"]
+      ? readFileSync(String(flags["text-file"]), "utf8")
+      : flags.text;
     return checkStealthViolations(textInput, {
       visibility: flags.visibility || "PUBLIC",
       privateRepos,

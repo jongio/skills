@@ -36,7 +36,7 @@ Exit early with `fast no-op: HEAD unchanged and healthy` **only** when all five 
 4. `0` untriaged external issues or PRs updated since `receipt.timestamp`.
 5. Neither `--force` nor an explicit `--stages <csv>` override was requested.
 
-If any condition fails, record the invalidation reason and proceed with the maintenance pass.
+If any condition fails (or if `receipt.phasesRun` is missing or omits any required phase), record the invalidation reason and proceed with the maintenance pass. When writing a receipt via `node <skill-dir>/scripts/repo-maintain.mjs write-receipt --repo <owner/repo> --json '<payload>'`, always include `phasesRun` (all completed and legitimately skipped phases) and `skillsEvalsApplicable` (`false` when the repository has no `skills/`, `evals/`, or `.vally.yaml`); omitting `phasesRun` marks `partialRun: true` so the next full pass will not skip unperformed audits.
 
 ## 2. Worktree & Rolling Branch Lifecycle (`repo-maintain/automated`)
 
