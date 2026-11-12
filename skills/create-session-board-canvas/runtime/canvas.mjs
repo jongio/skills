@@ -15,51 +15,115 @@ export function attachCanvasLifecycle(runtime, canvasConfig = runtime?.config) {
   const origOpen = runtime.openInstance.bind(runtime);
   const origClose = runtime.closeInstance.bind(runtime);
   const origShutdown = runtime.shutdown.bind(runtime);
-  let lifecycleTail = Promise.resolve();
-  const serializeLifecycle = (work) => {
-    const next = lifecycleTail.catch(() => {}).then(work);
-    lifecycleTail = next;
+  let serverChain = Promise.resolve();
+  const serializeServer = (work) => {
+    const next = serverChain.catch(() => {}).then(work);
+    serverChain = next;
     return next;
   };
 
-  runtime.openInstance = (args) =>
-    serializeLifecycle(async () => {
-      const instanceId = args?.instanceId;
+  let seq = 0;
+  let shutdownSeq = 0;
+  const closedSeqByInstance = new Map();
+  const activeOpenSeqByInstance = new Map();
+
+  runtime.openInstance = async (args) => {
+    const instanceId = args?.instanceId;
+    const openSeq = ++seq;
+    const isSupersededByCloseOrShutdown = () =>
+      openSeq <= shutdownSeq || (Boolean(instanceId) && openSeq <= (closedSeqByInstance.get(instanceId) || 0));
+    const isCurrentAttempt = () =>
+      !isSupersededByCloseOrShutdown() &&
+      (!instanceId || activeOpenSeqByInstance.get(instanceId) === openSeq);
+
+    // Serialize server creation and capability rotation without holding the lock across slow fleet discovery RPCs.
+    const serverSetup = await serializeServer(async () => {
+      await canvasConfig.authorizeOpen?.(instanceId, args?.input, args?.ctx, { commitTrust: false });
+      if (isSupersededByCloseOrShutdown()) {
+        return { cancelled: true, out: { url: "", title: canvasConfig.displayName ?? "", status: undefined } };
+      }
       if (instanceId && runtime._instances?.has?.(instanceId) && canvasConfig.didOpenerTrustChange?.(instanceId, args?.ctx)) {
         // Recreate the instance when opener trust changes so existing SSE streams disconnect and a fresh capability token is issued.
         await canvasConfig.onCloseInstance?.(instanceId);
         await origClose(instanceId);
       }
-      await canvasConfig.authorizeOpen?.(instanceId, args?.input, args?.ctx);
+      if (isSupersededByCloseOrShutdown()) {
+        return { cancelled: true, out: { url: "", title: canvasConfig.displayName ?? "", status: undefined } };
+      }
+      await canvasConfig.authorizeOpen?.(instanceId, args?.input, args?.ctx, { commitTrust: true });
+      if (instanceId) activeOpenSeqByInstance.set(instanceId, openSeq);
       const out = await origOpen(args);
+      if (isSupersededByCloseOrShutdown()) {
+        if (instanceId) {
+          if (activeOpenSeqByInstance.get(instanceId) === openSeq) activeOpenSeqByInstance.delete(instanceId);
+          await canvasConfig.onCloseInstance?.(instanceId);
+          await origClose(instanceId);
+        }
+        return { cancelled: true, out };
+      }
       const inst = runtime._instances?.get?.(instanceId);
+      if (inst) inst._openSeq = openSeq;
       if (inst?.server && !inst._fleetCloseBound) {
         inst._fleetCloseBound = true;
         const boundServer = inst.server;
         boundServer.once("close", () => {
-          if (runtime._instances?.get?.(instanceId)?.server === boundServer) {
+          const live = runtime._instances?.get?.(instanceId);
+          if (live?.server === boundServer) {
+            if (activeOpenSeqByInstance.get(instanceId) === live._openSeq) {
+              activeOpenSeqByInstance.delete(instanceId);
+            }
             void canvasConfig.onCloseInstance?.(instanceId);
           }
         });
       }
-      await canvasConfig.onOpenInstance?.(instanceId, args?.input, args?.ctx);
-      if (inst?.domainId) {
-        await runtime.invoke("get_status", {}, { domainId: inst.domainId, instanceId, source: "ui" });
+      return { cancelled: false, out, domainId: inst?.domainId };
+    });
+
+    if (serverSetup.cancelled || !isCurrentAttempt()) {
+      return serverSetup.out;
+    }
+
+    await canvasConfig.onOpenInstance?.(instanceId, args?.input, args?.ctx, { isCurrent: isCurrentAttempt });
+    if (serverSetup.domainId && isCurrentAttempt()) {
+      await runtime.invoke("get_status", {}, { domainId: serverSetup.domainId, instanceId, source: "ui" });
+    }
+    return serverSetup.out;
+  };
+
+  runtime.closeInstance = async (instanceId) => {
+    const closeSeq = ++seq;
+    if (instanceId) {
+      closedSeqByInstance.set(instanceId, closeSeq);
+      if ((activeOpenSeqByInstance.get(instanceId) || 0) < closeSeq) {
+        activeOpenSeqByInstance.delete(instanceId);
       }
-      return out;
+    }
+    // Invalidate viewer activity immediately without waiting on pending fleet open/discovery RPCs.
+    const invalidation = Promise.resolve().then(() =>
+      canvasConfig.onCloseInstance?.(instanceId, {
+        canMutatePanel: () => !instanceId || (activeOpenSeqByInstance.get(instanceId) || 0) < closeSeq,
+      }),
+    );
+    const serverClose = serializeServer(async () => {
+      if (!instanceId || (activeOpenSeqByInstance.get(instanceId) || 0) < closeSeq) {
+        return origClose(instanceId);
+      }
+      return undefined;
     });
+    const [, closed] = await Promise.all([invalidation, serverClose]);
+    return closed;
+  };
 
-  runtime.closeInstance = (instanceId) =>
-    serializeLifecycle(async () => {
-      await canvasConfig.onCloseInstance?.(instanceId);
-      return origClose(instanceId);
-    });
-
-  runtime.shutdown = () =>
-    serializeLifecycle(async () => {
-      await canvasConfig.onShutdown?.();
-      return origShutdown();
-    });
+  runtime.shutdown = async () => {
+    const shutSeq = ++seq;
+    shutdownSeq = shutSeq;
+    activeOpenSeqByInstance.clear();
+    // Immediately invalidate all fleet viewers, workers, and recovery dispatch before waiting on server teardown.
+    const invalidation = Promise.resolve().then(() => canvasConfig.onShutdown?.());
+    const serverShutdown = serializeServer(() => origShutdown());
+    const [, closed] = await Promise.all([invalidation, serverShutdown]);
+    return closed;
+  };
 
   return runtime;
 }
@@ -137,17 +201,22 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       },
       handler: async ({ input, set, ctx }) => {
         requireOperatorUi(ctx);
-        activeScope = input.scope;
+        const viewerKey = ctx?.instanceId;
         if (input.scope === "session") {
+          activeScope = "session";
           await fleetService.clearAllViewers();
         } else {
-          const viewerKey = ctx?.instanceId;
-          openPanels.add(viewerKey);
-          for (const panelId of openPanels) {
-            if (trustedPanels.has(panelId)) {
+          activeScope = input.scope;
+          if (viewerKey && trustedPanels.has(viewerKey)) openPanels.add(viewerKey);
+          for (const panelId of [...openPanels]) {
+            if (viewerKey && (!openPanels.has(viewerKey) || !trustedPanels.has(viewerKey))) break;
+            if (openPanels.has(panelId) && trustedPanels.has(panelId)) {
               await fleetService.setViewerActive(panelId, true);
             }
           }
+        }
+        if (viewerKey && !trustedPanels.has(viewerKey)) {
+          return { scope: activeScope, fleetRevision: fleetService.snapshot()?.revision ?? 0 };
         }
         const snapshot = composeSnapshot(operatorDomainId);
         set(snapshot);
@@ -292,9 +361,11 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       if (!fleetService || !instanceId || !panelTrustByInstance.has(instanceId)) return false;
       return panelTrustByInstance.get(instanceId) !== isTrustedOpener(ctx);
     },
-    authorizeOpen: (instanceId, input, ctx) => {
+    authorizeOpen: (instanceId, input, ctx, { commitTrust = true } = {}) => {
+      if (ctx?.sessionId && ctx.sessionId !== sessionId) {
+        throw new Error("Cross-session canvas rejected");
+      }
       if (!fleetService) return;
-      const trusted = isTrustedOpener(ctx);
       const requested = input?.scope;
       if (requested === "fleet" || requested === "projects" || requested === "inbox") {
         const actor = actorFor(ctx || {}, sessionId);
@@ -302,48 +373,55 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
           throw new Error("Only the primary session agent may open fleet-scoped views");
         }
       }
-      if (instanceId) {
+      if (commitTrust && instanceId) {
+        const trusted = isTrustedOpener(ctx);
         panelTrustByInstance.set(instanceId, trusted);
         if (trusted) trustedPanels.add(instanceId);
         else trustedPanels.delete(instanceId);
       }
     },
-    onOpenInstance: async (instanceId, input, ctx) => {
-      if (!fleetService) return false;
+    onOpenInstance: async (instanceId, input, ctx, { isCurrent = () => true } = {}) => {
+      if (!fleetService || !isCurrent()) return false;
       const trusted = instanceId ? trustedPanels.has(instanceId) : isTrustedOpener(ctx);
       if (!trusted) {
         if (instanceId) {
           openPanels.delete(instanceId);
           await fleetService.setViewerActive(instanceId, false);
         }
-        if (openPanels.size === 0 || !fleetService.isPolling()) activeScope = "session";
+        if (isCurrent() && (openPanels.size === 0 || !fleetService.isPolling())) activeScope = "session";
         return false;
       }
       if (instanceId) openPanels.add(instanceId);
       const requested = input?.scope;
       if (requested === "fleet" || requested === "projects" || requested === "inbox") {
         activeScope = requested === "inbox" ? "inbox" : "projects";
-        for (const panelId of openPanels) {
-          if (trustedPanels.has(panelId)) {
+        for (const panelId of [...openPanels]) {
+          if (!isCurrent()) return false;
+          if (openPanels.has(panelId) && trustedPanels.has(panelId)) {
             await fleetService.setViewerActive(panelId, true);
           }
         }
-        return true;
+        return isCurrent();
       }
       const hadFleetScope = activeScope !== "session" || fleetService.isPolling();
       activeScope = "session";
       await fleetService.clearAllViewers();
-      return hadFleetScope;
+      return isCurrent() ? hadFleetScope : false;
     },
-    onCloseInstance: async (instanceId) => {
+    onCloseInstance: async (instanceId, { canMutatePanel = () => true } = {}) => {
       if (!fleetService) return;
-      if (instanceId) {
+      if (instanceId && canMutatePanel()) {
         openPanels.delete(instanceId);
         trustedPanels.delete(instanceId);
         panelTrustByInstance.delete(instanceId);
+        if (openPanels.size === 0) activeScope = "session";
       }
-      await fleetService.setViewerActive(instanceId, false);
-      if (openPanels.size === 0 || !fleetService.isPolling()) activeScope = "session";
+      if (canMutatePanel()) {
+        await fleetService.setViewerActive(instanceId, false);
+      }
+      if (canMutatePanel() && (openPanels.size === 0 || !fleetService.isPolling())) {
+        activeScope = "session";
+      }
     },
     onShutdown: async () => {
       if (!fleetService) return;

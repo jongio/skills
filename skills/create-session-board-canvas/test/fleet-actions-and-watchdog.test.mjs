@@ -519,6 +519,157 @@ test("HTTP capability token gates all fleet operator actions and serves unified 
   assert.equal("fleet" in (await (await fetch(raceSubStateUrl)).json()), false);
 });
 
+test("closeInstance and shutdown immediately invalidate viewer activity and block recovery during pending fleet open/reopen", async (t) => {
+  const nowMs = Date.parse("2026-11-11T16:00:00.000Z");
+  let releaseHostDiscovery = null;
+  let hostDiscoveryStarted = null;
+  let hostDiscoveryStartedResolve = () => {};
+  let discoveryGatePromise = null;
+  const armSlowDiscovery = () => {
+    discoveryGatePromise = new Promise((resolve) => {
+      releaseHostDiscovery = resolve;
+    });
+    hostDiscoveryStarted = new Promise((resolve) => {
+      hostDiscoveryStartedResolve = resolve;
+    });
+  };
+
+  let workerRunning = false;
+  let workerStopCount = 0;
+  let recoveryDispatches = 0;
+
+  const progressService = await createProgressService({
+    sessionId: "close-race-host",
+    store: memoryStore(),
+    readSources: async () => ({ plan: { exists: false, content: null }, rows: [], dependencies: [] }),
+  });
+  const watchdog = await createRecoveryWatchdog({
+    store: memoryStore(),
+    now: () => nowMs,
+    graceMs: 60_000,
+    isLeader: () => true,
+    recoverSession: async () => {
+      recoveryDispatches += 1;
+    },
+  });
+  await watchdog.setPolicy("all_active");
+
+  const fleetService = createFleetService({
+    hostSessionId: "close-race-host",
+    now: () => nowMs,
+    watchdog,
+    executeHostTool: async (name) => {
+      if (discoveryGatePromise) {
+        hostDiscoveryStartedResolve();
+        await discoveryGatePromise;
+      }
+      if (name === "list_sessions_and_chats") {
+        return [{ id: "stalled-target", name: "Stalled target", repository: "jongio/skills" }];
+      }
+      if (name === "get_sessions_status") {
+        return [{ id: "stalled-target", activity: "idle", mode: "autopilot", was_interrupted: true }];
+      }
+      return [];
+    },
+    workerClient: {
+      scan: async () => {
+        workerRunning = true;
+        return {
+          sessions: [{
+            id: "stalled-target",
+            repository: "jongio/skills",
+            todos: [{ id: "leaf-1", title: "Finish task", status: "in_progress" }],
+            tailState: {
+              activity: "idle",
+              lastError: { message: "Stream disconnected", at: new Date(nowMs - 180_000).toISOString() },
+            },
+          }],
+          stats: {},
+        };
+      },
+      stop: async () => {
+        workerRunning = false;
+        workerStopCount += 1;
+      },
+      isRunning: () => workerRunning,
+    },
+  });
+  t.after(() => fleetService.shutdown());
+
+  const canvasConfig = createProgressCanvas(progressService, "close-race-host", { fleetService });
+  const runtime = attachCanvasLifecycle(createCanvasRuntime(canvasConfig), canvasConfig);
+  t.after(() => runtime.shutdown());
+
+  // 1. Pending initial fleet open + immediate closeInstance: close resolves before slow host discovery finishes,
+  //    stops the worker immediately, prevents recovery dispatch, and never reactivates polling!
+  armSlowDiscovery();
+  const pendingOpen = runtime.openInstance({
+    instanceId: "slow-fleet-open",
+    input: { scope: "fleet" },
+    ctx: { sessionId: "close-race-host", agentId: null },
+  });
+  await hostDiscoveryStarted;
+  let closeSettledWhileBlocked = false;
+  await runtime.closeInstance("slow-fleet-open").then(() => {
+    closeSettledWhileBlocked = true;
+  });
+  assert.equal(closeSettledWhileBlocked, true);
+  assert.equal(workerRunning, false);
+  assert.ok(workerStopCount >= 1);
+  assert.equal(fleetService.isPolling(), false);
+
+  releaseHostDiscovery();
+  discoveryGatePromise = null;
+  await pendingOpen;
+  assert.equal(recoveryDispatches, 0);
+  assert.equal(fleetService.isPolling(), false);
+  assert.equal(workerRunning, false);
+
+  // 2. Pending fleet reopen on an already-open session panel + immediate closeInstance:
+  const basePanel = await runtime.openInstance({
+    instanceId: "reopen-panel",
+    input: {},
+    ctx: { sessionId: "close-race-host", agentId: null },
+  });
+  assert.ok(basePanel.url);
+  armSlowDiscovery();
+  const pendingReopen = runtime.openInstance({
+    instanceId: "reopen-panel",
+    input: { scope: "inbox" },
+    ctx: { sessionId: "close-race-host", agentId: null },
+  });
+  await hostDiscoveryStarted;
+  await runtime.closeInstance("reopen-panel");
+  assert.equal(workerRunning, false);
+  assert.equal(fleetService.isPolling(), false);
+
+  releaseHostDiscovery();
+  discoveryGatePromise = null;
+  await pendingReopen;
+  assert.equal(recoveryDispatches, 0);
+  assert.equal(fleetService.isPolling(), false);
+
+  // 3. Pending fleet open + immediate shutdown(): shutdown resolves immediately while discovery is still blocked,
+  //    cleans up the worker, and prevents recovery dispatch or reactivation when discovery unwinds.
+  armSlowDiscovery();
+  const pendingBeforeShutdown = runtime.openInstance({
+    instanceId: "shutdown-panel",
+    input: { scope: "projects" },
+    ctx: { sessionId: "close-race-host", agentId: null },
+  });
+  await hostDiscoveryStarted;
+  await runtime.shutdown();
+  assert.equal(workerRunning, false);
+  assert.equal(fleetService.isPolling(), false);
+
+  releaseHostDiscovery();
+  discoveryGatePromise = null;
+  await pendingBeforeShutdown;
+  assert.equal(recoveryDispatches, 0);
+  assert.equal(fleetService.isPolling(), false);
+  assert.equal(workerRunning, false);
+});
+
 test("leader handover, viewer-close cancellation, cross-instance policy sync, RPC failure accounting, subagent auth exclusions, and untimestamped grace windows hold", async (t) => {
   let nowMs = Date.parse("2026-11-11T15:00:00.000Z");
   const sharedStore = memoryStore();

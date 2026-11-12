@@ -411,7 +411,13 @@ export function createFleetService({
 
   async function ensureLeaderIfActive() {
     if (stopped || activeViewers.size === 0 || !acquireLeader || leaderLease) return;
-    leaderLease = await Promise.resolve(acquireLeader()).catch(() => null);
+    const epochAtStart = viewerEpoch;
+    const acquired = await Promise.resolve(acquireLeader()).catch(() => null);
+    if (stopped || activeViewers.size === 0 || viewerEpoch !== epochAtStart) {
+      await acquired?.close?.().catch(() => {});
+      return;
+    }
+    leaderLease = acquired;
   }
 
   async function ensureWatchdog() {
@@ -480,6 +486,7 @@ export function createFleetService({
 
   async function clearAllViewers() {
     if (activeViewers.size > 0) viewerEpoch += 1;
+    inFlightRefresh = null;
     activeViewers.clear();
     clearTimeout(pollTimer);
     pollTimer = null;
@@ -490,18 +497,22 @@ export function createFleetService({
   }
 
   async function setViewerActive(instanceId, active) {
-    if (!instanceId) return;
+    if (!instanceId || stopped) return;
     if (active) {
+      const activateEpoch = viewerEpoch;
       const wasEmpty = activeViewers.size === 0;
       activeViewers.add(instanceId);
       if (wasEmpty) {
         await refreshFleet();
-        scheduleNextTick();
+        if (!stopped && activeViewers.has(instanceId) && viewerEpoch === activateEpoch) {
+          scheduleNextTick();
+        }
       }
     } else {
       activeViewers.delete(instanceId);
       if (activeViewers.size === 0) {
         viewerEpoch += 1;
+        inFlightRefresh = null;
         clearTimeout(pollTimer);
         pollTimer = null;
         await Promise.all([
@@ -515,7 +526,8 @@ export function createFleetService({
   async function refreshFleet() {
     if (inFlightRefresh) return inFlightRefresh;
     const refreshEpoch = viewerEpoch;
-    inFlightRefresh = (async () => {
+    let currentRefresh = null;
+    currentRefresh = (async () => {
       const rpcStart = performance.now();
       const [localResult, reposRes, catalogRes, statusRes, workflowsRes] = await Promise.all([
         workerClient ? workerClient.scan().catch(() => ({ sessions: [], prCache: {}, stats: {} })) : Promise.resolve({ sessions: [], prCache: {}, stats: {} }),
@@ -743,6 +755,11 @@ export function createFleetService({
         });
       }
 
+      // Bail out immediately if all fleet viewers closed or shutdown ran while discovery RPCs were in flight.
+      if (stopped || refreshEpoch !== viewerEpoch) {
+        return structuredClone(state);
+      }
+
       // Evaluate recovery watchdog on merged sessions; retry leader acquisition only while fleet views remain active.
       if (!stopped && activeViewers.size > 0 && refreshEpoch === viewerEpoch) {
         await ensureLeaderIfActive();
@@ -897,6 +914,10 @@ export function createFleetService({
         ? mergedSessions.find((s) => s.id === selectedSessionId) || null
         : null;
 
+      if (stopped || refreshEpoch !== viewerEpoch) {
+        return structuredClone(state);
+      }
+
       state = {
         revision: state.revision + 1,
         lastRefresh: new Date(now()).toISOString(),
@@ -924,7 +945,9 @@ export function createFleetService({
       await onChange(state);
       return structuredClone(state);
     })().finally(async () => {
-      inFlightRefresh = null;
+      if (inFlightRefresh === currentRefresh) {
+        inFlightRefresh = null;
+      }
       if (stopped || activeViewers.size === 0) {
         await Promise.all([
           workerClient?.stop?.().catch(() => {}),
@@ -932,7 +955,8 @@ export function createFleetService({
         ]);
       }
     });
-    return inFlightRefresh;
+    inFlightRefresh = currentRefresh;
+    return currentRefresh;
   }
 
   async function selectSession(targetSessionId) {
@@ -1074,6 +1098,7 @@ export function createFleetService({
   async function shutdown() {
     stopped = true;
     viewerEpoch += 1;
+    inFlightRefresh = null;
     activeViewers.clear();
     clearTimeout(pollTimer);
     pollTimer = null;
