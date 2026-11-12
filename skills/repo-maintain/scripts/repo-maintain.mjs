@@ -148,12 +148,31 @@ export function readReceipt(stateDir, repo) {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
+export const REQUIRED_CORE_PHASES = Object.freeze([
+  "governance",
+  "deps",
+  "secops",
+  "refactor",
+  "coverage",
+  "docs",
+]);
+
 export function writeReceipt(stateDir, repo, receipt) {
   const path = getReceiptPath(stateDir, repo);
   mkdirSync(dirname(path), { recursive: true });
+  const phasesRun = Array.isArray(receipt.phasesRun)
+    ? receipt.phasesRun
+    : [...REQUIRED_CORE_PHASES, "skills", "evals"];
+  const requiredPhases =
+    receipt.skillsEvalsApplicable === false
+      ? REQUIRED_CORE_PHASES
+      : [...REQUIRED_CORE_PHASES, "skills", "evals"];
+  const coversAllPhases = requiredPhases.every((phase) => phasesRun.includes(phase));
   const payload = {
     ...receipt,
     repo,
+    phasesRun,
+    partialRun: receipt.partialRun ?? !coversAllPhases,
     timestamp: receipt.timestamp || new Date().toISOString(),
   };
   writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
@@ -182,6 +201,20 @@ export function evaluateSkipGate({
     return {
       skip: false,
       reason: `prior maintenance receipt has unresolved failed phases (${(receipt.failedPhases || []).join(",") || "incomplete"})`,
+    };
+  }
+  const requiredPhases =
+    receipt.skillsEvalsApplicable === false
+      ? REQUIRED_CORE_PHASES
+      : [...REQUIRED_CORE_PHASES, "skills", "evals"];
+  const coversAllPhases =
+    !receipt.partialRun &&
+    (!Array.isArray(receipt.phasesRun) ||
+      requiredPhases.every((phase) => receipt.phasesRun.includes(phase)));
+  if (!coversAllPhases) {
+    return {
+      skip: false,
+      reason: "prior maintenance receipt only covered a partial stage subset",
     };
   }
   if (!headSha || receipt.lastMaintainSha !== headSha) {
@@ -378,12 +411,17 @@ export function checkStealthViolations(
     }
   }
   for (const privRepo of Array.isArray(privateRepos) ? privateRepos : []) {
-    const raw = String(privRepo || "").trim();
+    const raw = String(privRepo || "")
+      .trim()
+      .replace(/\.git$/i, "");
     if (!raw) continue;
     const bareName = raw.includes("/") ? raw.split("/").pop() : raw;
     const candidates = [raw, bareName].filter(Boolean);
     const leaked = candidates.some((candidate) => {
-      const pattern = new RegExp(`(?<![a-z0-9._-])${escapeRegex(candidate)}(?![a-z0-9._-])`, "i");
+      const pattern = new RegExp(
+        `(?<![a-z0-9_-])${escapeRegex(candidate)}(?=(?:\\.git\\b|[^a-z0-9_-]|$))`,
+        "i",
+      );
       return pattern.test(text);
     });
     if (leaked) {
@@ -415,7 +453,7 @@ export function classifyDependencyPr({
   releaseAgeDays = null,
   cooldownDays = 7,
   isKevActiveExploit = false,
-  hasOlderPatchedVersion = false,
+  hasOlderPatchedVersion = null,
 } = {}) {
   const validSemver =
     typeof semverBump === "string" && /^(?:patch|minor|major)$/i.test(semverBump.trim());
@@ -444,7 +482,7 @@ export function classifyDependencyPr({
     };
   }
 
-  if (breakingChange || semverBump.trim().toLowerCase() === "major") {
+  if (breakingChange === true || semverBump.trim().toLowerCase() === "major") {
     return {
       action: "escalate-needs-attention",
       reason: "semver-major or breaking dependency update requires maintainer decision",
@@ -453,7 +491,7 @@ export function classifyDependencyPr({
 
   const cooldownPassed =
     parsedAge >= Number(cooldownDays) ||
-    (Boolean(isKevActiveExploit) && !hasOlderPatchedVersion);
+    (isKevActiveExploit === true && hasOlderPatchedVersion === false);
   if (!cooldownPassed) {
     return {
       action: "hold-cooldown",

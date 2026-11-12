@@ -213,6 +213,16 @@ test("evaluateSkipGate and receipt persistence enforce all 5 Phase 0 fast no-op 
     );
     assert.equal(
       evaluateSkipGate({
+        receipt: { ...loaded, phasesRun: ["docs"] },
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
+      false,
+    );
+    assert.equal(
+      evaluateSkipGate({
         receipt: loaded,
         headSha: sha,
         newAdvisories: -1,
@@ -298,13 +308,20 @@ test("checkStealthViolations blocks CWE/CVE/exploit terms and private fleet repo
   assert.ok(badCommit.violations.includes("private-repo-leak: [redacted]"));
   assert.doesNotMatch(JSON.stringify(badCommit), /CWE-22|internal-ledger/i);
 
-  // Bare private repository name leak is also caught
+  // Bare private repository name leak is also caught (including trailing sentence period and .git URLs)
   const bareNameLeak = checkStealthViolations(
-    "Port validation logic from internal-ledger into public handler",
+    "Port validation logic from internal-ledger.",
     { visibility: "PUBLIC", privateRepos: ["sample-team/internal-ledger"] },
   );
   assert.equal(bareNameLeak.ok, false);
   assert.ok(bareNameLeak.violations.includes("private-repo-leak: [redacted]"));
+
+  const gitUrlLeak = checkStealthViolations(
+    "Mirrored from https://github.com/sample-team/internal-ledger.git for testing",
+    { visibility: "PUBLIC", privateRepos: ["sample-team/internal-ledger"] },
+  );
+  assert.equal(gitUrlLeak.ok, false);
+  assert.ok(gitUrlLeak.violations.includes("private-repo-leak: [redacted]"));
 
   // Fleet mode requires a non-empty privateRepos inventory
   const missingFleetInventory = checkStealthViolations(
@@ -379,6 +396,31 @@ test("classifyDependencyPr distinguishes companion syncs, cooldown holds, KEV by
       releaseAgeDays: 2,
       cooldownDays: 7,
       isKevActiveExploit: false,
+    }).action,
+    "hold-cooldown",
+  );
+
+  // Omitted hasOlderPatchedVersion or string "false" isKevActiveExploit cannot bypass cooldown
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
+      license: "MIT",
+      repoLicense: "MIT",
+      releaseAgeDays: 1,
+      cooldownDays: 7,
+      isKevActiveExploit: true,
+    }).action,
+    "hold-cooldown",
+  );
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
+      license: "MIT",
+      repoLicense: "MIT",
+      releaseAgeDays: 1,
+      cooldownDays: 7,
+      isKevActiveExploit: "false",
+      hasOlderPatchedVersion: false,
     }).action,
     "hold-cooldown",
   );
