@@ -17,7 +17,7 @@ Audit, author, compare, and CI-harden AI skill and prompt evaluations across `.v
 
 ## Dynamic Maintainer & Policy Resolution
 
-Resolve repository ownership and policy settings dynamically—never hardcode personal usernames:
+Resolve repository ownership and policy settings dynamically-never hardcode personal usernames:
 1. `.github/repo-maintain.json` (or `.github/maintain.json` / `.maintain.json` / `--policy` / CLI flags).
 2. `.github/CODEOWNERS`.
 3. Repository owner (`gh repo view --json owner --jq '.owner.login'`).
@@ -54,7 +54,7 @@ When integrating or auditing automated evaluation runs in GitHub Actions (using 
 
 1. **Untrusted Fork Protection:** Never run model evaluations with secrets or `copilot-requests: write` on untrusted `pull_request` or `pull_request_target` events from forks. Scope live eval triggers to `workflow_dispatch`, `schedule`, or trusted internal `push` / same-repo branches with narrow path filters (`evals/**`, `skills/**`), or gate PR jobs on `github.event.pull_request.head.repo.full_name == github.repository`.
 2. **SHA-Pinned Action & Locked Runner:** Pin `github/evals-action` and every third-party action (`actions/checkout`, `actions/setup-node`, `actions/upload-artifact`) to a full 40-character commit SHA with a version comment. Install local evaluation toolchains with lifecycle scripts disabled (`npm ci --prefix .github/tools/vally --ignore-scripts` and `persist-credentials: false` on checkout).
-3. **Least-Privilege Permissions & Step-Scoped Token:** Set top-level workflow `permissions: { contents: read }`. Grant `copilot-requests: write` only at the specific evaluation job level, and scope `COPILOT_GITHUB_TOKEN` (or `GITHUB_TOKEN`) as a step-level `env` variable on the evaluation step only—never in workflow-wide `env`.
+3. **Least-Privilege Permissions & Step-Scoped Token:** Set top-level workflow `permissions: { contents: read }`. Grant `copilot-requests: write` only at the specific evaluation job level, and scope `COPILOT_GITHUB_TOKEN` (or `GITHUB_TOKEN`) as a step-level `env` variable on the evaluation step only-never in workflow-wide `env`.
 4. **Cost & Concurrency Guards:** Require a `concurrency` group with `cancel-in-progress: true`, an explicit job `timeout-minutes` ceiling (e.g., `<= 30`), `--max-retries 0`, and bounded `--runs` / `--workers` / matrix `max-parallel` caps so runaway loops cannot exhaust quota.
 5. **Zero Transcript Leakage:** On public repositories, upload only redacted score and summary artifacts (`results.json`, `summary.md`) with short retention (`retention-days: 14`). Never upload raw model transcripts, environment dumps, or unredacted debug logs containing secrets or private context.
 

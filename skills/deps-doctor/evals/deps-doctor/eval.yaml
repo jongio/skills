@@ -63,7 +63,7 @@ scoring:
     file-matches: 0.166667
     file-not-contains: 0.166667
     skill-invocation: 0.166667
-  threshold: 0.75
+  threshold: 0.8
 
 stimuli:
   # Grounded in a real fixture tree rather than a prose file list: the agent has
@@ -479,6 +479,13 @@ stimuli:
         config:
           path: package.json
           value: "left-pad"
+      - type: tool-calls
+        name: tool-calls-retains-runtime-makes-no-git-writes
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: "(?i)\\b(git\\s+(?:commit|push|tag)|gh\\s+(?:pr|issue|release))\\b"
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: explains-runtime-reference
         config:
@@ -853,6 +860,13 @@ stimuli:
           # has copied npm's day-based `min-release-age`, and a three-minute
           # cooldown is indistinguishable from no cooldown at all.
           pattern: "(?m)^\\s*npmMinimalAgeGate:\\s*[1-9][0-9]{2,}(\\s|#|$)"
+      - type: tool-calls
+        name: tool-calls-configures-age-makes-no-git-writes
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: "(?i)\\b(git\\s+(?:commit|push|tag)|gh\\s+(?:pr|issue|release))\\b"
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: uses-the-correct-manager-setting
         config:
@@ -905,6 +919,13 @@ stimuli:
         config:
           path: package.json
           pattern: "(?=[\\s\\S]*\"dependencies\"\\s*:\\s*\\{[^}]*\"debug\"\\s*:\\s*\"[^\"]+\")(?=[\\s\\S]*\"dependencies\"\\s*:\\s*\\{[^}]*\"qs\"\\s*:\\s*\"[^\"]+\")(?=[\\s\\S]*\"dependencies\"\\s*:\\s*\\{[^}]*\"express\"\\s*:\\s*\"[^\"]+\")"
+      - type: tool-calls
+        name: tool-calls-declares-phantoms-makes-no-git-writes
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: "(?i)\\b(git\\s+(?:commit|push|tag)|gh\\s+(?:pr|issue|release))\\b"
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: explains-phantom-risk
         config:

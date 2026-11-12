@@ -352,76 +352,21 @@ Tailor to the detected stack:
 Use Contributor Covenant v2.1 text verbatim. Only customize the enforcement
 contact.
 
-## Update mode behavior
-
-When running in update mode (`repo-ready update`):
-
-1. **Scan**: Check for every file in the catalog. For each file:
-   - **Present**: Mark as existing (green checkmark)
-   - **Missing**: Mark as missing (red X)
-   - **Outdated**: Check for known issues (e.g., old action versions in CI,
-     legacy `.eslintrc` format, Markdown issue templates instead of YAML forms)
-
-2. **Audit repo metadata & security settings**: Check description, topics, and
-   homepage via `gh repo view --json description,repositoryTopics,homepageUrl`.
-   Also audit **GitHub Repo Security Settings**: Private Vulnerability Reporting
-   (`repos/{owner}/{repo}/private-vulnerability-reporting`), Secret Scanning &
-   Push Protection (`.security_and_analysis`), and Actions default `read-only`
-   workflow token permissions (`repos/{owner}/{repo}/actions/permissions/workflow`).
-   Flag empty, disabled, or over-permissive (`write` default token) settings.
-
-2a. **Runtime Version Parity check**: In `update` mode, compare declared
-    language/runtime versions across `.nvmrc`, `.node-version`,
-    `package.json#engines`, `go.mod`, `Dockerfile`, `.devcontainer/devcontainer.json`,
-    and `.github/workflows/*.yml` (`node-version`, `python-version`, `go-version`,
-    `dotnet-version`). Flag any drift between local version pins, container
-    base images, and CI workflow matrices, and propose synchronizing them to
-    the canonical project runtime version.
-
-3. **Report**: Show a summary table with status for every file AND repo
-   metadata settings.
-
-4. **Suggest**: For each missing or outdated file, describe what it does and
-   why the repo should have it. Group by tier (essential, community, automation,
-   tooling). For empty repo metadata, suggest values.
-
-5. **Interview**: For each file the user wants to add, run the relevant
-   interview questions (same as init mode, but only for the gaps).
-
-6. **Generate**: Create only the selected files.
-
-7. **Apply repo metadata**: For each approved metadata change, apply via `gh`
-   CLI (requires `ask_user` approval for each change).
-
-8. **Delta awareness**: If a file exists but is incomplete (e.g., `.gitignore`
-   exists but is missing patterns for the detected stack), offer to append the
-   missing patterns rather than overwriting. Show a diff preview before
-   applying.
-
-## The workflow you follow
+## Workflow
 
 ### Init mode
 
-1. Detect stack (auto-scan)
-2. Detect repo visibility (auto, via `gh api`)
-3. Interview (phases 1 through 6)
-4. Generate all selected files via `scripts/generate.mjs`
-5. Apply approved repo metadata changes via `gh` CLI
-6. Show summary of created files and applied settings
-7. Offer to commit: `git add -A && git commit -m "chore: scaffold repo health files"`
+1. Auto-scan detected stacks and query authoritative repository visibility (`gh api repos/{owner}/{repo} --jq '.private'`).
+2. Interview missing choices across Phases 1-6 (`ask_user` one question at a time).
+3. Generate all selected files via `scripts/generate.mjs` and apply approved repository metadata/security settings via `gh`.
+4. Show the summary of created files and applied settings, then offer to commit (`git add -A && git commit -m "chore: scaffold repo health files"`).
 
-### Update mode
+### Update mode (`repo-ready update`)
 
-1. Detect stack (auto-scan)
-2. Detect repo visibility (auto, via `gh api`)
-3. Scan existing files against catalog
-4. Audit repo metadata (description, topics, homepage)
-5. Report gaps with tier labels
-6. Interview for missing files and metadata only
-7. Generate selected files
-8. Apply approved repo metadata changes via `gh` CLI
-9. Show diff for any file being appended to (not overwritten)
-10. Offer to commit
+1. **Scan files & runtime parity**: Check every catalog file (`Present`, `Missing`, or `Outdated`, such as legacy Markdown issue templates or old CI action versions) and run the **Runtime Version Parity** check across `.nvmrc`, `.node-version`, `package.json#engines`, `go.mod`, `Dockerfile`, `.devcontainer/devcontainer.json`, and `.github/workflows/*.yml`, flagging drift against the canonical project runtime version.
+2. **Audit metadata & security settings**: Check description, topics, and homepage (`gh repo view --json description,repositoryTopics,homepageUrl`) plus **GitHub Repo Security Settings** - Private Vulnerability Reporting (`repos/{owner}/{repo}/private-vulnerability-reporting`), Secret Scanning & Push Protection (`.security_and_analysis`), and Actions `read-only` default token permissions (`repos/{owner}/{repo}/actions/permissions/workflow`).
+3. **Report & interview gaps only**: Present a tier-grouped gap table for files and settings, interview only for missing/selected items, and leave existing complete files untouched.
+4. **Generate & apply deltas**: Create selected missing files, offer diff-previewed appends for incomplete files (such as missing stack `.gitignore` entries) rather than overwriting, apply approved `gh` metadata/security updates (`ask_user` per change), and offer to commit.
 
 ## The generator
 
@@ -446,7 +391,7 @@ node scripts/generate.mjs <mode> [options]
 | `--dir <path>` | Output directory (default: current directory) |
 | `--dry-run` | Show what would be created without writing |
 
-## Safety rules
+## Safety
 
 1. **Never overwrite existing files** without explicit user approval via
    `ask_user`. Show a diff preview first.
@@ -457,7 +402,7 @@ node scripts/generate.mjs <mode> [options]
 5. **License accuracy**: Use exact license text from the GitHub API or
    canonical sources. Never paraphrase legal text.
 
-## Exit criteria
+## Exit Criteria
 
 - **Init mode**: All selected files created, summary shown, commit offered.
 - **Update mode**: Gap report shown, selected missing files created, diffs

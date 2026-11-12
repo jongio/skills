@@ -14,8 +14,9 @@ schedule. The per-PR gate is the fast static `vally lint` (plus `npm test`).
 
 - `../../.vally.yaml`: project config; wires this skill into the executor
   (`paths.skills: "."`) and points at `evals/`.
-- `naming-is-hard/eval.yaml`: the spec: two stimuli with deterministic file graders
-  and LLM rubrics.
+- `naming-is-hard/eval.yaml`: the spec: three stimuli (full CLI task-runner flow,
+  famous-brand Deal Breaker check, and offline pre-swipe collision screening with
+  deferred live lookups) with deterministic behavioral/file graders and LLM rubrics.
 
 ## Run it
 
@@ -41,6 +42,7 @@ opens the analytics dashboard.
 
 Deterministic (no LLM):
 
+- `skill-invocation` / `tool-calls`: `naming-is-hard` is invoked, GitHub mutations are blocked, and deferred-availability runs make no live lookups.
 - `file-exists`: the run's `naming-state.json` was created.
 - `file-contains`: the persisted state carries a `brief` and `candidates`.
 

@@ -55,7 +55,9 @@ test("workflow remains concise and covers preflight, review routing, monitoring,
   assert.match(skill, /already-pending Copilot requests/);
   assert.match(skill, /never waives posted feedback or other required reviews/);
   assert.match(skill, /Private visibility alone is not an exception/);
-  assert.match(skill, /resolve automated\/bot threads/i);
+  assert.match(skill, /resolve automated\/bot threads once fixed/i);
+  assert.match(skill, /disable it immediately \(`gh pr merge <number> -R <owner\/repo> --disable-auto`\) before continuing preflight or monitoring/);
+  assert.match(evalSpec, /manage_agent_merge/);
   assert.match(skill, /keep human threads with open questions open/i);
   assert.match(skill, /rebase/i);
   assert.match(skill, /review threads \(including outdated ones\)/);
@@ -295,19 +297,21 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "repeated-advisories-with-renewed-evidence",
     "rerequest-prior-human-reviewers",
     "bounded-evidence-led-ci-repairs",
+    "closer-look-prose-and-preexisting-automerge",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
   assert.equal((evalSpec.match(/type: skill-invocation/g) ?? []).length, cases.length);
+  assert.equal((evalSpec.match(/type: tool-calls/g) ?? []).length, cases.length);
   assert.match(evalSpec, /\*\*No open issues\*\*[\s\S]*<details>[\s\S]*previously missed[\s\S]*<details>/);
   assert.match(evalSpec, /finding exists only in review R17/);
   const weights = Object.fromEntries(
-    [...evalSpec.matchAll(/^    (prompt|diff-empty|skill-invocation): ([\d.]+)$/gm)]
+    [...evalSpec.matchAll(/^    (prompt|diff-empty|skill-invocation|tool-calls): ([\d.]+)$/gm)]
       .map(([, type, weight]) => [type, Number(weight)]),
   );
-  assert.equal(Object.keys(weights).length, 3);
+  assert.equal(Object.keys(weights).length, 4);
   assert.ok(Math.abs(Object.values(weights).reduce((a, b) => a + b, 0) - 1) < 0.000001);
   const threshold = Number(evalSpec.match(/^  threshold: ([\d.]+)$/m)[1]);
-  for (const requiredGrader of ["diff-empty", "skill-invocation"]) {
+  for (const requiredGrader of ["diff-empty", "skill-invocation", "tool-calls"]) {
     const scoreWithoutRequired = 1 - weights[requiredGrader];
     assert.ok(
       scoreWithoutRequired < threshold,
@@ -1111,6 +1115,9 @@ test("requestCopilotReview cancels superseded branch runs, toggles existing requ
   assert.match(skill, /--body-file.*@'\.\.\.'@/i);
   assert.match(skill, /pr-watch-daemon\.mjs request-copilot/);
   assert.match(skill, /cross-model `rubber-duck` sub-agent review/);
+  assert.match(skill, /--disable-auto/);
+  assert.match(skill, /re-audit the named code paths on the current head for unhandled edge cases rather than dismissing it by citing an earlier commit/);
+  assert.match(evalSpec, /name: closer-look-prose-and-preexisting-automerge/);
 
   // 0. Rejects missing --head in parsePrWatchArgs and requestCopilotReview without performing mutations
   assert.throws(

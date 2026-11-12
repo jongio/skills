@@ -13,20 +13,31 @@ ambiguous natural-language dates. A wider range is explicit permission to widen
 history discovery, not permission to publish its contents.
 
 Discover sessions by **activity**, not creation date. With a SQL history tool,
-page session IDs from turns/events in `[start, end)`, using stable time/ID cursors
-and bounded results. Include tool-only activity where exposed. Fetch metadata for
-those IDs separately. Do not filter by the target repository: application sessions
-can expose failures in skills maintained elsewhere. Keep backend namespaces
-separate; deduplicate cloud/local copies only with a verified shared identity.
+page cloud session IDs from materialized `turns` (`timestamp`) and
+`tool_executions` (`started_at`/`completed_at`) views in `[start, end)` using
+stable time/ID cursors rather than broad unfiltered `events` scans; on local
+SQLite stores without `tool_executions` or `events`, query `sessions` and `turns`
+using 10-character ISO date prefixes (`substr(..., 1, 10)`). Include tool-only
+activity where exposed. Fetch metadata and session evidence using literal
+`session_id IN (...)` batches rather than joining subqueries or CTEs across
+partitioned cloud views. Do not filter by the target repository: application
+sessions can expose failures in skills maintained elsewhere. Keep backend
+namespaces separate; deduplicate cloud/local copies only with a verified shared
+identity.
 
 The window selects sessions, not fragments to mark fully reviewed. For each
 selected session, review its complete evidence through the fixed cutoff: actual
 user turns, assistant responses, skill invocations, and relevant tool outcomes,
-including earlier turns. This makes a completed revision reusable when the next
-run widens or shifts its window. Paginate until exhausted; a result
-limit, missing event stream, or assistant summary is not complete evidence.
-Avoid unbounded text searches; first narrow by time and exact session IDs.
-Do not query live history for synthetic eval scenarios.
+including earlier turns. Bound each cloud batch's lower window (`turns.timestamp`
+or `tool_executions.started_at >= MIN(created_at)`) so partitioned cloud stores
+prune older partitions while retaining complete from-birth session evidence
+through `until`; when specific tool arguments or output text are needed, run
+narrow `tool_requests`/`events` reads bounded by literal `session_id` and that
+same time range. This makes a completed revision reusable when the next run
+widens or shifts its window. Paginate until exhausted; a result limit, missing
+event stream, or assistant summary is not complete evidence. Avoid unbounded
+text searches; first narrow by time and literal session IDs. Do not query live
+history for synthetic eval scenarios.
 
 ## Cache protocol
 
@@ -155,17 +166,16 @@ partial/failed reads `no-change`. A cache hit records past audit/delivery, not
 proof of current PR state or that a change merged.
 
 The helper stores only identity/revision hashes, status, checked timestamp, and
-receipt/PR pointers, not raw session content or raw account/session identifiers.
+receipt/PR pointers - never raw session content or raw account/session IDs.
 Snapshot keys retain old pending revisions rather than overwriting their work.
-Use the plan's `token` with `record` for optimistic concurrency; obtain the new
-token after each write. On a stale token, replan and reconcile; do not overwrite.
-Writes use an exclusive lock and atomic replacement. Lock contention, corruption,
-permission failures, or missing receipts stop recording explicitly. Do not delete
-locks or reset a cache automatically.
+Pass the plan's `token` to `record` for optimistic concurrency and use the new
+token on subsequent writes; on a stale token, replan and reconcile without
+overwriting. Writes use an exclusive lock and atomic rename; lock contention,
+corruption, permission failures, or missing receipts stop recording explicitly
+without deleting locks or resetting the cache.
 
-If cache access fails, report it and pause before repeating expensive analysis;
-ask whether to proceed without caching. Never treat an unreadable cache as empty.
-If no changes are justified, record the complete audits without creating a
-worktree or empty PR. If changes are justified, persist pending state before PR
-delivery, and advance it only on verified success. No last-run timestamp may
-replace per-session coverage.
+If cache access fails, report it and ask before proceeding without caching;
+never treat an unreadable cache as empty. Record completed no-change audits
+without creating a worktree or empty PR. Persist pending state before PR
+delivery and advance it only on verified success; never replace per-session
+coverage with a last-run timestamp.

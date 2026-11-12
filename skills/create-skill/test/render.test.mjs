@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   SKILL_NAME_PATTERN,
@@ -112,6 +113,8 @@ test("renderer creates the complete portable skill shape", () => {
   const withRepository = renderSkillFiles(manifest, { repository: "octocat/skills" });
   assert.match(withRepository.get("README.md"), /npx skills add octocat\/skills/);
   assert.doesNotMatch(withRepository.get("README.md"), /OWNER\/REPOSITORY/);
+  const authoredSkill = readFileSync(new URL("../SKILL.md", import.meta.url), "utf8");
+  assert.doesNotMatch(authoredSkill, /\bdevx\b/i);
 });
 
 test("renderer refuses a source lock that would invalidate the SDK security override", () => {

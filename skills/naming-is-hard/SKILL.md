@@ -90,7 +90,9 @@ where the run's state is persisted (use the session workspace, for example
 All commands print JSON (so you can parse the result) except `report`, which prints
 a human-readable card by default and JSON with `--as-json`.
 
-## Act 1: the Profile (Naming Brief)
+## Workflow
+
+### Act 1: the Profile (Naming Brief)
 
 Never brainstorm from nothing. First understand the thing being named.
 
@@ -133,11 +135,11 @@ options and let their answer pick the verdict `--preset` passed to `report`/`scr
 
 **Do not assume a default.** The user's answer fundamentally changes which names are
 "Perfect Match" vs "It's Complicated." If they say `.com`, then `.com` availability is
-the gating signal — do not dismiss it as "always parked." If they say npm/CLI, then
+the gating signal - do not dismiss it as "always parked." If they say npm/CLI, then
 `.com` is background noise. Respect their stated priority throughout the entire flow.
 
 Also ask whether GitHub org availability matters to them (yes/no). If they say no, do
-not include GitHub org status in the primary results table — show it only as a footnote.
+not include GitHub org status in the primary results table - show it only as a footnote.
 
 Note that social handles are always reported `unknown` (they cannot be checked honestly),
 so a `social-first` finalist stays "It's Complicated" until the user verifies the handle
@@ -251,7 +253,7 @@ org doesn't matter to me"), do NOT jump straight to declaring a winner. Instead:
 4. Let the user pick from the re-ranked options.
 
 Never collapse from "here are 5 options with tables" to "here's your one winner"
-just because the user corrected you. The correction changes the ranking — it does not
+just because the user corrected you. The correction changes the ranking - it does not
 eliminate the user's right to choose.
 
 ## Act 4: the Match (availability + verdict)
@@ -290,7 +292,7 @@ Now turn likes into a decision.
    dismissing a channel they told you matters. Present it conversationally.
 
 5. **Show ALL liked names, not just the winner (mandatory).** The user approved those
-   names — they deserve to know what happened to each one. Present the full field as
+   names - they deserve to know what happened to each one. Present the full field as
    a ranked list. For every name that is NOT the winner, give an explicit one-line
    reason why it ranked lower:
 
@@ -300,48 +302,36 @@ Now turn likes into a decision.
    - "GitHub org taken; decorated variants available: `cleanforkhq`, `getcleanfork`"
    - "No issues found, but ranked #2 on fit score behind the winner"
 
-   **Never silently drop a liked name.** If the user liked 6 names and you show them
-   1 winner with no mention of the other 5, that is a failure. They will feel unheard
-   and wonder if the skill even remembered their choices. The minimum output is:
+   **Never silently drop a liked name.** If the user liked 6 names, show all 6
+   with each rank reason rather than presenting only a single winner:
 
    ```text
    ## 💚 Winner: Menucheck
    [scorecard + why it won]
 
    ## The rest of your likes:
-   2. 💛 Cleanfork — .com taken (parked by GoDaddy)
-   3. 💛 Dinecheck — .com taken (active restaurant site)
-   4. 🚫 Clearfork — trademark: Clearfork Foods (USPTO #5998237, food industry)
-   5. 💛 Forkwatch — .com taken; GitHub org taken (decorated: forkwatchhq ✅)
-   6. 💚 Platemark — all clear, ranked #2 on fit
+   2. 💛 Cleanfork - .com taken (parked by GoDaddy)
+   3. 💛 Dinecheck - .com taken (active restaurant site)
+   4. 🚫 Clearfork - trademark: Clearfork Foods (USPTO #5998237, food industry)
+   5. 💛 Forkwatch - .com taken; GitHub org taken (decorated: forkwatchhq ✅)
+   6. 💚 Platemark - all clear, ranked #2 on fit
    ```
 
-   This lets the user override the recommendation with full information ("actually
-   I'll take Platemark and live without the .com"). Do not make that choice for them.
+   This lets the user override the recommendation with full information.
 
-## Act 5: next actions
+### Act 5: next actions
 
-Once the user picks a winner, give them a concrete **reservation checklist** to lock it
-down (do not do these for them; the skill only checks and links out):
+Once the user picks a winner, give them a concrete **reservation checklist** (do
+not execute registrations for them; link out only):
 
-1. **Primary domain** (per the user's preset): if they chose `website-first` or
-   `brand-first`, the `.com` is the top priority — register it immediately. If they
-   chose `cli-first` or `domain-first`, the `.dev` is the launch TLD. Register
-   whichever they told you matters most.
-2. **npm / package name** (for CLI/library projects): reserve it, or `npm publish` a
-   placeholder. A tombstoned name flagged by the scorecard is blocked; pick another.
-3. **Secondary domain**: register the other TLD (`.dev` if they got `.com`, or vice
-   versa) as a backup redirect.
-4. **GitHub org / repo**: `https://github.com/organizations/new`. If the bare org is
-   taken, use the decorated variant from `variants` (e.g. `<name>hq`). Skip this if
-   the user said GitHub org doesn't matter to them.
-5. **Social handles**: the verify URLs are in the scorecard (`channels.social`).
-6. **Formal trademark clearance**: the screen is not legal advice. Point the user (or
-   their lawyer) at the `channels.trademark.links` and note the relevant class (for
-   software, US classes 9 and 42) before they invest in the brand.
+1. **Primary domain** (matching their chosen preset: `.com` for `website-first`/`brand-first`, `.dev` for `cli-first`/`domain-first`).
+2. **npm / package name** (for CLI/library projects; tombstoned names are blocked).
+3. **Secondary domain**: register the companion TLD (`.dev` or `.com`) as a redirect.
+4. **GitHub org / repo**: `https://github.com/organizations/new` (or free decorated variant from `variants`; skip if GitHub org was excluded).
+5. **Social handles**: share verify URLs from `channels.social`.
+6. **Formal trademark clearance**: point to `channels.trademark.links` (US classes 9 and 42 for software); note that screening is not legal advice.
 
-If the name is replacing an existing one, offer to do the rename as a separate step.
-Offer to reopen the deck if nothing felt like The One.
+Offer a separate step if renaming an existing project, or reopen the deck if needed.
 
 ## Availability channels and honesty
 
@@ -379,7 +369,7 @@ Everything lives in the `--dir` state file, so a run survives across turns and
 sessions. To resume, point the same `--dir` at the existing state and continue with
 `next`. `state --dir D` dumps everything; `reset --dir D` starts over.
 
-## Exit criteria
+## Exit Criteria
 
 - A Naming Brief was written and stored.
 - The user swiped through candidates and the model learned a preference (`profile`

@@ -2,7 +2,7 @@
 
 A live session and opt-in project fleet board: current-session kanban, canonical
 completion percentage, primary/subagent team, blockers, ready-next tasks, plan,
-goal history, and delivery/approval status — plus viewer-gated cross-session
+goal history, and delivery/approval status - plus viewer-gated cross-session
 project rollups, an operator attention inbox, session drill-down, and conservative
 recovery controls. Zero coordinator agents and zero background model tokens.
 Active work shows explicitly session-owned PRs/issues, safe links, and

@@ -11,9 +11,11 @@ defaults:
 
 scoring:
   weights:
-    prompt: 0.8
-    skill-invocation: 0.2
-  threshold: 0.84
+    prompt: 0.46
+    skill-invocation: 0.18
+    diff-empty: 0.18
+    tool-calls: 0.18
+  threshold: 0.85
 
 stimuli:
   - name: incremental-week
@@ -33,6 +35,13 @@ stimuli:
       - type: skill-invocation
         config:
           required: [skill-doctor]
+      - type: diff-empty
+        name: diff-empty-incremental-week
+      - type: tool-calls
+        name: tool-calls-incremental-week
+        config: &no-live-tools
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: incremental-coverage
         config:
@@ -62,6 +71,11 @@ stimuli:
       - type: skill-invocation
         config:
           required: [skill-doctor]
+      - type: diff-empty
+        name: diff-empty-terse-supported-fix
+      - type: tool-calls
+        name: tool-calls-terse-supported-fix
+        config: *no-live-tools
       - type: prompt
         name: minimal-supported-lessons
         config:
@@ -90,6 +104,11 @@ stimuli:
       - type: skill-invocation
         config:
           required: [skill-doctor]
+      - type: diff-empty
+        name: diff-empty-partial-history-and-injection
+      - type: tool-calls
+        name: tool-calls-partial-history-and-injection
+        config: *no-live-tools
       - type: prompt
         name: partial-privacy-source
         config:
@@ -119,6 +138,11 @@ stimuli:
       - type: skill-invocation
         config:
           required: [skill-doctor]
+      - type: diff-empty
+        name: diff-empty-failed-delivery-and-cache
+      - type: tool-calls
+        name: tool-calls-failed-delivery-and-cache
+        config: *no-live-tools
       - type: prompt
         name: resumable-delivery
         config:
@@ -147,6 +171,11 @@ stimuli:
       - type: skill-invocation
         config:
           required: [skill-doctor]
+      - type: diff-empty
+        name: diff-empty-explicit-range-and-no-change
+      - type: tool-calls
+        name: tool-calls-explicit-range-and-no-change
+        config: *no-live-tools
       - type: prompt
         name: no-change-is-valid
         config:
@@ -176,6 +205,11 @@ stimuli:
       - type: skill-invocation
         config:
           required: [skill-doctor]
+      - type: diff-empty
+        name: diff-empty-independent-terseness-pass
+      - type: tool-calls
+        name: tool-calls-independent-terseness-pass
+        config: *no-live-tools
       - type: prompt
         name: source-terse-independent
         config:
@@ -209,6 +243,11 @@ stimuli:
       - type: skill-invocation
         config:
           required: [skill-doctor]
+      - type: diff-empty
+        name: diff-empty-historical-cutoff-revision
+      - type: tool-calls
+        name: tool-calls-historical-cutoff-revision
+        config: *no-live-tools
       - type: prompt
         name: cutoff-bounded-cache-identity
         config:
@@ -222,3 +261,48 @@ stimuli:
             21 snapshot must not skip the October 20 correction. Score 1 if
             collection stability alone makes R20 acceptable or unread evidence
             can be marked reviewed.
+
+  - name: cloud-partition-bounded-session-reads
+    prompt: >-
+      Load the skill-doctor skill first, then use skill-doctor on this synthetic
+      scenario only; do not query live history, run shell commands, or write
+      files. A SQL session store exposes cloud materialized sessions, turns
+      (timestamp), and tool_executions (started_at/completed_at) views plus raw
+      tool_requests and events tables, alongside a local SQLite store with
+      sessions and turns only. Joining a CTE of active session IDs or querying
+      turns with only timestamp < until times out across old cloud partitions,
+      and one active cloud session was created 30 days before the 7-day window.
+      Explain how to discover and read complete session evidence through until
+      (including specific tool arguments/outputs when needed) without timeouts or
+      partial-fragment reviews.
+    rubric:
+      - Discovers cloud activity from materialized turns (timestamp) and tool_executions (started_at/completed_at) rather than broad raw events scans, and handles local SQLite separately via sessions/turns.
+      - Passes literal session_id IN (...) batches instead of joining subqueries or CTEs across partitioned cloud views.
+      - Bounds lower turns.timestamp / tool_executions.started_at >= MIN(created_at) per batch (and scopes any needed tool_requests/events argument/output lookups to literal session_id plus that range) so complete from-birth evidence through until is read without scanning unrelated partitions.
+    graders:
+      - type: skill-invocation
+        config:
+          required: [skill-doctor]
+      - type: diff-empty
+        name: diff-empty-cloud-partition-bounded-session-reads
+      - type: tool-calls
+        name: tool-calls-cloud-partition-bounded-session-reads
+        config: *no-live-tools
+      - type: prompt
+        name: partition-pruned-complete-evidence
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the plan discovers cloud activity via materialized
+            turns (timestamp) and tool_executions (started_at/completed_at)
+            rather than broad raw events scans (handling local SQLite separately
+            via sessions/turns), uses literal session_id IN (...) batches instead
+            of CTE/subquery joins, bounds lower turns.timestamp and
+            tool_executions.started_at >= MIN(created_at) per batch so the
+            30-day-old session's complete from-birth evidence through until is
+            reviewed without timing out or truncating to [since, until), and
+            bounds any needed tool_requests/events argument/result lookups by
+            literal session_id and time range. Score 1 for truncating evidence
+            to [since, until), running broad unfiltered raw events scans, or
+            executing live queries.

@@ -25,8 +25,8 @@ registry rely on them, so treat the set as a stable contract:
 
 | Sentinel | Replaced with | Use for |
 | --- | --- | --- |
-| `__BASE_PATH__` | `/repo/` (or `/`) — trailing slash | Vite/Astro `base`, Eleventy `pathPrefix`, the workflow's `PATH_PREFIX` |
-| `__BASE_URL__` | `/repo` (or ``) — no trailing slash | Jekyll `baseurl` |
+| `__BASE_PATH__` | `/repo/` (or `/`) - trailing slash | Vite/Astro `base`, Eleventy `pathPrefix`, the workflow's `PATH_PREFIX` |
+| `__BASE_URL__` | `/repo` (or ``) - no trailing slash | Jekyll `baseurl` |
 | `__SITE_NAME__` | the human title | page titles, headings |
 | `__SITE_DESCRIPTION__` | catalog description | page metadata and introductory copy |
 | `__SITE_URL__` | `https://user.github.io/repo/` | meta, README |
@@ -59,7 +59,7 @@ After stamping, the skill **digests the target repo and rewrites the demo conten
 to match it (`scripts/digest-repo.mjs`), and drops placeholder images plus an
 `IMAGES.md` via `scripts/make-placeholder.mjs`. When authoring a generated site:
 
-- Write placeholders into the folder the template serves static files from —
+- Write placeholders into the folder the template serves static files from -
   `public/images/` for build tools (Astro/Vite), `assets/images/` for static/Jekyll,
   `src/assets/images/` for Eleventy.
 - Reference images through the same base-path mechanism as other assets (so they

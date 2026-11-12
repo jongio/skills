@@ -1,11 +1,10 @@
 name: naming-is-hard
 description: >-
   Capability eval for the naming-is-hard skill. Given a request to name something
-  and check availability, the agent must engage the skill's flow: write a Naming
-  Brief, generate a diverse candidate deck, run availability, and produce a report
-  with verdict tiers. A second stimulus checks that an obvious famous-brand
-  collision is flagged as a Deal Breaker. Deterministic file graders inspect the
-  persisted state; an LLM rubric judges the naming quality and the verdict.
+  and check availability, the agent must invoke the skill and its CLI engine:
+  write a Naming Brief, generate a diverse candidate deck, run availability, and
+  produce a report with verdict tiers, while blocking famous marks and prominent
+  offline product collisions deterministically.
 type: capability
 
 defaults:
@@ -15,20 +14,22 @@ defaults:
 
 scoring:
   weights:
-    file-exists: 0.2
-    file-contains: 0.3
-    prompt: 0.5
-  threshold: 0.7
+    skill-invocation: 0.24
+    tool-calls: 0.24
+    prompt: 0.28
+    file-exists: 0.12
+    file-contains: 0.12
+  threshold: 0.8
 
 stimuli:
   - name: name-and-check-a-task-runner
     prompt: >-
-      Use the naming-is-hard skill to help me name a fast, developer-focused
-      command-line task runner for JavaScript monorepos. The tone is technical and
-      a little playful. Use the folder ./naming-run as the state dir. You do not
-      need the interactive swipe loop for this: write the brief, add at least a
-      dozen diverse candidate names, check availability for your top three, and
-      produce the report with verdict tiers.
+      First invoke the naming-is-hard skill, then help me name a fast,
+      developer-focused command-line task runner for JavaScript monorepos. The
+      tone is technical and a little playful. Use the folder ./naming-run as the
+      state dir. You do not need the interactive swipe loop for this: write the
+      brief, add at least a dozen diverse candidate names, check availability for
+      your top three, and produce the report with verdict tiers.
     tags:
       scenario: full-flow
       cost: high
@@ -37,35 +38,47 @@ stimuli:
       - The candidate set is varied rather than repeating one naming gimmick.
       - Availability results use the skill's Perfect Match, It's Complicated, or Deal Breaker verdicts.
     graders:
+      - type: skill-invocation
+        name: skill-invocation-name-and-check-task-runner
+        config:
+          required: [naming-is-hard]
+      - type: tool-calls
+        name: tool-calls-task-runner-no-github-mutations
+        config: &no-naming-mutations
+          disallowed:
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: file-exists
         name: state-file-created
         config:
-          path: "**/naming-run/naming-state.json"
+          path: "naming-run/naming-state.json"
       - type: file-contains
         name: brief-persisted
         config:
-          path: "**/naming-run/naming-state.json"
+          path: "naming-run/naming-state.json"
           value: "\"brief\""
       - type: file-contains
         name: candidates-persisted
         config:
-          path: "**/naming-run/naming-state.json"
+          path: "naming-run/naming-state.json"
           value: "\"candidates\""
       - type: prompt
         name: report-has-verdicts
         config:
+          scoring: scale_1_5
+          threshold: 0.75
           prompt: >-
-            Review the agent's output. Did it (a) write a Naming Brief for a CLI
-            task runner, (b) generate a varied set of candidate names rather than
-            one gimmick, and (c) present availability results with a verdict such
-            as Perfect Match, It's Complicated, or Deal Breaker? Score 1.0 if all
-            three, 0.5 if two, 0.0 if it ignored the skill or produced generic
-            names with no availability check.
+            Review the agent's output. Score 5 only if it (a) wrote a Naming
+            Brief for a CLI task runner, (b) generated a varied set of candidate
+            names rather than one gimmick, and (c) presented availability results
+            with verdict tiers (Perfect Match, It's Complicated, or Deal Breaker).
+            Score 3 if two of three hold, 1 if it ignored the skill or produced
+            generic names with no availability check.
 
   - name: flag-a-famous-brand
     prompt: >-
-      Use the naming-is-hard skill. I want to call my music app "Spotify". Check
-      whether I can actually use that name. Use ./naming-run as the state dir.
+      First invoke the naming-is-hard skill and use its CLI engine with
+      ./naming-run as the state dir. I want to call my music app "Spotify".
+      Screen whether I can actually use that name and report the verdict.
     tags:
       scenario: deal-breaker
       cost: medium
@@ -73,23 +86,33 @@ stimuli:
       - Spotify is identified as an existing famous brand and trademark collision.
       - The name receives a Deal Breaker verdict rather than being presented as usable.
     graders:
+      - type: skill-invocation
+        name: skill-invocation-flag-a-famous-brand
+        config:
+          required: [naming-is-hard]
+      - type: tool-calls
+        name: tool-calls-famous-brand-no-github-mutations
+        config: *no-naming-mutations
       - type: prompt
         name: identifies-deal-breaker
         config:
+          scoring: scale_1_5
+          threshold: 0.75
           prompt: >-
-            Did the agent flag "Spotify" as a name the user cannot use, identifying
-            it as an existing famous brand / trademark collision (a Deal Breaker),
-            rather than reporting it as available? Score 1.0 if it clearly flags the
-            collision as a Deal Breaker, 0.5 if it notes it is taken without the
-            trademark framing, 0.0 if it treats the name as usable.
+            Score 5 only if the agent flags "Spotify" as a name the user cannot
+            use, identifying it as an existing famous brand / trademark collision
+            with a Deal Breaker verdict rather than reporting it as usable.
+            Score 3 if it notes it is taken without Deal Breaker / trademark
+            framing, 1 if it treats the name as usable.
 
   - name: block-codename-with-deferred-availability
     prompt: >-
-      Use the naming-is-hard skill to create a swipe deck for an internal developer
-      tool. I already have three codenames: Synapse, Brightloom, and Willowforge.
-      Use ./naming-run as the state dir. Defer all domain, GitHub, registry, social,
-      and live trademark checks until after swiping. Add the codenames, show me the
-      next swipe card, and report any name the offline screen rejected.
+      First invoke the naming-is-hard skill to create a swipe deck for an internal
+      developer tool. I already have three codenames: Synapse, Brightloom, and
+      Willowforge. Use ./naming-run as the state dir. Defer all domain, GitHub,
+      registry, social, and live trademark checks until after swiping. Add the
+      codenames, show me the next swipe card, and report any name the offline
+      screen rejected.
     tags:
       scenario: offline-pre-presentation-screen
       cost: low
@@ -99,17 +122,30 @@ stimuli:
       - Brightloom or Willowforge remains available as a swipe card.
       - No live availability check is required for the offline rejection.
     graders:
+      - type: skill-invocation
+        name: skill-invocation-block-codename-deferred
+        config:
+          required: [naming-is-hard]
+      - type: tool-calls
+        name: tool-calls-deferred-screen-no-live-lookups
+        config:
+          disallowed:
+            - name: "(?i)(web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
+            - name: "^(?:powershell|bash)$"
+              command: '(?i)\b(curl(?:\.exe)?|wget|Invoke-WebRequest|Invoke-RestMethod|naming\.mjs\S*\s+(?:check|screen))\b'
       - type: file-exists
         name: deferred-screen-state-file-created
         config:
-          path: "**/naming-run/naming-state.json"
+          path: "naming-run/naming-state.json"
       - type: prompt
         name: blocks-synapse-before-swipe
         config:
+          scoring: scale_1_5
+          threshold: 0.75
           prompt: >-
-            Did the agent use the deterministic offline screen to reject Synapse
-            before presenting a swipe card, explain the prominent existing
-            product/project collision, and present Brightloom or Willowforge
-            instead while honoring the request to defer live availability checks?
-            Score 1.0 if all conditions hold, 0.5 if Synapse is rejected without a
-            useful reason or timing clarity, and 0.0 if Synapse is shown as a card.
+            Score 5 only if the agent used the deterministic offline screen to
+            reject Synapse before presenting a swipe card, explained the prominent
+            existing product/project collision, and presented Brightloom or
+            Willowforge instead while honoring the request to defer live
+            availability checks. Score 3 if Synapse is rejected without a useful
+            reason or timing clarity, and 1 if Synapse is shown as a card.

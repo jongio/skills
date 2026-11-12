@@ -1,15 +1,15 @@
 # create-canvas-app
 
-Build **GitHub Copilot App canvas extensions** the right way, fast — a no-build
+Build **GitHub Copilot App canvas extensions** the right way, fast - a no-build
 Preact + htm kit packaged as a Copilot skill.
 
 A canvas is an interactive side-panel surface the Copilot agent can open and
 drive: dashboards, editors, trackers, boards, document previews.
 
-![A Stock Ticker canvas built with the kit — live quote cards with sparklines, filters, and a watchlist, themed to match GitHub.](docs/stock-ticker.png)
+![A Stock Ticker canvas built with the kit - live quote cards with sparklines, filters, and a watchlist, themed to match GitHub.](docs/stock-ticker.png)
 
 > A Stock Ticker canvas built with the kit: live quote cards with sparklines,
-> filter/sort tabs, and a watchlist — Primer-themed, official GitHub icons.
+> filter/sort tabs, and a watchlist - Primer-themed, official GitHub icons.
 
 ## Quickstart
 
@@ -19,7 +19,7 @@ drive: dashboards, editors, trackers, boards, document previews.
 npx skills add jongio/skills --skill create-canvas-app
 ```
 
-**2. Reload skills** — run `/skills reload`, or start a new session.
+**2. Reload skills** - run `/skills reload`, or start a new session.
 
 **3. Ask Copilot to build a canvas:**
 
@@ -33,35 +33,35 @@ That's it. The agent loads the skill, stamps a working canvas with the kit (live
 shared state, durable storage, Primer theming, official GitHub icons), shapes it
 to your request, and validates it visually before handing it back.
 
-> No agent? Stamp one yourself in one command — see
+> No agent? Stamp one yourself in one command - see
 > [Build without the agent](#build-without-the-agent).
 
 ## What you get
 
-- **Live shared state** — the agent and the user act on the same state through
+- **Live shared state** - the agent and the user act on the same state through
   the same action handlers; updates fan out to every open panel over SSE.
-- **No keystroke loss** — Preact diffs the DOM, so live pushes never clobber
+- **No keystroke loss** - Preact diffs the DOM, so live pushes never clobber
   focus or half-typed input (the #1 bug in hand-rolled `innerHTML` canvases).
-- **Durable per-user storage** — state persists under
+- **Durable per-user storage** - state persists under
   `$COPILOT_HOME/extensions/<name>/artifacts/<domain>.json`.
-- **Shared multiplayer storage (optional)** — `githubStore` backs the board with a
+- **Shared multiplayer storage (optional)** - `githubStore` backs the board with a
   file in a private repo, so collaborators edit one live document and see each
   other's changes within seconds (poll + adopt); GitHub handles access control.
-- **Primer theming** — `ck-*` classes mapped to the host theme tokens with
+- **Primer theming** - `ck-*` classes mapped to the host theme tokens with
   GitHub-dark fallbacks.
-- **Official GitHub icons** — the exact Lucide set github-app ships
+- **Official GitHub icons** - the exact Lucide set github-app ships
   (`lucide-react@1.23.0`), vendored and byte-identical.
-- **Host AI in a handler** — call the Copilot app's own model from an action with
+- **Host AI in a handler** - call the Copilot app's own model from an action with
   `ctx.ai(question)` (silent, no keys, no history) or hand work to the main agent
   with `ctx.askAgent(prompt)`. No API keys, no model picker, no external `fetch`.
-- **Deep links into github-app** — build a validated `ghapp://` URL (open a
+- **Deep links into github-app** - build a validated `ghapp://` URL (open a
   session, jump to a surface) with the kit's deep-link builders and render it as a
   `target="_blank"` link; the canvas webview routes it into the app's
   confirmation-gated deeplink pipeline. No OS launcher, no IPC, no SDK.
-- **A generator** — `node scripts/new-canvas.mjs <name>` stamps a working canvas
+- **A generator** - `node scripts/new-canvas.mjs <name>` stamps a working canvas
   (`--template data` for a fetch + auto-refresh canvas, `--template ai` for a
   host-AI canvas) with its own smoke test.
-- **Tests** — a standalone HTTP harness, a kit byte-parity check, a generator test, a
+- **Tests** - a standalone HTTP harness, a kit byte-parity check, a generator test, a
   kit-sync/freshness tooling check, and a Lucide re-vendor determinism test.
 
 ## Use it
@@ -76,7 +76,7 @@ Once installed, invoke the skill by name and describe the canvas you want:
 /create-canvas-app a canvas to review and triage incoming webhook events
 ```
 
-You don't have to name the skill explicitly — the agent routes to it whenever you
+You don't have to name the skill explicitly - the agent routes to it whenever you
 ask to "create / scaffold / build a canvas." Invoking `/create-canvas-app` just
 guarantees it.
 
@@ -93,7 +93,7 @@ npx skills add jongio/skills#main --skill create-canvas-app
 ```
 
 Uses the [`vercel-labs/skills`](https://github.com/vercel-labs/skills) CLI
-(`skills.sh`) — note the binary is **`skills`** (plural). This skill lives in the
+(`skills.sh`) - note the binary is **`skills`** (plural). This skill lives in the
 [`jongio/skills`](https://github.com/jongio/skills) monorepo at
 `skills/create-canvas-app/`; the bundled `kit/`, `reference/`, and `test/`
 directories are copied in with it.
@@ -113,13 +113,13 @@ enter `jongio/skills`, then click **Install** on `create-canvas-app`. The
 screenshot walkthrough. Or install every skill at once with
 `copilot plugin install jongio/skills`.
 
-**Local install (no network)** — clone, then run the bundled installer:
+**Local install (no network)** - clone, then run the bundled installer:
 
 ```sh
 pwsh -File scripts/install-local.ps1
 ```
 
-**Manual install** — copy this whole folder to
+**Manual install** - copy this whole folder to
 `$COPILOT_HOME/skills/create-canvas-app/` (`~/.copilot/skills/create-canvas-app/`
 by default).
 
@@ -152,7 +152,7 @@ node scripts/new-canvas.mjs ai-helper --template ai --dir .github/extensions/ai-
 
 Reload extensions, then open the canvas (`canvasId: "my-board"`). It works out of
 the box: add, toggle, and remove items, live, shared between you and the agent.
-Each stamped canvas ships a `test/smoke.test.mjs` — run `node test/smoke.test.mjs`
+Each stamped canvas ships a `test/smoke.test.mjs` - run `node test/smoke.test.mjs`
 from the canvas folder to prove its actions over real HTTP.
 
 Generated templates contain only their required kit modules and exact icon
@@ -162,17 +162,17 @@ actual and allowed byte counts if a template grows past its budget.
 
 Target any extension scope with `--dir`: `.github/extensions/<name>` (in-repo,
 committed), `$COPILOT_HOME/extensions/<name>` (personal, local to you), or
-`$COPILOT_HOME/session-state/<sessionId>/extensions/<name>` (current session only —
+`$COPILOT_HOME/session-state/<sessionId>/extensions/<name>` (current session only -
 a throwaway canvas that disappears with the session).
 
 Then make it yours:
 
-1. **`canvas.mjs`** — edit `createInitialState`, the action handlers, and
+1. **`canvas.mjs`** - edit `createInitialState`, the action handlers, and
    `statusLine`. This file is SDK-free and holds all your logic.
-2. **`web/app.mjs`** — render the shared state with Preact + htm; call
+2. **`web/app.mjs`** - render the shared state with Preact + htm; call
    `invoke("<action>", input)` from buttons. Keep draft inputs in `useState`.
-3. **`web/index.html`** — the shell; links `/kit/theme.css` and `./app.mjs`.
-4. **`extension.mjs`** — the only SDK adapter; you rarely touch it.
+3. **`web/index.html`** - the shell; links `/kit/theme.css` and `./app.mjs`.
+4. **`extension.mjs`** - the only SDK adapter; you rarely touch it.
 
 See **`SKILL.md`** for the full authoring contract and **`reference/decision-log/`**
 for a complete worked example.
@@ -192,7 +192,7 @@ app-specific `canvas.mjs` and `web/` changes into the new extension.
 ## Ship it
 
 Built a canvas you want to keep and reuse? Drop the folder into
-[`jongio/copilot-extensions`](https://github.com/jongio/copilot-extensions) — a
+[`jongio/copilot-extensions`](https://github.com/jongio/copilot-extensions) - a
 collection of finished, installable canvases. From there you (or anyone with
 access) install one in-app by asking the agent: *"install the stock-ticker canvas
 from jongio/copilot-extensions/extensions/stock-ticker."* No clone, no build.
@@ -201,26 +201,26 @@ from jongio/copilot-extensions/extensions/stock-ticker."* No clone, no build.
 
 ```text
 SKILL.md                      The Copilot skill (authoring contract + workflow)
-kit/                          The canonical kit — copy into your extension as canvas-kit/
+kit/                          The canonical kit - copy into your extension as canvas-kit/
   core-client.mjs             Core browser runtime used by scoped templates
   client.mjs                  Backward-compatible full-kit barrel with optional exports
   server.mjs                  SDK-free runtime: /state, /events (SSE), /action, static, inputSchema/stateSchema validation, optional shared-state sync
-  storage.mjs                 Durable JSON store — userStore / sessionStore / workspaceStore (atomic, concurrency-safe writes)
-  github-store.mjs            Shared repo-backed store — githubStore (multi-writer via the GitHub Contents API; poll + optimistic-lock)
+  storage.mjs                 Durable JSON store - userStore / sessionStore / workspaceStore (atomic, concurrency-safe writes)
+  github-store.mjs            Shared repo-backed store - githubStore (multi-writer via the GitHub Contents API; poll + optimistic-lock)
   validate.mjs                Dependency-free JSON-Schema-subset validator (enforces action inputSchema + stateSchema)
   net.mjs                     Server-side egress guard: assertPublicUrl / isBlockedAddress / safeFetch (SSRF-safe fetch + timeout)
   format.mjs                  nid + relativeTime / compactNumber / percent helpers
   deeplinks.mjs               github-app deep-link builders (ghapp://) + safe URL / prompt helpers
   theme.css                   Primer-token styling (ck-* classes)
   icons.mjs                   Lucide Icon component + helpers
-  version.mjs                 KIT_VERSION stamp — sync + freshness tooling
+  version.mjs                 KIT_VERSION stamp - sync + freshness tooling
   vendor/                     Vendored Preact+htm and the Lucide glyph data
 reference/decision-log/       Complete working canvas in the real installed shape
                               (CRUD + host AI + an "Open in github-app" card that
                               demonstrates every ghapp:// deep-link builder)
 reference/deeplinks.md        Deep-link schema reference (routes, params, validation)
 scripts/
-  new-canvas.mjs              Generator — stamp a new canvas (--template list|data|ai)
+  new-canvas.mjs              Generator - stamp a new canvas (--template list|data|ai)
   kit-features.mjs            Strict feature manifest, icon subset, and size-budget helpers
   sync-kit.mjs                Sync a manifest subset or a legacy full kit, then stamp the version
   check-kit-freshness.mjs     Offline drift gate for scoped and full vendored kits
@@ -250,9 +250,9 @@ node test/vendor-lucide.test.mjs
 node test/kit-runtime.test.mjs
 ```
 
-No dependencies to install — everything is vendored. Node 18+ (developed on 24).
+No dependencies to install - everything is vendored. Node 18+ (developed on 24).
 `npm test` runs all eight in sequence.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT - see [LICENSE](./LICENSE).

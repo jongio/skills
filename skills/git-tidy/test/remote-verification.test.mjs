@@ -94,6 +94,14 @@ async function httpFixture(t, { anonymous = false, remoteUrl = approvedUrl } = {
   const backendEnvironment = Object.fromEntries([
     "PATH", "Path", "SystemRoot", "SYSTEMROOT", "WINDIR", "TEMP", "TMP",
   ].flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+  const execPathResult = await runBoundedProcess(gitPath, ["--exec-path"], {
+    cwd: remoteRoot,
+    env: backendEnvironment,
+  });
+  const gitExecPath = execPathResult.stdout.toString("utf8").trim();
+  const hasHttpBackend = existsSync(
+    path.join(gitExecPath, process.platform === "win32" ? "git-http-backend.exe" : "git-http-backend"),
+  );
   let redirect = null;
   const server = createServer(async (request, response) => {
     requests.push({ url: request.url, authorization: request.headers.authorization });
@@ -110,36 +118,81 @@ async function httpFixture(t, { anonymous = false, remoteUrl = approvedUrl } = {
     try {
       const input = [];
       for await (const chunk of request) input.push(chunk);
+      const bodyInput = Buffer.concat(input);
       const url = new URL(request.url, "http://localhost");
-      const result = await runBoundedProcess(gitPath, ["http-backend"], {
-        cwd: remoteRoot,
-        env: {
-          ...backendEnvironment,
-          GIT_CONFIG_NOSYSTEM: "1",
-          GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
-          GIT_PROJECT_ROOT: remoteRoot,
-          GIT_HTTP_EXPORT_ALL: "1",
-          REQUEST_METHOD: request.method,
-          PATH_INFO: url.pathname.replace(/^\/owner/u, ""),
-          QUERY_STRING: url.search.slice(1),
-          CONTENT_TYPE: request.headers["content-type"] ?? "",
-          REMOTE_USER: anonymous ? "" : "fixture",
-        },
-        input: Buffer.concat(input),
-      });
-      const separator = result.stdout.indexOf("\r\n\r\n");
-      assert.ok(separator >= 0);
-      const headers = result.stdout.subarray(0, separator).toString("utf8");
-      let status = 200;
-      for (const header of headers.split("\r\n")) {
-        const index = header.indexOf(":");
-        const name = header.slice(0, index);
-        const value = header.slice(index + 1).trim();
-        if (name.toLowerCase() === "status") status = Number(value.split(" ")[0]);
-        else response.setHeader(name, value);
+      const baseGitEnv = {
+        ...backendEnvironment,
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+      };
+      if (hasHttpBackend) {
+        const result = await runBoundedProcess(gitPath, ["http-backend"], {
+          cwd: remoteRoot,
+          env: {
+            ...baseGitEnv,
+            GIT_PROJECT_ROOT: remoteRoot,
+            GIT_HTTP_EXPORT_ALL: "1",
+            REQUEST_METHOD: request.method,
+            PATH_INFO: url.pathname.replace(/^\/owner/u, ""),
+            QUERY_STRING: url.search.slice(1),
+            CONTENT_TYPE: request.headers["content-type"] ?? "",
+            REMOTE_USER: anonymous ? "" : "fixture",
+          },
+          input: bodyInput,
+        });
+        const separator = result.stdout.indexOf("\r\n\r\n");
+        assert.ok(separator >= 0);
+        const headers = result.stdout.subarray(0, separator).toString("utf8");
+        let status = 200;
+        for (const header of headers.split("\r\n")) {
+          const index = header.indexOf(":");
+          const name = header.slice(0, index);
+          const value = header.slice(index + 1).trim();
+          if (name.toLowerCase() === "status") status = Number(value.split(" ")[0]);
+          else response.setHeader(name, value);
+        }
+        response.writeHead(status);
+        response.end(result.stdout.subarray(separator + 4));
+      } else {
+        // Stripped MinGit builds (e.g. bundled Windows app distributions) omit
+        // CGI git-http-backend while shipping git-upload-pack. Serve Smart HTTP
+        // directly over upload-pack only when http-backend is absent.
+        const relRepo = url.pathname.replace(/^\/owner\//u, "");
+        const repoMatch = /^(private\.git)\/(info\/refs|git-upload-pack)$/u.exec(relRepo);
+        if (!repoMatch) {
+          response.writeHead(404);
+          response.end("not found");
+          return;
+        }
+        const targetRepo = path.join(remoteRoot, repoMatch[1]);
+        if (repoMatch[2] === "info/refs" && url.searchParams.get("service") === "git-upload-pack") {
+          const advertised = await runBoundedProcess(
+            gitPath,
+            ["upload-pack", "--stateless-rpc", "--advertise-refs", targetRepo],
+            { cwd: remoteRoot, env: baseGitEnv },
+          );
+          const pkt = Buffer.from("001e# service=git-upload-pack\n0000", "utf8");
+          response.writeHead(200, {
+            "Content-Type": "application/x-git-upload-pack-advertisement",
+            "Cache-Control": "no-cache",
+          });
+          response.end(Buffer.concat([pkt, advertised.stdout]));
+        } else if (repoMatch[2] === "git-upload-pack" && request.method === "POST") {
+          const uploaded = await runBoundedProcess(
+            gitPath,
+            ["upload-pack", "--stateless-rpc", targetRepo],
+            { cwd: remoteRoot, env: baseGitEnv, input: bodyInput },
+          );
+          response.writeHead(200, {
+            "Content-Type": "application/x-git-upload-pack-result",
+            "Cache-Control": "no-cache",
+          });
+          response.end(uploaded.stdout);
+        } else {
+          response.writeHead(400);
+          response.end("unsupported request");
+        }
       }
-      response.writeHead(status);
-      response.end(result.stdout.subarray(separator + 4));
     } catch (error) {
       response.writeHead(500);
       response.end(String(error));

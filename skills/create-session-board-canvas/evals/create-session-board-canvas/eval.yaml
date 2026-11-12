@@ -11,9 +11,11 @@ defaults:
 
 scoring:
   weights:
-    prompt: 0.65
-    skill-invocation: 0.35
-  threshold: 0.8
+    prompt: 0.46
+    skill-invocation: 0.18
+    diff-empty: 0.18
+    tool-calls: 0.18
+  threshold: 0.85
 
 stimuli:
   - name: follows-complete-workflow
@@ -40,6 +42,11 @@ stimuli:
       - type: skill-invocation
         config:
           required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: current-session-existing-provider
     prompt: >-

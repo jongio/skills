@@ -1,8 +1,8 @@
-# .vally.yaml — Vally project config for the create-canvas-app skill eval.
+# .vally.yaml - Vally project config for the create-canvas-app skill eval.
 #
 # Wires the skill into the built-in copilot-sdk executor: `vally eval --skill-dir .`
 # reads paths.skills below to discover this skill (node_modules is ignored) and
-# loads it into the agent session — without copying it into the agent's workspace,
+# loads it into the agent session - without copying it into the agent's workspace,
 # so the file graders only ever see what the agent itself produced. Stimuli omit
 # `environment.skills` on purpose for exactly that reason.
 #

@@ -14,10 +14,11 @@ defaults:
 
 scoring:
   weights:
-    prompt: 0.333334
-    diff-empty: 0.333333
-    skill-invocation: 0.333333
-  threshold: 0.8
+    prompt: 0.46
+    diff-empty: 0.18
+    skill-invocation: 0.18
+    tool-calls: 0.18
+  threshold: 0.85
 
 stimuli:
   - name: verified-private-owner-exception
@@ -59,6 +60,11 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-verified-private-owner-exception
+        config: &no-live-pr-ops
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|reply_to_review_thread|reply_and_resolve_review_thread|manage_agent_merge|add_pr_review_comment|edit_pr_review_comment|remove_pr_review_comment|task$)"
 
   - name: long-running-gate-and-approval-wait
     prompt: >-
@@ -100,6 +106,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-long-running-gate-and-approval-wait
+        config: *no-live-pr-ops
 
   - name: other-private-owner-requires-current-head-review
     prompt: >-
@@ -140,6 +149,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-other-private-owner-requires-current-head-revie
+        config: *no-live-pr-ops
 
   - name: clean-headline-hides-body-only-finding
     prompt: |
@@ -194,6 +206,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-clean-headline-hides-body-only-finding
+        config: *no-live-pr-ops
 
   - name: deduplicate-and-revalidate-review-body-findings
     prompt: >-
@@ -235,6 +250,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-deduplicate-and-revalidate-review-body-findings
+        config: *no-live-pr-ops
 
   - name: bot-vs-human-comment-resolution
     prompt: >-
@@ -267,6 +285,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-bot-vs-human-comment-resolution
+        config: *no-live-pr-ops
 
   - name: behind-base-preserves-head
     prompt: >-
@@ -304,6 +325,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-behind-base-preserves-head
+        config: *no-live-pr-ops
 
   - name: verified-base-update-blockers
     prompt: >-
@@ -345,6 +369,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-verified-base-update-blockers
+        config: *no-live-pr-ops
 
   - name: unknown-mergeability-and-queue
     prompt: >-
@@ -382,6 +409,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-unknown-mergeability-and-queue
+        config: *no-live-pr-ops
 
   - name: terse-fix-replies-with-commit-links
     prompt: |
@@ -434,6 +464,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-terse-fix-replies-with-commit-links
+        config: *no-live-pr-ops
 
   - name: documentation-preflight-reuse
     prompt: >-
@@ -469,6 +502,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-documentation-preflight-reuse
+        config: *no-live-pr-ops
 
   - name: default-merge-approval
     prompt: >-
@@ -500,6 +536,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-default-merge-approval
+        config: *no-live-pr-ops
 
   - name: explicit-auto-merge
     prompt: >-
@@ -529,6 +568,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-explicit-auto-merge
+        config: *no-live-pr-ops
 
   - name: explicit-approval-overrides-standing-policy
     prompt: >-
@@ -556,6 +598,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-explicit-approval-overrides-standing-policy
+        config: *no-live-pr-ops
 
   - name: changed-head-needs-fresh-approval
     prompt: >-
@@ -583,6 +628,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-changed-head-needs-fresh-approval
+        config: *no-live-pr-ops
 
   - name: conflicting-merge-modes
     prompt: >-
@@ -606,6 +654,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-conflicting-merge-modes
+        config: *no-live-pr-ops
 
   - name: squash-and-cleanup-defaults
     prompt: >-
@@ -638,6 +689,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-squash-and-cleanup-defaults
+        config: *no-live-pr-ops
 
   - name: merge-queue-deferred-cleanup
     prompt: >-
@@ -669,6 +723,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-merge-queue-deferred-cleanup
+        config: *no-live-pr-ops
 
   - name: post-merge-branch-advanced
     prompt: >-
@@ -701,6 +758,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-post-merge-branch-advanced
+        config: *no-live-pr-ops
 
   - name: post-merge-complete-and-partial-issues
     prompt: >-
@@ -735,6 +795,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-post-merge-complete-and-partial-issues
+        config: *no-live-pr-ops
 
   - name: post-merge-issue-retry-and-permission-failure
     prompt: >-
@@ -772,6 +835,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-post-merge-issue-retry-and-permission-failure
+        config: *no-live-pr-ops
 
   - name: post-merge-unknown-and-cross-repository-issues
     prompt: >-
@@ -809,6 +875,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-post-merge-unknown-and-cross-repository-issues
+        config: *no-live-pr-ops
 
   - name: pre-merge-partial-closing-link
     prompt: >-
@@ -849,6 +918,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-pre-merge-partial-closing-link
+        config: *no-live-pr-ops
 
   - name: repeated-advisories-with-renewed-evidence
     prompt: >-
@@ -883,6 +955,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-repeated-advisories-with-renewed-evidence
+        config: *no-live-pr-ops
 
   - name: rerequest-prior-human-reviewers
     prompt: >-
@@ -931,6 +1006,9 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-rerequest-prior-human-reviewers
+        config: *no-live-pr-ops
 
   - name: bounded-evidence-led-ci-repairs
     prompt: >-
@@ -967,3 +1045,50 @@ stimuli:
       - type: skill-invocation
         config:
           required: [pr]
+      - type: tool-calls
+        name: tool-calls-bounded-evidence-led-ci-repairs
+        config: *no-live-pr-ops
+
+  - name: closer-look-prose-and-preexisting-automerge
+    prompt: >-
+      Load pr first and provide a delivery plan only; no commands, edits, agents,
+      or network calls. On an open PR with head H4, GitHub shows autoMergeRequest
+      already enabled from an earlier command while expected human review is still
+      pending. Copilot submitted a COMMENTED review on H4 with heading Needs a
+      closer look, prose warning that incomplete run receipts can skip unperformed
+      audits and compound SPDX expressions bypass license screening, No open
+      issues, and zero details cards or inline threads. Earlier commit H3 touched
+      both modules. Explain what to do about GitHub auto-merge and how to handle
+      Copilot's prose warning before merging.
+    tags:
+      scenario: review-prose-and-automerge
+      cost: low
+    rubric:
+      - Disables pre-existing GitHub auto-merge immediately with gh pr merge <number> -R <owner/repo> --disable-auto while gates remain open.
+      - Does not dismiss Copilot's Needs a closer look prose warning merely by citing commit H3 or No open issues.
+      - Re-audits the named receipt and SPDX code paths on head H4 for unhandled edge cases before dispositioning or merging.
+      - Keeps pending human review and head-pinned merge gates blocking.
+    graders:
+      - type: diff-empty
+        name: diff-empty-closer-look-prose-and-automerge
+      - type: prompt
+        name: reaudits-prose-warning-and-disables-automerge
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the plan disables pre-existing GitHub auto-merge
+            (--disable-auto) while review/disposition gates remain open, refuses
+            to dismiss the Needs a closer look prose warning merely by citing
+            earlier commit H3 or No open issues, re-audits the named receipt and
+            SPDX code paths on current head H4 for remaining edge cases before
+            dispositioning, and keeps pending human review and head-pinned merge
+            gates blocking. Score 1 for leaving GitHub auto-merge active,
+            treating No open issues as proof that prose warnings are clear,
+            dismissing by citing H3 without code re-inspection, or running tools/writes.
+      - type: skill-invocation
+        config:
+          required: [pr]
+      - type: tool-calls
+        name: tool-calls-closer-look-prose-and-preexisting-automerge
+        config: *no-live-pr-ops

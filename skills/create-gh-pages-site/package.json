@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "test": "node test/generator.test.mjs && node test/digest.test.mjs",
+    "test": "node test/generator.test.mjs && node test/digest.test.mjs && node --test test/fixtures.test.mjs",
     "new": "node scripts/new-site.mjs",
     "eval:lint": "vally lint --eval-spec evals/create-gh-pages-site/eval.yaml --strict",
     "eval": "vally eval --eval-spec evals/create-gh-pages-site/eval.yaml --skill-dir ."

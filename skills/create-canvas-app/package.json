@@ -5,8 +5,8 @@
   "description": "Dev tooling for the create-canvas-app skill (tests + Vally eval). Shipped canvases never get a package.json; this is for the skill repo only.",
   "license": "MIT",
   "scripts": {
-    "test": "node test/http.test.mjs && node test/client.test.mjs && node test/kit-parity.test.mjs && node test/deeplinks.test.mjs && node test/generator.test.mjs && node test/tooling.test.mjs && node test/vendor-lucide.test.mjs && node test/kit-runtime.test.mjs",
-    "eval:lint": "vally lint --eval-spec evals/create-canvas-app/eval.yaml",
+    "test": "node test/http.test.mjs && node test/client.test.mjs && node test/kit-parity.test.mjs && node test/deeplinks.test.mjs && node test/generator.test.mjs && node test/tooling.test.mjs && node test/vendor-lucide.test.mjs && node test/kit-runtime.test.mjs && node --test test/fixtures.test.mjs",
+    "eval:lint": "vally lint --eval-spec evals/create-canvas-app/eval.yaml --strict",
     "eval": "vally eval --eval-spec evals/create-canvas-app/eval.yaml --skill-dir ."
   },
   "devDependencies": {

@@ -92,7 +92,7 @@ reviewing the generated shape.
     earlier approval. Repository creation, push, Pages publication, and every
     later GitHub write retain their own approval gates.
 
-## Safety invariants
+## Safety
 
 - The CLI never imports a GitHub client or executes `git` or `gh`.
 - Catalog and example composition run only in a sibling staging directory.
@@ -109,7 +109,7 @@ reviewing the generated shape.
   `persist-credentials: false`, ignored dependency lifecycle scripts, job
   timeouts, and trusted triggers.
 
-## Exit criteria
+## Exit Criteria
 
 - The requested command reports `created`, `unchanged`, `updated`, `clean`, or
   `planned`.

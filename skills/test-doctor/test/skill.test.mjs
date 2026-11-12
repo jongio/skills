@@ -68,15 +68,17 @@ test("capability cases are specific and behavioral graders remain decisive", () 
   assert.match(evalSpec, /type: diff-empty/);
   assert.match(evalSpec, /path: test\/shipping\.test\.mjs/);
   const weights = Object.fromEntries(
-    [...evalSpec.matchAll(/^    (prompt|diff-empty|file-matches): ([\d.]+)$/gm)]
+    [...evalSpec.matchAll(/^    (prompt|diff-empty|file-matches|tool-calls): ([\d.]+)$/gm)]
       .map(([, type, weight]) => [type, Number(weight)]),
   );
-  assert.equal(Object.keys(weights).length, 3);
+  assert.equal(Object.keys(weights).length, 4);
   assert.ok(Math.abs(Object.values(weights).reduce((a, b) => a + b, 0) - 1) < 0.000001);
   const threshold = Number(evalSpec.match(/^  threshold: ([\d.]+)$/m)[1]);
-  for (const behavior of ["diff-empty", "file-matches"]) {
+  for (const behavior of ["diff-empty", "file-matches", "tool-calls"]) {
     const total = weights.prompt + weights[behavior];
     assert.ok(weights.prompt / total < threshold, "prose cannot outvote failed behavior");
     assert.ok(weights[behavior] / total < threshold, "behavior cannot outvote failed judgment");
   }
+  const threeTypeScoreOnSingleFail = (weights.prompt + weights["tool-calls"]) / (weights.prompt + weights["file-matches"] + weights["tool-calls"]);
+  assert.ok(threeTypeScoreOnSingleFail < threshold, "failing any grader in a 3-type stimulus must drop score below threshold");
 });

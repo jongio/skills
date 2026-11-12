@@ -13,7 +13,7 @@ Diagnose, check, and optimize GitHub Actions workflows with stateless ETag-cache
   - Script-injection hardening (`zizmor` / `actionlint`: untrusted `${{ ... }}` bound via `env:`).
   - Least-privilege `permissions` (`contents: read` default, job-scoped write permissions).
 - **Two-Tier Telemetry**:
-  1. **Tier 1 (`main` branch — `push`, `workflow_dispatch`, `schedule`)**: Job-level failure diagnosis and isolated worktree auto-repair.
+  1. **Tier 1 (`main` branch - `push`, `workflow_dispatch`, `schedule`)**: Job-level failure diagnosis and isolated worktree auto-repair.
   2. **Tier 2 (All runs including `pull_request`)**: Harvests step/job durations, queue wait times, and recurring flake signatures even when nothing merges to `main`.
 - **Multi-Repo & Portfolio Setup (`/ci-doctor setup`)**:
   - Check the current repository by default, or configure a persistent watchlist across any set of repositories (`--repos owner/repo1,owner/repo2`, `--add-repo`, `--remove-repo`) or dynamic account scopes (`--all-my-repos --visibility private`, `--owner <login> --visibility <all|private|public>`).

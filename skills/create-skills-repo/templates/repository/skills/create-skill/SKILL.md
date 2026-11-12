@@ -176,8 +176,8 @@ npm test
 npm run eval:lint
 ```
 
-Run `devx skills doctor`, strict skill checking, routing, and overlap checks when those tools are
-available in the target repository. Do not run the full capability eval unless the user accepts
+Run `vally lint <skill-dir>`, `skill-doctor`, and registration parity checks when available in
+the target repository. Do not run the full capability eval unless the user accepts
 its agent usage.
 
 ### 7. Generate a deterministic fixture
@@ -202,7 +202,7 @@ Repository generators use `create-skill register create-skill --dry-run`, follow
 unchanged command with `--approve <hash>`, after catalog staging. This registers the bundled
 authoring skill through the same atomic path without rewriting its skill files.
 
-## Safety Invariants
+## Safety
 
 1. Dry-run never writes files or calls an image provider.
 2. Approval binds the exact inputs and target paths. Changed inputs require a new preview.
