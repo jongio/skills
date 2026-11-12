@@ -41,9 +41,10 @@ If any condition fails, record the invalidation reason and proceed with the main
 ## 2. Worktree & Rolling Branch Lifecycle (`repo-maintain/automated`)
 
 - **Never mutate the active checkout:** Resolve the external worktree root from `.github/repo-maintain.json#worktreeRoot` or the host's configured external worktree directory (`<worktree-root>/<repo>/repo-maintain-automated`).
-- **Base synchronization:** Fetch `origin/<defaultBranch>` and check whether an open PR already exists for `head: repo-maintain/automated`:
-  - **No open PR:** Create or reset `repo-maintain/automated` directly to `origin/<defaultBranch>`.
-  - **Open `repo-maintain/automated` PR:** Inspect unmerged commits on `origin/repo-maintain/automated`. If all commits carry automated maintenance prefixes (`chore(repo-maintain):`, `chore(deps):`, `fix(repo-maintain):`, `refactor(repo-maintain):`, `test(repo-maintain):`, `docs(repo-maintain):`), rebase onto `origin/<defaultBranch>` and reuse the existing PR number. If unknown manual commits exist on the branch, do not force-overwrite; pause and escalate to `Needs My Attention`.
+- **Base synchronization & manual-commit guard:** Fetch `origin/<defaultBranch>` and inspect any existing local or remote `repo-maintain/automated` branch (`origin/<defaultBranch>..repo-maintain/automated` and `origin/<defaultBranch>..origin/repo-maintain/automated`) **before** any reset or rebase, regardless of whether a PR is currently open:
+  - **Unmerged manual commits present (with or without an open PR):** If any unmerged commit on local or remote `repo-maintain/automated` lacks an automated maintenance prefix (`chore(repo-maintain):`, `chore(deps):`, `fix(repo-maintain):`, `refactor(repo-maintain):`, `test(repo-maintain):`, `docs(repo-maintain):`), do **not** reset or force-overwrite; pause and escalate to `Needs My Attention`.
+  - **No unmerged commits (or branch absent) and no open PR:** Create or reset `repo-maintain/automated` to `origin/<defaultBranch>`.
+  - **Only automated maintenance commits present:** Rebase onto `origin/<defaultBranch>` and reuse the existing open PR number (or open a new consolidated PR when none is open).
 
 ## 3. Phases 1–6 Execution, Skip Gates & Phase-Scoped Rollback
 

@@ -163,9 +163,9 @@ export function writeReceipt(stateDir, repo, receipt) {
 export function evaluateSkipGate({
   receipt = null,
   headSha = null,
-  newAdvisories = 0,
-  failingCiRuns = 0,
-  untriagedItems = 0,
+  newAdvisories = null,
+  failingCiRuns = null,
+  untriagedItems = null,
   force = false,
   stages = [],
 } = {}) {
@@ -190,17 +190,20 @@ export function evaluateSkipGate({
       reason: `default branch HEAD changed (${receipt.lastMaintainSha} -> ${headSha || "unknown"})`,
     };
   }
-  const advisoriesCount = Number(newAdvisories);
-  const failingCiCount = Number(failingCiRuns);
-  const untriagedCount = Number(untriagedItems);
-  if (
-    !Number.isFinite(advisoriesCount) ||
-    advisoriesCount < 0 ||
-    !Number.isFinite(failingCiCount) ||
-    failingCiCount < 0 ||
-    !Number.isFinite(untriagedCount) ||
-    untriagedCount < 0
-  ) {
+  const parseNonNegativeCount = (val) => {
+    if (typeof val === "number") {
+      return Number.isInteger(val) && val >= 0 ? val : null;
+    }
+    if (typeof val === "string" && val.trim() !== "") {
+      const parsed = Number(val);
+      return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+    }
+    return null;
+  };
+  const advisoriesCount = parseNonNegativeCount(newAdvisories);
+  const failingCiCount = parseNonNegativeCount(failingCiRuns);
+  const untriagedCount = parseNonNegativeCount(untriagedItems);
+  if (advisoriesCount === null || failingCiCount === null || untriagedCount === null) {
     return { skip: false, reason: "unverified or invalid observation counts" };
   }
   if (advisoriesCount > 0) {
@@ -341,18 +344,21 @@ export function computeHealthScore(findings = {}) {
   };
 }
 
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function checkStealthViolations(
   text,
-  { visibility = "PUBLIC", privateRepos = [], requireNonEmpty = false } = {},
+  { visibility = "PUBLIC", privateRepos = [], fleetMode = false, requireNonEmpty = false } = {},
 ) {
   const normalizedVisibility = String(visibility || "PUBLIC").toUpperCase();
   const stealthMode = normalizedVisibility !== "PRIVATE";
-  const input = String(text || "");
-  if (requireNonEmpty && !input.trim()) {
+  if (typeof text !== "string" || (requireNonEmpty && !text.trim())) {
     return {
       ok: false,
       stealthMode,
-      violations: ["missing-input: non-empty --text is required"],
+      violations: ["missing-input: non-empty string --text is required"],
     };
   }
   if (!stealthMode) {
@@ -360,15 +366,27 @@ export function checkStealthViolations(
   }
 
   const violations = [];
+  if (
+    fleetMode &&
+    (!Array.isArray(privateRepos) || privateRepos.filter((r) => String(r || "").trim()).length === 0)
+  ) {
+    violations.push("missing-private-repos: fleet mode requires a non-empty --private-repos inventory");
+  }
   for (const { id, regex } of STEALTH_PATTERNS) {
-    const match = input.match(regex);
-    if (match) {
-      violations.push(`${id}: "${match[0]}"`);
+    if (regex.test(text)) {
+      violations.push(`${id}: [redacted]`);
     }
   }
-  for (const privRepo of privateRepos) {
-    if (!privRepo) continue;
-    if (input.toLowerCase().includes(String(privRepo).toLowerCase())) {
+  for (const privRepo of Array.isArray(privateRepos) ? privateRepos : []) {
+    const raw = String(privRepo || "").trim();
+    if (!raw) continue;
+    const bareName = raw.includes("/") ? raw.split("/").pop() : raw;
+    const candidates = [raw, bareName].filter(Boolean);
+    const leaked = candidates.some((candidate) => {
+      const pattern = new RegExp(`(?<![a-z0-9._-])${escapeRegex(candidate)}(?![a-z0-9._-])`, "i");
+      return pattern.test(text);
+    });
+    if (leaked) {
       violations.push("private-repo-leak: [redacted]");
     }
   }
@@ -390,24 +408,43 @@ const COPYLEFT_LICENSES = /\b(?:AGPL|GPL|LGPL|SSPL|EUPL)\b/i;
 
 export function classifyDependencyPr({
   companionSyncKind = null,
-  semverBump = "patch",
+  semverBump = null,
   breakingChange = false,
-  license = "MIT",
-  repoLicense = "MIT",
-  releaseAgeDays = 10,
+  license = null,
+  repoLicense = null,
+  releaseAgeDays = null,
   cooldownDays = 7,
   isKevActiveExploit = false,
   hasOlderPatchedVersion = false,
 } = {}) {
-  const permissiveRepo = /^(?:MIT|Apache-2\.0|BSD-[23]-Clause|ISC|0BSD)$/i.test(repoLicense);
-  if (permissiveRepo && COPYLEFT_LICENSES.test(String(license || ""))) {
+  const validSemver =
+    typeof semverBump === "string" && /^(?:patch|minor|major)$/i.test(semverBump.trim());
+  const validLicense = typeof license === "string" && license.trim().length > 0;
+  const validRepoLicense = typeof repoLicense === "string" && repoLicense.trim().length > 0;
+  const parsedAge =
+    typeof releaseAgeDays === "number" ||
+    (typeof releaseAgeDays === "string" && releaseAgeDays.trim() !== "")
+      ? Number(releaseAgeDays)
+      : NaN;
+  const validAge = Number.isFinite(parsedAge) && parsedAge >= 0;
+
+  if (!validSemver || !validLicense || !validRepoLicense || !validAge) {
+    return {
+      action: "escalate-needs-attention",
+      reason:
+        "missing or unverified dependency metadata (semverBump, license, repoLicense, and releaseAgeDays are required)",
+    };
+  }
+
+  const permissiveRepo = /^(?:MIT|Apache-2\.0|BSD-[23]-Clause|ISC|0BSD)$/i.test(repoLicense.trim());
+  if (permissiveRepo && COPYLEFT_LICENSES.test(license)) {
     return {
       action: "escalate-needs-attention",
       reason: `incompatible copyleft license (${license}) in ${repoLicense} repository`,
     };
   }
 
-  if (breakingChange || String(semverBump).toLowerCase() === "major") {
+  if (breakingChange || semverBump.trim().toLowerCase() === "major") {
     return {
       action: "escalate-needs-attention",
       reason: "semver-major or breaking dependency update requires maintainer decision",
@@ -415,12 +452,12 @@ export function classifyDependencyPr({
   }
 
   const cooldownPassed =
-    Number(releaseAgeDays) >= Number(cooldownDays) ||
+    parsedAge >= Number(cooldownDays) ||
     (Boolean(isKevActiveExploit) && !hasOlderPatchedVersion);
   if (!cooldownPassed) {
     return {
       action: "hold-cooldown",
-      reason: `release age (${releaseAgeDays}d) is below cooldownDays (${cooldownDays}d) without KEV bypass`,
+      reason: `release age (${parsedAge}d) is below cooldownDays (${cooldownDays}d) without KEV bypass`,
     };
   }
 
@@ -443,6 +480,8 @@ export function classifyDependencyPr({
   };
 }
 
+const BOOLEAN_FLAGS = new Set(["force", "fleet"]);
+
 function parseCliArgs(argv) {
   const flags = {};
   const positionals = [];
@@ -452,11 +491,16 @@ function parseCliArgs(argv) {
       const eqIdx = token.indexOf("=");
       if (eqIdx !== -1) {
         flags[token.slice(2, eqIdx)] = token.slice(eqIdx + 1);
-      } else if (i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
-        flags[token.slice(2)] = argv[i + 1];
-        i += 1;
       } else {
-        flags[token.slice(2)] = true;
+        const key = token.slice(2);
+        if (BOOLEAN_FLAGS.has(key)) {
+          flags[key] = true;
+        } else if (i + 1 < argv.length) {
+          flags[key] = argv[i + 1];
+          i += 1;
+        } else {
+          flags[key] = null;
+        }
       }
     } else {
       positionals.push(token);
@@ -500,9 +544,9 @@ export function runCli(argv = process.argv.slice(2)) {
     return evaluateSkipGate({
       receipt,
       headSha: flags["head-sha"] || null,
-      newAdvisories: Number(flags["new-advisories"] || 0),
-      failingCiRuns: Number(flags["failing-ci"] || 0),
-      untriagedItems: Number(flags["untriaged"] || 0),
+      newAdvisories: flags["new-advisories"],
+      failingCiRuns: flags["failing-ci"],
+      untriagedItems: flags["untriaged"],
       force: Boolean(flags.force),
       stages: flags.stages ? String(flags.stages).split(",").filter(Boolean) : [],
     });
@@ -519,9 +563,10 @@ export function runCli(argv = process.argv.slice(2)) {
     const privateRepos = flags["private-repos"]
       ? String(flags["private-repos"]).split(",").filter(Boolean)
       : [];
-    return checkStealthViolations(flags.text || "", {
+    return checkStealthViolations(flags.text, {
       visibility: flags.visibility || "PUBLIC",
       privateRepos,
+      fleetMode: Boolean(flags.fleet),
       requireNonEmpty: true,
     });
   }

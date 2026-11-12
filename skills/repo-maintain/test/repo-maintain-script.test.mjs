@@ -124,43 +124,101 @@ test("evaluateSkipGate and receipt persistence enforce all 5 Phase 0 fast no-op 
 
     const loaded = readReceipt(tempState, repo);
     assert.deepEqual(
-      evaluateSkipGate({ receipt: loaded, headSha: sha }),
+      evaluateSkipGate({
+        receipt: loaded,
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }),
       { skip: true, reason: "fast no-op: HEAD unchanged and healthy" },
     );
 
+    // Omitted observation counts fail closed (skip: false)
     assert.equal(
-      evaluateSkipGate({ receipt: loaded, headSha: "deadbeef" }).skip,
+      evaluateSkipGate({ receipt: loaded, headSha: sha }).skip,
       false,
     );
     assert.equal(
-      evaluateSkipGate({ receipt: loaded, headSha: sha, newAdvisories: 1 }).skip,
+      evaluateSkipGate({
+        receipt: loaded,
+        headSha: "deadbeef",
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
       false,
     );
     assert.equal(
-      evaluateSkipGate({ receipt: loaded, headSha: sha, failingCiRuns: 1 }).skip,
+      evaluateSkipGate({
+        receipt: loaded,
+        headSha: sha,
+        newAdvisories: 1,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
       false,
     );
     assert.equal(
-      evaluateSkipGate({ receipt: loaded, headSha: sha, untriagedItems: 2 }).skip,
+      evaluateSkipGate({
+        receipt: loaded,
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 1,
+        untriagedItems: 0,
+      }).skip,
       false,
     );
     assert.equal(
-      evaluateSkipGate({ receipt: loaded, headSha: sha, force: true }).skip,
+      evaluateSkipGate({
+        receipt: loaded,
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 2,
+      }).skip,
       false,
     );
     assert.equal(
-      evaluateSkipGate({ receipt: loaded, headSha: sha, stages: ["deps", "secops"] }).skip,
+      evaluateSkipGate({
+        receipt: loaded,
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+        force: true,
+      }).skip,
+      false,
+    );
+    assert.equal(
+      evaluateSkipGate({
+        receipt: loaded,
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+        stages: ["deps", "secops"],
+      }).skip,
       false,
     );
     assert.equal(
       evaluateSkipGate({
         receipt: { ...loaded, failedPhases: ["refactor"] },
         headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
       }).skip,
       false,
     );
     assert.equal(
-      evaluateSkipGate({ receipt: loaded, headSha: sha, newAdvisories: -1 }).skip,
+      evaluateSkipGate({
+        receipt: loaded,
+        headSha: sha,
+        newAdvisories: -1,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
       false,
     );
   } finally {
@@ -228,20 +286,37 @@ test("computeHealthScore calculates deterministic Before/After scores and clamps
   assert.equal(scoreToGrade(97), "A+");
 });
 
-test("checkStealthViolations blocks CWE/CVE/exploit terms and private fleet repo names on public repos", () => {
+test("checkStealthViolations blocks CWE/CVE/exploit terms and private fleet repo names on public repos without echoing matched text", () => {
   const badCommit = checkStealthViolations(
     "fix(secops): patch CWE-22 path traversal vulnerability from sample-team/internal-ledger",
     { visibility: "PUBLIC", privateRepos: ["sample-team/internal-ledger"] },
   );
   assert.equal(badCommit.ok, false);
   assert.equal(badCommit.stealthMode, true);
-  assert.ok(badCommit.violations.some((v) => v.includes("cwe-id")));
-  assert.ok(badCommit.violations.some((v) => v.includes("vuln-class")));
-  assert.ok(badCommit.violations.some((v) => v.includes("private-repo-leak")));
+  assert.ok(badCommit.violations.includes("cwe-id: [redacted]"));
+  assert.ok(badCommit.violations.includes("vuln-class: [redacted]"));
+  assert.ok(badCommit.violations.includes("private-repo-leak: [redacted]"));
+  assert.doesNotMatch(JSON.stringify(badCommit), /CWE-22|internal-ledger/i);
+
+  // Bare private repository name leak is also caught
+  const bareNameLeak = checkStealthViolations(
+    "Port validation logic from internal-ledger into public handler",
+    { visibility: "PUBLIC", privateRepos: ["sample-team/internal-ledger"] },
+  );
+  assert.equal(bareNameLeak.ok, false);
+  assert.ok(bareNameLeak.violations.includes("private-repo-leak: [redacted]"));
+
+  // Fleet mode requires a non-empty privateRepos inventory
+  const missingFleetInventory = checkStealthViolations(
+    "fix(repo-maintain): harden input validation and configuration defaults",
+    { visibility: "PUBLIC", fleetMode: true, privateRepos: [] },
+  );
+  assert.equal(missingFleetInventory.ok, false);
+  assert.ok(missingFleetInventory.violations.some((v) => v.includes("missing-private-repos")));
 
   const neutralCommit = checkStealthViolations(
     "fix(repo-maintain): harden input validation and configuration defaults",
-    { visibility: "PUBLIC", privateRepos: ["sample-team/internal-ledger"] },
+    { visibility: "PUBLIC", fleetMode: true, privateRepos: ["sample-team/internal-ledger"] },
   );
   assert.deepEqual(neutralCommit, {
     ok: true,
@@ -257,7 +332,14 @@ test("checkStealthViolations blocks CWE/CVE/exploit terms and private fleet repo
   assert.equal(privateCommit.stealthMode, false);
 });
 
-test("classifyDependencyPr distinguishes companion syncs, cooldown holds, KEV bypasses, and license/major escalations", () => {
+test("classifyDependencyPr distinguishes companion syncs, cooldown holds, KEV bypasses, and license/major/missing-metadata escalations", () => {
+  // Missing metadata fails closed to escalate-needs-attention
+  assert.equal(classifyDependencyPr({}).action, "escalate-needs-attention");
+  assert.equal(
+    classifyDependencyPr({ semverBump: "patch", license: "MIT", repoLicense: "MIT" }).action,
+    "escalate-needs-attention",
+  );
+
   assert.equal(
     classifyDependencyPr({
       companionSyncKind: "required-azd-version",
@@ -339,6 +421,15 @@ test("runCli exposes deterministic JSON subcommands", () => {
   ]);
   assert.equal(stealthRes.ok, true);
 
+  const stealthDashBody = runCli([
+    "stealth-check",
+    "--visibility=PUBLIC",
+    "--text",
+    "---\ntitle: CWE-79 exploit\n---",
+  ]);
+  assert.equal(stealthDashBody.ok, false);
+  assert.ok(stealthDashBody.violations.includes("cwe-id: [redacted]"));
+
   const emptyStealthRes = runCli(["stealth-check", "--visibility=PUBLIC"]);
   assert.equal(emptyStealthRes.ok, false);
   assert.ok(emptyStealthRes.violations.some((v) => v.includes("missing-input")));
@@ -380,6 +471,16 @@ test("runCli exposes deterministic JSON subcommands", () => {
       JSON.stringify({ lastMaintainSha: "1234567890abcdef1234567890abcdef12345678", healthScore: 98 }),
     ]);
     assert.equal(written.healthScore, 98);
+    const checkedMissingObs = runCli([
+      "skip-check",
+      "--state-dir",
+      tempState,
+      "--repo",
+      "example-org/one",
+      "--head-sha",
+      "1234567890abcdef1234567890abcdef12345678",
+    ]);
+    assert.equal(checkedMissingObs.skip, false);
     const checked = runCli([
       "skip-check",
       "--state-dir",
@@ -388,6 +489,12 @@ test("runCli exposes deterministic JSON subcommands", () => {
       "example-org/one",
       "--head-sha",
       "1234567890abcdef1234567890abcdef12345678",
+      "--new-advisories",
+      "0",
+      "--failing-ci",
+      "0",
+      "--untriaged",
+      "0",
     ]);
     assert.equal(checked.skip, true);
   } finally {
@@ -400,7 +507,13 @@ test("runCli exposes deterministic JSON subcommands", () => {
   const depRes = runCli([
     "classify-dep-pr",
     "--json",
-    JSON.stringify({ companionSyncKind: "codeql-action-lockstep-sha", releaseAgeDays: 10 }),
+    JSON.stringify({
+      companionSyncKind: "codeql-action-lockstep-sha",
+      semverBump: "patch",
+      license: "MIT",
+      repoLicense: "MIT",
+      releaseAgeDays: 10,
+    }),
   ]);
   assert.equal(depRes.action, "auto-companion-sync");
 
