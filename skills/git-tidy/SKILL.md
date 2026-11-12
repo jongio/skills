@@ -2,9 +2,8 @@
 name: git-tidy
 description: >-
   Audit Git branches, worktrees, stashes, remotes, tags, artifacts, ignored
-  tracking, large blobs, and maintenance health. Remove proven integrated local
-  branches, clean linked worktrees, redundant stashes, and stale origin
-  tracking refs in one guarded run.
+  tracking, large blobs, and maintenance health. Aim for a clean local default
+  checkout, one local branch, and zero stashes in one confirmed, recovery-backed run.
   USE FOR: git-tidy, tidy repo, audit worktrees, inspect stashes, Git cleanup.
   DO NOT USE FOR: history rewriting, repository deletion, or discarding unique work.
 metadata:
@@ -26,6 +25,11 @@ git-tidy [scope] --dry-run
 ```
 
 Default to `all` at `proof` depth. Honor explicit scope and user limits.
+The default target is a clean primary checkout on the verified remote default
+(usually `main`), exactly one local branch, and zero stashes. Treat unmet
+conditions as findings with concrete blockers. Read
+[default reconciliation](references/approval-flow.md#default-reconciliation)
+before preparing the plan, including when the local default ref already matches.
 `branches` can remove blocking linked worktrees only when the request includes
 worktree cleanup. `worktrees` and `stashes` use branch refs as evidence only.
 
@@ -41,9 +45,10 @@ worktree cleanup. `worktrees` and `stashes` use branch refs as evidence only.
 2. **Verify.** In cleanup mode resolve the intended origin URL and use isolated
    remote verification without an approval stop. Feed its baseline to
    `analyze-verified`. If the verified default tip is missing or stale locally,
-   report the gap and keep auditing. If the user authorized a refresh, fetch
-   only that tracking ref from the exact verified URL without pruning, with
-   hooks and executable transports disabled. Verify and analyze again.
+   report the gap and keep auditing. Include any needed tracking-ref refresh
+   in the plan. After authorization, fetch only that ref from the verified URL
+   without pruning, with hooks and executable transports disabled. Verify and
+   analyze again before acting on dependent targets.
    Include [stale origin tracking refs](references/approval-flow.md#stale-origin-tracking-refs)
    by default under `all`, and when `remote` is explicitly selected.
 3. **Investigate blockers.** Compare HEAD, index, and file bytes for suspect
@@ -51,35 +56,34 @@ worktree cleanup. `worktrees` and `stashes` use branch refs as evidence only.
    Inspect ignored entries in otherwise removable worktrees using the
    [cleanup and revalidation flow](references/approval-flow.md). Treat a verified
    index refresh or removal of byte-verified outputs as a proposed prerequisite.
-   Preserve real or uncertain overlays and unmerged committed changes.
+   Identify active work to retain and inactive work that can be archived.
 4. **Show the report and confirm once.** Show the full audit summary in chat,
    with proposed removals, retained items and why they remain, coverage gaps,
    and legacy findings. Show the preservation evidence for every proposed
    removal. Include exact targets and identities, retained refs or commits,
    how preservation was proved, and any prerequisite and execution order.
    List every stale origin ref and tip, live absence evidence, per-ref and
-   total commit loss counts, and the recovery bundle path if required.
+   total commit loss counts, and the recovery paths and verification for each action.
    A linked report can hold long lists. Every target must be available for
    review before confirmation. Include a checked-out branch as a conditional
-   removal only when its integration is proved and all required worktree
-   removals or the safe checkout are listed. Ask once to approve the listed
+   removal only with its preservation evidence and the listed worktree
+   removal, safe switch, or same-commit detach. Ask once to approve the listed
    plan or keep everything. If declined, unanswered, report-only, or there are
    no eligible actions, finish with the report.
-5. **Execute.** Run only approved prerequisites and removals. Apply approved
-   tracking-ref pruning first. Verify the recovery bundle before pruning
-   whenever the plan shows commits would become unreachable. Revalidate and
-   remove approved linked worktrees first. Rerun proof, then delete approved
-   conditional branches whose prerequisites and evidence hold. Drop approved
-   redundant stashes with exact preservation. Revalidate every batch and check
-   each target immediately before execution. Use the single confirmation for
-   the listed plan, including its listed dependencies.
+5. **Execute.** After approval, verify the planned recovery backups before the
+   first removal or overwrite. Run approved stale-ref pruning first, then the
+   approved worktree removals and checkout transitions. Recheck their dependent
+   branches, delete exact approved refs, and drop the approved stashes.
+   Revalidate every batch and target. The same confirmation covers listed
+   prerequisites and actions unlocked by those prerequisites.
 6. **Verify and finish.** Reinventory after mutations. On drift or partial
    failure, rebuild the plan from current evidence and continue independent safe
    work. Retry recoverable failures after addressing their cause. Record a
    persistent failure as a blocker until its evidence changes.
-   Finish every approved action whose evidence still holds. Report what was
-   removed and why each leftover remains. Report new candidates and changed
-   actions separately. Fresh confirmation is required to remove them.
+   Finish every approved action whose evidence still holds. Verify the primary
+   checkout's branch, tip and status, the local branch list, and the stash list.
+   Report what was removed, why each leftover remains, and any new candidates
+   or changed actions. Fresh confirmation is required for changed actions.
    Include the saved audit path and full `runId` when available.
 
 ## Evidence and scope
@@ -90,15 +94,12 @@ worktree cleanup. `worktrees` and `stashes` use branch refs as evidence only.
   repository, head ref, head OID, and merged base all match. A branch may have
   advanced since the merge. Age, naming, patch similarity, and commit messages
   cannot prove preservation. See [evidence model](references/evidence-model.md).
-- Remove integrated local branches only. Preserve the default and policy-
-  protected branches, open PR heads, and any checked-out branch. When a merged
-  branch is checked out in the primary worktree, switch to the verified local
-  default only if the worktree is clean and that checkout is safe and available.
-  Use `git switch --no-overwrite-ignore` and rerun proof. Never force a checkout
-  or reset the primary worktree.
-- Preserve unique stashes and dirty, locked, missing, conflicted, or otherwise
-  unverified worktrees. Report any unique stash or detached work that can be
-  moved into a durable branch with user direction.
+- Preserve protected branches, open PR heads, and active or uncertain work.
+  For inactive branches and stashes, distinguish integration or exact
+  duplication from retirement backed by a verified archive. Archive-backed
+  retirement requires explicit approval of the specific action in the plan.
+  Use `git switch --no-overwrite-ignore` for an approved checkout transition.
+  Never force a checkout, reset the primary worktree, or delete a checked-out ref.
 - Prune stale local origin tracking refs as part of the confirmed cleanup.
   Live branch deletion
   requires an explicit remote cleanup request and a verified, unprotected exact

@@ -1,6 +1,6 @@
 ---
 title: git-tidy
-tagline: "Audit Git work, remove proven integrated local branches and worktrees, and verify what remains."
+tagline: "Audit Git work and aim for a clean local default branch with zero stashes."
 useWhen: "When Git work needs cleanup without risking unique changes or relying on age and names as deletion proof."
 repoPath: skills/git-tidy
 thumb: images/thumb-git-tidy.png
@@ -15,16 +15,15 @@ install:
 ## What It Does
 
 `git-tidy` audits the whole repository and shows the evidence for each proposed
-removal. One confirmation covers the listed cleanup plan, including stale origin
-tracking refs. A verified recovery bundle preserves any history at risk.
-The cleanup removes worktrees
-first and then rechecks their branches. It also drops duplicate stashes when a
-durable copy holds the same changes.
+removal. It aims to leave the primary checkout clean on the verified default
+branch, with that branch as the sole local branch and zero stashes. One
+confirmation covers the listed actions, including stale origin tracking refs.
+Recovery backups are verified before removal.
 
 The audit covers remote refs, tags, ignored tracking, artifacts, large blobs,
 and maintenance. The final summary lists removals, retained work, and blockers.
-Dirty or unmerged work stays in place. Changing live remote branches requires
-an explicit request.
+Active work and operational checkouts are preserved. Changing live remote
+branches requires an explicit request.
 
 Use `--dry-run` for a preview, `--depth metadata` for inventory, or
 `--depth review` for a bounded content review. Proof requires Node.js 22 or

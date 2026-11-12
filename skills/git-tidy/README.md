@@ -8,17 +8,17 @@ tags, artifacts, ignored tracking, large blobs, and maintenance health. It uses
 typed legacy inventory, records coverage gaps, and saves a run-specific JSON
 artifact when session storage is available.
 
-Cleanup removes clean linked worktrees with integrated changes, then rechecks
-which local branches can be deleted. It drops duplicate stashes only when their
-exact changes survive in a durable copy. One confirmation covers the listed
-targets and prerequisites, including stale origin tracking refs. Each batch is
-revalidated before execution. When pruning would leave commits unreachable, a
-verified recovery bundle is required. The final audit lists removals and why
-each remaining branch or worktree was retained.
+Cleanup aims for a clean primary checkout on the verified default branch,
+that branch as the sole local branch, and zero stashes. One confirmation
+covers the listed targets and prerequisites, including stale origin tracking
+refs. The plan verifies private backups before removing or overwriting work,
+and revalidates each target before acting. The final audit reports progress
+toward the target and the reason for each retained item.
 
-Exact ancestry and exact tree comparisons catch squash merges. Dirty worktrees
-and unmerged work are kept. Ignored outputs can be cleared after exact
-content verification. Unverified ignored files block removal.
+Exact ancestry and exact tree comparisons catch squash merges. Inactive work
+outside the default branch can be retired after approval and verified recovery.
+Operational worktrees can stay detached at their existing commit. Ignored
+files need verified recovery or exact output proof before removal.
 
 ## Install
 
@@ -77,8 +77,8 @@ credential helpers, and existing authentication when required. The verified
 default tip must match the local tracking ref used as evidence. Unrelated
 tracking drift is reported separately.
 
-Main worktrees, protected refs, unique stashes, uncertain ignored content, and
-dirty or locked worktrees are preserved. Live remote branch deletion requires an
+Primary worktrees, protected refs, active work, and unverified data are
+preserved. Live remote branch deletion requires an
 explicit remote cleanup request, protection evidence, and an expected-OID
 lease. Tags, artifacts, large blobs, and maintenance are audited. Changing
 those areas requires a separate request.

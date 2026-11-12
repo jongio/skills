@@ -31,7 +31,9 @@ test("tracking prune confirms exact refs and verifies recovery before deletion",
   local.git(["update-ref", "refs/remotes/origin/duplicate", unique]);
   const input = { remoteUrl: origin.root, bundlePath, excludeWitnessRefs: [] };
   local.git(["branch", "pending-removal", unique]);
-  assert.equal((await run("plan", input, local.root)).bundleRequired, false);
+  const allReachablePlan = await run("plan", input, local.root);
+  assert.equal(allReachablePlan.unreachableCommits, 0);
+  assert.equal(allReachablePlan.bundleRequired, true);
   input.excludeWitnessRefs.push("refs/heads/pending-removal");
   local.git(["update-ref", "refs/bisect/bad", unique]);
 
@@ -86,10 +88,22 @@ test("tracking prune confirms exact refs and verifies recovery before deletion",
   const recovered = local.git(["bundle", "list-heads", bundlePath]).stdout.toString("utf8");
   assert.match(recovered, new RegExp(unique + " refs/remotes/origin/unique"));
   assert.deepEqual((await run("plan", input, local.root)).rows, []);
+  await unlink(bundlePath);
 
   local.git(["update-ref", "refs/remotes/origin/merged", base]);
   const mergedPlan = await run("plan", input, local.root);
-  assert.equal(mergedPlan.bundleRequired, false);
-  const withoutBundle = await run("apply", { input, approvedPlanId: mergedPlan.planId }, local.root);
-  assert.deepEqual(withoutBundle, { pruned: ["refs/remotes/origin/merged"], bundle: null });
+  assert.equal(mergedPlan.unreachableCommits, 0);
+  assert.equal(mergedPlan.bundleRequired, true);
+  await assert.rejects(run("apply", { input, approvedPlanId: mergedPlan.planId }, local.root, {
+    verify: async () => { throw new Error("Injected bundle verification failure"); },
+  }), /bundle verification failure/);
+  assert.equal(local.oid("refs/remotes/origin/merged"), base);
+  await unlink(bundlePath);
+
+  const mergedResult = await run("apply", { input, approvedPlanId: mergedPlan.planId }, local.root);
+  assert.deepEqual(mergedResult, { pruned: ["refs/remotes/origin/merged"], bundle: await realpath(bundlePath) });
+  const emptyPlan = await run("plan", input, local.root);
+  assert.equal(emptyPlan.bundleRequired, false);
+  assert.deepEqual(await run("apply", { input, approvedPlanId: emptyPlan.planId }, local.root),
+    { pruned: [], bundle: null });
 });

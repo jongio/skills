@@ -13,7 +13,8 @@ safety boundary. Scenarios must verify:
 - read-only analyzer behavior, including no fetch or prune;
 - explicit coverage gaps for missing, partial, hostile, or over-budget evidence;
 - monotone bounded review that can't strengthen deletion eligibility; and
-- separate approvals and established handoffs for every action class.
+- one confirmation for default reconciliation, with verified recovery before
+  cleanup and specialist handoffs for out-of-scope operations.
 
 Tags, artifacts, ignored-but-tracked files, large blobs, remotes, and maintenance
 retain their protected behavior. In particular, recovery-destroying maintenance

@@ -157,7 +157,7 @@ async function snapshot(git, input, cwd) {
     input: { ...input, bundlePath }, commonDir,
     objectFormat, defaultTracking, defaultOid: remote.defaultOid, liveHeads: remote.heads,
     rows, omitted: omitted.map(({ ref, oid }) => ({ ref, oid })), retainedWitnesses: witnesses,
-    unreachableCommits, bundleRequired: unreachableCommits > 0,
+    unreachableCommits, bundleRequired: rows.length > 0,
   };
   return { ...evidence, planId: digest(evidence) };
 }
@@ -223,24 +223,22 @@ export async function run(mode, value, cwd = process.cwd(), { verify = verifyArc
   if (mode === "plan") return plan;
   if (plan.planId !== value.approvedPlanId) throw new Error("Tracking-ref plan changed. Review it again.");
   if (plan.rows.length === 0) return { pruned: [], bundle: null };
-  if (plan.bundleRequired) {
-    await archive(git, plan);
-    const bundlePath = plan.input.bundlePath;
-    const archived = await lstat(bundlePath, { bigint: true });
-    await verify(git, plan);
-    plan = await snapshot(git, input, cwd);
-    if (plan.planId !== value.approvedPlanId) {
-      throw new Error("Plan changed after writing the recovery bundle. Review it again.");
-    }
-    const current = await lstat(bundlePath, { bigint: true });
-    if (!archived.isFile() || !current.isFile() ||
-        ["dev", "ino", "size", "mtimeNs", "ctimeNs"].some((key) => archived[key] !== current[key])) {
-      throw new Error("Recovery bundle changed after verification.");
-    }
+  await archive(git, plan);
+  const bundlePath = plan.input.bundlePath;
+  const archived = await lstat(bundlePath, { bigint: true });
+  await verify(git, plan);
+  plan = await snapshot(git, input, cwd);
+  if (plan.planId !== value.approvedPlanId) {
+    throw new Error("Plan changed after writing the recovery bundle. Review it again.");
   }
-  const guards = plan.bundleRequired
-    ? [{ ref: plan.defaultTracking, oid: plan.defaultOid }]
-    : plan.retainedWitnesses;
+  const current = await lstat(bundlePath, { bigint: true });
+  if (!archived.isFile() || !current.isFile() ||
+      ["dev", "ino", "size", "mtimeNs", "ctimeNs"].some((key) => archived[key] !== current[key])) {
+    throw new Error("Recovery bundle changed after verification.");
+  }
+  const guards = plan.unreachableCommits === 0
+    ? plan.retainedWitnesses
+    : [{ ref: plan.defaultTracking, oid: plan.defaultOid }];
   const transaction = [
     "start", ...guards.map(({ ref, oid }) => `verify ${ref} ${oid}`),
     ...plan.rows.map(({ ref, oid }) => `delete ${ref} ${oid}`),
@@ -249,7 +247,7 @@ export async function run(mode, value, cwd = process.cwd(), { verify = verifyArc
   await git(["update-ref", "--no-deref", "--stdin"], transaction);
   const remaining = new Set((await git(["for-each-ref", "--format=%(refname)", trackingPrefix])).split("\n"));
   if (plan.rows.some(({ ref }) => remaining.has(ref))) throw new Error("A pruned tracking ref is present again.");
-  return { pruned: plan.rows.map(({ ref }) => ref), bundle: plan.bundleRequired ? plan.input.bundlePath : null };
+  return { pruned: plan.rows.map(({ ref }) => ref), bundle: bundlePath };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
