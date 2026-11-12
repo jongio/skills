@@ -44,6 +44,18 @@ export async function acquireFleetLeader(scopeKey = "default") {
   });
 }
 
+function isAwaitingOperator(session) {
+  return Boolean(
+    session.awaitingOperator ||
+    session.activity === "waiting" ||
+    session.activity === "attention" ||
+    session.awaitingInput ||
+    session.pendingPlan ||
+    session.pendingPermission ||
+    session.pendingElicitation,
+  );
+}
+
 export function classifyRecoveryCandidate(
   session,
   currentMs,
@@ -55,7 +67,7 @@ export function classifyRecoveryCandidate(
     return { action: "none", autoEligible: false, reason: "Session turn was cancelled by operator", hasSignal: false };
   }
 
-  if (session.awaitingInput || session.pendingPlan || session.pendingPermission || session.pendingElicitation) {
+  if (isAwaitingOperator(session)) {
     return { action: "none", autoEligible: false, reason: "Waiting on operator input or approval", hasSignal: false };
   }
 
@@ -458,7 +470,7 @@ export async function createRecoveryWatchdog({
         const safeId = isSafeKey(String(session.id)) && SAFE_SESSION_ID.test(String(session.id)) ? session.id : "<session-id>";
         throw new Error(`Standalone CLI sessions must be resumed in a terminal: copilot --resume ${safeId}`);
       }
-      if (session.awaitingInput || session.pendingPlan || session.pendingPermission || session.pendingElicitation) {
+      if (isAwaitingOperator(session)) {
         throw new Error("Session is waiting on operator input or approval; resolve the pending prompt first.");
       }
       if (session.rootCancelled) {

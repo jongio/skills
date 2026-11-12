@@ -670,6 +670,156 @@ test("closeInstance and shutdown immediately invalidate viewer activity and bloc
   assert.equal(workerRunning, false);
 });
 
+test("set_scope transitions do not restart polling after switching back to session, and operator-attention signals block auto/manual wakes", async (t) => {
+  const nowMs = Date.parse("2026-11-11T17:00:00.000Z");
+  let releaseSlowScope = null;
+  let slowScopeStartedResolve = () => {};
+  let slowScopeGate = null;
+  let slowScopeStarted = null;
+  const armSlowScope = () => {
+    slowScopeGate = new Promise((r) => { releaseSlowScope = r; });
+    slowScopeStarted = new Promise((r) => { slowScopeStartedResolve = r; });
+  };
+
+  let recoveryCalls = 0;
+  const progressService = await createProgressService({
+    sessionId: "scope-race-host",
+    store: memoryStore(),
+    readSources: async () => ({ plan: { exists: false, content: null }, rows: [], dependencies: [] }),
+  });
+  const watchdog = await createRecoveryWatchdog({
+    store: memoryStore(),
+    now: () => nowMs,
+    graceMs: 60_000,
+    isLeader: () => true,
+    recoverSession: async () => { recoveryCalls += 1; },
+  });
+  await watchdog.setPolicy("all_active");
+
+  const fleetService = createFleetService({
+    hostSessionId: "scope-race-host",
+    now: () => nowMs,
+    watchdog,
+    executeHostTool: async (name) => {
+      if (slowScopeGate) {
+        slowScopeStartedResolve();
+        await slowScopeGate;
+      }
+      if (name === "list_sessions_and_chats") {
+        return [
+          { id: "board-attn", name: "Board operator wait", repository: "jongio/skills" },
+          { id: "host-waiting", name: "Host waiting status", repository: "jongio/skills" },
+          { id: "omitted-cold-tail", name: "Omitted cold tail", repository: "jongio/skills" },
+        ];
+      }
+      if (name === "get_sessions_status") {
+        // Coordinator-scoped: omits "omitted-cold-tail" while reporting "host-waiting" with activity="waiting" and no awaiting_input payload!
+        return [
+          { id: "board-attn", activity: "idle", mode: "autopilot", was_interrupted: true },
+          { id: "host-waiting", activity: "waiting", mode: "autopilot", was_interrupted: true },
+        ];
+      }
+      return [];
+    },
+    workerClient: {
+      scan: async () => ({
+        sessions: [
+          {
+            id: "board-attn",
+            repository: "jongio/skills",
+            todos: [{ id: "t1", title: "Merge PR", status: "in_progress" }],
+            board: {
+              activeGoalId: "g1",
+              delivery: { phase: "awaiting_merge_approval", status: "waiting" },
+              operatorReports: [{ id: "r1", goalId: "g1", taskId: "t1", requiresOperator: true, message: "Approve merge?" }],
+            },
+            tailState: {
+              activity: "idle",
+              lastError: { message: "Earlier transient hiccup", at: new Date(nowMs - 300_000).toISOString() },
+            },
+          },
+          {
+            id: "host-waiting",
+            repository: "jongio/skills",
+            todos: [{ id: "t2", title: "Confirm step", status: "in_progress" }],
+            tailState: {
+              activity: "idle",
+              lastError: { message: "Earlier transient hiccup", at: new Date(nowMs - 300_000).toISOString() },
+            },
+          },
+          {
+            id: "omitted-cold-tail",
+            repository: "jongio/skills",
+            todos: [{ id: "t3", title: "Work", status: "in_progress" }],
+            tailState: {
+              activity: "idle",
+              truncatedStart: true,
+              lastError: { message: "Earlier transient hiccup", at: new Date(nowMs - 300_000).toISOString() },
+            },
+          },
+        ],
+        stats: {},
+      }),
+      stop: async () => {},
+      isRunning: () => false,
+    },
+  });
+  t.after(() => fleetService.shutdown());
+
+  const canvasConfig = createProgressCanvas(progressService, "scope-race-host", { fleetService });
+  const runtime = attachCanvasLifecycle(createCanvasRuntime(canvasConfig), canvasConfig);
+  t.after(() => runtime.shutdown());
+
+  // Open two primary panels in default "session" scope.
+  const panelA = await runtime.openInstance({ instanceId: "scope-a", input: {}, ctx: { sessionId: "scope-race-host", agentId: null } });
+  await runtime.openInstance({ instanceId: "scope-b", input: {}, ctx: { sessionId: "scope-race-host", agentId: null } });
+  const actionUrl = new URL("/action", panelA.url);
+  actionUrl.search = new URL(panelA.url).search;
+
+  // Start set_scope("projects") (which iterates across scope-a & scope-b) and switch back to "session" while slow discovery is in flight!
+  armSlowScope();
+  const projectsReq = fetch(actionUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actionName: "set_scope", input: { scope: "projects" } }),
+  });
+  await slowScopeStarted;
+  const sessionReq = await fetch(actionUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actionName: "set_scope", input: { scope: "session" } }),
+  });
+  assert.equal(sessionReq.status, 200);
+  assert.equal(fleetService.isPolling(), false);
+
+  releaseSlowScope();
+  slowScopeGate = null;
+  await projectsReq;
+  // Stale projectsReq must NOT restart polling on the second panel or overwrite activeScope!
+  assert.equal(fleetService.isPolling(), false);
+  const stateUrl = new URL("/state", panelA.url);
+  stateUrl.search = new URL(panelA.url).search;
+  assert.equal((await (await fetch(stateUrl)).json()).activeScope, "session");
+
+  // Now switch cleanly to "inbox" and verify all 3 operator-attention / coordinator-omitted sessions block auto and manual wakes!
+  const inboxReq = await fetch(actionUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ actionName: "set_scope", input: { scope: "inbox" } }),
+  });
+  assert.equal(inboxReq.status, 200);
+  assert.equal(recoveryCalls, 0);
+
+  await assert.rejects(
+    fleetService.triggerRecovery({ targetSessionId: "board-attn" }),
+    /waiting on operator input or approval/i,
+  );
+  await assert.rejects(
+    fleetService.triggerRecovery({ targetSessionId: "host-waiting" }),
+    /waiting on operator input or approval/i,
+  );
+});
+
 test("leader handover, viewer-close cancellation, cross-instance policy sync, RPC failure accounting, subagent auth exclusions, and untimestamped grace windows hold", async (t) => {
   let nowMs = Date.parse("2026-11-11T15:00:00.000Z");
   const sharedStore = memoryStore();

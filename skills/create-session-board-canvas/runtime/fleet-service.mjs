@@ -618,11 +618,42 @@ export function createFleetService({
         const pendingElicitation =
           (awaitingInput?.isElicitation ? awaitingInput : null) || loc?.tailState?.pendingElicitation || null;
 
+        const todos = loc?.todos || [];
+        const doneTodoIds = new Set(todos.filter((t) => t?.status === "done").map((t) => t.id));
+        const boardAttentionItem = Array.isArray(loc?.board?.attention) && loc.board.attention.length > 0
+          ? loc.board.attention[0]
+          : null;
+        const boardOperatorReport = Array.isArray(loc?.board?.operatorReports)
+          ? loc.board.operatorReports.find(
+              (r) =>
+                (!r.goalId || r.goalId === loc?.board?.activeGoalId) &&
+                (!r.taskId || !doneTodoIds.has(r.taskId)),
+            ) || null
+          : null;
+        const awaitingMergeApproval = loc?.board?.delivery?.phase === "awaiting_merge_approval";
+        const serverAttention = String(loc?.liveServer?.status || "").toLowerCase() === "attention";
+
         let activity = String(st?.activity || st?.status || loc?.liveServer?.status || loc?.tailState?.activity || "idle").toLowerCase();
         if (activity === "working") activity = "busy";
-        if (awaitingInput || pendingPlan || pendingPermission || pendingElicitation) activity = "waiting";
+        if (activity === "attention") activity = "waiting";
+        const awaitingOperator = Boolean(
+          activity === "waiting" ||
+          serverAttention ||
+          boardAttentionItem ||
+          boardOperatorReport ||
+          awaitingMergeApproval ||
+          awaitingInput ||
+          pendingPlan ||
+          pendingPermission ||
+          pendingElicitation,
+        );
+        if (awaitingOperator) activity = "waiting";
+        const operatorAttentionMessage =
+          boardAttentionItem?.message ||
+          boardOperatorReport?.message ||
+          (awaitingMergeApproval ? "Awaiting final merge approval." : null) ||
+          (serverAttention ? `Awaiting operator (${loc.liveServer.attentionKind || "attention"}).` : null);
 
-        const todos = loc?.todos || [];
         const hierarchy = loc?.board?.hierarchy || [];
         const leafMetrics = computeLeafMetrics(todos, hierarchy, { truncated: Boolean(loc?.todosTruncated) });
         const prs = enrichPrList(cat, loc, localResult.prCache);
@@ -637,6 +668,9 @@ export function createFleetService({
 
         const deepLink = safeDeepLinkUrl(cat.app_url) || buildSessionDetailDeepLink(id);
         const restartDeepLink = buildSessionRestartDeepLink(id);
+        const unverifiedCoordinatorOmission = Boolean(
+          coordinatorScoped && !st && surface === "desktop" && (!loc?.tailState || loc.tailState.truncatedStart),
+        );
 
         mergedSessions.push({
           id,
@@ -647,13 +681,19 @@ export function createFleetService({
           branch: String(cat.branch || st?.branch || loc?.branch || ""),
           mode: String(st?.mode || cat.mode || "interactive"),
           activity,
-          lifecycleUnknown: Boolean(!st?.activity && !st?.status && !loc?.liveServer?.status && loc?.tailState?.lifecycleUnknown && activity !== "waiting"),
+          lifecycleUnknown: Boolean(
+            activity !== "waiting" &&
+              ((!st?.activity && !st?.status && !loc?.liveServer?.status && loc?.tailState?.lifecycleUnknown) ||
+                unverifiedCoordinatorOmission),
+          ),
           rootCancelled: Boolean(loc?.tailState?.rootCancelled),
           busyDurationMs: Number.isFinite(st?.busy_duration_ms) ? st.busy_duration_ms : null,
           wasInterrupted,
           interruptionReason,
           lastError,
           failedAtMs,
+          awaitingOperator,
+          operatorAttentionMessage,
           awaitingInput: awaitingInput && !awaitingInput.isElicitation ? awaitingInput : null,
           pendingPlan,
           pendingPermission,
@@ -700,14 +740,47 @@ export function createFleetService({
         const pendingPermission = loc.tailState?.pendingPermission || null;
         const pendingElicitation = loc.tailState?.pendingElicitation || null;
 
+        const doneTodoIds = new Set(todos.filter((t) => t?.status === "done").map((t) => t.id));
+        const boardAttentionItem = Array.isArray(loc.board?.attention) && loc.board.attention.length > 0
+          ? loc.board.attention[0]
+          : null;
+        const boardOperatorReport = Array.isArray(loc.board?.operatorReports)
+          ? loc.board.operatorReports.find(
+              (r) =>
+                (!r.goalId || r.goalId === loc.board?.activeGoalId) &&
+                (!r.taskId || !doneTodoIds.has(r.taskId)),
+            ) || null
+          : null;
+        const awaitingMergeApproval = loc.board?.delivery?.phase === "awaiting_merge_approval";
+        const cliProcessAlive = !(surface === "cli" && loc.lockState?.hasLockFile && !loc.lockState.alive);
+        const serverAttention = cliProcessAlive && String(loc.liveServer?.status || "").toLowerCase() === "attention";
+
         let activity = String(loc.liveServer?.status || loc.tailState?.activity || (loc.lockState?.alive ? "idle" : "idle")).toLowerCase();
         if (activity === "working") activity = "busy";
-        if (surface === "cli" && loc.lockState?.hasLockFile && !loc.lockState.alive) {
+        if (activity === "attention") activity = "waiting";
+        if (!cliProcessAlive) {
           activity = "idle";
         }
-        if (awaitingInput || pendingPlan || pendingPermission || pendingElicitation) {
+        const awaitingOperator = Boolean(
+          cliProcessAlive &&
+            (activity === "waiting" ||
+              serverAttention ||
+              boardAttentionItem ||
+              boardOperatorReport ||
+              awaitingMergeApproval ||
+              awaitingInput ||
+              pendingPlan ||
+              pendingPermission ||
+              pendingElicitation),
+        );
+        if (awaitingOperator) {
           activity = "waiting";
         }
+        const operatorAttentionMessage =
+          boardAttentionItem?.message ||
+          boardOperatorReport?.message ||
+          (awaitingMergeApproval ? "Awaiting final merge approval." : null) ||
+          (serverAttention ? `Awaiting operator (${loc.liveServer.attentionKind || "attention"}).` : null);
 
         const errorStamp = loc.tailState?.lastError?.at ? Date.parse(loc.tailState.lastError.at) : NaN;
         mergedSessions.push({
@@ -727,10 +800,12 @@ export function createFleetService({
           lastError: loc.tailState?.lastError || null,
           failedAtMs: Number.isFinite(errorStamp) ? errorStamp : null,
           lockState: loc.lockState,
-          awaitingInput,
-          pendingPlan,
-          pendingPermission,
-          pendingElicitation,
+          awaitingOperator,
+          operatorAttentionMessage,
+          awaitingInput: cliProcessAlive ? awaitingInput : null,
+          pendingPlan: cliProcessAlive ? pendingPlan : null,
+          pendingPermission: cliProcessAlive ? pendingPermission : null,
+          pendingElicitation: cliProcessAlive ? pendingElicitation : null,
           taskProgress: {
             done: leafMetrics.done,
             total: leafMetrics.total,
@@ -824,6 +899,18 @@ export function createFleetService({
             projectName: session.projectName,
             surface: session.surface,
             message: item.message,
+            deepLink: session.deepLink,
+          });
+        } else if (session.awaitingOperator && !session.awaitingInput && !session.pendingPlan) {
+          inbox.push({
+            id: `attn:${session.id}`,
+            kind: "operator_attention",
+            priority: 2,
+            sessionId: session.id,
+            sessionTitle: session.title,
+            projectName: session.projectName,
+            surface: session.surface,
+            message: session.operatorAttentionMessage || "Session is awaiting operator attention.",
             deepLink: session.deepLink,
           });
         }

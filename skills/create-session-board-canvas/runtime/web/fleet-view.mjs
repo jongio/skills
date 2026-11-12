@@ -204,7 +204,7 @@ function InboxCard({ item, invoke, onInspectSession }) {
       </div>`}
     </div>`}
 
-    ${(item.kind === "permission" || item.kind === "elicitation") && html`<div class="inbox-body">
+    ${(item.kind === "permission" || item.kind === "elicitation" || item.kind === "operator_attention") && html`<div class="inbox-body">
       <p class="inbox-prompt">${item.message || "Approval or interactive sign-in required in the session."}</p>
     </div>`}
 

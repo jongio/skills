@@ -130,6 +130,7 @@ export function attachCanvasLifecycle(runtime, canvasConfig = runtime?.config) {
 
 export function createProgressCanvas(service, sessionId, { refreshTracking = async () => {}, fleetService = null } = {}) {
   let activeScope = "session";
+  let scopeTransitionSeq = 0;
   const operatorDomainId = `${sessionId}:operator`;
   const openPanels = new Set();
   const trustedPanels = new Set();
@@ -202,6 +203,7 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
       handler: async ({ input, set, ctx }) => {
         requireOperatorUi(ctx);
         const viewerKey = ctx?.instanceId;
+        const myScopeSeq = ++scopeTransitionSeq;
         if (input.scope === "session") {
           activeScope = "session";
           await fleetService.clearAllViewers();
@@ -209,13 +211,14 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
           activeScope = input.scope;
           if (viewerKey && trustedPanels.has(viewerKey)) openPanels.add(viewerKey);
           for (const panelId of [...openPanels]) {
+            if (scopeTransitionSeq !== myScopeSeq || activeScope === "session") break;
             if (viewerKey && (!openPanels.has(viewerKey) || !trustedPanels.has(viewerKey))) break;
             if (openPanels.has(panelId) && trustedPanels.has(panelId)) {
               await fleetService.setViewerActive(panelId, true);
             }
           }
         }
-        if (viewerKey && !trustedPanels.has(viewerKey)) {
+        if (scopeTransitionSeq !== myScopeSeq || (viewerKey && !trustedPanels.has(viewerKey))) {
           return { scope: activeScope, fleetRevision: fleetService.snapshot()?.revision ?? 0 };
         }
         const snapshot = composeSnapshot(operatorDomainId);
@@ -388,25 +391,30 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
           openPanels.delete(instanceId);
           await fleetService.setViewerActive(instanceId, false);
         }
-        if (isCurrent() && (openPanels.size === 0 || !fleetService.isPolling())) activeScope = "session";
+        if (isCurrent() && (openPanels.size === 0 || !fleetService.isPolling())) {
+          scopeTransitionSeq += 1;
+          activeScope = "session";
+        }
         return false;
       }
+      const myScopeSeq = ++scopeTransitionSeq;
+      const isTransitionCurrent = () => isCurrent() && scopeTransitionSeq === myScopeSeq;
       if (instanceId) openPanels.add(instanceId);
       const requested = input?.scope;
       if (requested === "fleet" || requested === "projects" || requested === "inbox") {
         activeScope = requested === "inbox" ? "inbox" : "projects";
         for (const panelId of [...openPanels]) {
-          if (!isCurrent()) return false;
+          if (!isTransitionCurrent() || activeScope === "session") return false;
           if (openPanels.has(panelId) && trustedPanels.has(panelId)) {
             await fleetService.setViewerActive(panelId, true);
           }
         }
-        return isCurrent();
+        return isTransitionCurrent();
       }
       const hadFleetScope = activeScope !== "session" || fleetService.isPolling();
       activeScope = "session";
       await fleetService.clearAllViewers();
-      return isCurrent() ? hadFleetScope : false;
+      return isTransitionCurrent() ? hadFleetScope : false;
     },
     onCloseInstance: async (instanceId, { canMutatePanel = () => true } = {}) => {
       if (!fleetService) return;
@@ -414,17 +422,23 @@ export function createProgressCanvas(service, sessionId, { refreshTracking = asy
         openPanels.delete(instanceId);
         trustedPanels.delete(instanceId);
         panelTrustByInstance.delete(instanceId);
-        if (openPanels.size === 0) activeScope = "session";
+        if (openPanels.size === 0) {
+          scopeTransitionSeq += 1;
+          activeScope = "session";
+        }
       }
       if (canMutatePanel()) {
         await fleetService.setViewerActive(instanceId, false);
       }
       if (canMutatePanel() && (openPanels.size === 0 || !fleetService.isPolling())) {
+        if (activeScope !== "session") scopeTransitionSeq += 1;
         activeScope = "session";
       }
     },
     onShutdown: async () => {
       if (!fleetService) return;
+      scopeTransitionSeq += 1;
+      activeScope = "session";
       openPanels.clear();
       trustedPanels.clear();
       panelTrustByInstance.clear();

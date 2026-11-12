@@ -236,6 +236,7 @@ function computeDbSignature(dbPath) {
 
 function createTailParserState({ truncatedStart = false } = {}) {
   return {
+    truncatedStart: Boolean(truncatedStart),
     lifecycleKnown: !truncatedStart,
     activity: truncatedStart ? "unknown" : "idle",
     rootCancelled: false,
@@ -395,6 +396,7 @@ function snapshotParserState(parserState) {
 
   return {
     activity,
+    truncatedStart: Boolean(parserState.truncatedStart),
     lifecycleUnknown: !parserState.lifecycleKnown && !hasWaitingPrompt,
     rootCancelled: parserState.rootCancelled,
     awaitingInput,
@@ -575,12 +577,17 @@ export function readLocalFleetSnapshot({
       if (boundedBoard) {
         try {
           const parsedBoard = JSON.parse(boundedBoard.content);
+          const allReports = Array.isArray(parsedBoard.reports) ? parsedBoard.reports : [];
           board = {
             activeGoalId: parsedBoard.activeGoalId || null,
             goals: Array.isArray(parsedBoard.goals) ? parsedBoard.goals : [],
             hierarchy: Array.isArray(parsedBoard.hierarchy) ? parsedBoard.hierarchy : [],
             agents: Array.isArray(parsedBoard.agents) ? parsedBoard.agents : [],
-            reports: Array.isArray(parsedBoard.reports) ? parsedBoard.reports.slice(-40) : [],
+            attention: Array.isArray(parsedBoard.attention) ? parsedBoard.attention.slice(0, 20) : [],
+            operatorReports: allReports
+              .filter((r) => r && r.requiresOperator === true && !r.superseded)
+              .slice(-20),
+            reports: allReports.slice(-40),
             delivery: parsedBoard.delivery || null,
             references: parsedBoard.references || null,
           };
