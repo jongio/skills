@@ -65,7 +65,7 @@ test("every synthetic secops-doctor scenario has a staged fixture, mandatory CI 
     assert.match(fixture, /^# Synthetic scenario:/);
     assert.match(fixture, /^## Observations$/m);
     assert.match(fixture, /^## Request$/m);
-    assert.doesNotMatch(fixture, /C:\\Users\\|jongio/i);
+    assert.doesNotMatch(fixture, /C:\\Users\\|\/Users\/|jongio/i);
   }
 });
 

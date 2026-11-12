@@ -65,7 +65,7 @@ test("every synthetic eval-doctor scenario has a staged fixture, mandatory CI gu
     assert.match(fixture, /^# Synthetic scenario:/);
     assert.match(fixture, /^## Observations$/m);
     assert.match(fixture, /^## Request$/m);
-    assert.doesNotMatch(fixture, /jongio/i);
+    assert.doesNotMatch(fixture, /C:\\Users\\|\/Users\/|jongio|(?:^|\s)@[\w-]+/i);
   }
 });
 
