@@ -18,11 +18,34 @@
     "version.mjs"
   ],
   "icons": [
+    "activity",
+    "alert-triangle",
+    "arrow-up-right",
+    "bell",
+    "bot",
+    "check",
     "circle",
+    "circle-alert",
     "circle-check",
+    "clock",
+    "external-link",
+    "folder-git-2",
+    "git-branch",
+    "git-pull-request",
     "inbox",
+    "layers",
+    "layout-grid",
     "layout-list",
+    "message-square",
+    "play",
     "plus",
-    "trash-2"
+    "refresh-cw",
+    "rotate-ccw",
+    "search",
+    "send",
+    "shield-alert",
+    "terminal",
+    "trash-2",
+    "x"
   ]
 }

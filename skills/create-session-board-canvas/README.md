@@ -1,8 +1,10 @@
 # create-session-board-canvas
 
-A live read-only session board: kanban, canonical completion percentage,
-primary/subagent team, blockers, ready-next tasks, plan, goal history, and
-delivery/approval status. No coordinator agent or background model loop.
+A live session and opt-in project fleet board: current-session kanban, canonical
+completion percentage, primary/subagent team, blockers, ready-next tasks, plan,
+goal history, and delivery/approval status — plus viewer-gated cross-session
+project rollups, an operator attention inbox, session drill-down, and conservative
+recovery controls. Zero coordinator agents and zero background model tokens.
 Active work shows explicitly session-owned PRs/issues, safe links, and
 head-pinned CI summaries with their observation time.
 
@@ -91,8 +93,36 @@ the system temporary directory; fail closed and restart/clean that exact stale
 socket only after verifying no provider is running. It carries no session data.
 
 No automatic PR/issue enrollment, permission escalation, task edits from the UI,
-model API calls, or cross-session scans. Generic canvas apps belong to
-`create-canvas-app`; footer management belongs to `session-statusline`.
+or model API calls. Default `This session` mode performs zero cross-session
+scans, zero worker spawns, and zero background timers.
+
+## Opt-in fleet & project views (`Projects & sessions` / `Attention inbox`)
+
+Opening with `{ scope: "fleet" }` or switching tabs in the header activates the
+viewer-gated fleet workspace:
+
+- **Zero-interference performance isolation:** Local `$COPILOT_HOME` reads run in
+  an off-main-thread `worker_threads` worker only while a fleet tab is open and
+  stop immediately when closed. Per-session `session.db` queries open with
+  `readOnly: true`, `PRAGMA query_only = ON`, and a short busy timeout, closing
+  handles immediately in `finally` and caching by `mtime` so active sessions and
+  Windows workspace archival are never blocked. Server registry files are
+  sanitized on read so tokens and ports are never retained or serialized.
+- **Unified operator inbox:** Answer `ask_user` prompts (`choices` and freeform)
+  inline via `answer_session_input`, preview `plan.md` and approve/reject
+  coordinated child plans (falling back to confirmation-gated `ghapp://sessions/<id>`
+  links for uncoordinated root sessions), jump to permission/MCP prompts, and
+  steer or wake desktop sessions via `send_session_message` (`immediate` or
+  `enqueue`). Standalone CLI sessions display copyable `copilot --resume <id>`
+  commands.
+- **Conservative recovery watchdog:** Disabled (`off`) by default, guarded by an
+  OS named-pipe leader lease, a 60-second grace window so built-in host retries
+  finish first, a 3-attempt progress-gated circuit breaker, and strict exclusions
+  for `401`/`403`/OAuth, repository trust, quota, user aborts, and active
+  operator prompts.
+
+Generic canvas apps belong to `create-canvas-app`; footer management belongs to
+`session-statusline`.
 
 ## Development
 

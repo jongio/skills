@@ -2,7 +2,9 @@
 
 Discover `session_progress` before use. All calls are bound to the joined
 session; do not pass a session path or arbitrary SQL. Read `status` to reconcile
-revisions, known agents, task IDs and report sequences. UI actions are read-only.
+revisions, known agents, task IDs and report sequences. UI actions never mutate
+canonical tasks; opt-in fleet operator controls act only through capability-gated
+host session tools.
 
 | Action | Caller | Required fields |
 | --- | --- | --- |

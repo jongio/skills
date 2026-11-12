@@ -1,5 +1,6 @@
 import { html, mountCanvas, useState } from "/kit/core-client.mjs";
 import { Icon } from "/kit/icons.mjs";
+import { FleetWorkspace, ScopeNav } from "./fleet-view.mjs";
 import {
   activeWorkView, blockerEntries, blockingReportLabel, childTaskIds, dependencyIds, isBlockingReport, isLeaf,
   latestReports, leafProgress, milestoneProgress, operatorRequests, scopedReports, scopedTaskReports,
@@ -437,8 +438,13 @@ function App({ state, invoke, connected }) {
   const [statusFilter, setStatusFilter] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [switchingScope, setSwitchingScope] = useState(false);
   const [refreshError, setRefreshError] = useState("");
   const model = state || {};
+  const hasFleet = model.fleet !== undefined;
+  const activeScope = hasFleet && (model.activeScope === "projects" || model.activeScope === "inbox")
+    ? model.activeScope
+    : "session";
   const source = model.source || {};
   const goals = list(model.goals);
   const activeGoal = goals.find((goal) => goal.id === model.activeGoalId);
@@ -506,11 +512,24 @@ function App({ state, invoke, connected }) {
     setRefreshing(true);
     setRefreshError("");
     try {
-      await invoke("refresh", {});
+      await invoke(activeScope === "session" ? "refresh" : "refresh_fleet", {});
     } catch (error) {
       setRefreshError(`Refresh failed: ${error?.message || text(error) || "Unknown error"}`);
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function selectScope(nextScope) {
+    if (!hasFleet || switchingScope || nextScope === activeScope) return;
+    setSwitchingScope(true);
+    setRefreshError("");
+    try {
+      await invoke("set_scope", { scope: nextScope });
+    } catch (error) {
+      setRefreshError(`View switch failed: ${error?.message || text(error) || "Unknown error"}`);
+    } finally {
+      setSwitchingScope(false);
     }
   }
 
@@ -519,6 +538,12 @@ function App({ state, invoke, connected }) {
       <div class="page-brand"><span class="brand-icon"><${Icon} name="layout-list" size=${20} /></span>
         <div><h1>Session Board Canvas</h1></div>
       </div>
+      ${hasFleet && html`<${ScopeNav}
+        activeScope=${activeScope}
+        inboxCount=${model.fleet?.summary?.attention || 0}
+        switching=${switchingScope}
+        onSelectScope=${selectScope}
+      />`}
       <div class="header-actions">
         <span class="ck-status" role="status"><span class=${`ck-dot ${!loading && connected && source.status !== "stale" ? "ck-dot-live" : "ck-dot-off"}`}></span>${freshness}</span>
         <button class="ck-btn ck-btn-sm" type="button" onClick=${refresh} disabled=${refreshing} aria-busy=${refreshing}>${refreshing ? "Refreshing…" : "Refresh"}</button>
@@ -526,10 +551,10 @@ function App({ state, invoke, connected }) {
     </header>
 
     <div class="session-meta">
-      <span class="read-only-label">Read-only</span>
+      <span class="read-only-label">${activeScope === "session" ? "Read-only" : "Fleet view"}</span>
       <span class="session-id" title=${text(model.sessionId)}>${model.sessionId ? `Session ${model.sessionId}` : "Waiting for session"}</span>
       ${model.revision != null && html`<span class="revision">rev ${text(model.revision)}</span>`}
-      <span class="last-refresh">Refreshed <${Time} at=${source.lastRefresh} /></span>
+      <span class="last-refresh">Refreshed <${Time} at=${activeScope === "session" ? source.lastRefresh : (model.fleet?.lastRefresh || source.lastRefresh)} /></span>
     </div>
 
     ${(source.error || refreshError) && html`<div class="ck-callout ck-error error-notice" role="alert">
@@ -542,6 +567,12 @@ function App({ state, invoke, connected }) {
     ${source.status === "stale" && !source.error && html`<div class="ck-callout freshness-notice" role="status">Source data is stale. Treat progress as the last known snapshot, not current confirmation.</div>`}
     ${!connected && state && html`<p class="connection-note">Live connection interrupted. Showing the last snapshot while reconnecting.</p>`}
 
+    ${activeScope !== "session" ? html`<${FleetWorkspace}
+      fleet=${model.fleet}
+      activeScope=${activeScope}
+      invoke=${invoke}
+      onSelectScope=${selectScope}
+    />` : html`
     <section class="goal-overview ck-card" aria-labelledby="goal-title">
       <div class="goal-copy">
         <div class="minor-spread">
@@ -667,6 +698,7 @@ function App({ state, invoke, connected }) {
         <${Plan} plan=${model.plan} drafts=${list(model.drafts)} />
       </aside>
     </div>`}
+    `}
   </main>`;
 }
 
