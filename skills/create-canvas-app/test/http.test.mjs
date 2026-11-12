@@ -295,6 +295,37 @@ async function main() {
     assert.equal(after.body.agentError, null, "a successful handoff clears the prior error");
   });
 
+  await test("default instances enforce Host, Origin, Sec-Fetch-Site, JSON Content-Type, and UI-only askAgent", async () => {
+    const before = await get(open.url, "/state");
+    const id = before.body.decisions[0].id;
+    const crossOrigin = await fetch(new URL("/action", open.url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://foreign.invalid" },
+      body: JSON.stringify({ actionName: "add_decision", input: { title: "blocked" } }),
+    });
+    assert.equal(crossOrigin.status, 403);
+    const crossSite = await fetch(new URL("/state", open.url), {
+      headers: { "Sec-Fetch-Site": "cross-site" },
+    });
+    assert.equal(crossSite.status, 403);
+    const wrongHost = await new Promise((resolve, reject) => {
+      http.get(new URL("/state", open.url), { headers: { Host: "foreign.invalid" } }, (response) => {
+        response.resume();
+        resolve(response.statusCode);
+      }).on("error", reject);
+    });
+    assert.equal(wrongHost, 403);
+    const nonJson = await fetch(new URL("/action", open.url), {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ actionName: "add_decision", input: { title: "blocked" } }),
+    });
+    assert.equal(nonJson.status, 415);
+    const agentAttempt = await runtime.invokeFromAgent("hand_to_agent", { id }, { instanceId: "inst-1" });
+    assert.equal(agentAttempt.ok, false);
+    assert.match(agentAttempt.error, /interactive canvas UI/i);
+  });
+
   await test("opt-in capabilities protect private state, SSE and actions with Host/Origin checks", async () => {
     const secure = createCanvasRuntime({ ...canvasConfig, requireCapability: true, statusLine: undefined,
       loadState: undefined, saveState: undefined, createInitialState: () => ({ secret: "session-private" }) });

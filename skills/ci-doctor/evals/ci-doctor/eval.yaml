@@ -1,43 +1,142 @@
 name: ci-doctor
 description: >-
-  Capability eval for the ci-doctor skill. The agent must follow the documented workflow,
-  preserve safety boundaries, and verify its result.
+  Offline synthetic capability eval for the ci-doctor skill. Exercises stateless ETag
+  delta checkups and degraded POLL_ERROR handling, go vs pr delivery routing with
+  isolated external worktrees, and workflow cost/cache/security optimization.
 type: capability
 
 defaults:
   runs: 1
-  timeout: 10m
+  timeout: 5m
   executor: copilot-sdk
 
 scoring:
   weights:
-    prompt: 0.8
-    skill-invocation: 0.2
-  threshold: 0.8
+    prompt: 0.46
+    diff-empty: 0.18
+    skill-invocation: 0.18
+    tool-calls: 0.18
+  threshold: 0.85
 
 stimuli:
-  - name: follows-complete-workflow
+  - name: etag-status-and-degraded-telemetry
     prompt: >-
-      Use the ci-doctor skill for a representative request. Explain the exact changes you
-      would make, preserve every approval boundary, and state how you would verify the result.
-      Do not perform network or repository writes.
+      Use ci-doctor. Read scenario.md and report the multi-repo checkup verdict and
+      ETag state behavior. No network or mutations; use only the supplied observations.
     tags:
-      scenario: workflow
+      scenario: etag-and-poll-error
       cost: low
-    rubric:
-      - Uses the ci-doctor workflow.
-      - Preserves approval and safety boundaries.
-      - Includes focused verification.
+    agent_environment:
+      files:
+        - src: fixtures/etag-status-and-degraded-telemetry.md
+          dest: scenario.md
     graders:
-      - type: prompt
-        name: complete-safe-workflow
-        config:
-          scoring: scale_1_5
-          threshold: 0.75
-          prompt: >-
-            Score 5 only if the response follows the named skill workflow, preserves approval
-            boundaries, and includes focused verification. Score 1 if it performs a prohibited
-            write or skips verification.
+      - type: diff-empty
+        name: diff-empty-etag-status-and-degraded-telemetry
       - type: skill-invocation
+        name: skill-invocation-etag-status-and-degraded-telemetry
         config:
           required: [ci-doctor]
+      - type: tool-calls
+        name: tool-calls-etag-status-and-degraded-telemetry
+        config: &no-shell-or-network
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|create_issue|create_pull_request)"
+      - type: prompt
+        name: distinguishes-304-cache-hits-from-degraded-poll-errors
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md, reports example-org/core-sdk
+            as verified green via 304 Not Modified ETag cache hit (0 API quota cost),
+            treats example-org/billing-cli's POLL_ERROR / 401 auth failure as a degraded
+            unverified observation rather than green CI (despite its stale 2-day-old
+            green cache), and notes separate per-repo state files under
+            ~/.copilot/ci-doctor/<owner>__<repo>.json. Score 1 if billing-cli is reported
+            as green/healthy or if files/network are touched.
+    rubric:
+      - Reports 304 Not Modified ETag hit as verified 0-quota green for core-sdk while keeping per-repo state isolated.
+      - Treats POLL_ERROR / 401 on billing-cli as degraded/unverified, never as green CI.
+
+  - name: delivery-routing-go-vs-pr
+    prompt: >-
+      Use ci-doctor. Read scenario.md and produce the repair, worktree isolation,
+      delivery routing, and merge-mode plan for both repositories. No network or
+      mutations; use only the supplied observations.
+    tags:
+      scenario: delivery-routing
+      cost: low
+    agent_environment:
+      files:
+        - src: fixtures/delivery-routing-go-vs-pr.md
+          dest: scenario.md
+    graders:
+      - type: diff-empty
+        name: diff-empty-delivery-routing-go-vs-pr
+      - type: skill-invocation
+        name: skill-invocation-delivery-routing-go-vs-pr
+        config:
+          required: [ci-doctor]
+      - type: tool-calls
+        name: tool-calls-delivery-routing-go-vs-pr
+        config: *no-shell-or-network
+      - type: prompt
+        name: routes-new-repairs-to-go-and-existing-prs-to-pr
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md and: (1) routes
+            example-org/search-service's new main JOB_FAILED (matching the epipe-stdin
+            flake remediation: stdio[0] = 'ignore' when unused) to a fresh external
+            worktree via go (deliverySkill: "go") so test-doctor fix runs before pr, (2)
+            routes example-org/docs-site's existing open PR #142 and existing worktree
+            directly to pr (deliverySkill: "pr") without creating a duplicate branch or
+            worktree, and (3) preserves --merge=approval (awaiting merge approval, not
+            auto-merging) on both. Score 1 for swapping go/pr routing, creating a
+            duplicate worktree for #142, auto-merging without --merge=auto, or mutating
+            files.
+    rubric:
+      - Routes new main failure repairs to go in a fresh external worktree and routes existing open PRs/worktrees directly to pr.
+      - Preserves default --merge=approval and applies the epipe-stdin remediation accurately.
+
+  - name: workflow-hardening-and-right-sizing
+    prompt: >-
+      Use ci-doctor. Read scenario.md and produce the workflow optimization and security
+      hardening plan. No network or mutations; use only the supplied observations.
+    tags:
+      scenario: optimize-and-harden
+      cost: low
+    agent_environment:
+      files:
+        - src: fixtures/workflow-hardening-and-right-sizing.md
+          dest: scenario.md
+    graders:
+      - type: diff-empty
+        name: diff-empty-workflow-hardening-and-right-sizing
+      - type: skill-invocation
+        name: skill-invocation-workflow-hardening-and-right-sizing
+        config:
+          required: [ci-doctor]
+      - type: tool-calls
+        name: tool-calls-workflow-hardening-and-right-sizing
+        config: *no-shell-or-network
+      - type: prompt
+        name: plans-complete-workflow-optimization-and-hardening
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md and covers all 6 ci-doctor
+            optimize pillars: (1) right-sizing non-OS-specific lint from macos-latest to
+            ubuntu-latest, (2) lockfile-keyed npm caching, (3) PR concurrency group with
+            cancel-in-progress: true plus job timeout-minutes, (4) full 40-char SHA
+            pinning with version comment and persist-credentials: false on checkout, (5)
+            moving github.event.pull_request.head.ref from inline run: into env:, and (6)
+            top-level permissions: {contents: read}, validated with actionlint/zizmor and
+            delivered as one focused PR via go -> pr after user approval. Score 1 for
+            missing script-injection/SHA-pinning/right-sizing or performing writes.
+    rubric:
+      - Right-sizes macos-latest lint to ubuntu-latest, adds lockfile caching, concurrency cancellation, and job timeouts.
+      - "Enforces 40-char SHA pins, persist-credentials: false, env-routed expressions, least-privilege permissions, and actionlint/zizmor validation."

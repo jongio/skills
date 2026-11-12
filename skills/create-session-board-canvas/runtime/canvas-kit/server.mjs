@@ -251,6 +251,12 @@ export function createCanvasRuntime(config) {
       // the user's conversation. Visible in chat and tool-capable — use for
       // "do X in the repo" actions, NOT silent canvas text generation (use ai).
       askAgent: (prompt) => {
+        if (ctx?.source === "agent") {
+          throw new CanvasKitError(
+            "agent_forbidden",
+            "askAgent() is restricted to interactive canvas UI actions and cannot be triggered from an agent action call.",
+          );
+        }
         if (typeof host?.askAgent !== "function") {
           throw new CanvasKitError(
             "agent_unavailable",
@@ -290,7 +296,7 @@ export function createCanvasRuntime(config) {
 
   async function invokeFromAgent(actionName, input, sdkCtx) {
     const domainId = domainFor(input, sdkCtx);
-    return invoke(actionName, input, { ...sdkCtx, domainId });
+    return invoke(actionName, input, { ...sdkCtx, domainId, source: "agent" });
   }
 
   // ---- static file serving (path-traversal safe, Windows-safe) -------------
@@ -304,7 +310,10 @@ export function createCanvasRuntime(config) {
     }
     try {
       const body = await readFile(abs);
-      res.writeHead(200, { "Content-Type": MIME[extname(abs)] ?? "application/octet-stream" });
+      res.writeHead(200, {
+        "Content-Type": MIME[extname(abs)] ?? "application/octet-stream",
+        "X-Content-Type-Options": "nosniff",
+      });
       res.end(body);
     } catch {
       res.writeHead(404).end("not found");
@@ -348,19 +357,29 @@ export function createCanvasRuntime(config) {
       const path = url.pathname;
       const inst = instances.get(instanceId);
       const domainId = inst?.domainId ?? "default";
+      const expected = inst?.url ? new URL(inst.url) : null;
+      const sensitive = ["/state", "/events", "/action"].includes(path);
+      res.setHeader("Referrer-Policy", "no-referrer");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      if (sensitive) {
+        res.setHeader("Cache-Control", "no-store");
+      }
+      if (
+        (expected && req.headers.host !== expected.host) ||
+        (expected && req.headers.origin && req.headers.origin !== expected.origin) ||
+        req.headers["sec-fetch-site"] === "cross-site"
+      ) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, code: "forbidden", message: "Forbidden host or origin" }));
+        return;
+      }
       if (config.requireCapability) {
-        const expected = new URL(inst.url);
         const supplied = url.searchParams.get("capability") || "";
-        const sensitive = ["/state", "/events", "/action"].includes(path);
         const suppliedBytes = Buffer.from(supplied);
         const expectedBytes = Buffer.from(inst.capability);
         const tokenMatches = suppliedBytes.length === expectedBytes.length &&
           timingSafeEqual(suppliedBytes, expectedBytes);
-        res.setHeader("Referrer-Policy", "no-referrer");
-        res.setHeader("Cache-Control", "no-store");
-        if (req.headers.host !== expected.host ||
-            (req.headers.origin && req.headers.origin !== expected.origin) ||
-            (sensitive && !tokenMatches)) {
+        if (sensitive && !tokenMatches) {
           res.writeHead(403, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ ok: false, code: "forbidden", message: "Canvas capability required" }));
           return;
@@ -400,6 +419,11 @@ export function createCanvasRuntime(config) {
 
       // POST /action — UI-invoked action (same handlers as agent)
       if (req.method === "POST" && path === "/action") {
+        if (!/^application\/json\b/i.test(String(req.headers["content-type"] || ""))) {
+          res.writeHead(415, { "Content-Type": MIME[".json"] });
+          res.end(JSON.stringify({ ok: false, code: "unsupported_media_type", message: "Content-Type must be application/json" }));
+          return;
+        }
         try {
           const { actionName, input } = JSON.parse(await readBody(req) || "{}");
           const result = await invoke(actionName, input, { instanceId, domainId, source: "ui" });

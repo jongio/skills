@@ -118,3 +118,56 @@ jobs:
             --runs 5 \
             --workers 2 \
             --max-retries 0
+
+      - name: Report eval diagnostics
+        if: always()
+        working-directory: ${{ matrix.skill }}
+        run: |
+          set -euo pipefail
+          if [ ! -d vally-results ]; then
+            echo "::error::Vally produced no result directory; inspect the eval process failure."
+            exit 1
+          fi
+          summary=$(find vally-results -name results.jsonl -type f -print -quit)
+          if [ -z "$summary" ]; then
+            echo "::error::Vally produced no result records; this is not evidence of a passing eval."
+            exit 1
+          fi
+          jq -c '
+            if .type == "run-summary" then
+              {type, passed, hadExecutionErrors, evals: [.evals[] |
+                {name, passed, scoringApplied, overallScore, threshold}]}
+            elif .type == "trial-result" and
+              any(.gradeResult.details[]; .passed != true) then
+              {type, stimulus, graders: [.gradeResult.details[] |
+                select(.passed != true) | {name, passed, score}]}
+            else empty end
+          ' "$summary"
+
+      - name: Assert eval passed
+        working-directory: ${{ matrix.skill }}
+        run: |
+          set -euo pipefail
+          summary=$(find vally-results -name results.jsonl -type f -print -quit)
+          test -n "$summary"
+          jq -s -e '
+            ([.[] | select(.type == "trial-result")] | group_by(.stimulus)) as $stimuli |
+            ([.[] | select(.type == "run-summary")] | last) as $run |
+            ($run.passed == true) and
+            ($run.hadExecutionErrors == false) and
+            ($run.evals | length > 0) and
+            ($run.evals | all(
+              (.passed == true) and
+              (.scoringApplied == true) and
+              (.overallScore >= .threshold)
+            )) and
+            ($stimuli | length > 0) and
+            ($stimuli | all(
+              all(.[].gradeResult.details[];
+                if (.name | test("^(skill-invocation|diff-empty|tool-calls)"))
+                then .passed == true
+                else true
+                end
+              )
+            ))
+          ' "$summary" > /dev/null

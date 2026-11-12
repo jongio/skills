@@ -16,10 +16,10 @@ defaults:
 
 scoring:
   weights:
-    prompt: 0.52
-    skill-invocation: 0.16
-    diff-empty: 0.16
-    tool-calls: 0.16
+    prompt: 0.46
+    skill-invocation: 0.18
+    diff-empty: 0.18
+    tool-calls: 0.18
   threshold: 0.85
 
 stimuli:

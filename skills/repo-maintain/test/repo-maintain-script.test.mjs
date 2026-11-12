@@ -14,6 +14,7 @@ import {
   readReceipt,
   resolveConfig,
   runCli,
+  sanitizeRepoKey,
   scoreToGrade,
   writeReceipt,
 } from "../scripts/repo-maintain.mjs";
@@ -813,4 +814,50 @@ test("runCli exposes deterministic JSON subcommands", () => {
 
   const helpRes = runCli(["help"]);
   assert.ok(Array.isArray(helpRes.commands));
+});
+
+test("resolveConfig and sanitizeRepoKey normalize untrusted policy values safely", () => {
+  assert.equal(sanitizeRepoKey(".."), "unknown__repo");
+  assert.equal(sanitizeRepoKey("."), "unknown__repo");
+  assert.equal(sanitizeRepoKey("example-org/repo"), "example-org__repo");
+
+  const tempRoot = mkdtempSync(join(tmpdir(), "repo-maintain-bounds-"));
+  try {
+    mkdirSync(join(tempRoot, ".github"), { recursive: true });
+    writeFileSync(
+      join(tempRoot, ".github", "repo-maintain.json"),
+      JSON.stringify({
+        maintainer: "--bad-flag",
+        branch: "--upload-pack=bad",
+        cooldownDays: -5,
+      }),
+      "utf8",
+    );
+    const resolved = resolveConfig({
+      cwd: tempRoot,
+      repoOwner: "valid-owner",
+      visibility: "PUBLIC",
+    });
+    assert.equal(resolved.maintainer, "valid-owner");
+    assert.equal(resolved.maintainerSource, "repo-owner");
+    assert.equal(resolved.branch, "repo-maintain/automated");
+    assert.equal(resolved.cooldownDays, 7);
+
+    for (const invalidCooldown of [null, false, "", "   "]) {
+      writeFileSync(
+        join(tempRoot, ".github", "repo-maintain.json"),
+        JSON.stringify({ cooldownDays: invalidCooldown }),
+        "utf8",
+      );
+      assert.equal(resolveConfig({ cwd: tempRoot }).cooldownDays, 7);
+    }
+    writeFileSync(
+      join(tempRoot, ".github", "repo-maintain.json"),
+      JSON.stringify({ cooldownDays: 0 }),
+      "utf8",
+    );
+    assert.equal(resolveConfig({ cwd: tempRoot }).cooldownDays, 0);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

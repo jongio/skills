@@ -13,12 +13,37 @@
 // can't escape its extension's artifacts directory.
 
 import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
 
 function copilotHome() {
   return process.env.COPILOT_HOME || join(homedir(), ".copilot");
+}
+
+function assertSafeSegment(value, label) {
+  if (
+    typeof value !== "string" ||
+    !value ||
+    value === "." ||
+    value === ".." ||
+    !/^[A-Za-z0-9._-]+$/.test(value)
+  ) {
+    throw new Error(`storage: invalid ${label}`);
+  }
+  return value;
+}
+
+function resolveConfinedPath(rootDir, relativeFile, label) {
+  if (typeof relativeFile !== "string" || !relativeFile || relativeFile.includes("\0")) {
+    throw new Error(`storage: invalid ${label}`);
+  }
+  const base = resolve(rootDir);
+  const target = resolve(base, relativeFile);
+  if (target === base || !target.startsWith(base + sep)) {
+    throw new Error(`storage: ${label} escapes store root`);
+  }
+  return target;
 }
 
 // Per-file write queue. Concurrent saves to the SAME durable file (an agent
@@ -90,7 +115,9 @@ function makeStore(file) {
 
 /** Per-user, cross-session artifact store for a named extension. */
 export function userStore(extensionName, fileName) {
-  return makeStore(join(copilotHome(), "extensions", extensionName, "artifacts", fileName));
+  const safeExt = assertSafeSegment(extensionName, "extensionName");
+  const root = join(copilotHome(), "extensions", safeExt, "artifacts");
+  return makeStore(resolveConfinedPath(root, fileName, "fileName"));
 }
 
 /**
@@ -100,18 +127,21 @@ export function userStore(extensionName, fileName) {
  */
 export function sessionStore(sessionId, extensionName, fileName) {
   // Reduce the session id to a single safe path segment. The charset filter keeps
-  // "." (so dotted ids survive), so we must ALSO collapse any ".." run — otherwise
-  // a session id of ".." would join to one level ABOVE session-state and escape the
-  // per-session root. (sessionId is normally a trusted SDK value; this keeps the
-  // sanitizer honest regardless.)
-  const safeSession =
-    String(sessionId)
-      .replace(/[^A-Za-z0-9._-]/g, "_")
-      .replace(/\.\.+/g, "_") || "default";
-  return makeStore(join(copilotHome(), "session-state", safeSession, "extensions", extensionName, fileName));
+  // "." (so dotted ids survive), so we must ALSO collapse "." and any ".." run -
+  // otherwise "." or ".." would collapse out of the per-session root.
+  const cleaned = String(sessionId)
+    .replace(/[^A-Za-z0-9._-]/g, "_")
+    .replace(/\.\.+/g, "_");
+  const safeSession = !cleaned || cleaned === "." ? "default" : cleaned;
+  const safeExt = assertSafeSegment(extensionName, "extensionName");
+  const root = join(copilotHome(), "session-state", safeSession, "extensions", safeExt);
+  return makeStore(resolveConfinedPath(root, fileName, "fileName"));
 }
 
 /** Per-session store rooted at the session workspace path. */
 export function workspaceStore(workspacePath, fileName) {
-  return makeStore(join(workspacePath, fileName));
+  if (typeof workspacePath !== "string" || !workspacePath) {
+    throw new Error("storage: workspacePath is required");
+  }
+  return makeStore(resolveConfinedPath(workspacePath, fileName, "fileName"));
 }

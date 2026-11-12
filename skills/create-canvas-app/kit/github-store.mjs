@@ -69,9 +69,19 @@ function makeTokenResolver(tokenOpt) {
 }
 
 function encodePath(path) {
-  // Keep the slashes as path separators in the Contents API URL; encode each
-  // segment so spaces / unicode in a filename can't break the request.
-  return String(path).split("/").filter(Boolean).map(encodeURIComponent).join("/");
+  // Keep the slashes as path separators in the Contents API URL; reject empty,
+  // backslash, or dot segments ("." / "..") so encodeURIComponent (which leaves
+  // "." unescaped) can never resolve across the /repos/:owner/:repo/contents/
+  // API path boundary when parsed by fetch().
+  const raw = String(path);
+  if (!raw || raw.includes("\\") || raw.includes("\0")) {
+    throw new Error("githubStore: invalid repository file path");
+  }
+  const segments = raw.split("/").filter(Boolean);
+  if (segments.length === 0 || segments.some((seg) => seg === "." || seg === "..")) {
+    throw new Error("githubStore: repository file path must not contain dot segments");
+  }
+  return segments.map(encodeURIComponent).join("/");
 }
 
 /**
@@ -90,6 +100,9 @@ function encodePath(path) {
 export function githubStore(opts) {
   const { owner, repo, path, branch = "main", token, merge, message, apiBase = API } = opts ?? {};
   if (!owner || !repo || !path) throw new Error("githubStore: owner, repo and path are required");
+  if (owner === "." || owner === ".." || repo === "." || repo === "..") {
+    throw new Error("githubStore: owner and repo must not be dot segments");
+  }
   // apiBase is a trusted, fixed host by design — GitHub's public API by default, or a
   // GitHub Enterprise host the canvas author sets at construction (never runtime
   // input). That's why we call fetch() directly rather than the kit's safeFetch SSRF
