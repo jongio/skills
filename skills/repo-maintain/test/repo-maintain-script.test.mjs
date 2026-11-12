@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  REQUIRED_CORE_PHASES,
   checkStealthViolations,
   classifyDependencyPr,
   computeHealthScore,
   evaluateSkipGate,
+  evaluateSpdxExpression,
   parseCodeownersMaintainer,
   readReceipt,
   resolveConfig,
@@ -100,6 +102,15 @@ test("resolveConfig enforces exact maintainer precedence and fail-closed Stealth
         () => resolveConfig({ cwd: emptyRoot, policyPath: "missing-policy.json" }),
         /Explicit policy file not found/,
       );
+      writeFileSync(
+        join(emptyRoot, ".maintain.json"),
+        JSON.stringify({ copilotReview: "true" }),
+        "utf8",
+      );
+      assert.throws(
+        () => resolveConfig({ cwd: emptyRoot }),
+        /Invalid boolean setting for copilotReview/,
+      );
     } finally {
       rmSync(emptyRoot, { recursive: true, force: true });
     }
@@ -119,13 +130,35 @@ test("evaluateSkipGate and receipt persistence enforce all 5 Phase 0 fast no-op 
       reason: "no prior maintenance receipt found",
     });
 
-    const saved = writeReceipt(tempState, repo, {
+    // Omitting phasesRun in writeReceipt marks partialRun: true and cannot fast no-op
+    const partialSaved = writeReceipt(tempState, repo, {
       defaultBranch: "main",
       lastMaintainSha: sha,
       healthScore: 96,
       grade: "A",
     });
+    assert.equal(partialSaved.partialRun, true);
+    assert.equal(
+      evaluateSkipGate({
+        receipt: readReceipt(tempState, repo),
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
+      false,
+    );
+
+    const fullPhases = [...REQUIRED_CORE_PHASES, "skills", "evals"];
+    const saved = writeReceipt(tempState, repo, {
+      defaultBranch: "main",
+      lastMaintainSha: sha,
+      phasesRun: fullPhases,
+      healthScore: 96,
+      grade: "A",
+    });
     assert.equal(saved.lastMaintainSha, sha);
+    assert.equal(saved.partialRun, false);
 
     const loaded = readReceipt(tempState, repo);
     assert.deepEqual(
@@ -137,6 +170,19 @@ test("evaluateSkipGate and receipt persistence enforce all 5 Phase 0 fast no-op 
         untriagedItems: 0,
       }),
       { skip: true, reason: "fast no-op: HEAD unchanged and healthy" },
+    );
+
+    // Receipt without phasesRun array is rejected
+    const { phasesRun: _omittedPhases, ...receiptWithoutPhases } = loaded;
+    assert.equal(
+      evaluateSkipGate({
+        receipt: receiptWithoutPhases,
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
+      false,
     );
 
     // Omitted observation counts fail closed (skip: false)
@@ -209,6 +255,45 @@ test("evaluateSkipGate and receipt persistence enforce all 5 Phase 0 fast no-op 
     assert.equal(
       evaluateSkipGate({
         receipt: { ...loaded, failedPhases: ["refactor"] },
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
+      false,
+    );
+    assert.equal(
+      evaluateSkipGate({
+        receipt: { ...loaded, partialRun: "true" },
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
+      false,
+    );
+    const stringPartialSaved = writeReceipt(tempState, repo, {
+      defaultBranch: "main",
+      lastMaintainSha: sha,
+      phasesRun: fullPhases,
+      partialRun: "true",
+      healthScore: 96,
+      grade: "A",
+    });
+    assert.equal(stringPartialSaved.partialRun, true);
+    assert.equal(
+      evaluateSkipGate({
+        receipt: { ...loaded, failedPhases: "secops" },
+        headSha: sha,
+        newAdvisories: 0,
+        failingCiRuns: 0,
+        untriagedItems: 0,
+      }).skip,
+      false,
+    );
+    assert.equal(
+      evaluateSkipGate({
+        receipt: { ...loaded, timestamp: "invalid-date" },
         headSha: sha,
         newAdvisories: 0,
         failingCiRuns: 0,
@@ -395,6 +480,78 @@ test("classifyDependencyPr distinguishes companion syncs, cooldown holds, KEV by
   assert.equal(
     classifyDependencyPr({
       semverBump: "patch",
+      license: "MIT AND GPL-3.0-only",
+      repoLicense: "MIT",
+      releaseAgeDays: 14,
+    }).action,
+    "escalate-needs-attention",
+  );
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
+      license: "UNLICENSED",
+      repoLicense: "MIT",
+      releaseAgeDays: 14,
+    }).action,
+    "escalate-needs-attention",
+  );
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
+      license: "MIT WITH Classpath-exception-2.0",
+      repoLicense: "MIT",
+      releaseAgeDays: 14,
+    }).action,
+    "escalate-needs-attention",
+  );
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
+      license: "(MIT OR GPL-3.0-only) AND ISC",
+      repoLicense: "MIT OR Apache-2.0",
+      releaseAgeDays: 14,
+    }).action,
+    "auto-merge-ready",
+  );
+  assert.deepEqual(evaluateSpdxExpression("(MIT OR GPL-3.0-only) AND ISC"), {
+    valid: true,
+    canBePermissive: true,
+    hasCopyleft: true,
+  });
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
+      license: "Apache-2.0",
+      repoLicense: "GPL-2.0-only",
+      releaseAgeDays: 14,
+    }).action,
+    "escalate-needs-attention",
+  );
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
+      license: "GPL-99.0-only",
+      repoLicense: "MIT",
+      releaseAgeDays: 14,
+    }).action,
+    "escalate-needs-attention",
+  );
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
+      license: "MIT OR GPL-2.1-only",
+      repoLicense: "MIT",
+      releaseAgeDays: 14,
+    }).action,
+    "escalate-needs-attention",
+  );
+  assert.equal(
+    evaluateSpdxExpression(`${"(".repeat(25)}MIT${")".repeat(25)}`).valid,
+    false,
+  );
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
       license: "MIT",
       repoLicense: "Custom-Proprietary-1.0",
       releaseAgeDays: 14,
@@ -486,9 +643,54 @@ test("runCli exposes deterministic JSON subcommands", () => {
   assert.equal(stealthDashBody.ok, false);
   assert.ok(stealthDashBody.violations.includes("cwe-id: [redacted]"));
 
-  const emptyStealthRes = runCli(["stealth-check", "--visibility=PUBLIC"]);
-  assert.equal(emptyStealthRes.ok, false);
-  assert.ok(emptyStealthRes.violations.some((v) => v.includes("missing-input")));
+  // Missing flag value before --fleet does not consume --fleet
+  const stealthMissingVisibilityVal = runCli([
+    "stealth-check",
+    "--visibility",
+    "--fleet",
+    "--text",
+    "fix(repo-maintain): harden input validation and configuration defaults",
+  ]);
+  assert.equal(stealthMissingVisibilityVal.ok, false);
+  assert.ok(
+    stealthMissingVisibilityVal.violations.some((v) => v.includes("missing-private-repos")),
+  );
+
+  // Empty --stages= still counts as an explicit stage flag and does not fast no-op
+  const emptyStagesSkip = runCli(["skip-check", "--stages="]);
+  assert.equal(emptyStagesSkip.skip, false);
+
+  assert.throws(
+    () => runCli(["resolve-config", "--auto-merge="]),
+    /Invalid boolean value/,
+  );
+  assert.throws(
+    () => runCli(["resolve-config", "--cooldown-days", "--coverage-threshold"]),
+    /Invalid numeric value/,
+  );
+  assert.throws(
+    () => runCli(["resolve-config", "--policy"]),
+    /Explicit policy file not found/,
+  );
+  assert.throws(
+    () => runCli(["write-receipt", "--state-dir", "/tmp", "--json", "--repo", "example-org/one"]),
+    /Invalid or empty string value for --json/,
+  );
+  assert.throws(
+    () => runCli(["write-receipt", "--state-dir", "--json", "{}", "--repo", "example-org/one"]),
+    /Invalid or empty string value for --state-dir/,
+  );
+  const stealthTextConsumingFlag = runCli([
+    "stealth-check",
+    "--text",
+    "--fleet",
+    "--text",
+    "fix(repo-maintain): harden input validation and configuration defaults",
+  ]);
+  assert.equal(stealthTextConsumingFlag.ok, false);
+  assert.ok(
+    stealthTextConsumingFlag.violations.some((v) => v.includes("missing-private-repos")),
+  );
 
   const cfgRes = runCli([
     "resolve-config",
@@ -524,9 +726,14 @@ test("runCli exposes deterministic JSON subcommands", () => {
       "--repo",
       "example-org/one",
       "--json",
-      JSON.stringify({ lastMaintainSha: "1234567890abcdef1234567890abcdef12345678", healthScore: 98 }),
+      JSON.stringify({
+        lastMaintainSha: "1234567890abcdef1234567890abcdef12345678",
+        phasesRun: [...REQUIRED_CORE_PHASES, "skills", "evals"],
+        healthScore: 98,
+      }),
     ]);
     assert.equal(written.healthScore, 98);
+    assert.equal(written.partialRun, false);
     const checkedMissingObs = runCli([
       "skip-check",
       "--state-dir",
@@ -567,6 +774,23 @@ test("runCli exposes deterministic JSON subcommands", () => {
     ]);
     assert.equal(fileStealth.ok, false);
     assert.ok(fileStealth.violations.includes("private-repo-leak: [redacted]"));
+
+    const missingTextFile = runCli([
+      "stealth-check",
+      "--visibility=PUBLIC",
+      `--text-file=${join(tempState, "does-not-exist.txt")}`,
+    ]);
+    assert.equal(missingTextFile.ok, false);
+    assert.ok(missingTextFile.violations.some((v) => v.includes("missing-text-file")));
+
+    const missingPrivFile = runCli([
+      "stealth-check",
+      "--visibility=PUBLIC",
+      `--text-file=${textFile}`,
+      `--private-repos-file=${join(tempState, "missing-priv.txt")}`,
+    ]);
+    assert.equal(missingPrivFile.ok, false);
+    assert.ok(missingPrivFile.violations.some((v) => v.includes("missing-private-repos-file")));
   } finally {
     rmSync(tempState, { recursive: true, force: true });
   }

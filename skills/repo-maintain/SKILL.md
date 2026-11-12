@@ -98,7 +98,7 @@ Grade scale: `A+` (97-100), `A` (90-96), `B` (80-89), `C` (70-79), `D` (60-69), 
 
 ### Consolidated PR Delivery & Post-Merge Release Check
 
-1. **No-op gate:** If Phases 1-6 produced zero file changes across the worktree and **zero** phases failed verification, record the updated SHA receipt (`scripts/repo-maintain.mjs write-receipt`), report the 0-100 Repo Health Score, and exit without pushing a branch or opening a PR. If any phase failed and was rolled back, mark `failedPhases` in the receipt so the next run does not skip it as a fast no-op.
+1. **No-op gate:** If Phases 1-6 produced zero file changes across the worktree and **zero** phases failed verification, record the updated SHA receipt (`scripts/repo-maintain.mjs write-receipt` with `phasesRun` and `skillsEvalsApplicable`), report the 0-100 Repo Health Score, and exit without pushing a branch or opening a PR. If any phase failed and was rolled back, mark `failedPhases` in the receipt so the next run does not skip it as a fast no-op.
 2. **Zero-Touch Auto-Create & Auto-Merge via `pr --merge=auto --no-copilot` (`repo-maintain/automated`):** By default (`"autoMerge": true` and `"copilotReview": false` in `.github/repo-maintain.json`, or resolved `prDeliveryArgs`), when Phases 1-6 produce verified changes and all local tests pass, do **not** pause to ask the user before pushing, creating the PR, or merging:
    - Reuse passing Phases 1-6 preflight evidence (`code-review`, `doc-doctor`, `test-doctor`, security, lint, and build) under the `pr` identity rule.
    - Push `repo-maintain/automated` and create or update the single consolidated PR (`gh pr create` / `gh pr edit`) with the phase summary table and before/after 0-100 Repo Health Score.

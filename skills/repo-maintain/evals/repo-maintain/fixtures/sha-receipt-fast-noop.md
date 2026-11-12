@@ -5,15 +5,19 @@
 - Repository A: `example-org/payments-api` (`visibility: PRIVATE`, default branch `main`, current `HEAD` `a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2`).
   - Cached receipt `~/.copilot/repo-maintain/example-org__payments-api.json`:
     - `lastMaintainSha`: `a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2`
+    - `phasesRun`: `["governance", "deps", "secops", "refactor", "coverage", "docs", "skills", "evals"]`
+    - `partialRun`: `false`
     - `healthScore`: `96` (`Grade A`)
-    - `timestamp`: `T1`
-  - Since `T1`: `0` new security advisories, `0` failing workflow runs on `main`, `0` untriaged external issues or PRs, no `--force` or `--stages` flags.
+    - `timestamp`: `2026-11-01T00:00:00.000Z`
+  - Since `2026-11-01T00:00:00.000Z`: `0` new security advisories, `0` failing workflow runs on `main`, `0` untriaged external issues or PRs, no `--force` or `--stages` flags.
 - Repository B: `example-org/billing-worker` (`visibility: PUBLIC`, default branch `main`, current `HEAD` `f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5`).
   - Cached receipt `~/.copilot/repo-maintain/example-org__billing-worker.json`:
     - `lastMaintainSha`: `f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5`
+    - `phasesRun`: `["governance", "deps", "secops", "refactor", "coverage", "docs", "skills", "evals"]`
+    - `partialRun`: `false`
     - `healthScore`: `92` (`Grade A`)
-    - `timestamp`: `T1`
-  - Since `T1`: `HEAD` is unchanged, `0` failing CI runs, `1` new high-severity Dependabot advisory (`GHSA-xxxx-yyyy-zzzz`), and `1` untriaged external PR `example-org/billing-worker#88` ("Add custom webhook header").
+    - `timestamp`: `2026-11-01T00:00:00.000Z`
+  - Since `2026-11-01T00:00:00.000Z`: `HEAD` is unchanged, `0` failing CI runs, `1` new high-severity Dependabot advisory (`GHSA-xxxx-yyyy-zzzz`), and `1` untriaged external PR `example-org/billing-worker#88` ("Add custom webhook header").
 
 ## Request
 
