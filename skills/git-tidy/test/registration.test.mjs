@@ -298,6 +298,7 @@ test("eval catalog covers every content-aware triage scenario", () => {
     "confirms-stale-ref-cleanup-with-evidence",
     "blocks-pruning-on-bundle-verification-failure",
     "hands-off-specialist-workflows",
+    "reconciles-dirty-primary-to-main-with-zero-stashes",
     "defaults-to-git-clean-report",
     "batches-large-git-clean-report",
     "identifies-cleanup-target-before-selection",
@@ -317,14 +318,14 @@ test("eval catalog covers every content-aware triage scenario", () => {
   assert.match(skillDoc, /Show the preservation evidence for every proposed\s+removal/);
   assert.match(skillDoc, /Ask once to approve the listed\s+plan or keep everything/);
   assert.match(skillDoc, /If declined, unanswered, report-only, or there are\s+no eligible actions, finish with the report/);
-  assert.match(skillDoc, /remove approved linked worktrees first\. Rerun proof, then delete approved\s+conditional branches/);
+  assert.match(skillDoc, /approved worktree removals and checkout transitions\. Recheck their dependent\s+branches, delete exact approved refs/);
   assert.match(approvalFlow, /New targets or changed evidence require fresh confirmation/);
   assert.match(skillDoc, /stale origin tracking refs[\s\S]*by default under \x60all\x60/);
   assert.match(approvalFlow, /same report and confirmation as local branches/);
-  assert.match(approvalFlow, /verifies all\s+listed tips, complete history, and the pack checksum/);
+  assert.match(approvalFlow, /verifies all listed tips, complete history,\s+and the pack checksum/);
   assert.match(skillDoc, /dry run performed only analysis/);
   assert.match(approvalFlow, /approvedPlan[\s\S]*approvalRevalidated: true/);
-  assert.match(approvalFlow, /Unknown entries, credentials, local configuration/);
+  assert.match(approvalFlow, /Unverified local data keeps the worktree\s+blocked/);
   assert.match(skillDoc, /git-tidy-<generatedAt-compact>-<runId-first-12>\.json/);
   assert.match(skillDoc, /Never overwrite a prior run/);
 });
@@ -338,7 +339,11 @@ test("every stimulus has the complete grader shape", () => {
     assert.equal(stimulus.promptNames.length, 1, `${stimulus.name} needs one named judge`);
     promptNames.push(...stimulus.promptNames);
     assert.match(stimulus.body, /required: \[git-tidy\]/);
-    assert.match(stimulus.body, /command: "\(\?i\)git/);
+    if (stimulus.name === "reconciles-dirty-primary-to-main-with-zero-stashes") {
+      assert.match(stimulus.body, /name: "\^\(\?:powershell\|bash\|shell\|exec_command\|apply_patch\)\$"/);
+    } else {
+      assert.match(stimulus.body, /command: "\(\?i\)git/);
+    }
   }
   assert.equal(new Set(promptNames).size, promptNames.length, "prompt grader names must be unique");
   assert.equal((evalSpec.match(/^ {10}threshold: 0\.75$/gm) ?? []).length, stimuli.length);

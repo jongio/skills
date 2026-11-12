@@ -645,6 +645,81 @@ stimuli:
               command: "(?i)git(?:\\.exe)?(?: +-C +\\S+)? +(fetch|remote +prune|bundle +create|checkout|switch|add|commit|clean|reset|branch +-[dD]|tag +-d|update-ref|rebase|merge|push|stash +(apply|pop|drop|clear|store)|worktree +(add|remove|prune|repair)|rm|reflog +expire|gc|repack|filter-repo|filter-branch)\\b|gh(?:\\.exe)?(?: +-R +\\S+)? +(pr +(create|comment|close|merge)|api +.*(?:--method[= ](?:POST|PUT|PATCH|DELETE)|-[fF][^ ]*))\\b|tracking-prune\\.mjs[\\x22\\x27]?\\s+apply\\b"
             - name: "^(?:create_issue|create_pull_request|update_pull_request|reply_and_resolve_review_thread|workiq-create_entity|workiq-update_entity|workiq-delete_entity|workiq-do_action)$"
 
+  - name: reconciles-dirty-primary-to-main-with-zero-stashes
+    prompt: >-
+      Use git-tidy. A user runs bare git-tidy in a synthetic repository and
+      says they want a clean main. Verified GitHub main is
+      1111111111111111111111111111111111111111. The unchecked-out local main
+      is 2222222222222222222222222222222222222222, five ahead and eight behind.
+      The primary /repo is on refs/heads/topic at
+      3333333333333333333333333333333333333333, with twelve unstaged and four
+      untracked files from retired work. The retained origin/topic has that
+      exact tip. Three other unchecked-out local branches carry retired
+      variants of shipped features: refs/heads/catalog-ui at
+      8888888888888888888888888888888888888888,
+      refs/heads/import-queue at 9999999999999999999999999999999999999999,
+      and refs/heads/saved-items at aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.
+      Their full tips differ from main, and the saved-items reflog has a
+      pre-rebase tip bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb. No active local
+      work needs to resume.
+      stash@{0} is 4444444444444444444444444444444444444444 and contains a
+      unique staged edit plus untracked files. stash@{1} is
+      5555555555555555555555555555555555555555 and holds an older request-retry
+      snapshot. Its behavior shipped and the saved bytes differ.
+      The clean detached /worktrees/integration is on the
+      verified main tip and has ignored test output plus a pre-squash reflog
+      tip 6666666666666666666666666666666666666666. The running
+      /worktrees/deployment is on refs/heads/deploy at
+      7777777777777777777777777777777777777777, pinned by OID, independent of
+      the local branch name, and protected by the identical live origin/deploy
+      tip. Thirteen generated files are flagged as modified but their bytes
+      match the index and HEAD. Its files and processes must stay as-is.
+      The clean detached /worktrees/rollback is still needed. No other local branches, stashes,
+      worktrees, open PRs, or stale tracking refs exist. Private /recovery is
+      outside all checkouts. Give the pre-approval report and the single
+      confirmation as text. Describe the guarded execution and success check.
+      No approval has been given. Do not run commands or ask the evaluator.
+    tags:
+      scenario: cleanup-workflow
+      ci: clean-main
+      cost: low
+    rubric:
+      - Show the exact local and remote main OIDs, divergence, dirty primary checkout, and all proposed targets with their preservation evidence.
+      - One confirmation includes the archive-backed main ref update, checkout transition, both stash drops, integration worktree removal, same-commit deployment detach, and the five local branch deletions.
+      - Verify private byte backups and restore the Git bundle before any removal or overwrite. Preserve the unique stash's index and untracked parent, the old local main tip, and both reflog-only commits. A failed verification blocks its affected action.
+      - Finish with a clean primary checkout on main at the verified upstream tip, one local branch, and zero stashes. Retain live and rollback worktrees and GitHub refs.
+    graders:
+      - type: prompt
+        name: clean-main-and-zero-stashes-in-one-plan
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the report gives the exact old and new main OIDs,
+            the primary checkout's branch and dirty counts, both stash OIDs,
+            all five local branch names and tips, and the integration path and
+            pre-squash OID. It gives one confirmation for the complete plan.
+            It verifies outside-repo backups before removing or overwriting
+            anything, including exact dirty and ignored file bytes, full
+            stash snapshots with parents, the diverged main tip, and the
+            pre-squash and pre-rebase commits. It guards the main ref update
+            by the old OID, switches the primary checkout to main, detaches deployment at the
+            same revision before deleting its local branch, and verifies that
+            main is clean, synced and the sole local branch, with zero stashes.
+            It retains the live and rollback checkouts and the GitHub refs.
+            Score 1 if any required condition is missing, or if the response
+            uses a force reset, changes operational files, or asks again for
+            a listed prerequisite.
+      - type: skill-invocation
+        config:
+          required: [git-tidy]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash|shell|exec_command|apply_patch)$"
+            - name: "^(?:create_issue|create_pull_request|update_pull_request|reply_and_resolve_review_thread|workiq-create_entity|workiq-update_entity|workiq-delete_entity|workiq-do_action)$"
+
   - name: defaults-to-git-clean-report
     prompt: >-
       Scenario only. Use git-tidy. The user ran bare git-tidy. The audit proves that

@@ -5,6 +5,62 @@ confirmation of the listed cleanup plan. Cover all listed local removals and
 their named prerequisites in that confirmation. Read-only, dry-run, and metadata
 requests end with the report.
 
+## Default reconciliation
+
+For full cleanup, report the primary checkout's branch, staged, unstaged and
+untracked status, local and verified remote default tips, ahead/behind counts,
+and stash identities. Aim for a clean primary checkout on the verified
+default, exactly one local branch, and zero stashes. Check checkout status
+even when the local ref already matches. Leave GitHub branches and
+operational worktree contents alone.
+
+Include all applicable steps in one plan.
+
+- **Align the primary checkout.** Plan a fast-forward if the local default is
+  behind. If it has commits outside upstream, explain the remaining work and
+  show the old and new OIDs before offering an archive-backed ref update.
+  Update a diverged default only while unchecked out, with its old tip archived
+  and an expected-old-OID guard. If checked out, list a clean, same-commit
+  detach before the ref update and subsequent switch. Never merge, rebase,
+  or reset to get a clean checkout. For known inactive edits, offer to
+  preserve the index, staged and unstaged changes, and exact untracked files
+  before clearing them.
+  Verify the saved bytes and index state. If a temporary stash is needed,
+  list its creation and removal in the same plan and verify its full recovery
+  snapshot before dropping it. Check for ignored-file collisions before
+  switching to the verified default.
+- **Retire branches and stashes.** Show exact refs, OIDs, and integration or
+  surviving-copy evidence. When inactive history or edits remain outside the
+  default, describe the delta and propose archive-backed retirement when the
+  evidence supports it. Preserve each full stash commit and its parents,
+  including staged, unstaged, and untracked content. Include reflog-only
+  commits that would lose their last recovery handle.
+- **Keep operational worktrees.** A local deployment branch can be retired
+  while its worktree stays at the same commit if the deployment is proved
+  independent of the symbolic local branch and the commit remains recoverable.
+  List the exact path, OID, branch and same-commit detach. Check that the index
+  and existing overlays survive the detach. Retain the branch if the deployment
+  needs it or the transition cannot be proved safe. Keep rollback, dirty or
+  locked linked worktrees unless a listed safe action preserves their data
+  and role.
+
+Show the private recovery destination and verification for each removal or
+overwrite. After approval, prepare and verify backups before the first
+removal or overwrite. For Git history, verify a self-contained bundle with the
+exact tip OIDs by restoring into an empty repository without alternates and
+checking the selected objects. Name otherwise unnameable commits using
+temporary refs in an isolated backup repository. Verify exact paths and
+SHA-256 hashes for backed-up files. Keep recovery outside the worktrees and
+target Git directory, restricted to the user. Leave a target in place if its
+backup cannot be verified.
+
+The analyzer stays read-only. Archive-backed retirement requires its own
+preservation evidence. For recovery-backed steps, bind the displayed plan to the
+exact refs, OIDs, reflogs, checkout states, dependencies, and backup paths.
+Re-read those identities and verify the approved recovery before mutation.
+Use analyzer revalidation for its supported action classes. Withhold
+unsupported steps whose prerequisites cannot be independently verified.
+
 ## Revalidation
 
 1. Pass the exact verified schema 2.0 result, selected carrier IDs, one mutation
@@ -64,9 +120,11 @@ The helper guards the default tracking ref and leaves symbolic refs in place.
 A failed check leaves pruning blocked. Dry runs use only `plan`.
 
 Apply the confirmed tracking plan before the other cleanup batches. The helper
-revalidates the live and local evidence. If any commits would become
-unreachable, it creates a self-contained recovery bundle and verifies all
-listed tips, complete history, and the pack checksum. It then rechecks the plan
+revalidates the live and local evidence. For every nonempty plan, it creates a
+self-contained recovery bundle and verifies all listed tips, complete history,
+and the pack checksum before the first removal. If a tracking ref has reflog-only
+commits to preserve, verify their separate recovery before invoking the helper.
+The helper then rechecks the plan
 and deletes the approved tracking refs atomically using their exact old OIDs.
 If archiving or verification fails, leave the refs in place. After pruning,
 report the exact refs removed and the verified bundle path. Refresh the
@@ -79,26 +137,29 @@ For otherwise removable worktrees, check ignored paths privately using
 NUL-delimited Git output. Names, metadata, and build configuration only identify
 candidate outputs. Require user-authorized byte-for-byte comparison against a
 trusted copy of the exact output. If regeneration is needed, obtain explicit
-authorization and regenerate in an isolated directory. Without an exact match,
-keep the entry and worktree blocked. Keep ignored names and payloads out of audit artifacts. `--include-ignored` requests this check
+authorization and regenerate in an isolated directory. A private verified file
+backup can also preserve an ignored entry. Keep the worktree blocked until one
+of these proofs holds. Keep ignored names and payloads out of public audit
+artifacts. `--include-ignored` requests this check
 for the report even when cleanup is not enabled.
 
-Before clearing verified outputs, confirm the worktree's exact registered
+Before clearing verified files, confirm the worktree's exact registered
 absolute root. Resolve every target under that root, reject symlinks, reparse
-points, submodules and nested repositories, and preview the exact literal
+points, submodules and nested repositories from recursive operations, and preview the exact literal
 targets in the confirmation plan. Require that each target remains ignored,
 contains no tracked or unignored files, and still matches the verified bytes.
 Use native
-filesystem operations without shell interpolation. Rerun proof after cleanup and
-use ordinary worktree removal. Unknown entries, credentials, local configuration,
-or irreplaceable data keep the worktree blocked. Do not use blanket
+filesystem operations without shell interpolation. Unlink an explicitly listed
+junction only as a link after verifying its target. Rerun proof after cleanup
+and use ordinary worktree removal. Unverified local data keeps the worktree
+blocked. Do not use blanket
 `git clean` or force-remove a worktree to get around the blocker.
 
 ## Exceptions
 
-Keep unique overlays and stashes. If the user requests recovery, verify that a
-durable branch contains the saved change units before removing the original.
-A new ref name, command success, or reflog reachability alone is insufficient.
+Keep active or uncertain overlays and stashes. For approved recovery, verify
+the saved change units before removing the original. A new ref name, command
+success, or reflog reachability alone is insufficient.
 
 Report remaining decisions together after routine cleanup. Saving unique work,
 discarding uncertain data, modifying tags/remotes, aborting interrupted operations,
