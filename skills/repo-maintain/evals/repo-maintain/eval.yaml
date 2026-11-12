@@ -1,43 +1,175 @@
 name: repo-maintain
 description: >-
-  Capability eval for the repo-maintain skill. The agent must follow the documented workflow,
-  preserve safety boundaries, and verify its result.
+  Offline synthetic capability eval for the repo-maintain skill. Exercises Phase 0
+  SHA-receipt skip/invalidation gates, fail-closed Public Repo Stealth Mode and fleet
+  isolation, Dependabot companion syncs vs Needs My Attention escalations, phase-scoped
+  failure rollback, deterministic 0-100 Repo Health Score calculation, and zero-touch
+  head-pinned PR delivery.
 type: capability
 
 defaults:
   runs: 1
-  timeout: 10m
+  timeout: 5m
   executor: copilot-sdk
 
 scoring:
   weights:
-    prompt: 0.8
-    skill-invocation: 0.2
+    prompt: 0.333333
+    diff-empty: 0.333333
+    skill-invocation: 0.333333
   threshold: 0.8
 
 stimuli:
-  - name: follows-complete-workflow
+  - name: sha-receipt-fast-noop
     prompt: >-
-      Use the repo-maintain skill for a representative request. Explain the exact changes you
-      would make, preserve every approval boundary, and state how you would verify the result.
-      Do not perform network or repository writes.
+      Use repo-maintain. Read scenario.md and complete the requested offline Phase 0
+      evaluation. No network or mutations; use only the supplied observations.
     tags:
-      scenario: workflow
+      scenario: sha-receipt-skip
       cost: low
-    rubric:
-      - Uses the repo-maintain workflow.
-      - Preserves approval and safety boundaries.
-      - Includes focused verification.
+    agent_environment:
+      files:
+        - src: fixtures/sha-receipt-fast-noop.md
+          dest: scenario.md
     graders:
-      - type: prompt
-        name: complete-safe-workflow
-        config:
-          scoring: scale_1_5
-          threshold: 0.75
-          prompt: >-
-            Score 5 only if the response follows the named skill workflow, preserves approval
-            boundaries, and includes focused verification. Score 1 if it performs a prohibited
-            write or skips verification.
+      - type: diff-empty
+        name: diff-empty-sha-receipt-fast-noop
       - type: skill-invocation
+        name: skill-invocation-sha-receipt-fast-noop
         config:
           required: [repo-maintain]
+      - type: prompt
+        name: evaluates-sha-receipt-and-invalidation
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md, reports that
+            example-org/payments-api exits early with "fast no-op: HEAD unchanged
+            and healthy" without creating a worktree or PR, explains that
+            example-org/billing-worker invalidates its receipt despite matching HEAD
+            because of the new security advisory and untriaged external PR #88,
+            routes #88 through Tier 2 (needs-maintainer-review) or Tier 3 triage,
+            and enables Stealth Public Mode on example-org/billing-worker because
+            visibility is PUBLIC. Score 1 for network calls, file writes, skipping
+            billing-worker, or creating a worktree for payments-api.
+    rubric:
+      - Unchanged healthy HEAD exits early with fast no-op.
+      - New advisories or untriaged external PRs invalidate a matching SHA receipt.
+
+  - name: public-stealth-redaction
+    prompt: >-
+      Use repo-maintain. Read scenario.md and produce the requested Stealth Public Mode
+      and fleet isolation plan. No network or mutations; use only the supplied observations.
+    tags:
+      scenario: stealth-mode
+      cost: low
+    agent_environment:
+      files:
+        - src: fixtures/public-stealth-redaction.md
+          dest: scenario.md
+    graders:
+      - type: diff-empty
+        name: diff-empty-public-stealth-redaction
+      - type: skill-invocation
+        name: skill-invocation-public-stealth-redaction
+        config:
+          required: [repo-maintain]
+      - type: prompt
+        name: enforces-stealth-redaction-and-fleet-partitioning
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md, proposes a neutral hardening
+            commit message, test name, and PR snippet for example-org/public-gateway
+            that omit CWE-22, CVSS 8.6, path traversal, and exploit labels from public
+            artifacts, routes detailed technical findings to a private local/gitignored
+            report outside Git, and states that private repository names and findings
+            from sample-team/internal-ledger must never appear in public-gateway commits,
+            PR bodies, or logs. Score 1 if it recommends putting CWE-22 or private repo
+            names into the public commit/PR or performs network/file writes.
+    rubric:
+      - Public repository commits, tests, and PR bodies use neutral engineering language without CWE/CVSS/exploit labels.
+      - Fleet execution strictly partitions private repository names and findings from public repository artifacts.
+
+  - name: companion-sync-and-escalation
+    prompt: >-
+      Use repo-maintain. Read scenario.md and classify each item and delivery action.
+      No network or mutations; use only the supplied observations.
+    tags:
+      scenario: companion-sync-escalation
+      cost: low
+    agent_environment:
+      files:
+        - src: fixtures/companion-sync-and-escalation.md
+          dest: scenario.md
+    graders:
+      - type: diff-empty
+        name: diff-empty-companion-sync-and-escalation
+      - type: skill-invocation
+        name: skill-invocation-companion-sync-and-escalation
+        config:
+          required: [repo-maintain]
+      - type: prompt
+        name: classifies-companion-sync-triage-and-escalations
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md and: (1) classifies #201 as a
+            mechanical companion sync (RequiredAzdVersion + codeql-action/* SHA pins)
+            eligible for automatic repair and zero-touch squash merge via
+            pr --merge=auto --no-copilot (using head-pinned gh pr merge --squash
+            --match-head-commit), (2) blocks #202 from
+            auto-merge and escalates to Needs My Attention due to both semver-major
+            breaking changes and the incompatible AGPL-3.0 copyleft license in an MIT
+            repo, (3) places #203 in Tier 1 Quarantine with zero public comments,
+            (4) places #204 in Tier 2 with needs-maintainer-review, and (5) files/updates
+            a deduplicated [Refactor L3] issue instead of auto-implementing the Level 3
+            refactor. Score 1 for auto-merging #202, commenting publicly on #203,
+            auto-implementing L3, or performing network/file writes.
+    rubric:
+      - Mechanical companion syncs auto-merge via head-pinned pr --merge=auto --no-copilot.
+      - Semver-major and copyleft license conflicts escalate to Needs My Attention, Tier 1 spam gets zero public comments, and Level 3 refactors become [Refactor L3] issues.
+
+  - name: phase-isolation-and-health-score
+    prompt: >-
+      Use repo-maintain. Read scenario.md and produce the phase rollback plan, exact
+      Before/After 0-100 Repo Health Scores, and delivery workflow. No network or
+      mutations; use only the supplied observations.
+    tags:
+      scenario: health-score-and-rollback
+      cost: low
+    agent_environment:
+      files:
+        - src: fixtures/phase-isolation-and-health-score.md
+          dest: scenario.md
+    graders:
+      - type: diff-empty
+        name: diff-empty-phase-isolation-and-health-score
+      - type: skill-invocation
+        name: skill-invocation-phase-isolation-and-health-score
+        config:
+          required: [repo-maintain]
+      - type: prompt
+        name: computes-exact-health-score-and-rolls-back-failed-phase
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent reads scenario.md and: (1) explains that Phase 4's
+            uncommitted edits are rolled back after 2 failed repair attempts while
+            preserving the atomic commits from Phases 1, 2, 5, and 6 and recording Phase 4
+            under Needs My Attention, (2) computes the exact Before score as 70 (Grade C:
+            CI 12/20, Coverage 12/20, Deps 7/15, SecOps 15/15, Docs 7/10, Skills/Evals
+            10/10 N/A, Backlog 7/10) and After score as 97 (Grade A+: CI 20/20, Coverage
+            20/20, Deps 15/15, SecOps 15/15, Docs 10/10, Skills/Evals 10/10 N/A, Backlog
+            7/10), and (3) describes consolidated PR delivery on repo-maintain/automated
+            via pr --merge=auto --no-copilot (and head-pinned squash merge with
+            --match-head-commit on gh pr merge) followed by
+            post-merge release-doctor evaluation. Score 1 for aborting healthy phases,
+            omitting Before/After scores, using gh pr merge --auto, or performing writes.
+    rubric:
+      - Phase-scoped rollback isolates the failed Phase 4 refactor while preserving verified commits from Phases 1, 2, 5, and 6.
+      - Deterministic Before (70, C) and After (97, A+) Repo Health Scores and post-merge release-doctor handoff are reported accurately.
