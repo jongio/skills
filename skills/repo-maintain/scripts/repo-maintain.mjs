@@ -123,23 +123,30 @@ export function resolveConfig({
     maintainerSource = "auth-user";
   }
 
-  const normalizedVisibility = String(visibility || "PUBLIC").toUpperCase();
+  if (typeof merged.autoMerge !== "boolean") {
+    throw new Error(`Invalid boolean setting for autoMerge: ${String(merged.autoMerge)}`);
+  }
+  if (typeof merged.copilotReview !== "boolean") {
+    throw new Error(`Invalid boolean setting for copilotReview: ${String(merged.copilotReview)}`);
+  }
+  if (typeof visibility !== "string" || !visibility.trim()) {
+    visibility = "PUBLIC";
+  }
+  const normalizedVisibility = visibility.trim().toUpperCase();
   const stealthMode = normalizedVisibility !== "PRIVATE";
-  const strictAutoMerge = merged.autoMerge === true;
-  const strictCopilotReview = merged.copilotReview === true;
 
   return {
     ...merged,
-    autoMerge: strictAutoMerge,
-    copilotReview: strictCopilotReview,
+    autoMerge: merged.autoMerge,
+    copilotReview: merged.copilotReview,
     maintainer,
     maintainerSource,
     configSource,
     visibility: normalizedVisibility,
     stealthMode,
     prDeliveryArgs: [
-      `--merge=${strictAutoMerge ? "auto" : "approval"}`,
-      ...(strictCopilotReview ? [] : ["--no-copilot"]),
+      `--merge=${merged.autoMerge ? "auto" : "approval"}`,
+      ...(merged.copilotReview ? [] : ["--no-copilot"]),
     ],
   };
 }
@@ -488,10 +495,17 @@ const MECHANICAL_COMPANION_KINDS = new Set([
 const PERMISSIVE_SPDX_TOKEN =
   /^(?:MIT|Apache-2\.0|BSD-2-Clause|BSD-3-Clause|ISC|0BSD|Unlicense|CC0-1\.0|BlueOak-1\.0\.0)$/i;
 const COPYLEFT_SPDX_TOKEN =
-  /^(?:(?:A|L)?GPL-(?:2\.0|2\.1|3\.0)(?:-(?:only|or-later))?|SSPL-1\.0|EUPL-1\.2)$/i;
+  /^(?:GPL-(?:2\.0|3\.0)(?:-(?:only|or-later))?|LGPL-(?:2\.1|3\.0)(?:-(?:only|or-later))?|AGPL-3\.0(?:-(?:only|or-later))?|SSPL-1\.0|EUPL-1\.2)$/i;
+const MAX_SPDX_LENGTH = 512;
+const MAX_SPDX_TOKENS = 128;
+const MAX_SPDX_DEPTH = 16;
 
 export function evaluateSpdxExpression(expression) {
-  if (typeof expression !== "string" || !expression.trim()) {
+  if (
+    typeof expression !== "string" ||
+    !expression.trim() ||
+    expression.length > MAX_SPDX_LENGTH
+  ) {
     return { valid: false, canBePermissive: false, hasCopyleft: false };
   }
   const tokens = [];
@@ -503,6 +517,9 @@ export function evaluateSpdxExpression(expression) {
       return { valid: false, canBePermissive: false, hasCopyleft: false };
     }
     tokens.push(match[1]);
+    if (tokens.length > MAX_SPDX_TOKENS) {
+      return { valid: false, canBePermissive: false, hasCopyleft: false };
+    }
     lastIndex = tokenRegex.lastIndex;
   }
   if (lastIndex !== expression.length || tokens.length === 0) {
@@ -515,36 +532,37 @@ export function evaluateSpdxExpression(expression) {
   let pos = 0;
   let hasCopyleft = false;
 
-  function parseOr() {
-    let left = parseAnd();
+  function parseOr(depth) {
+    if (depth > MAX_SPDX_DEPTH) return null;
+    let left = parseAnd(depth);
     if (!left) return null;
     while (pos < tokens.length && /^OR$/i.test(tokens[pos])) {
       pos += 1;
-      const right = parseAnd();
+      const right = parseAnd(depth);
       if (!right) return null;
       left = { canBePermissive: left.canBePermissive || right.canBePermissive };
     }
     return left;
   }
 
-  function parseAnd() {
-    let left = parsePrimary();
+  function parseAnd(depth) {
+    let left = parsePrimary(depth);
     if (!left) return null;
     while (pos < tokens.length && /^AND$/i.test(tokens[pos])) {
       pos += 1;
-      const right = parsePrimary();
+      const right = parsePrimary(depth);
       if (!right) return null;
       left = { canBePermissive: left.canBePermissive && right.canBePermissive };
     }
     return left;
   }
 
-  function parsePrimary() {
-    if (pos >= tokens.length) return null;
+  function parsePrimary(depth) {
+    if (pos >= tokens.length || depth > MAX_SPDX_DEPTH) return null;
     const tok = tokens[pos];
     if (tok === "(") {
       pos += 1;
-      const inner = parseOr();
+      const inner = parseOr(depth + 1);
       if (!inner || pos >= tokens.length || tokens[pos] !== ")") return null;
       pos += 1;
       return inner;
@@ -561,7 +579,7 @@ export function evaluateSpdxExpression(expression) {
     return null;
   }
 
-  const ast = parseOr();
+  const ast = parseOr(0);
   if (!ast || pos !== tokens.length) {
     return { valid: false, canBePermissive: false, hasCopyleft: false };
   }
@@ -694,6 +712,19 @@ function parseStrictNumberFlag(name, rawValue) {
   throw new Error(`Invalid numeric value for --${name}: ${String(rawValue)}`);
 }
 
+function parseStrictStringFlag(name, rawValue, { required = false } = {}) {
+  if (rawValue === undefined) {
+    if (required) {
+      throw new Error(`Missing required flag --${name}`);
+    }
+    return undefined;
+  }
+  if (typeof rawValue !== "string" || !rawValue.trim()) {
+    throw new Error(`Invalid or empty string value for --${name}`);
+  }
+  return rawValue.trim();
+}
+
 function isNextTokenValue(key, nextToken) {
   if (!nextToken.startsWith("--")) return true;
   if (key === "text" && /^---/.test(nextToken)) return true;
@@ -736,15 +767,22 @@ export function runCli(argv = process.argv.slice(2)) {
     ) {
       throw new Error(`Explicit policy file not found: ${String(flags.policy)}`);
     }
+    const cwd = parseStrictStringFlag("cwd", flags.cwd) || process.cwd();
+    const repoOwner = parseStrictStringFlag("repo-owner", flags["repo-owner"]) || null;
+    const authUser = parseStrictStringFlag("auth-user", flags["auth-user"]) || null;
+    const visibility = parseStrictStringFlag("visibility", flags.visibility) || "PUBLIC";
+    const maintainer = parseStrictStringFlag("maintainer", flags.maintainer);
+    const escalationLabel = parseStrictStringFlag("escalation-label", flags["escalation-label"]);
+    const reposStr = parseStrictStringFlag("repos", flags.repos);
     return resolveConfig({
-      cwd: flags.cwd || process.cwd(),
+      cwd,
       policyPath: flags.policy || null,
-      repoOwner: flags["repo-owner"] || null,
-      authUser: flags["auth-user"] || null,
-      visibility: flags.visibility || "PUBLIC",
+      repoOwner,
+      authUser,
+      visibility,
       cliFlags: {
-        maintainer: flags.maintainer,
-        escalationLabel: flags["escalation-label"],
+        maintainer,
+        escalationLabel,
         cooldownDays: parseStrictNumberFlag("cooldown-days", flags["cooldown-days"]),
         coverageThreshold: parseStrictNumberFlag(
           "coverage-threshold",
@@ -752,18 +790,21 @@ export function runCli(argv = process.argv.slice(2)) {
         ),
         autoMerge: parseStrictBooleanFlag("auto-merge", flags["auto-merge"]),
         copilotReview: parseStrictBooleanFlag("copilot-review", flags["copilot-review"]),
-        repos: flags.repos ? String(flags.repos).split(",").filter(Boolean) : undefined,
+        repos: reposStr ? reposStr.split(",").filter(Boolean) : undefined,
       },
     });
   }
   if (command === "skip-check") {
-    const receipt = flags.repo ? readReceipt(flags["state-dir"], flags.repo) : null;
+    const stateDir = parseStrictStringFlag("state-dir", flags["state-dir"]);
+    const repo = parseStrictStringFlag("repo", flags.repo);
+    const headSha = parseStrictStringFlag("head-sha", flags["head-sha"]) || null;
+    const receipt = repo ? readReceipt(stateDir, repo) : null;
     const stagesSpecified = flags.stages !== undefined;
     const parsedStages =
       typeof flags.stages === "string" ? flags.stages.split(",").filter(Boolean) : [];
     return evaluateSkipGate({
       receipt,
-      headSha: flags["head-sha"] || null,
+      headSha,
       newAdvisories: flags["new-advisories"],
       failingCiRuns: flags["failing-ci"],
       untriagedItems: flags["untriaged"],
@@ -773,11 +814,20 @@ export function runCli(argv = process.argv.slice(2)) {
     });
   }
   if (command === "write-receipt") {
-    const input = flags.json ? JSON.parse(String(flags.json)) : {};
-    return writeReceipt(flags["state-dir"], flags.repo || input.repo, input);
+    const stateDir = parseStrictStringFlag("state-dir", flags["state-dir"]);
+    const jsonRaw = parseStrictStringFlag("json", flags.json, { required: true });
+    const input = JSON.parse(jsonRaw);
+    const repo =
+      parseStrictStringFlag("repo", flags.repo) ||
+      (typeof input.repo === "string" && input.repo.trim() ? input.repo.trim() : null);
+    if (!repo) {
+      throw new Error("Missing or empty --repo for write-receipt");
+    }
+    return writeReceipt(stateDir, repo, input);
   }
   if (command === "score") {
-    const input = flags.json ? JSON.parse(String(flags.json)) : {};
+    const jsonRaw = parseStrictStringFlag("json", flags.json);
+    const input = jsonRaw ? JSON.parse(jsonRaw) : {};
     return computeHealthScore(input);
   }
   if (command === "stealth-check") {

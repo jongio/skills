@@ -102,6 +102,15 @@ test("resolveConfig enforces exact maintainer precedence and fail-closed Stealth
         () => resolveConfig({ cwd: emptyRoot, policyPath: "missing-policy.json" }),
         /Explicit policy file not found/,
       );
+      writeFileSync(
+        join(emptyRoot, ".maintain.json"),
+        JSON.stringify({ copilotReview: "true" }),
+        "utf8",
+      );
+      assert.throws(
+        () => resolveConfig({ cwd: emptyRoot }),
+        /Invalid boolean setting for copilotReview/,
+      );
     } finally {
       rmSync(emptyRoot, { recursive: true, force: true });
     }
@@ -530,6 +539,19 @@ test("classifyDependencyPr distinguishes companion syncs, cooldown holds, KEV by
   assert.equal(
     classifyDependencyPr({
       semverBump: "patch",
+      license: "MIT OR GPL-2.1-only",
+      repoLicense: "MIT",
+      releaseAgeDays: 14,
+    }).action,
+    "escalate-needs-attention",
+  );
+  assert.equal(
+    evaluateSpdxExpression(`${"(".repeat(25)}MIT${")".repeat(25)}`).valid,
+    false,
+  );
+  assert.equal(
+    classifyDependencyPr({
+      semverBump: "patch",
       license: "MIT",
       repoLicense: "Custom-Proprietary-1.0",
       releaseAgeDays: 14,
@@ -649,6 +671,14 @@ test("runCli exposes deterministic JSON subcommands", () => {
   assert.throws(
     () => runCli(["resolve-config", "--policy"]),
     /Explicit policy file not found/,
+  );
+  assert.throws(
+    () => runCli(["write-receipt", "--state-dir", "/tmp", "--json", "--repo", "example-org/one"]),
+    /Invalid or empty string value for --json/,
+  );
+  assert.throws(
+    () => runCli(["write-receipt", "--state-dir", "--json", "{}", "--repo", "example-org/one"]),
+    /Invalid or empty string value for --state-dir/,
   );
   const stealthTextConsumingFlag = runCli([
     "stealth-check",
