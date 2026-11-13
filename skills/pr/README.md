@@ -184,11 +184,27 @@ token; each renewed review still requires its own explicit reference.
 Internal headings in balanced cards remain card evidence. Headings outside
 cards define local context, not a shared location for the entire review.
 
-Reply once per distinct actionable concern. Update one consolidated body-finding
-comment with review IDs, headings, and actual fixing-commit links instead of
+Reply once per distinct actionable concern after critically evaluating each
+reviewer and Copilot suggestion before changing code. Distinguish real defects
+(concrete bugs, security boundary violations, or broken contracts in touched
+code) from speculative hypotheticals for impossible or already-guarded inputs,
+and reject over-engineering that adds unnecessary state machines, locks,
+duplicate validation layers, wrapper helpers, config knobs, or extra
+abstractions when simpler code or no change suffices. When a finding identifies
+a real defect, implement the smallest, simplest fix for the underlying defect
+rather than adopting an over-complicated suggested patch verbatim. When
+re-auditing `Needs a closer look` or prose summary warnings, change code only if
+a concrete, reproducible defect is confirmed; if current code is already sound,
+record a terse evidence-backed disposition without adding speculative guards.
+Update one consolidated body-finding comment with review IDs, headings (or
+`concern:<id>`), and actual fixing-commit links or concise rationale instead of
 posting another acknowledgment each round. Keep fixes and dispositions brief.
-Optional or tangential suggestions do not authorize broader edits. Replies never
-replace thread resolution, final-head review, required approvals, or merge consent.
+Optional or tangential suggestions do not authorize broader edits. When an
+automated/Copilot thread is critically evaluated and declined, reply tersely
+with the technical rationale (citing the invariant or `file:line`) and resolve
+the automated/bot thread on GitHub rather than writing bloatware just to resolve
+it; keep human threads with open questions open. Replies never replace thread
+resolution, final-head review, required approvals, or merge consent.
 
 Batch related repairs and wait for applicable current-head CI to pass before
 requesting reviews, unless the user requests early review. Every changed head

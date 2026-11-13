@@ -286,3 +286,103 @@ test("the production poll honors edited consolidated dispositions without waivin
     assert.equal(result.events.some(event => event.type === "FEEDBACK_ACTION_NEEDED"), !ready, JSON.stringify(result.events));
   }
 });
+
+test("declined and resolved Copilot threads plus settled prose dispositions clear FEEDBACK_ACTION_NEEDED without code commits", async () => {
+  const proseWarning = "parseHeader might receive null when optional headers are omitted.";
+  const body = `<!-- ccr-overview-v2 -->\n\n### 🔵 Needs a closer look\n\n${proseWarning}\n\n**No open issues**\n\n<details>\n<summary><strong>1 open issue</strong></summary>\n\n* [Add async mutex state machine](https://github.com/example-org/sample-repo/pull/7#discussion_r88)\n</details>`;
+  let threadResolved = false;
+  let conversationComments = [];
+
+  assert.equal(
+    extractBodyOnlyFindings(
+      [review(103, "* [Unlinked bracketed warning; see [resolved item](https://github.com/example-org/sample-repo/pull/7#discussion_r88)")],
+      [],
+      "current-head",
+      new Set([88]),
+    ).length,
+    1,
+    "bracketed prose preceding a resolved inline link must remain unsettled",
+  );
+
+  const runPoll = (sinceCommentId) =>
+    evaluatePrPollTick(
+      parsePrWatchArgs(["once", "--repo", "example-org/sample-repo", "--pr", "7", "--head", "current-head", "--since-comment-id", String(sinceCommentId)]),
+      request => ({
+        ok: true,
+        status: 200,
+        headers: {},
+        data: request.kind !== "graphql" ? { workflow_runs: [] } : {
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "current-head",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: null,
+                reviewRequests: { nodes: [] },
+                reviews: { nodes: [review(104, body)] },
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: "PRRT_declined_bot",
+                      isResolved: threadResolved,
+                      isOutdated: false,
+                      path: "src/parser.mjs",
+                      line: 14,
+                      comments: {
+                        nodes: [{ databaseId: 88, author: { login: "copilot-pull-request-reviewer" }, body: "Add an async mutex and retry state machine." }],
+                      },
+                    },
+                  ],
+                },
+                comments: { nodes: conversationComments },
+                commits: {
+                  nodes: [{
+                    commit: {
+                      statusCheckRollup: {
+                        state: "SUCCESS",
+                        contexts: { nodes: [{ __typename: "CheckRun", name: "test", status: "COMPLETED", conclusion: "SUCCESS" }] },
+                      },
+                    },
+                  }],
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+  // Before triage (cursor 608): both the inline Copilot thread and the prose warning require action.
+  conversationComments = [{ databaseId: 608, createdAt: "2026-10-22T20:00:00Z", body: "Initial context." }];
+  const initial = await runPoll(608);
+  assert.equal(initial.events[0].type, "FEEDBACK_ACTION_NEEDED");
+  assert.equal(initial.events[0].latestCommentId, 608);
+  assert.equal(initial.events[0].unresolvedThreads.length, 1);
+  const proseDetail = initial.events[0].bodyFindings[0].unsettledConcernDetails.find(c => c.evidence.includes("parseHeader"));
+  assert.ok(proseDetail);
+
+  // During triage, a human reviewer posts comment 609 before the disposition comment 610 is created.
+  threadResolved = true;
+  conversationComments = [
+    ...conversationComments,
+    { databaseId: 609, createdAt: "2026-10-22T20:05:30Z", author: { login: "alice" }, body: "Should malformed headers also log a metric?" },
+    {
+      databaseId: 610,
+      createdAt: "2026-10-22T20:06:00Z",
+      body: `Review 104 (${proseDetail.id}): Declined - src/parser.mjs:9 already rejects null inputs with a TypeError covered by test/parser.test.mjs; no speculative guard needed.`,
+    },
+  ];
+
+  // Retaining the previous cursor (608) delivers intervening human comment 609 via NEW_PR_COMMENTS instead of skipping it.
+  const intervening = await runPoll(608);
+  assert.equal(intervening.events[0].type, "NEW_PR_COMMENTS");
+  assert.deepEqual(intervening.events[0].comments.map(c => c.databaseId), [609, 610]);
+  assert.equal(intervening.events[0].latestCommentId, 610);
+
+  // After handling 609/610, polling at latestCommentId (610) yields PR_READY_TO_MERGE without looping FEEDBACK_ACTION_NEEDED.
+  const settled = await runPoll(610);
+  assert.equal(settled.events.length, 1);
+  assert.equal(settled.events[0].type, "PR_READY_TO_MERGE");
+});

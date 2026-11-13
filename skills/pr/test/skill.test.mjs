@@ -226,6 +226,42 @@ test("review replies identify every fix tersely with actual commit links", async
   assert.match(comments, /replying does not replace thread resolution or review\/merge gates/i);
 });
 
+test("critical review triage rejects over-engineering and resolves declined bot threads cleanly", async () => {
+  const embedded = skill.split("**Embedded findings**:")[1]?.split("\n")[0];
+  const comments = skill.split("**Comments**:")[1]?.split("\n")[0];
+  const exitCriteria = skill.split("## Exit Criteria")[1];
+  assert.ok(embedded);
+  assert.ok(comments);
+  assert.ok(exitCriteria);
+  assert.match(embedded, /change code only when a concrete, reproducible defect is confirmed/i);
+  assert.match(embedded, /if current code is already sound, record a terse evidence-backed disposition without adding speculative guards/i);
+  assert.match(comments, /Critically evaluate every reviewer and Copilot suggestion before changing code/);
+  assert.match(comments, /real defects.*speculative hypotheticals.*already-guarded inputs/i);
+  assert.match(comments, /reject over-engineering.*state machines, locks, duplicate validation layers, wrapper helpers, config knobs, or extra abstractions/i);
+  assert.match(comments, /smallest, simplest fix for the underlying defect rather than adopting an over-complicated suggested patch verbatim/i);
+  assert.match(comments, /Resolve automated\/bot threads once fixed or critically declined with terse technical rationale \(never writing bloatware just to resolve a bot thread\)/);
+  assert.match(comments, /keep human threads with open questions open/);
+  assert.match(exitCriteria, /fixed minimally or critically declined with terse, evidence-backed rationale.*with bot threads resolved/);
+
+  for (const file of ["../README.md", "../../../site/src/content/skills/pr.md"]) {
+    const text = (await readFile(new URL(file, import.meta.url), "utf8")).replace(/\s+/g, " ");
+    assert.match(text, /critically evaluat/i);
+    assert.match(text, /speculative hypotheticals/i);
+    assert.match(text, /state machines, locks, duplicate validation layers, wrapper helpers, config knobs, or extra abstractions/i);
+    assert.match(text, /rather than (?:adopting|copying) an over-complicated suggested patch verbatim/i);
+    assert.match(text, /without (?:adding )?speculative guards/i);
+    assert.match(text, /resolve the automated\/bot thread on GitHub rather than writing bloatware/i);
+  }
+
+  const triageEval = evalSpec.split("  - name: critical-triage-and-declined-bot-thread-resolution\n")[1]
+    ?.split("\n  - name: ")[0];
+  assert.ok(triageEval);
+  assert.match(triageEval, /declines T12 as[\s\S]*over-engineering[\s\S]*resolves[\s\S]*automated thread T12 without bloatware/i);
+  assert.match(triageEval, /minimal surgical[\s\S]*ChunkRangeBuilder/i);
+  assert.match(triageEval, /without[\s\S]*speculative/i);
+  assert.match(triageEval, /keeps human[\s\S]*T14/i);
+});
+
 test("delivery batches repairs, bounds repeated failures, and avoids review-round acknowledgments", () => {
   assert.match(skill, /wait for applicable current-head CI to pass before requesting or re-requesting reviews/);
   assert.match(skill, /unless the user requests early review/);
@@ -298,6 +334,7 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "rerequest-prior-human-reviewers",
     "bounded-evidence-led-ci-repairs",
     "closer-look-prose-and-preexisting-automerge",
+    "critical-triage-and-declined-bot-thread-resolution",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
   assert.equal((evalSpec.match(/type: skill-invocation/g) ?? []).length, cases.length);

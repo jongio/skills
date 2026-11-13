@@ -59,6 +59,7 @@ test("plans, tests, implements, and reviews before invoking pr without copying i
   assert.match(skill, /invoke the repository's local `code-review` skill in local\/branch mode when present/i);
   assert.match(skill, /one bounded, read-only `rubber-duck` sub-agent review.*different model family than the currently active model/);
   assert.match(skill, /forbid sub-agent test, lint, typecheck, or build execution/);
+  assert.match(skill, /critically evaluate suggestions so only confirmed material defects are fixed with the smallest surgical change \(rejecting speculative hypotheticals or over-engineered abstractions\)/);
   assert.match(skill, /(?:without|rather than) repeating `rubber-duck` loops/);
   assert.match(pr, /Reuse passing `go` Step 4 review evidence under the identity rule.*cross-model `rubber-duck` sub-agent review.*when invoked directly without `go`/);
   assert.match(skill, /passing test\/review evidence/);
