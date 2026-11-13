@@ -291,7 +291,7 @@ test("declined and resolved Copilot threads plus settled prose dispositions clea
   const proseWarning = "parseHeader might receive null when optional headers are omitted.";
   const body = `<!-- ccr-overview-v2 -->\n\n### 🔵 Needs a closer look\n\n${proseWarning}\n\n**No open issues**\n\n<details>\n<summary><strong>1 open issue</strong></summary>\n\n* [Add async mutex state machine](https://github.com/example-org/sample-repo/pull/7#discussion_r88)\n</details>`;
   let threadResolved = false;
-  let dispositionComment = null;
+  let conversationComments = [];
 
   assert.equal(
     extractBodyOnlyFindings(
@@ -336,7 +336,7 @@ test("declined and resolved Copilot threads plus settled prose dispositions clea
                     },
                   ],
                 },
-                comments: { nodes: dispositionComment ? [dispositionComment] : [] },
+                comments: { nodes: conversationComments },
                 commits: {
                   nodes: [{
                     commit: {
@@ -354,22 +354,34 @@ test("declined and resolved Copilot threads plus settled prose dispositions clea
       }),
     );
 
-  // Before triage: both the inline Copilot thread and the prose warning require action.
-  const initial = await runPoll(0);
+  // Before triage (cursor 608): both the inline Copilot thread and the prose warning require action.
+  conversationComments = [{ databaseId: 608, createdAt: "2026-10-22T20:00:00Z", body: "Initial context." }];
+  const initial = await runPoll(608);
   assert.equal(initial.events[0].type, "FEEDBACK_ACTION_NEEDED");
+  assert.equal(initial.events[0].latestCommentId, 608);
   assert.equal(initial.events[0].unresolvedThreads.length, 1);
   const proseDetail = initial.events[0].bodyFindings[0].unsettledConcernDetails.find(c => c.evidence.includes("parseHeader"));
   assert.ok(proseDetail);
 
-  // Triage declines the over-engineered bot thread (resolving it with rationale) and declines the prose warning with evidence on the same head.
+  // During triage, a human reviewer posts comment 609 before the disposition comment 610 is created.
   threadResolved = true;
-  dispositionComment = {
-    databaseId: 610,
-    createdAt: "2026-10-22T20:06:00Z",
-    body: `Review 104 (${proseDetail.id}): Declined - src/parser.mjs:9 already rejects null inputs with a TypeError covered by test/parser.test.mjs; no speculative guard needed.`,
-  };
+  conversationComments = [
+    ...conversationComments,
+    { databaseId: 609, createdAt: "2026-10-22T20:05:30Z", author: { login: "alice" }, body: "Should malformed headers also log a metric?" },
+    {
+      databaseId: 610,
+      createdAt: "2026-10-22T20:06:00Z",
+      body: `Review 104 (${proseDetail.id}): Declined - src/parser.mjs:9 already rejects null inputs with a TypeError covered by test/parser.test.mjs; no speculative guard needed.`,
+    },
+  ];
 
-  // Advancing --since-comment-id to the posted disposition comment (610) yields PR_READY_TO_MERGE without self-waking or looping FEEDBACK_ACTION_NEEDED.
+  // Retaining the previous cursor (608) delivers intervening human comment 609 via NEW_PR_COMMENTS instead of skipping it.
+  const intervening = await runPoll(608);
+  assert.equal(intervening.events[0].type, "NEW_PR_COMMENTS");
+  assert.deepEqual(intervening.events[0].comments.map(c => c.databaseId), [609, 610]);
+  assert.equal(intervening.events[0].latestCommentId, 610);
+
+  // After handling 609/610, polling at latestCommentId (610) yields PR_READY_TO_MERGE without looping FEEDBACK_ACTION_NEEDED.
   const settled = await runPoll(610);
   assert.equal(settled.events.length, 1);
   assert.equal(settled.events[0].type, "PR_READY_TO_MERGE");
