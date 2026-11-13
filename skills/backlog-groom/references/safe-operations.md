@@ -30,6 +30,12 @@ organization values, dates and release metadata outside exact scope.
 1. Discover host, authenticated capabilities and actual schema/response types.
    Prefer existing authenticated GitHub tooling (for example `gh` where
    available), not new credentials, elevated tokens or browser extraction.
+   When selected repositories span multiple organizations or Enterprise Managed
+   User (EMU) accounts and a repository returns `NOT_FOUND` or `403`, inspect
+   available authenticated accounts (for example `gh auth status`) and scope
+   requests per process (for example passing `gh auth token -h <host> -u <account>`
+   in a child process environment) rather than mutating global `gh auth switch`
+   state or immediately concluding the repository is missing.
 2. Follow pagination for every connection, including nested field values,
    relationships, PRs and project membership. Track cursors/page completion
    independently for each repository/connection; detect repeated cursors.
@@ -38,9 +44,14 @@ organization values, dates and release metadata outside exact scope.
    any user-approved limit; do not claim completeness beyond it.
 3. Use structured JSON request bodies and GraphQL variables through the tool's
    JSON/file/stdin interface. Do not interpolate issue text into shell commands
-   or concatenate GraphQL strings. Use host-appropriate paths and line endings.
-   Do not hardcode repository/user names, refs, project/field/option IDs or status
-   vocabulary. Opaque GitHub IDs are case-sensitive; never lowercase them.
+   or concatenate GraphQL strings. Disable interactive CLI prompts and pagers
+   (for example `GH_PROMPT_DISABLED=1` and `GH_PAGER=cat`, `git --no-pager`, or
+   non-TTY stdout capture) and prefer structured REST/GraphQL file endpoints
+   (such as `/repos/{owner}/{repo}/pulls/{number}/files`) over interactive
+   `gh pr diff` calls that can stall unattended shells. Use
+   host-appropriate paths and line endings. Do not hardcode repository/user
+   names, refs, project/field/option IDs or status vocabulary. Opaque GitHub IDs
+   are case-sensitive; never lowercase them.
 4. Decode only known value wrappers from the discovered schema, including text
    `raw`/`html` shapes. Treat missing, null, empty and inaccessible distinctly.
    Normalize transport CRLF/LF where appropriate, not meaningful user content.
@@ -57,7 +68,10 @@ Prefer issue closure -> project Done and a relevant linked implementation PR ->
 In Progress only when compatible with the user's status policy. Ask whether
 moving a card to Done should close an issue; never enable card-driven auto-close
 by default. An open issue/Done-card mismatch is a conflict to surface, not
-authority to close the issue or override the user's card choice.
+authority to close the issue or override the user's card choice. Check whether
+an `Item reopened` workflow exists alongside `Item closed -> Done`; reopening an
+issue after a closing PR merges can otherwise leave an `OPEN` issue stuck at
+`Status = Done` and hidden from `-status:Done` active views.
 
 Review repository auto-add, sub-issue auto-add and archival independently.
 Do not archive away Shipped history. New auto-add configuration does not prove
@@ -87,9 +101,14 @@ For each operation:
    read/write window and disclose that cross-call atomicity is unavailable.
    A changed precondition invalidates the affected plan: re-plan and obtain
    approval if effects changed; do not overwrite from a stale snapshot.
-3. Apply only the authorized patch. On success or uncertainty, re-read the direct
-   record and compare actual membership/values with the intended postcondition.
-   A successful API response alone is not final verification.
+3. Apply only the authorized patch. Attaching a parent (`addSubIssue`) can
+   asynchronously trigger native `Auto-add sub-issues` workflows, causing a
+   subsequent `addProjectV2ItemById` call to return `Content already exists in
+   this project`; treat that conflict idempotently by re-reading the issue's
+   `projectItems` connection to obtain the created item ID rather than failing
+   the batch. On success or uncertainty, re-read the direct record and compare
+   actual membership/values with the intended postcondition. A successful API
+   response alone is not final verification.
 4. After a timeout or partial mutation, mark the outcome unknown until direct
    verification. Re-discover using exact identity/confirmed scope before
    retrying any create. Do not blindly replay the campaign, duplicate a field/
@@ -114,6 +133,18 @@ For each operation:
 Preserve view IDs and URLs. Do not recreate a view, silently drop columns or
 guess UI-only settings to bypass unavailable native access. Do not terminate a
 shared browser or take over an occupied session. Do not read browser credentials.
+
+When an authorized dedicated in-app Browser surface is available and logged out,
+navigate to the target route and ask the user to sign in directly inside that
+panel without reading or handling credentials. For HTML top-layer popovers
+(`<div popover>`), check control visibility with `getBoundingClientRect()`
+rather than `offsetParent !== null` (`offsetParent` is `null` on top-layer
+popovers). Save edits to an existing view via `View -> Save view`, never
+`Save changes to new view` (which creates a duplicate view). Confirm view
+persistence by reloading the clean view URL without transient query parameters
+(such as `?visibleFields=`); if saving an unbacked column (such as a native
+issue `Type` column without a backing `ProjectV2Field` ID) no-ops, discard the
+transient preview state and report the schema limitation.
 
 When UI is unavailable, name the exact Project/view, setting, expected value,
 population and manual action/check, plus why it remains blocked. Configuration

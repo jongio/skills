@@ -45,7 +45,12 @@ For partial implementation across repositories, enumerate each satisfied and
 remaining requirement. Do not close an umbrella issue because one service
 merged. An open relevant implementation PR may support a policy-compatible
 In Progress proposal, but unrelated mentions or PR authorship do not establish
-the mapping. Before changing state, refresh PR state and source heads; changed
+the mapping. Do not treat an earlier grooming or audit comment as current proof
+once the selected source revision, linked PRs or external trackers have moved;
+treat prior audit notes as dated baselines and re-verify remaining acceptance
+directly against the current pinned source OID and live external targets (such
+as release trackers, external catalogs or upstream blockers). Before changing
+state, refresh PR state, source heads and external acceptance trackers; changed
 evidence invalidates stale disposition proposals.
 
 ## Truthful closure and parentage

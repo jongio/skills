@@ -21,9 +21,8 @@ test("skill includes workflow, safety, and exit criteria", () => {
   assert.match(skill, /^## Exit Criteria$/m);
 });
 
-test("instructions are bounded, portable, and all relative links resolve", async () => {
+test("instructions are bounded, portable, ASCII-clean, and all relative links resolve", async () => {
   assert.ok(skill.split("\n").length <= 500);
-  assert.doesNotMatch(skill, /DEVX_WS|_shared[\\/]|C:\\Users\\|installed-plugins/);
   const links = [...skill.matchAll(/\]\((references\/[^)]+)\)/g)];
   assert.deepEqual(new Set(links.map(([, link]) => link)), new Set([
     "references/evidence-ledger.md",
@@ -31,7 +30,12 @@ test("instructions are bounded, portable, and all relative links resolve", async
     "references/safe-operations.md",
     "references/unattended-policy.md",
   ]));
-  for (const [, link] of links) assert.ok((await read(link)).length > 100);
+  for (const doc of ["SKILL.md", ...new Set(links.map(([, link]) => link))]) {
+    const content = await read(doc);
+    assert.ok(content.length > 100, doc);
+    assert.doesNotMatch(content, /DEVX_WS|_shared[\\/]|C:\\Users\\|\/Users\/|installed-plugins/, doc);
+    assert.doesNotMatch(content, /[\u2013\u2014]/, `${doc} must use ASCII '-' instead of Unicode en/em dashes`);
+  }
 });
 
 const contracts = [
@@ -43,7 +47,8 @@ const contracts = [
   ["completion evidence cannot collapse acceptance boundaries", "references/evidence-ledger.md", [
     /selected source revision/, /merged PR.*not.*proof/i, /actually executed/,
     /installed-host qualification/i, /live evaluation/i, /released\/publication-approved/i,
-    /partial implementation/, /research.*duplicate.*not.planned/i,
+    /partial implementation/, /earlier grooming or audit comment/i,
+    /research.*duplicate.*not.planned/i,
     /open parent.*closed children/i, /unavailable.*unknown/i,
   ]],
   ["workflow and ownership are preserved instead of guessed", "references/organization.md", [
@@ -55,12 +60,15 @@ const contracts = [
   ]],
   ["mutation authority and uncertain results fail closed", "references/safe-operations.md", [
     /Audit mode.*read-only/, /distinct approval/,
-    /empty replacement collection/, /card.*Done.*close/i,
+    /empty replacement collection/, /card.*Done.*close/i, /Item reopened/,
     /backfill/, /case-sensitive/, /raw.*html/,
-    /pagination/, /partial mutation/, /rate limit/,
+    /Enterprise Managed User/i, /GH_PROMPT_DISABLED=1/, /GH_PAGER=cat/,
+    /pagination/, /Content already exists in this project/,
+    /partial mutation/, /rate limit/,
     /direct.*record/, /aggregate.*lag/i, /re-read/i,
     /changed source heads/, /newer.*edits/i,
     /three.*attempts/, /Do not terminate.*browser/i,
+    /getBoundingClientRect/, /Save changes to new view/, /\?visibleFields=/,
   ]],
 ];
 

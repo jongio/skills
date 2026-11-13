@@ -74,8 +74,11 @@ or completion changes. Inspect selected-source behavior and remaining acceptance
 not just PR state, filenames, test titles, boxes or green CI.
 
 Keep implementation, executed tests, installed qualification, live evaluation
-and release approval distinct. Keep partial work open, explain external/shared
-parent gates, and mark unavailable or ambiguous source evidence unknown.
+and release approval distinct. Treat earlier grooming or audit comments as dated
+baselines, not current proof once source refs or external trackers advance:
+re-verify remaining acceptance against the live pinned revision and external
+targets. Keep partial work open, explain external/shared parent gates, and mark
+unavailable or ambiguous source evidence unknown.
 
 #### Dynamic Maintainer Resolution & Inbound Triage
 
