@@ -338,7 +338,7 @@ function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
   for (const section of residual) {
     const bodyWithoutStatusSummaries = section.parts.join("");
     for (const match of bodyWithoutStatusSummaries.matchAll(
-      /\[([^\]]+)\]\(https:\/\/github\.com\/[^)]+#discussion_r(\d+)\)/g
+      /\[([^\[\]\r\n]+)\]\(https:\/\/github\.com\/[^)\s]+#discussion_r(\d+)\)/g
     )) {
       const title = match[1].trim();
       const commentId = Number.parseInt(match[2], 10);
@@ -353,7 +353,7 @@ function extractBodyConcerns(body, resolvedCommentIds = new Set()) {
     const residualProse = bodyWithoutStatusSummaries
       .replace(/<!--[\s\S]*?-->/g, "")
       .replace(/<\/?details[^>]*>/gi, "")
-      .replace(/^\s*-\s*(?:<picture>[\s\S]*?<\/picture>\s*)?\[[^\]]+\]\(https:\/\/github\.com\/[^)]+#discussion_r\d+\)[ \t]*/gm, "")
+      .replace(/^[ \t]*[-*][ \t]*(?:<picture>[\s\S]*?<\/picture>[ \t]*)?\[[^\[\]\r\n]+\]\(https:\/\/github\.com\/[^)\s]+#discussion_r\d+\)[ \t]*/gm, "")
       .replace(/^#{1,6}\s+.+$/gm, "")
       .replace(/\*\*No open issues\*\*\s*(?:🎉)?/gi, "")
       .replace(/<sub>[\s\S]*?<\/sub>/gi, "")

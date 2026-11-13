@@ -286,3 +286,91 @@ test("the production poll honors edited consolidated dispositions without waivin
     assert.equal(result.events.some(event => event.type === "FEEDBACK_ACTION_NEEDED"), !ready, JSON.stringify(result.events));
   }
 });
+
+test("declined and resolved Copilot threads plus settled prose dispositions clear FEEDBACK_ACTION_NEEDED without code commits", async () => {
+  const proseWarning = "parseHeader might receive null when optional headers are omitted.";
+  const body = `<!-- ccr-overview-v2 -->\n\n### 🔵 Needs a closer look\n\n${proseWarning}\n\n**No open issues**\n\n<details>\n<summary><strong>1 open issue</strong></summary>\n\n* [Add async mutex state machine](https://github.com/example-org/sample-repo/pull/7#discussion_r88)\n</details>`;
+  let threadResolved = false;
+  let dispositionComment = null;
+
+  assert.equal(
+    extractBodyOnlyFindings(
+      [review(103, "* [Unlinked bracketed warning; see [resolved item](https://github.com/example-org/sample-repo/pull/7#discussion_r88)")],
+      [],
+      "current-head",
+      new Set([88]),
+    ).length,
+    1,
+    "bracketed prose preceding a resolved inline link must remain unsettled",
+  );
+
+  const runPoll = (sinceCommentId) =>
+    evaluatePrPollTick(
+      parsePrWatchArgs(["once", "--repo", "example-org/sample-repo", "--pr", "7", "--head", "current-head", "--since-comment-id", String(sinceCommentId)]),
+      request => ({
+        ok: true,
+        status: 200,
+        headers: {},
+        data: request.kind !== "graphql" ? { workflow_runs: [] } : {
+          data: {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                headRefOid: "current-head",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                reviewDecision: null,
+                reviewRequests: { nodes: [] },
+                reviews: { nodes: [review(104, body)] },
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: "PRRT_declined_bot",
+                      isResolved: threadResolved,
+                      isOutdated: false,
+                      path: "src/parser.mjs",
+                      line: 14,
+                      comments: {
+                        nodes: [{ databaseId: 88, author: { login: "copilot-pull-request-reviewer" }, body: "Add an async mutex and retry state machine." }],
+                      },
+                    },
+                  ],
+                },
+                comments: { nodes: dispositionComment ? [dispositionComment] : [] },
+                commits: {
+                  nodes: [{
+                    commit: {
+                      statusCheckRollup: {
+                        state: "SUCCESS",
+                        contexts: { nodes: [{ __typename: "CheckRun", name: "test", status: "COMPLETED", conclusion: "SUCCESS" }] },
+                      },
+                    },
+                  }],
+                },
+              },
+            },
+          },
+        },
+      }),
+    );
+
+  // Before triage: both the inline Copilot thread and the prose warning require action.
+  const initial = await runPoll(0);
+  assert.equal(initial.events[0].type, "FEEDBACK_ACTION_NEEDED");
+  assert.equal(initial.events[0].unresolvedThreads.length, 1);
+  const proseDetail = initial.events[0].bodyFindings[0].unsettledConcernDetails.find(c => c.evidence.includes("parseHeader"));
+  assert.ok(proseDetail);
+
+  // Triage declines the over-engineered bot thread (resolving it with rationale) and declines the prose warning with evidence on the same head.
+  threadResolved = true;
+  dispositionComment = {
+    databaseId: 610,
+    createdAt: "2026-10-22T20:06:00Z",
+    body: `Review 104 (${proseDetail.id}): Declined - src/parser.mjs:9 already rejects null inputs with a TypeError covered by test/parser.test.mjs; no speculative guard needed.`,
+  };
+
+  // Advancing --since-comment-id to the posted disposition comment (610) yields PR_READY_TO_MERGE without self-waking or looping FEEDBACK_ACTION_NEEDED.
+  const settled = await runPoll(610);
+  assert.equal(settled.events.length, 1);
+  assert.equal(settled.events[0].type, "PR_READY_TO_MERGE");
+});

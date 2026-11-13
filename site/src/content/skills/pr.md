@@ -72,7 +72,20 @@ that renewed concern, explicitly citing its review ID. Unrelated edits do not
 revalidate another concern.
 For long prose or ambiguous titles, cite the review ID and the exact `concern:...`
 token from `unsettledConcernDetails`; full evidence and local context remain
-available without requiring a verbatim reply.
+available without requiring a verbatim reply. Critically evaluate every reviewer
+and Copilot suggestion before editing code: distinguish concrete bugs, security
+boundary violations, or broken contracts in touched code from speculative
+hypotheticals for impossible or already-guarded inputs; reject over-engineered
+state machines, locks, duplicate validation layers, wrapper helpers, config
+knobs, or extra abstractions when simpler code or no change suffices; and fix
+confirmed defects with the smallest surgical change rather than copying an
+over-complicated suggested patch verbatim. When re-auditing `Needs a closer look`
+prose warnings, change code only if a concrete defect is confirmed, otherwise
+recording a terse evidence-backed disposition without speculative guards. When
+an automated/Copilot thread is declined on merit, reply tersely citing the
+invariant or `file:line` and resolve the automated/bot thread on GitHub rather
+than writing bloatware just to turn it green, while keeping human threads with
+open questions open.
 
 ## Install with required skills
 

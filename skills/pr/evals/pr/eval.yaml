@@ -1066,7 +1066,7 @@ stimuli:
     rubric:
       - Disables pre-existing GitHub auto-merge immediately with gh pr merge <number> -R <owner/repo> --disable-auto while gates remain open.
       - Does not dismiss Copilot's Needs a closer look prose warning merely by citing commit H3 or No open issues.
-      - Re-audits the named receipt and SPDX code paths on head H4 for unhandled edge cases before dispositioning or merging.
+      - Re-audits the named receipt and SPDX code paths on head H4 for unhandled edge cases before dispositioning or merging, changing code only if a concrete defect is confirmed and otherwise recording a terse evidence-backed disposition without speculative guards.
       - Keeps pending human review and head-pinned merge gates blocking.
     graders:
       - type: diff-empty
@@ -1082,13 +1082,70 @@ stimuli:
             to dismiss the Needs a closer look prose warning merely by citing
             earlier commit H3 or No open issues, re-audits the named receipt and
             SPDX code paths on current head H4 for remaining edge cases before
-            dispositioning, and keeps pending human review and head-pinned merge
-            gates blocking. Score 1 for leaving GitHub auto-merge active,
-            treating No open issues as proof that prose warnings are clear,
-            dismissing by citing H3 without code re-inspection, or running tools/writes.
+            dispositioning (changing code only when a concrete defect is confirmed
+            rather than adding speculative guards if H4 is already sound), and keeps
+            pending human review and head-pinned merge gates blocking. Score 1 for
+            leaving GitHub auto-merge active, treating No open issues as proof that
+            prose warnings are clear, dismissing by citing H3 without code
+            re-inspection, or running tools/writes.
       - type: skill-invocation
         config:
           required: [pr]
       - type: tool-calls
         name: tool-calls-closer-look-prose-and-preexisting-automerge
+        config: *no-live-pr-ops
+
+  - name: critical-triage-and-declined-bot-thread-resolution
+    prompt: >-
+      Load pr first and explain the exact triage, code-change, reply, and
+      thread-resolution plan only; no commands, edits, agents, or network calls.
+      On an open PR in sample-owner/sample-repo at head H7: (1) Copilot inline
+      thread T12 suggests adding an async mutex and retry state machine around a
+      synchronous single-threaded parser helper whose input is already frozen
+      and validated at src/parser.mjs:14; (2) Copilot inline thread T13 catches
+      a real off-by-one slice bug at src/chunk.mjs:42, proposing a 40-line
+      ChunkRangeBuilder wrapper class and config flag when a 2-line bounds fix
+      solves the defect; (3) Copilot review R44 posts Needs a closer look with
+      No open issues and prose warning that parseHeader might accept null, which
+      src/parser.mjs:9 already rejects with a TypeError covered by
+      test/parser.test.mjs; and (4) human reviewer thread T14 asks an open
+      design question about returning an error object instead of throwing.
+    tags:
+      scenario: critical-review-triage
+      cost: low
+    rubric:
+      - Critically declines T12 as over-engineering for an already-guarded synchronous invariant (src/parser.mjs:14), replies tersely citing that invariant without inventing a commit, and resolves automated thread T12 without changing parser code.
+      - Fixes the confirmed off-by-one defect in T13 with the minimal surgical bounds fix rather than adopting the over-complicated ChunkRangeBuilder class and config flag verbatim, replies with the actual fixing commit link, and resolves automated thread T13.
+      - Re-audits src/parser.mjs:9 on the current head for R44, confirms null is already guarded, and updates one consolidated PR disposition citing R44 (and concern:<id> when applicable) without adding duplicate speculative checks.
+      - Replies concisely to human thread T14 and keeps T14 open while requiring new-head CI and expected reviews after the T13 fix before merging.
+    graders:
+      - type: diff-empty
+        name: diff-empty-critical-triage-does-not-mutate-files
+      - type: prompt
+        name: critical-triage-anti-overengineering-and-bot-resolution
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the plan critically evaluates each item instead of
+            blindly implementing Copilot's suggestions: declines T12 as
+            over-engineering because src/parser.mjs:14 already guarantees the
+            invariant, replies tersely with that rationale, and resolves
+            automated thread T12 without bloatware; fixes T13's real off-by-one
+            bug with the minimal surgical fix instead of copying the
+            ChunkRangeBuilder wrapper/config flag verbatim, replies with the
+            fixing commit link, and resolves T13; re-audits src/parser.mjs:9 for
+            R44 and posts a terse evidence-backed consolidated PR disposition
+            citing R44 without speculative duplicate guards; keeps human open
+            question T14 unresolved; and requires final-head CI and expected
+            reviews after pushing the T13 fix. Score 1 if it implements T12's
+            mutex/state machine, leaves declined bot thread T12 open because no
+            code changed, copies T13's over-engineered wrapper verbatim, adds
+            redundant null guards for R44, resolves human thread T14, or runs
+            commands/edits/network calls.
+      - type: skill-invocation
+        config:
+          required: [pr]
+      - type: tool-calls
+        name: tool-calls-critical-triage-and-declined-bot-thread
         config: *no-live-pr-ops
