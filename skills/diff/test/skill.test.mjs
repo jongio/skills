@@ -15,12 +15,17 @@ test("portable skill frontmatter contains name, description, and version metadat
   assert.match(frontmatter[1], /^  version: "1\.0\.0"$/m);
 });
 
-test("skill includes workflow, safety, exit criteria, and untrusted-data boundary", () => {
+test("skill includes workflow, safety, exit criteria, canvas actions, and untrusted-data boundary", () => {
   assert.match(skill, /^## Workflow$/m);
   assert.match(skill, /^## Safety$/m);
   assert.match(skill, /^## Exit Criteria$/m);
   assert.match(skill, /Untrusted data boundary/i);
+  assert.match(skill, /open_canvas/);
+  assert.match(skill, /get_review/);
+  assert.match(skill, /mark_addressed/);
   assert.match(skill, /Submit Review/);
+  assert.doesNotMatch(skill, /scripts\/diff\.mjs/);
+  assert.doesNotMatch(readme, /scripts\/diff\.mjs/);
 });
 
 test("tracked markdown and eval spec avoid Unicode dashes and YAML aliases", () => {

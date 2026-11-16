@@ -308,6 +308,20 @@ html, body, #app {
   border-bottom: none;
 }
 
+.dv-file-card.collapsed.has-collapsed-cta .dv-file-header {
+  border-bottom: 1px solid var(--ck-border);
+}
+
+.dv-collapsed-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--ck-bg);
+  font-size: 12px;
+}
+
 .dv-collapse-btn {
   display: inline-flex;
   align-items: center;
@@ -439,13 +453,16 @@ html, body, #app {
 .dv-ln-plus {
   display: none;
   position: absolute;
-  left: 3px;
-  top: 2px;
+  left: 4px;
+  top: 0;
+  line-height: 20px;
+  font-size: 12px;
+  font-weight: var(--ck-fw-semibold);
   color: var(--ck-accent);
 }
 
 .dv-ln.commentable:hover .dv-ln-plus {
-  display: inline-flex;
+  display: inline-block;
 }
 
 .dv-code {

@@ -6,7 +6,7 @@ import {
   pairSplitRows,
   parseDiffPatch,
   tokenizeCodeLine,
-} from "../scripts/parse-diff.mjs";
+} from "../runtime/parse-diff.mjs";
 import {
   buildFileTree as buildWebFileTree,
   computeInlineWordDiff as computeWebWordDiff,
@@ -75,7 +75,7 @@ test("parseDiffPatch parses added, modified, renamed, deleted, binary, and blank
 
   const tree = buildFileTree(parsed.files);
   const webTree = buildWebFileTree(parsed.files);
-  assert.equal(typeof tree, "object");
+  assert.equal(Array.isArray(tree), true);
   assert.equal(Array.isArray(webTree), true);
   assert.equal(webTree.length, 3);
 });
@@ -83,21 +83,18 @@ test("parseDiffPatch parses added, modified, renamed, deleted, binary, and blank
 test("computeInlineWordDiff and tokenizeCodeLine stay linear and safe on pathological inputs", () => {
   const wd = computeInlineWordDiff("return oldCount + 1;", "return newCount + 1;");
   const webWd = computeWebWordDiff("return oldCount + 1;", "return newCount + 1;");
-  assert.equal(wd.left[1], "old");
-  assert.equal(wd.right[1], "new");
-  assert.ok(webWd.left.some((p) => p.changed && p.text === "oldCount"));
-  assert.ok(webWd.right.some((p) => p.changed && p.text === "newCount"));
+  assert.ok(wd.left.some((p) => p.changed && p.text === "oldCount"));
+  assert.ok(wd.right.some((p) => p.changed && p.text === "newCount"));
+  assert.deepEqual(wd, webWd);
 
   const tokens = tokenizeCodeLine("export const count = 42; // trailing comment", "js");
   const webTokens = tokenizeWebCodeLine("export const count = 42; // trailing comment", "js");
-  assert.ok(tokens.some((t) => t.kind === "kw" && t.value === "export"));
-  assert.ok(tokens.some((t) => t.kind === "num" && t.value === "42"));
-  assert.ok(tokens.some((t) => t.kind === "cmt"));
-  assert.ok(webTokens.some((t) => t.kind === "keyword" && t.text === "export"));
-  assert.ok(webTokens.some((t) => t.kind === "number" && t.text === "42"));
-  assert.ok(webTokens.some((t) => t.kind === "comment"));
+  assert.ok(tokens.some((t) => t.kind === "keyword" && t.text === "export"));
+  assert.ok(tokens.some((t) => t.kind === "number" && t.text === "42"));
+  assert.ok(tokens.some((t) => t.kind === "comment"));
+  assert.deepEqual(tokens, webTokens);
 
   const hugeLine = "const a = 1; ".repeat(500);
-  assert.deepEqual(tokenizeCodeLine(hugeLine, "js"), [{ kind: "plain", value: hugeLine }]);
+  assert.deepEqual(tokenizeCodeLine(hugeLine, "js"), [{ kind: "plain", text: hugeLine }]);
   assert.deepEqual(tokenizeWebCodeLine(hugeLine, "js"), [{ kind: "plain", text: hugeLine }]);
 });

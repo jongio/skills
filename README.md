@@ -50,7 +50,7 @@ installed individually or all at once as one plugin.
 | [`eval-doctor`](skills/eval-doctor/) | Audit, author, and harden AI skill and prompt evaluations with Vally, github/evals, deterministic graders, and safe github/evals-action CI workflows. |
 | [`secops-doctor`](skills/secops-doctor/) | Audit repository and application security across OWASP/STRIDE, secrets, workflows, containers, and Cloudflare with Public Repo Stealth Mode. |
 | [`release-doctor`](skills/release-doctor/) | Verify post-merge release readiness, unreleased commits, semver recommendations, and cross-manifest version parity before cutting a release. |
-| [`diff`](skills/diff/) | Open a GitHub-style side-by-side diff viewer in a browser or canvas with inline review comments and structured review triage. |
+| [`diff`](skills/diff/) | Open a GitHub-style side-by-side diff viewer in a Copilot App canvas with inline review comments and structured review triage. |
 
 **How the delivery workflow skills fit together:** triage issues with
 [`backlog-groom`](skills/backlog-groom/), plan and implement with

@@ -4,6 +4,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   unlinkSync,
@@ -39,6 +40,49 @@ function assertSafeDestination(home, file) {
   }
 }
 
+export function findInstalledPluginDiffExtension(home) {
+  const pluginsRoot = join(resolve(home), "installed-plugins");
+  let rootStat;
+  try {
+    rootStat = lstatSync(pluginsRoot);
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  }
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) return null;
+
+  function scanDir(dir, depth) {
+    if (depth > 3) return null;
+    const candidate = join(dir, "com.github.copilot", "extensions", "diff", "extension.mjs");
+    try {
+      const stat = lstatSync(candidate);
+      if (stat.isFile() && !stat.isSymbolicLink()) {
+        return candidate;
+      }
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+    }
+
+    let entries = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name === "node_modules" || entry.name.startsWith(".")) {
+        continue;
+      }
+      const found = scanDir(join(dir, entry.name), depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  return scanDir(pluginsRoot, 0);
+}
+
 export function planSetup({
   home = process.env.COPILOT_HOME || join(homedir(), ".copilot"),
   entry = defaultEntry,
@@ -47,12 +91,35 @@ export function planSetup({
   const resolvedEntry = resolve(entry);
   const file = join(resolvedHome, "extensions", "diff", "extension.mjs");
   assertSafeDestination(resolvedHome, file);
-  if (!existsSync(resolvedEntry) || !lstatSync(resolvedEntry).isFile()) {
-    throw new Error("Installed runtime is missing; reinstall the diff skill");
-  }
+
+  const pluginExtension = findInstalledPluginDiffExtension(resolvedHome);
   const before = existsSync(file) ? readFileSync(file, "utf8") : null;
   if (before !== null && !before.startsWith(`${marker}\n`)) {
     throw new Error("Existing loader is not managed by this skill; preserve it");
+  }
+
+  if (pluginExtension) {
+    const hash = createHash("sha256")
+      .update(file)
+      .update("\0")
+      .update(before ?? "<absent>")
+      .update("\0")
+      .update(`plugin:${pluginExtension}`)
+      .digest("hex");
+    return {
+      home: resolvedHome,
+      entry: resolvedEntry,
+      file,
+      pluginManaged: true,
+      pluginFile: pluginExtension,
+      content: null,
+      hash,
+      unchanged: before === null,
+    };
+  }
+
+  if (!existsSync(resolvedEntry) || !lstatSync(resolvedEntry).isFile()) {
+    throw new Error("Installed runtime is missing; reinstall the diff skill");
   }
   const content = `${marker}\nawait import(${JSON.stringify(pathToFileURL(resolvedEntry).href)});\n`;
   const hash = createHash("sha256")
@@ -66,26 +133,50 @@ export function planSetup({
     home: resolvedHome,
     entry: resolvedEntry,
     file,
+    pluginManaged: false,
+    pluginFile: null,
     content,
     hash,
     unchanged: before === content,
   };
 }
 
-export function applySetup(plan, approval) {
-  if (typeof approval !== "string" || approval !== plan.hash) {
+export function applySetup(plan, approval = plan?.hash) {
+  if (!plan || typeof approval !== "string" || approval !== plan.hash) {
     throw new Error("Exact preview hash approval required");
   }
   const current = planSetup({ home: plan.home, entry: plan.entry });
   if (
     current.hash !== plan.hash ||
     current.file !== plan.file ||
-    current.content !== plan.content
+    current.content !== plan.content ||
+    current.pluginManaged !== plan.pluginManaged
   ) {
     throw new Error("Stale setup preview; preview again");
   }
+
+  if (current.pluginManaged) {
+    if (existsSync(current.file)) {
+      unlinkSync(current.file);
+      return {
+        applied: true,
+        removedStandaloneLoader: true,
+        pluginManaged: true,
+        pluginFile: current.pluginFile,
+        file: current.file,
+      };
+    }
+    return {
+      applied: false,
+      unchanged: true,
+      pluginManaged: true,
+      pluginFile: current.pluginFile,
+      file: current.file,
+    };
+  }
+
   if (current.unchanged) {
-    return { applied: false, unchanged: true, file: current.file };
+    return { applied: false, unchanged: true, pluginManaged: false, file: current.file };
   }
   const dir = dirname(current.file);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -103,30 +194,34 @@ export function applySetup(plan, approval) {
     try { unlinkSync(temp); } catch {}
     throw error;
   }
-  return { applied: true, file: current.file };
+  return { applied: true, pluginManaged: false, file: current.file };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const args = process.argv.slice(2);
     if (
-      args.length &&
+      args.length > 0 &&
       !(args.length === 1 && args[0] === "--dry-run") &&
       !(args.length === 2 && args[0] === "--approve")
     ) {
-      throw new Error("Usage: node scripts/setup.mjs --dry-run | --approve <hash>");
+      throw new Error("Usage: node scripts/setup.mjs [--dry-run | --approve <hash>]");
     }
     const plan = planSetup();
     const out =
-      args[0] === "--approve"
-        ? applySetup(plan, args[1])
-        : {
-            applied: false,
-            file: plan.file,
-            runtime: plan.entry,
-            hash: plan.hash,
-            unchanged: plan.unchanged,
-          };
+      args.length === 0
+        ? applySetup(plan, plan.hash)
+        : args[0] === "--approve"
+          ? applySetup(plan, args[1])
+          : {
+              applied: false,
+              pluginManaged: plan.pluginManaged,
+              pluginFile: plan.pluginFile,
+              file: plan.file,
+              runtime: plan.entry,
+              hash: plan.hash,
+              unchanged: plan.unchanged,
+            };
     console.log(JSON.stringify(out, null, 2));
   } catch (error) {
     console.error(error.message);

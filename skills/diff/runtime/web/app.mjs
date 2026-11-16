@@ -31,20 +31,38 @@ function fileIconName(status) {
   return "file-code";
 }
 
+export const LARGE_FILE_CHANGED_LINES_THRESHOLD = 600;
+
+const LOCKFILE_BASENAME_RE =
+  /^(?:package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|cargo\.lock|gemfile\.lock|poetry\.lock|uv\.lock|pipfile\.lock|composer\.lock|go\.sum|packages\.lock\.json|paket\.lock|flake\.lock)$/i;
+
+export function getAutoCollapseReason(file) {
+  const pathText = String(file?.canonicalPath || file?.displayPath || "").trim();
+  const base = pathText.split("/").pop() || "";
+  if (base && LOCKFILE_BASENAME_RE.test(base)) {
+    return "Lockfile diff collapsed by default";
+  }
+  const changedLines = (Number(file?.additions) || 0) + (Number(file?.deletions) || 0);
+  if (changedLines > LARGE_FILE_CHANGED_LINES_THRESHOLD) {
+    return "Large file diff collapsed by default";
+  }
+  return null;
+}
+
 function CodeTokens({ text, language, segments, highlightClass }) {
   if (Array.isArray(segments) && segments.length > 0) {
-    return html`<>${segments.map((seg, idx) =>
+    return segments.map((seg, idx) =>
       seg.changed
         ? html`<span key=${idx} class=${highlightClass}>${seg.text}</span>`
         : seg.text,
-    )}</>`;
+    );
   }
   const tokens = tokenizeCodeLine(text, language);
-  return html`<>${tokens.map((tok, idx) =>
+  return tokens.map((tok, idx) =>
     tok.kind === "plain"
       ? tok.text
       : html`<span key=${idx} class=${`tok-${tok.kind}`}>${tok.text}</span>`,
-  )}</>`;
+  );
 }
 
 function FileTreeNodes({
@@ -158,20 +176,27 @@ function ThreadRows({
           (c) => html`
             <div key=${c.id} class="dv-comment-card">
               <div class="dv-comment-head">
-                <span class="ck-mono">${c.file}:${c.line} (${c.side}) · ${c.createdAt ? relativeTime(c.createdAt) : "saved"}</span>
-                ${canEditComments
-                  ? html`
-                      <button
-                        type="button"
-                        class="ck-btn dv-icon-btn"
-                        title="Delete comment"
-                        disabled=${busyAction}
-                        onClick=${() => onDeleteComment(c.id)}
-                      >
-                        <${Icon} name="trash-2" size=${12} />
-                      </button>
-                    `
-                  : null}
+                <span class="ck-mono">
+                  ${c.file}:${c.line} (${c.side}) · ${c.createdAt ? relativeTime(c.createdAt) : "saved"}
+                </span>
+                <div class="ck-row">
+                  ${c.stale
+                    ? html`<span class="ck-badge ck-badge-muted" title="Diff changed at this line since comment was added">Stale</span>`
+                    : null}
+                  ${canEditComments
+                    ? html`
+                        <button
+                          type="button"
+                          class="ck-btn dv-icon-btn"
+                          title="Delete comment"
+                          disabled=${busyAction}
+                          onClick=${() => onDeleteComment(c.id)}
+                        >
+                          <${Icon} name="trash-2" size=${12} />
+                        </button>
+                      `
+                    : null}
+                </div>
               </div>
               <div class="dv-comment-body">${c.body}</div>
             </div>
@@ -232,6 +257,7 @@ function FileDiffCard({
   onStartSplitResize,
   isViewed,
   isCollapsed,
+  autoCollapseReason,
   isFocusedFile,
   focusedLine,
   onToggleCollapse,
@@ -248,8 +274,10 @@ function FileDiffCard({
   busyAction,
 }) {
   const canonical = file.canonicalPath || "";
+  const collapseKey = canonical || String(file.index);
   const leftCodePct = `${splitLeftPct}%`;
   const rightCodePct = `${100 - splitLeftPct}%`;
+  const showCollapsedCta = Boolean(isCollapsed && autoCollapseReason && !isViewed);
 
   const commentLookup = useMemo(() => {
     const byAnchor = new Map();
@@ -273,14 +301,14 @@ function FileDiffCard({
     <section
       id=${`dv-file-${file.index}`}
       data-canonical-file=${canonical}
-      class=${`dv-file-card${isCollapsed ? " collapsed" : ""}${isFocusedFile ? " focused" : ""}`}
+      class=${`dv-file-card${isCollapsed ? " collapsed" : ""}${showCollapsedCta ? " has-collapsed-cta" : ""}${isFocusedFile ? " focused" : ""}`}
     >
       <header class="dv-file-header">
         <button
           type="button"
           class="dv-collapse-btn"
           title=${isCollapsed ? "Expand file" : "Collapse file"}
-          onClick=${() => onToggleCollapse(canonical || String(file.index))}
+          onClick=${() => onToggleCollapse(collapseKey, !isCollapsed)}
         >
           <${Icon} name=${isCollapsed ? "chevron-right" : "chevron-down"} size=${14} />
         </button>
@@ -327,7 +355,7 @@ function FileDiffCard({
                           title="Drag to resize Split columns"
                           onMouseDown=${onStartSplitResize}
                         ></div>
-                        <table class="dv-table">
+                        <table class="dv-table dv-table-split">
                           <colgroup>
                             <col style="width: 48px" />
                             <col style=${{ width: leftCodePct }} />
@@ -335,13 +363,15 @@ function FileDiffCard({
                             <col style=${{ width: rightCodePct }} />
                           </colgroup>
                           <tbody>
-                            ${rows.map((row, rowIdx) => {
+                            ${rows.flatMap((row, rowIdx) => {
                               if (row.kind === "meta") {
-                                return html`
-                                  <tr key=${`meta:${rowIdx}`}>
-                                    <td colSpan=${4} class="dv-code dv-cell-empty ck-muted">${row.text}</td>
-                                  </tr>
-                                `;
+                                return [
+                                  html`
+                                    <tr key=${`meta:${rowIdx}`}>
+                                      <td colSpan=${4} class="dv-code dv-cell-empty ck-muted">${row.text}</td>
+                                    </tr>
+                                  `,
+                                ];
                               }
                               const l = row.left;
                               const r = row.right;
@@ -370,67 +400,76 @@ function FileDiffCard({
                                 focusedLine !== null &&
                                 (leftLine === focusedLine || rightLine === focusedLine);
 
-                              return html`
-                                <>
-                                  <tr
-                                    key=${`r:${rowIdx}`}
-                                    data-line=${rightLine ?? leftLine ?? undefined}
-                                    class=${lineFocused ? "dv-line-focused" : ""}
+                              const mainRow = html`
+                                <tr
+                                  key=${`r:${rowIdx}`}
+                                  data-line=${rightLine ?? leftLine ?? undefined}
+                                  class=${lineFocused ? "dv-line-focused" : ""}
+                                >
+                                  <td
+                                    class=${`dv-ln${l ? (l.type === "del" ? " dv-cell-del" : "") : " dv-cell-empty"}${canEditComments && canonical && leftLine !== null ? " commentable" : ""}`}
+                                    onClick=${() => {
+                                      if (canEditComments && canonical && leftLine !== null) {
+                                        onOpenComposer(canonical, leftLine, "left");
+                                      }
+                                    }}
                                   >
-                                    <td
-                                      class=${`dv-ln${l ? (l.type === "del" ? " dv-cell-del" : "") : " dv-cell-empty"}${canEditComments && canonical && leftLine !== null ? " commentable" : ""}`}
-                                      onClick=${() => {
-                                        if (canEditComments && canonical && leftLine !== null) {
-                                          onOpenComposer(canonical, leftLine, "left");
-                                        }
-                                      }}
-                                    >
-                                      ${canEditComments && canonical && leftLine !== null
-                                        ? html`<span class="dv-ln-plus"><${Icon} name="message-square-plus" size=${12} /></span>`
-                                        : null}
-                                      ${leftLine !== null ? leftLine : ""}
-                                    </td>
-                                    <td class=${`dv-code${l ? (l.type === "del" ? " dv-cell-del" : "") : " dv-cell-empty"}`}>
-                                      ${l
-                                        ? html`
-                                            <span class="dv-prefix">${l.type === "del" ? "-" : " "}</span>
-                                            <${CodeTokens}
-                                              text=${l.text}
-                                              language=${file.language}
-                                              segments=${row.leftSegments}
-                                              highlightClass="dv-word-del"
-                                            />
-                                          `
-                                        : ""}
-                                    </td>
-                                    <td
-                                      class=${`dv-ln${r ? (r.type === "add" ? " dv-cell-add" : "") : " dv-cell-empty"}${canEditComments && canonical && rightLine !== null ? " commentable" : ""}`}
-                                      onClick=${() => {
-                                        if (canEditComments && canonical && rightLine !== null) {
-                                          onOpenComposer(canonical, rightLine, "right");
-                                        }
-                                      }}
-                                    >
-                                      ${canEditComments && canonical && rightLine !== null
-                                        ? html`<span class="dv-ln-plus"><${Icon} name="message-square-plus" size=${12} /></span>`
-                                        : null}
-                                      ${rightLine !== null ? rightLine : ""}
-                                    </td>
-                                    <td class=${`dv-code${r ? (r.type === "add" ? " dv-cell-add" : "") : " dv-cell-empty"}`}>
-                                      ${r
-                                        ? html`
-                                            <span class="dv-prefix">${isContextPair ? " " : r.type === "add" ? "+" : " "}</span>
-                                            <${CodeTokens}
-                                              text=${r.text}
-                                              language=${file.language}
-                                              segments=${row.rightSegments}
-                                              highlightClass="dv-word-add"
-                                            />
-                                          `
-                                        : ""}
-                                    </td>
-                                  </tr>
+                                    ${canEditComments && canonical && leftLine !== null
+                                      ? html`<span class="dv-ln-plus" aria-hidden="true">+</span>`
+                                      : null}
+                                    ${leftLine !== null ? leftLine : ""}
+                                  </td>
+                                  <td class=${`dv-code${l ? (l.type === "del" ? " dv-cell-del" : "") : " dv-cell-empty"}`}>
+                                    ${l
+                                      ? html`
+                                          <span class="dv-prefix">${l.type === "del" ? "-" : " "}</span>
+                                          <${CodeTokens}
+                                            text=${l.text}
+                                            language=${file.language}
+                                            segments=${row.leftSegments}
+                                            highlightClass="dv-word-del"
+                                          />
+                                        `
+                                      : ""}
+                                  </td>
+                                  <td
+                                    class=${`dv-ln${r ? (r.type === "add" ? " dv-cell-add" : "") : " dv-cell-empty"}${canEditComments && canonical && rightLine !== null ? " commentable" : ""}`}
+                                    onClick=${() => {
+                                      if (canEditComments && canonical && rightLine !== null) {
+                                        onOpenComposer(canonical, rightLine, "right");
+                                      }
+                                    }}
+                                  >
+                                    ${canEditComments && canonical && rightLine !== null
+                                      ? html`<span class="dv-ln-plus" aria-hidden="true">+</span>`
+                                      : null}
+                                    ${rightLine !== null ? rightLine : ""}
+                                  </td>
+                                  <td class=${`dv-code${r ? (r.type === "add" ? " dv-cell-add" : "") : " dv-cell-empty"}`}>
+                                    ${r
+                                      ? html`
+                                          <span class="dv-prefix">${isContextPair ? " " : r.type === "add" ? "+" : " "}</span>
+                                          <${CodeTokens}
+                                            text=${r.text}
+                                            language=${file.language}
+                                            segments=${row.rightSegments}
+                                            highlightClass="dv-word-add"
+                                          />
+                                        `
+                                      : ""}
+                                  </td>
+                                </tr>
+                              `;
+
+                              if (rowComments.length === 0 && !composerHere) {
+                                return [mainRow];
+                              }
+
+                              return [
+                                mainRow,
+                                html`
                                   <${ThreadRows}
+                                    key=${`rt:${rowIdx}`}
                                     colSpan=${4}
                                     rowComments=${rowComments}
                                     composerHere=${composerHere}
@@ -443,8 +482,8 @@ function FileDiffCard({
                                     canEditComments=${canEditComments}
                                     busyAction=${busyAction}
                                   />
-                                </>
-                              `;
+                                `,
+                              ];
                             })}
                           </tbody>
                         </table>
@@ -456,20 +495,22 @@ function FileDiffCard({
                           <span>${hunk.header}</span>
                           ${hunk.section ? html`<span class="dv-hunk-section">${hunk.section}</span>` : null}
                         </div>
-                        <table class="dv-table">
+                        <table class="dv-table dv-table-unified">
                           <colgroup>
                             <col style="width: 44px" />
                             <col style="width: 44px" />
                             <col />
                           </colgroup>
                           <tbody>
-                            ${hunk.lines.map((ln, lineIdx) => {
+                            ${hunk.lines.flatMap((ln, lineIdx) => {
                               if (ln.type === "meta") {
-                                return html`
-                                  <tr key=${`meta:${lineIdx}`}>
-                                    <td colSpan=${3} class="dv-code dv-cell-empty ck-muted">${ln.text}</td>
-                                  </tr>
-                                `;
+                                return [
+                                  html`
+                                    <tr key=${`meta:${lineIdx}`}>
+                                      <td colSpan=${3} class="dv-code dv-cell-empty ck-muted">${ln.text}</td>
+                                    </tr>
+                                  `,
+                                ];
                               }
                               const oldLine = ln.oldLine;
                               const newLine = ln.newLine;
@@ -497,39 +538,54 @@ function FileDiffCard({
                                 focusedLine !== null &&
                                 (oldLine === focusedLine || newLine === focusedLine);
 
-                              return html`
-                                <>
-                                  <tr
-                                    key=${`u:${lineIdx}`}
-                                    data-line=${newLine ?? oldLine ?? undefined}
-                                    class=${`${rowCls}${lineFocused ? " dv-line-focused" : ""}`}
+                              const mainRow = html`
+                                <tr
+                                  key=${`u:${lineIdx}`}
+                                  data-line=${newLine ?? oldLine ?? undefined}
+                                  class=${`${rowCls}${lineFocused ? " dv-line-focused" : ""}`}
+                                >
+                                  <td
+                                    class=${`dv-ln dv-ln-unified${canEditComments && canonical && oldLine !== null ? " commentable" : ""}`}
+                                    onClick=${() => {
+                                      if (canEditComments && canonical && oldLine !== null) {
+                                        onOpenComposer(canonical, oldLine, "left");
+                                      }
+                                    }}
                                   >
-                                    <td
-                                      class=${`dv-ln dv-ln-unified${canEditComments && canonical && oldLine !== null ? " commentable" : ""}`}
-                                      onClick=${() => {
-                                        if (canEditComments && canonical && oldLine !== null) {
-                                          onOpenComposer(canonical, oldLine, "left");
-                                        }
-                                      }}
-                                    >
-                                      ${oldLine !== null ? oldLine : ""}
-                                    </td>
-                                    <td
-                                      class=${`dv-ln dv-ln-unified${canEditComments && canonical && newLine !== null ? " commentable" : ""}`}
-                                      onClick=${() => {
-                                        if (canEditComments && canonical && newLine !== null) {
-                                          onOpenComposer(canonical, newLine, "right");
-                                        }
-                                      }}
-                                    >
-                                      ${newLine !== null ? newLine : ""}
-                                    </td>
-                                    <td class="dv-code">
-                                      <span class="dv-prefix">${ln.type === "add" ? "+" : ln.type === "del" ? "-" : " "}</span>
-                                      <${CodeTokens} text=${ln.text} language=${file.language} />
-                                    </td>
-                                  </tr>
+                                    ${canEditComments && canonical && oldLine !== null
+                                      ? html`<span class="dv-ln-plus" aria-hidden="true">+</span>`
+                                      : null}
+                                    ${oldLine !== null ? oldLine : ""}
+                                  </td>
+                                  <td
+                                    class=${`dv-ln dv-ln-unified${canEditComments && canonical && newLine !== null ? " commentable" : ""}`}
+                                    onClick=${() => {
+                                      if (canEditComments && canonical && newLine !== null) {
+                                        onOpenComposer(canonical, newLine, "right");
+                                      }
+                                    }}
+                                  >
+                                    ${canEditComments && canonical && newLine !== null
+                                      ? html`<span class="dv-ln-plus" aria-hidden="true">+</span>`
+                                      : null}
+                                    ${newLine !== null ? newLine : ""}
+                                  </td>
+                                  <td class="dv-code">
+                                    <span class="dv-prefix">${ln.type === "add" ? "+" : ln.type === "del" ? "-" : " "}</span>
+                                    <${CodeTokens} text=${ln.text} language=${file.language} />
+                                  </td>
+                                </tr>
+                              `;
+
+                              if (rowComments.length === 0 && !composerHere) {
+                                return [mainRow];
+                              }
+
+                              return [
+                                mainRow,
+                                html`
                                   <${ThreadRows}
+                                    key=${`ut:${lineIdx}`}
                                     colSpan=${3}
                                     rowComments=${rowComments}
                                     composerHere=${composerHere}
@@ -542,8 +598,8 @@ function FileDiffCard({
                                     canEditComments=${canEditComments}
                                     busyAction=${busyAction}
                                   />
-                                </>
-                              `;
+                                `,
+                              ];
                             })}
                           </tbody>
                         </table>
@@ -551,12 +607,25 @@ function FileDiffCard({
                     `)}
             </div>
           `
-        : null}
+        : showCollapsedCta
+          ? html`
+              <div class="dv-collapsed-notice">
+                <span class="ck-muted">${autoCollapseReason}</span>
+                <button
+                  type="button"
+                  class="ck-btn"
+                  onClick=${() => onToggleCollapse(collapseKey, false)}
+                >
+                  Show diff (+${file.additions} / -${file.deletions})
+                </button>
+              </div>
+            `
+          : null}
     </section>
   `;
 }
 
-function DiffCanvasApp({ state, invoke }) {
+export function DiffCanvasApp({ state, invoke }) {
   // Local UI state strictly separated from SSE domain state so live updates
   // never overwrite focus, filter queries, or in-progress comment text.
   const [viewMode, setViewMode] = useState("split");
@@ -612,29 +681,42 @@ function DiffCanvasApp({ state, invoke }) {
 
   const scrollToFile = useCallback((canonicalPath, line = null) => {
     setSelectedFile(canonicalPath);
-    setCollapsedFiles((prev) => {
-      if (!prev[canonicalPath]) return prev;
-      const next = { ...prev };
-      delete next[canonicalPath];
-      return next;
-    });
-    requestAnimationFrame(() => {
-      const root = mainPaneRef.current || document;
+    setCollapsedFiles((prev) =>
+      prev[canonicalPath] === false ? prev : { ...prev, [canonicalPath]: false },
+    );
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (fn) => setTimeout(fn, 0);
+    schedule(() => {
+      const root = mainPaneRef.current || (typeof document !== "undefined" ? document : null);
+      if (!root?.querySelectorAll) return;
       const cards = root.querySelectorAll("[data-canonical-file]");
       for (const card of cards) {
         if (card.getAttribute("data-canonical-file") !== canonicalPath) continue;
         if (line !== null) {
-          const lineRow = card.querySelector(`tr[data-line="${CSS.escape(String(line))}"]`);
-          if (lineRow) {
+          const escapedLine =
+            typeof CSS !== "undefined" && typeof CSS.escape === "function"
+              ? CSS.escape(String(line))
+              : String(line).replace(/"/g, '\\"');
+          const lineRow = card.querySelector(`tr[data-line="${escapedLine}"]`);
+          if (lineRow?.scrollIntoView) {
             lineRow.scrollIntoView({ behavior: "smooth", block: "center" });
             return;
           }
         }
-        card.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (card.scrollIntoView) {
+          card.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
         return;
       }
     });
   }, []);
+
+  useEffect(() => {
+    setCollapsedFiles({});
+    setSelectedFile(null);
+  }, [state?.domain]);
 
   useEffect(() => {
     if (state?.focusSeq && state?.focusedFile) {
@@ -741,7 +823,7 @@ function DiffCanvasApp({ state, invoke }) {
   );
 
   const handleSubmitReview = useCallback(async () => {
-    const res = await runAction("submit_review", {});
+    const res = await runAction("submit_review", { notifyAgent: true });
     if (res) {
       setActiveComposer(null);
       setDraftBody("");
@@ -775,9 +857,9 @@ function DiffCanvasApp({ state, invoke }) {
               <strong>No diff loaded yet</strong>
             </div>
             <p class="ck-muted">
-              Open this canvas from a Git workspace or pass a prepared review payload
-              (<span class="ck-mono">reviewId</span>, <span class="ck-mono">repoSlug</span>,
-              <span class="ck-mono">branchSlug</span>) or <span class="ck-mono">cwd</span> + <span class="ck-mono">spec</span>.
+              Open this canvas from a Git workspace (<span class="ck-mono">cwd</span>,
+              <span class="ck-mono">spec</span>) or target a GitHub pull request directly
+              (<span class="ck-mono">repo</span>, <span class="ck-mono">pr</span>).
             </p>
             ${state.error
               ? html`
@@ -794,7 +876,7 @@ function DiffCanvasApp({ state, invoke }) {
   }
 
   const badge = statusBadgeMeta(state.status);
-  const canEditComments = state.status === "draft";
+  const canEditComments = state.status !== "addressed";
 
   return html`
     <div class=${`dv-shell${wrapLines ? " wrap-lines" : ""}`}>
@@ -896,7 +978,7 @@ function DiffCanvasApp({ state, invoke }) {
           class="ck-btn dv-icon-btn"
           title="Reload diff"
           disabled=${busyAction}
-          onClick=${() => runAction("load_diff", {})}
+          onClick=${() => runAction("refresh", {})}
         >
           <${Icon} name="refresh-cw" size=${14} />
         </button>
@@ -904,19 +986,23 @@ function DiffCanvasApp({ state, invoke }) {
         <button
           type="button"
           class="ck-btn ck-btn-primary"
-          disabled=${busyAction || state.status !== "draft"}
+          disabled=${busyAction || state.status === "addressed"}
           onClick=${handleSubmitReview}
         >
           <${Icon} name="circle-check" size=${14} />
-          ${state.status === "draft" ? "Submit Review" : "Review Submitted"}
+          ${state.status === "pending"
+            ? "Resubmit Review"
+            : state.status === "addressed"
+              ? "Addressed"
+              : "Submit Review"}
         </button>
       </header>
 
-      ${actionError
+      ${actionError || state.error
         ? html`
             <div class="ck-callout ck-error dv-error-banner">
               <${Icon} name="circle-x" size=${16} />
-              <span>${actionError}</span>
+              <span>${actionError || state.error}</span>
             </div>
           `
         : null}
@@ -961,6 +1047,18 @@ function DiffCanvasApp({ state, invoke }) {
             : filteredFiles.map((file) => {
                 const canonical = file.canonicalPath || "";
                 const collapseKey = canonical || String(file.index);
+              const autoCollapseReason = getAutoCollapseReason(file);
+              const hasExplicitCollapse = Object.prototype.hasOwnProperty.call(
+                collapsedFiles,
+                collapseKey,
+              );
+              const targetedByFocus = Boolean(
+                canonical && (selectedFile === canonical || state.focusedFile === canonical),
+              );
+              const isCollapsed = hasExplicitCollapse
+                ? Boolean(collapsedFiles[collapseKey])
+                : Boolean(autoCollapseReason) && !targetedByFocus;
+
                 return html`
                   <${FileDiffCard}
                     key=${`${canonical}:${file.index}`}
@@ -969,11 +1067,12 @@ function DiffCanvasApp({ state, invoke }) {
                     splitLeftPct=${splitLeftPct}
                     onStartSplitResize=${startSplitResize}
                     isViewed=${viewedSet.has(canonical)}
-                    isCollapsed=${Boolean(collapsedFiles[collapseKey])}
+                  isCollapsed=${isCollapsed}
+                  autoCollapseReason=${autoCollapseReason}
                     isFocusedFile=${ Boolean(canonical && state.focusedFile === canonical) }
                     focusedLine=${state.focusedLine}
-                    onToggleCollapse=${(key) =>
-                      setCollapsedFiles((prev) => ({ ...prev, [key]: !prev[key] }))}
+                  onToggleCollapse=${(key, nextCollapsed) =>
+                    setCollapsedFiles((prev) => ({ ...prev, [key]: Boolean(nextCollapsed) }))}
                     onToggleViewed=${handleToggleViewed}
                     commentsForFile=${commentsByFileMap.get(canonical) || []}
                     canEditComments=${canEditComments}
@@ -997,6 +1096,12 @@ function DiffCanvasApp({ state, invoke }) {
   `;
 }
 
-mountCanvas({
-  view: ({ state, invoke }) => html`<${DiffCanvasApp} state=${state} invoke=${invoke} />`,
-});
+if (
+  typeof document !== "undefined" &&
+  !globalThis.__DIFF_SKIP_AUTO_MOUNT__ &&
+  document.getElementById("app")
+) {
+  mountCanvas({
+    view: ({ state, invoke }) => html`<${DiffCanvasApp} state=${state} invoke=${invoke} />`,
+  });
+}
