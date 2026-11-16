@@ -22,17 +22,33 @@ test("skill includes workflow, safety, exit criteria, canvas actions, and untrus
   assert.match(skill, /Untrusted data boundary/i);
   assert.match(skill, /open_canvas/);
   assert.match(skill, /get_review/);
+  assert.match(skill, /reopen_review/);
   assert.match(skill, /mark_addressed/);
   assert.match(skill, /Submit Review/);
+  assert.doesNotMatch(skill, /load_diff/);
+  assert.doesNotMatch(readme, /load_diff/);
   assert.doesNotMatch(skill, /scripts\/diff\.mjs/);
   assert.doesNotMatch(readme, /scripts\/diff\.mjs/);
 });
 
-test("tracked markdown and eval spec avoid Unicode dashes and YAML aliases", () => {
+test("tracked markdown, eval spec, and runtime sources avoid Unicode dashes and YAML aliases", async () => {
+  const runtimeFiles = [
+    "../runtime/canvas.mjs",
+    "../runtime/diff-loader.mjs",
+    "../runtime/extension.mjs",
+    "../runtime/parse-diff.mjs",
+    "../runtime/web/app.mjs",
+    "../runtime/web/diff-view-model.mjs",
+    "../runtime/web/style.css",
+  ];
+  const loadedRuntime = await Promise.all(
+    runtimeFiles.map(async (rel) => [rel, await readFile(new URL(rel, import.meta.url), "utf8")]),
+  );
   for (const [label, content] of [
     ["SKILL.md", skill],
     ["README.md", readme],
     ["eval.yaml", evalYaml],
+    ...loadedRuntime,
   ]) {
     assert.doesNotMatch(content, /[\u2013\u2014]/, `${label} must use ASCII '-'`);
   }

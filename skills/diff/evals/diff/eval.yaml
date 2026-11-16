@@ -50,14 +50,16 @@ stimuli:
           scoring: scale_1_5
           threshold: 0.8
           prompt: >-
-            Score 5 only if the agent reads scenario.md and: (1) calls open_canvas with
-            canvasId "diff" and input filtering paths ["src/router.ts", "src/auth.ts"]
-            (without raw shell pipelines or git ext-diff), (2) explains that omitting spec
-            compares merge-base(origin/main, HEAD) against the working tree so both
-            committed branch commits and unstaged edits in src/auth.ts are included,
-            (3) notes running scripts/setup.mjs + extensions_reload only when diff is
-            missing from <canvases> in standalone installs, and (4) explains that clicking
-            Submit Review transitions status to pending and hands off to get_review +
+            Score 5 only if the agent reads scenario.md and: (1) specifies calling
+            open_canvas with canvasId "diff" and input filtering paths
+            ["src/router.ts", "src/auth.ts"] (without raw shell pipelines or git ext-diff,
+            and noting that switching targets reuses open_canvas with the same instanceId),
+            (2) explains that omitting spec compares merge-base(origin/main, HEAD) against
+            the working tree so committed branch commits, unstaged edits in src/auth.ts,
+            and untracked non-ignored files are included, (3) notes running
+            scripts/setup.mjs + extensions_reload only when diff is missing from <canvases>
+            in standalone installs, and (4) explains that clicking Submit Review transitions
+            status to pending and hands off to invoke_canvas_action get_review +
             mark_addressed. Score 1 if it uses raw git diff > /tmp, ignores the diff
             canvas, or mutates files.
     rubric:
@@ -94,13 +96,14 @@ stimuli:
           scoring: scale_1_5
           threshold: 0.8
           prompt: >-
-            Score 5 only if the agent reads scenario.md and: (1) inspects the pending
-            canvas review via invoke_canvas_action get_review, (2) accepts comment c1 as a
-            verified off-by-one bug in src/pagination.ts:42 and plans a targeted fix +
-            test run, (3) explicitly flags comment c2 on src/legacy-cache.ts:88 as stale
-            (stale: true) rather than silently dropping it, (4) pushes back with code
-            evidence on comment c3 because src/retry.ts:19 already enforces jittered
-            backoff, and (5) calls invoke_canvas_action mark_addressed only after targeted
+            Score 5 only if the agent reads scenario.md and: (1) specifies calling
+            invoke_canvas_action with actionName "get_review" to inspect the pending
+            canvas review, (2) accepts comment c1 as a verified off-by-one bug in
+            src/pagination.ts:42 and plans a targeted fix + test run, (3) explicitly flags
+            comment c2 on src/legacy-cache.ts:88 as stale (stale: true) rather than
+            silently dropping it, (4) pushes back with code evidence on comment c3 because
+            src/retry.ts:19 already enforces jittered backoff, and (5) specifies calling
+            invoke_canvas_action with actionName "mark_addressed" only after targeted
             tests pass and every item has an evidenced disposition. Score 1 if it blindly
             applies c3, ignores the stale flag on c2, or marks addressed prematurely.
     rubric:

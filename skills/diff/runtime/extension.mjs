@@ -78,8 +78,7 @@ const canvas = createCanvas({
         input: ctx?.input ?? {},
         workspacePath: resolveSessionWorkingDirectory(ctx),
       };
-      const domainId = canvasConfig.resolveDomainId(enrichedCtx.input, enrichedCtx);
-      const alreadyWarm = isDomainHydrated(domainId);
+      const alreadyWarm = isDomainHydrated(enrichedCtx.input, enrichedCtx);
       const opened = await runtime.openInstance({
         instanceId: ctx.instanceId,
         input: ctx.input,
@@ -102,11 +101,21 @@ const canvas = createCanvas({
   },
 
   onClose: async (ctx) => {
-    await ready;
-    checkSession(ctx, session);
-    await runtime.closeInstance(ctx.instanceId);
+    try {
+      await ready;
+      checkSession(ctx, session);
+      await runtime.closeInstance(ctx.instanceId);
+    } catch (err) {
+      throw toCanvasError(err);
+    }
   },
 });
+
+for (const sig of ["SIGTERM", "SIGINT"]) {
+  process.once(sig, () => {
+    runtime.shutdown().catch(() => {});
+  });
+}
 
 try {
   session = await joinSession({ canvases: [canvas] });

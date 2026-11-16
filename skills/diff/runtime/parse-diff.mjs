@@ -207,6 +207,7 @@ export function parseDiffPatch(
   if (typeof rawDiff !== "string" || rawDiff.length === 0) {
     return {
       fileCount: 0,
+      totalFiles: 0,
       additions: 0,
       deletions: 0,
       truncatedFiles: false,
@@ -401,7 +402,8 @@ export function parseDiffPatch(
   finalizeFile();
 
   return {
-    fileCount: totalFilesSeen,
+    fileCount: files.length,
+    totalFiles: totalFilesSeen,
     additions: totalAdditions,
     deletions: totalDeletions,
     truncatedFiles,

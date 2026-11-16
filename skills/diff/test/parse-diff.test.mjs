@@ -44,8 +44,19 @@ test("parseDiffPatch parses added, modified, renamed, deleted, binary, and blank
   const parsed = parseDiffPatch(samplePatch);
   assert.equal(parsed.files.length, 3);
   assert.equal(parsed.fileCount, 3);
+  assert.equal(parsed.totalFiles, 3);
   assert.equal(parsed.additions, 3);
   assert.equal(parsed.deletions, 1);
+
+  const truncatedParsed = parseDiffPatch(samplePatch, { maxFiles: 2 });
+  assert.equal(truncatedParsed.files.length, 2);
+  assert.equal(truncatedParsed.fileCount, 2);
+  assert.equal(truncatedParsed.totalFiles, 3);
+  assert.equal(truncatedParsed.truncatedFiles, true);
+
+  const emptyParsed = parseDiffPatch("");
+  assert.equal(emptyParsed.fileCount, 0);
+  assert.equal(emptyParsed.totalFiles, 0);
 
   const renamed = parsed.files[0];
   assert.equal(renamed.status, "renamed");
@@ -97,4 +108,32 @@ test("computeInlineWordDiff and tokenizeCodeLine stay linear and safe on patholo
   const hugeLine = "const a = 1; ".repeat(500);
   assert.deepEqual(tokenizeCodeLine(hugeLine, "js"), [{ kind: "plain", text: hugeLine }]);
   assert.deepEqual(tokenizeWebCodeLine(hugeLine, "js"), [{ kind: "plain", text: hugeLine }]);
+
+  // JSON property keys vs string values and JSON-only keywords
+  const jsonTokens = tokenizeWebCodeLine('  "function": "def", "enabled": true', "json");
+  assert.ok(jsonTokens.some((t) => t.kind === "property" && t.text === '"function"'));
+  assert.ok(jsonTokens.some((t) => t.kind === "string" && t.text === '"def"'));
+  assert.ok(jsonTokens.some((t) => t.kind === "property" && t.text === '"enabled"'));
+  assert.ok(jsonTokens.some((t) => t.kind === "keyword" && t.text === "true"));
+
+  // '#' comments in py/sh/yaml require index 0 or preceding space/tab
+  const pyAnchor = tokenizeWebCodeLine('url = slug#not-a-comment', "py");
+  assert.equal(pyAnchor.some((t) => t.kind === "comment"), false);
+  const pyComment = tokenizeWebCodeLine("value = 1 # real trailing comment", "py");
+  assert.ok(pyComment.some((t) => t.kind === "comment" && t.text === "# real trailing comment"));
+  const shStartComment = tokenizeWebCodeLine("# full line comment", "sh");
+  assert.deepEqual(shStartComment, [{ kind: "comment", text: "# full line comment" }]);
+
+  // Language-family keyword isolation
+  const jsDef = tokenizeWebCodeLine("const def = fn + impl;", "js");
+  assert.ok(jsDef.some((t) => t.kind === "keyword" && t.text === "const"));
+  assert.equal(jsDef.some((t) => t.kind === "keyword" && (t.text === "def" || t.text === "fn" || t.text === "impl")), false);
+
+  const rustLine = tokenizeWebCodeLine("pub fn parse() -> bool", "rust");
+  assert.ok(rustLine.some((t) => t.kind === "keyword" && t.text === "pub"));
+  assert.ok(rustLine.some((t) => t.kind === "keyword" && t.text === "fn"));
+
+  const sqlLine = tokenizeWebCodeLine("select id from users where id = 1", "sql");
+  assert.ok(sqlLine.some((t) => t.kind === "keyword" && t.text === "select"));
+  assert.ok(sqlLine.some((t) => t.kind === "keyword" && t.text === "where"));
 });

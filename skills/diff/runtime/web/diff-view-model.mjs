@@ -6,16 +6,76 @@ const MAX_TOKENIZE_LINE_LENGTH = 1000;
 const MAX_INLINE_DIFF_LINE_LENGTH = 600;
 const MAX_INLINE_DIFF_TOKENS = 140;
 
-const COMMON_KEYWORDS = new Set([
+const JS_KEYWORDS = new Set([
   "async", "await", "break", "case", "catch", "class", "const", "continue",
-  "def", "default", "delete", "do", "elif", "else", "enum", "export", "extends",
-  "false", "finally", "fn", "for", "from", "func", "function", "if", "impl",
-  "import", "in", "interface", "let", "match", "mut", "new", "nil", "None",
-  "null", "package", "private", "protected", "pub", "public", "readonly",
-  "return", "self", "static", "struct", "super", "switch", "this", "throw",
-  "trait", "true", "True", "False", "try", "type", "typeof", "undefined",
-  "use", "var", "void", "where", "while", "with", "yield",
+  "default", "delete", "do", "else", "enum", "export", "extends", "false",
+  "finally", "for", "from", "function", "if", "implements", "import", "in",
+  "instanceof", "interface", "let", "new", "null", "of", "private",
+  "protected", "public", "readonly", "return", "static", "super", "switch",
+  "this", "throw", "true", "try", "type", "typeof", "undefined", "var",
+  "void", "while", "with", "yield",
 ]);
+
+const PY_KEYWORDS = new Set([
+  "False", "None", "True", "and", "as", "assert", "async", "await", "break",
+  "class", "continue", "def", "del", "elif", "else", "except", "finally",
+  "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal",
+  "not", "or", "pass", "raise", "return", "self", "try", "while", "with",
+  "yield",
+]);
+
+const GO_KEYWORDS = new Set([
+  "break", "case", "chan", "const", "continue", "default", "defer", "else",
+  "fallthrough", "false", "for", "func", "go", "goto", "if", "import",
+  "interface", "map", "nil", "package", "range", "return", "select",
+  "struct", "switch", "true", "type", "var",
+]);
+
+const RUST_KEYWORDS = new Set([
+  "Self", "as", "async", "await", "break", "const", "continue", "crate",
+  "dyn", "else", "enum", "extern", "false", "fn", "for", "if", "impl", "in",
+  "let", "loop", "match", "mod", "move", "mut", "pub", "ref", "return",
+  "self", "static", "struct", "super", "trait", "true", "type", "unsafe",
+  "use", "where", "while",
+]);
+
+const SH_KEYWORDS = new Set([
+  "case", "do", "done", "elif", "else", "esac", "export", "fi", "for",
+  "function", "if", "in", "local", "return", "then", "until", "while",
+]);
+
+const SQL_KEYWORDS = new Set([
+  "ADD", "ALL", "ALTER", "AND", "AS", "ASC", "BETWEEN", "BY", "CASE",
+  "CREATE", "DELETE", "DESC", "DISTINCT", "DROP", "ELSE", "END", "EXISTS",
+  "FROM", "GROUP", "HAVING", "IN", "INDEX", "INNER", "INSERT", "INTO", "IS",
+  "JOIN", "LEFT", "LIKE", "LIMIT", "NOT", "NULL", "ON", "OR", "ORDER",
+  "OUTER", "PRIMARY", "REFERENCES", "RIGHT", "SELECT", "SET", "TABLE",
+  "THEN", "UNION", "UNIQUE", "UPDATE", "VALUES", "VIEW", "WHEN", "WHERE",
+]);
+
+const JSON_KEYWORDS = new Set(["true", "false", "null"]);
+const YAML_KEYWORDS = new Set(["true", "false", "null", "True", "False", "NULL"]);
+const CSS_KEYWORDS = new Set(["important", "inherit", "initial", "unset", "var", "calc"]);
+
+const LANGUAGE_KEYWORDS = {
+  js: JS_KEYWORDS,
+  py: PY_KEYWORDS,
+  go: GO_KEYWORDS,
+  rust: RUST_KEYWORDS,
+  sh: SH_KEYWORDS,
+  sql: SQL_KEYWORDS,
+  json: JSON_KEYWORDS,
+  yaml: YAML_KEYWORDS,
+  css: CSS_KEYWORDS,
+};
+
+function isLanguageKeyword(language, word) {
+  if (language === "sql") {
+    return SQL_KEYWORDS.has(word.toUpperCase());
+  }
+  const table = LANGUAGE_KEYWORDS[language];
+  return Boolean(table && table.has(word));
+}
 
 function isIdentStart(ch) {
   const c = ch.charCodeAt(0);
@@ -197,14 +257,19 @@ export function tokenizeCodeLine(text, language = "text") {
     }
     if (
       (language === "py" || language === "sh" || language === "yaml") &&
-      ch === "#"
+      ch === "#" &&
+      (i === 0 || str[i - 1] === " " || str[i - 1] === "\t")
     ) {
       flushPlain();
       tokens.push({ kind: "comment", text: str.slice(i) });
       break;
     }
 
-    if (ch === '"' || ch === "'" || (language === "js" && ch === "`")) {
+    if (
+      ch === '"' ||
+      (language !== "json" && ch === "'") ||
+      (language === "js" && ch === "`")
+    ) {
       flushPlain();
       const quote = ch;
       let j = i + 1;
@@ -219,7 +284,17 @@ export function tokenizeCodeLine(text, language = "text") {
         }
         j += 1;
       }
-      tokens.push({ kind: "string", text: str.slice(i, j) });
+      let tokenKind = "string";
+      if (language === "json" && quote === '"') {
+        let k = j;
+        while (k < len && (str[k] === " " || str[k] === "\t")) {
+          k += 1;
+        }
+        if (str[k] === ":") {
+          tokenKind = "property";
+        }
+      }
+      tokens.push({ kind: tokenKind, text: str.slice(i, j) });
       i = j;
       continue;
     }
@@ -248,12 +323,9 @@ export function tokenizeCodeLine(text, language = "text") {
       let j = i + 1;
       while (j < len && isIdentPart(str[j])) j += 1;
       const word = str.slice(i, j);
-      if (COMMON_KEYWORDS.has(word)) {
+      if (isLanguageKeyword(language, word)) {
         flushPlain();
         tokens.push({ kind: "keyword", text: word });
-      } else if (language === "json" && str[j] === ":") {
-        flushPlain();
-        tokens.push({ kind: "property", text: word });
       } else {
         plainBuf += word;
       }

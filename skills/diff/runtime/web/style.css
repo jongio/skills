@@ -41,20 +41,26 @@ html, body, #app {
 .dv-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 6px;
+  padding: 6px 10px;
   background: var(--ck-bg-muted);
   border-bottom: 1px solid var(--ck-border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.dv-toolbar > * {
   flex-shrink: 0;
 }
 
 .dv-title-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex: 0 1 auto;
   min-width: 0;
-  margin-right: 4px;
+  margin-right: 2px;
 }
 
 .dv-title {
@@ -63,27 +69,29 @@ html, body, #app {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 280px;
+  max-width: 210px;
 }
 
 .dv-stats {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   font-size: 12px;
   font-family: var(--ck-mono);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .dv-add { color: var(--ck-success); font-weight: var(--ck-fw-semibold); }
 .dv-del { color: var(--ck-danger); font-weight: var(--ck-fw-semibold); }
 
-.dv-spacer { flex: 1 1 auto; }
+.dv-spacer { flex: 1 1 8px; min-width: 4px; }
 
 .dv-search-wrap {
   position: relative;
   display: inline-flex;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .dv-search-icon {
@@ -95,7 +103,7 @@ html, body, #app {
 }
 
 .dv-search-input.ck-input {
-  width: 170px;
+  width: 136px;
   padding: 4px 8px 4px 26px;
   font-size: 12px;
 }
@@ -167,11 +175,35 @@ html, body, #app {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   padding: 7px 10px;
   font-size: 12px;
   font-weight: var(--ck-fw-semibold);
   border-bottom: 1px solid var(--ck-border);
   color: var(--ck-muted);
+}
+
+.dv-sidebar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dv-sidebar-toggle-btn {
+  border: 1px solid var(--ck-border);
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+  font: inherit;
+  font-size: 11px;
+  font-weight: var(--ck-fw-medium);
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dv-sidebar-toggle-btn:hover {
+  background: var(--ck-bg-inset);
 }
 
 .dv-tree-scroll {
@@ -468,9 +500,15 @@ html, body, #app {
   cursor: pointer;
 }
 
-.dv-ln.commentable:hover {
+.dv-ln.commentable:hover,
+.dv-ln.commentable:focus-visible {
   color: var(--ck-accent);
   font-weight: var(--ck-fw-semibold);
+  outline: none;
+}
+
+.dv-ln.commentable:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--ck-accent);
 }
 
 .dv-ln-plus {
@@ -484,7 +522,8 @@ html, body, #app {
   color: var(--ck-accent);
 }
 
-.dv-ln.commentable:hover .dv-ln-plus {
+.dv-ln.commentable:hover .dv-ln-plus,
+.dv-ln.commentable:focus-visible .dv-ln-plus {
   display: inline-block;
 }
 
@@ -611,6 +650,36 @@ html, body, #app {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 8px;
+}
+
+.dv-truncation-banner {
+  margin-bottom: 12px;
+}
+
+.dv-file-truncation-notice {
+  margin: 8px 12px 10px;
+  font-size: 12px;
+}
+
+.dv-unanchored-threads {
+  padding: 8px 12px;
+  background: var(--ck-bg-muted);
+  border-bottom: 1px solid var(--ck-border);
+}
+
+.dv-unanchored-label {
+  font-size: 11px;
+  font-weight: var(--ck-fw-semibold);
+  color: var(--ck-muted);
+  margin-bottom: 6px;
+}
+
+.dv-orphan-comments-card {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--ck-border);
+  border-radius: var(--ck-radius);
+  background: var(--ck-bg-muted);
 }
 
 .dv-empty-wrap {

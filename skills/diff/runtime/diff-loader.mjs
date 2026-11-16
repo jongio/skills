@@ -14,10 +14,16 @@ const execFileAsync = promisify(execFile);
 
 export const MAX_DIFF_BYTES = 32 * 1024 * 1024;
 export const EXEC_TIMEOUT_MS = 30_000;
+export const MAX_UNTRACKED_FILES = 200;
+export const MAX_UNTRACKED_FILE_BYTES = 512 * 1024;
+const BINARY_PROBE_BYTES = 8 * 1024;
 
 const CONTROL_OR_SPACE_RE = /[\u0000-\u0020\u007f-\u009f]/;
 const CONTROL_CHAR_RE = /[\u0000-\u001f\u007f-\u009f]/;
 const REPO_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
+const GH_ACCOUNT_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,38})$/;
+const GH_AUTH_OR_NOT_FOUND_RE =
+  /Could not resolve to a Repository|Could not resolve to a PullRequest|HTTP 401|HTTP 403|HTTP 404|authentication|not logged into|gh auth login|Bad credentials|Resource not accessible/i;
 const WINDOWS_DRIVE_PREFIX_RE = /^[A-Za-z]:/;
 const WINDOWS_RESERVED_SEGMENT_RE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
 const GIT_SHORTNAME_SEGMENT_RE = /^(?:\.git|git~[0-9]+|\.git[~.].*)$/i;
@@ -157,23 +163,51 @@ async function defaultExec(command, args, options = {}) {
   });
   const effectiveArgs =
     command === "git" ? ["-c", "core.fsmonitor=false", ...args] : args;
+  const envOverrides = options.env && typeof options.env === "object" ? options.env : null;
+  const childEnv = {
+    ...process.env,
+    LC_ALL: "C.UTF-8",
+    LANG: "C.UTF-8",
+    LESSCHARSET: "utf-8",
+    GIT_TERMINAL_PROMPT: "0",
+    GH_PROMPT_DISABLED: "1",
+    NoDefaultCurrentDirectoryInExePath: "1",
+    ...(envOverrides ?? {}),
+  };
+  if (envOverrides && typeof envOverrides.GH_TOKEN === "string" && envOverrides.GH_TOKEN) {
+    childEnv.GITHUB_TOKEN = envOverrides.GH_TOKEN;
+  }
   const { stdout } = await execFileAsync(resolvedCommand, effectiveArgs, {
     cwd: options.cwd || os.tmpdir(),
     encoding: "utf8",
     windowsHide: true,
     timeout: options.timeout ?? EXEC_TIMEOUT_MS,
     maxBuffer: options.maxBuffer ?? MAX_DIFF_BYTES,
-    env: {
-      ...process.env,
-      LC_ALL: "C.UTF-8",
-      LANG: "C.UTF-8",
-      LESSCHARSET: "utf-8",
-      GIT_TERMINAL_PROMPT: "0",
-      GH_PROMPT_DISABLED: "1",
-      NoDefaultCurrentDirectoryInExePath: "1",
-    },
+    env: childEnv,
   });
   return stdout;
+}
+
+export function assertSafeGitHubAccount(rawAccount) {
+  if (rawAccount === undefined || rawAccount === null || rawAccount === "") {
+    return null;
+  }
+  if (typeof rawAccount !== "string") {
+    throw new Error("GitHub account must be a string");
+  }
+  const trimmed = rawAccount.trim();
+  if (!trimmed) return null;
+  if (!GH_ACCOUNT_RE.test(trimmed)) {
+    throw new Error(`Invalid GitHub account '${trimmed}'.`);
+  }
+  return trimmed;
+}
+
+export function encodeCopilotGhAccountEnvKey(account) {
+  const safe = assertSafeGitHubAccount(account);
+  if (!safe) throw new Error("GitHub account is required");
+  const encoded = safe.replace(/[_-]/g, (ch) => (ch === "_" ? "_5F_" : "_2D_"));
+  return `COPILOT_GH_ACCOUNT_github_2E_com_${encoded}`;
 }
 
 export function assertSafeRepoFullName(rawRepo) {
@@ -353,11 +387,15 @@ function sanitizeSegment(raw, fallback = "item") {
 
 export function normalizeDiffSource(input = {}, workspacePath = "") {
   const paths = assertSafePathspecs(input?.paths);
+  const account = assertSafeGitHubAccount(input?.account);
   const rawRepo = typeof input?.repo === "string" && input.repo.trim() ? input.repo.trim() : "";
   const hasPr = input?.pr !== undefined && input?.pr !== null;
 
   if (rawRepo && !hasPr) {
     throw new Error("'pr' is required when 'repo' is provided");
+  }
+  if (account && !hasPr) {
+    throw new Error("'pr' is required when 'account' is provided");
   }
 
   const explicitCwd = typeof input?.cwd === "string" && input.cwd.trim() ? input.cwd.trim() : "";
@@ -387,6 +425,7 @@ export function normalizeDiffSource(input = {}, workspacePath = "") {
       mode: "pr",
       repo,
       pr,
+      ...(account ? { account } : {}),
       cwd: repo ? null : candidateCwd,
       paths,
     };
@@ -454,6 +493,7 @@ export function sanitizePublicErrorMessage(err) {
   const raw = String(err?.message ?? err ?? "Unknown error");
   return raw
     .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)\b/g, "<redacted-token>")
     .replace(/[A-Za-z]:[\\/][^\s"'`)]+/g, "<path>")
     .replace(/(?:\\\\|\/\/)[^\s"'`)]+/g, "<path>")
     .replace(
@@ -493,8 +533,10 @@ function filterFilesByPaths(parsed, paths) {
     additions += f.additions;
     deletions += f.deletions;
   }
+  const extraTruncated = Math.max(0, (parsed.totalFiles ?? parsed.fileCount) - parsed.files.length);
   return {
     fileCount: filtered.length,
+    totalFiles: parsed.truncatedFiles ? filtered.length + extraTruncated : filtered.length,
     additions,
     deletions,
     truncatedFiles: parsed.truncatedFiles,
@@ -551,11 +593,232 @@ async function runGitDiff(execFn, repoRoot, refArgs, paths) {
   return execFn("git", args, { cwd: repoRoot, maxBuffer: MAX_DIFF_BYTES });
 }
 
+function isGhAuthOrNotFoundError(err) {
+  const combined = `${err?.message ?? ""} ${err?.stderr ?? ""}`;
+  return GH_AUTH_OR_NOT_FOUND_RE.test(combined);
+}
+
+async function resolveExplicitAccountToken(account, { execFn, execCwd, untrustedRoots, env }) {
+  const expectedKey = encodeCopilotGhAccountEnvKey(account);
+  const directVal = typeof env?.[expectedKey] === "string" ? env[expectedKey].trim() : "";
+  if (directVal) return directVal;
+
+  const lowerKey = expectedKey.toLowerCase();
+  for (const [k, v] of Object.entries(env ?? {})) {
+    if (k.toLowerCase() === lowerKey && typeof v === "string" && v.trim()) {
+      return v.trim();
+    }
+  }
+
+  const cliToken = (
+    await tryExec(
+      execFn,
+      "gh",
+      ["auth", "token", "--hostname", "github.com", "--user", account],
+      { cwd: execCwd, untrustedRoots },
+    )
+  )?.trim();
+  if (cliToken) return cliToken;
+
+  throw new Error(
+    `No GitHub token available for account '${account}'. Run 'gh auth login' or link the account in Copilot.`,
+  );
+}
+
+function collectFallbackAccountTokens(env) {
+  const prefix = "COPILOT_GH_ACCOUNT_github_2E_com_";
+  const ambient = typeof env?.GH_TOKEN === "string" ? env.GH_TOKEN.trim() : "";
+  const seen = new Set();
+  if (ambient) seen.add(ambient);
+  const tokens = [];
+  for (const key of Object.keys(env ?? {}).sort()) {
+    if (!key.startsWith(prefix)) continue;
+    const raw = env[key];
+    const trimmed = typeof raw === "string" ? raw.trim() : "";
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    tokens.push(trimmed);
+  }
+  return tokens;
+}
+
+function formatGitDiffHeaderPath(prefix, relPath) {
+  const full = `${prefix}/${relPath}`;
+  if (/[ "\\\t]/.test(full)) {
+    return `"${full.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\t", "\\t")}"`;
+  }
+  return full;
+}
+
+function concatPatches(first, second) {
+  if (!first) return second || "";
+  if (!second) return first;
+  return first.endsWith("\n") ? `${first}${second}` : `${first}\n${second}`;
+}
+
+async function buildUntrackedFilesPatch(
+  execFn,
+  repoRoot,
+  paths,
+  {
+    currentPatchBytes = 0,
+    maxPatchBytes = MAX_DIFF_BYTES,
+    maxUntrackedFiles = MAX_UNTRACKED_FILES,
+    maxUntrackedFileBytes = MAX_UNTRACKED_FILE_BYTES,
+  } = {},
+) {
+  const rawList = await tryExec(
+    execFn,
+    "git",
+    ["ls-files", "--others", "--exclude-standard", "-z", "--", ...paths],
+    { cwd: repoRoot, maxBuffer: maxPatchBytes },
+  );
+  if (!rawList) {
+    return {
+      patch: "",
+      truncatedFiles: false,
+      skippedFiles: 0,
+      preTruncatedPaths: new Set(),
+    };
+  }
+
+  let repoRootReal;
+  try {
+    repoRootReal = fs.realpathSync.native(repoRoot);
+  } catch {
+    repoRootReal = path.resolve(repoRoot);
+  }
+
+  const rawEntries = rawList.split("\0").filter(Boolean);
+  const chunks = [];
+  const preTruncatedPaths = new Set();
+  let usedBytes = Math.max(0, currentPatchBytes);
+  let validCandidateCount = 0;
+  let includedCount = 0;
+  let truncatedFiles = false;
+
+  for (const rawEntry of rawEntries) {
+    const relPath = normalizeCanonicalPath(rawEntry);
+    if (!relPath) continue;
+
+    const absPath = path.resolve(repoRootReal, relPath);
+    if (!pathIsWithin(absPath, repoRootReal)) continue;
+
+    let lstat;
+    try {
+      lstat = fs.lstatSync(absPath);
+    } catch {
+      continue;
+    }
+    if (lstat.isSymbolicLink() || !lstat.isFile()) continue;
+
+    try {
+      const parentReal = fs.realpathSync.native(path.dirname(absPath));
+      if (!pathIsWithin(parentReal, repoRootReal)) continue;
+    } catch {
+      continue;
+    }
+
+    validCandidateCount += 1;
+    if (includedCount >= maxUntrackedFiles) {
+      truncatedFiles = true;
+      continue;
+    }
+
+    const headerA = formatGitDiffHeaderPath("a", relPath);
+    const headerB = formatGitDiffHeaderPath("b", relPath);
+
+    let chunk = "";
+    let fileWasSizeTruncated = false;
+
+    if (lstat.size === 0) {
+      chunk = `diff --git ${headerA} ${headerB}\nnew file mode 100644\n--- /dev/null\n+++ ${headerB}\n`;
+    } else {
+      const toRead = Math.min(lstat.size, maxUntrackedFileBytes);
+      let buf = null;
+      let bytesRead = 0;
+      let fd = null;
+      try {
+        const flags = (fs.constants.O_RDONLY ?? 0) | (fs.constants.O_NOFOLLOW ?? 0);
+        fd = fs.openSync(absPath, flags);
+        buf = Buffer.allocUnsafe(toRead);
+        while (bytesRead < toRead) {
+          const n = fs.readSync(fd, buf, bytesRead, toRead - bytesRead, bytesRead);
+          if (n <= 0) break;
+          bytesRead += n;
+        }
+      } catch {
+        continue;
+      } finally {
+        if (fd !== null) {
+          try {
+            fs.closeSync(fd);
+          } catch {
+            // Ignore close errors
+          }
+        }
+      }
+
+      const slice = buf.subarray(0, bytesRead);
+      const probeLen = Math.min(slice.length, BINARY_PROBE_BYTES);
+      const isBinary = slice.subarray(0, probeLen).includes(0);
+
+      if (isBinary) {
+        chunk = `diff --git ${headerA} ${headerB}\nnew file mode 100644\nBinary files /dev/null and ${headerB} differ\n`;
+      } else {
+        fileWasSizeTruncated = lstat.size > bytesRead;
+        let text = slice.toString("utf8");
+        if (fileWasSizeTruncated && !text.endsWith("\n")) {
+          const lastNl = text.lastIndexOf("\n");
+          if (lastNl >= 0) {
+            text = text.slice(0, lastNl + 1);
+          }
+        }
+        const endedWithNewline = text.endsWith("\n");
+        const rawLines = endedWithNewline ? text.slice(0, -1).split("\n") : text.split("\n");
+        const cleanLines = rawLines.map((ln) => (ln.endsWith("\r") ? ln.slice(0, -1) : ln));
+        const bodyLines = cleanLines.map((ln) => `+${ln}`);
+        if (!endedWithNewline && !fileWasSizeTruncated) {
+          bodyLines.push("\\ No newline at end of file");
+        }
+        chunk =
+          `diff --git ${headerA} ${headerB}\n` +
+          `new file mode 100644\n` +
+          `--- /dev/null\n` +
+          `+++ ${headerB}\n` +
+          `@@ -0,0 +1,${cleanLines.length} @@\n` +
+          `${bodyLines.join("\n")}\n`;
+      }
+    }
+
+    const chunkBytes = Buffer.byteLength(chunk, "utf8");
+    if (usedBytes + chunkBytes > maxPatchBytes) {
+      truncatedFiles = true;
+      continue;
+    }
+
+    usedBytes += chunkBytes;
+    includedCount += 1;
+    chunks.push(chunk);
+    if (fileWasSizeTruncated) {
+      preTruncatedPaths.add(relPath);
+    }
+  }
+
+  return {
+    patch: chunks.join(""),
+    truncatedFiles,
+    skippedFiles: Math.max(0, validCandidateCount - includedCount),
+    preTruncatedPaths,
+  };
+}
+
 export async function loadDiff(source, options = {}) {
   if (!source) {
     throw new Error("No diff source configured");
   }
   const execFn = options.execFn ?? defaultExec;
+  const env = options.env ?? process.env;
 
   if (source.mode === "pr") {
     let execCwd = os.tmpdir();
@@ -579,30 +842,89 @@ export async function loadDiff(source, options = {}) {
       execCwd = assertSafeResolvedRepoRoot(path.resolve(top), source.cwd);
     }
 
+    const untrustedRoots = source.cwd ? [source.cwd] : [];
     const prNumText = String(source.pr);
-    const [rawPatch, rawMeta] = await Promise.all([
-      execFn("gh", ["pr", "diff", prNumText, ...repoArgs, "--color", "never"], {
-        cwd: execCwd,
-        untrustedRoots: source.cwd ? [source.cwd] : [],
-        maxBuffer: MAX_DIFF_BYTES,
-      }),
-      tryExec(
-        execFn,
-        "gh",
-        [
-          "pr",
-          "view",
-          prNumText,
-          ...repoArgs,
-          "--json",
-          "number,title,headRefName,baseRefName",
-        ],
-        {
+    const repoLabel = source.repo ? `${source.repo}#${source.pr}` : `PR #${source.pr}`;
+
+    const runPrCommands = async (tokenOverride) => {
+      const envOpt = tokenOverride
+        ? { env: { GH_HOST: "github.com", GH_TOKEN: tokenOverride } }
+        : {};
+      return Promise.all([
+        execFn("gh", ["pr", "diff", prNumText, ...repoArgs, "--color", "never"], {
           cwd: execCwd,
-          untrustedRoots: source.cwd ? [source.cwd] : [],
-        },
-      ),
-    ]);
+          untrustedRoots,
+          maxBuffer: MAX_DIFF_BYTES,
+          ...envOpt,
+        }),
+        tryExec(
+          execFn,
+          "gh",
+          [
+            "pr",
+            "view",
+            prNumText,
+            ...repoArgs,
+            "--json",
+            "number,title,headRefName,baseRefName",
+          ],
+          {
+            cwd: execCwd,
+            untrustedRoots,
+            ...envOpt,
+          },
+        ),
+      ]);
+    };
+
+    let rawPatch;
+    let rawMeta;
+    const explicitAccount = assertSafeGitHubAccount(source.account);
+    if (explicitAccount) {
+      const token = await resolveExplicitAccountToken(explicitAccount, {
+        execFn,
+        execCwd,
+        untrustedRoots,
+        env,
+      });
+      try {
+        [rawPatch, rawMeta] = await runPrCommands(token);
+      } catch (err) {
+        if (isGhAuthOrNotFoundError(err)) {
+          throw new Error(
+            `Unable to load ${repoLabel} with GitHub account '${explicitAccount}': repository not found or account lacks access.`,
+          );
+        }
+        throw err;
+      }
+    } else {
+      try {
+        [rawPatch, rawMeta] = await runPrCommands(null);
+      } catch (primaryErr) {
+        if (!isGhAuthOrNotFoundError(primaryErr)) {
+          throw primaryErr;
+        }
+        const fallbackTokens = collectFallbackAccountTokens(env);
+        let recovered = false;
+        for (const candidateToken of fallbackTokens) {
+          try {
+            [rawPatch, rawMeta] = await runPrCommands(candidateToken);
+            recovered = true;
+            break;
+          } catch (retryErr) {
+            if (!isGhAuthOrNotFoundError(retryErr)) {
+              throw retryErr;
+            }
+          }
+        }
+        if (!recovered) {
+          const namedTarget = source.repo || repoLabel;
+          throw new Error(
+            `Unable to load ${repoLabel}: could not resolve '${namedTarget}' or authenticate with available GitHub accounts. Verify access via 'gh auth status' or pass 'account' in open_canvas input.`,
+          );
+        }
+      }
+    }
 
     let meta = null;
     if (rawMeta) {
@@ -614,7 +936,6 @@ export async function loadDiff(source, options = {}) {
     }
 
     const parsed = filterFilesByPaths(parseDiffPatch(rawPatch), source.paths);
-    const repoLabel = source.repo ? `${source.repo}#${source.pr}` : `PR #${source.pr}`;
     const prTitle = typeof meta?.title === "string" && meta.title.trim() ? meta.title.trim() : "";
     const title = prTitle ? `${repoLabel} - ${prTitle}` : repoLabel;
     const branch = typeof meta?.headRefName === "string" ? meta.headRefName : "";
@@ -622,6 +943,7 @@ export async function loadDiff(source, options = {}) {
     return {
       source: {
         ...source,
+        ...(explicitAccount ? { account: explicitAccount } : {}),
         paths: [...(source.paths ?? [])],
       },
       diffSpec: repoLabel,
@@ -631,6 +953,7 @@ export async function loadDiff(source, options = {}) {
       truncatedFiles: Boolean(parsed.truncatedFiles),
       stats: {
         fileCount: parsed.fileCount,
+        totalFiles: parsed.totalFiles ?? parsed.fileCount,
         additions: parsed.additions,
         deletions: parsed.deletions,
         truncatedFiles: Boolean(parsed.truncatedFiles),
@@ -672,13 +995,23 @@ export async function loadDiff(source, options = {}) {
   const paths = source.paths ?? [];
   let title = "";
   let rawPatch = "";
+  let untrackedMeta = {
+    patch: "",
+    truncatedFiles: false,
+    skippedFiles: 0,
+    preTruncatedPaths: new Set(),
+  };
 
   if (parsedSpec.kind === "staged") {
     title = "Staged Changes";
     rawPatch = await runGitDiff(execFn, repoRoot, ["--cached"], paths);
   } else if (parsedSpec.kind === "unstaged") {
     title = "Unstaged Changes";
-    rawPatch = await runGitDiff(execFn, repoRoot, [], paths);
+    const trackedPatch = await runGitDiff(execFn, repoRoot, [], paths);
+    untrackedMeta = await buildUntrackedFilesPatch(execFn, repoRoot, paths, {
+      currentPatchBytes: Buffer.byteLength(trackedPatch, "utf8"),
+    });
+    rawPatch = concatPatches(trackedPatch, untrackedMeta.patch);
   } else if (parsedSpec.kind === "two-dot") {
     if (!(await revParse(parsedSpec.baseRef))) {
       throw new Error(`Unknown base revision: ${parsedSpec.baseRef}`);
@@ -715,19 +1048,39 @@ export async function loadDiff(source, options = {}) {
     const headCommit = await revParse("HEAD");
     const mb = headCommit ? ((await mergeBase(parsedSpec.ref, "HEAD")) ?? resolvedRef) : resolvedRef;
     title = `${parsedSpec.ref} vs working tree`;
-    rawPatch = await runGitDiff(execFn, repoRoot, [mb], paths);
+    const trackedPatch = await runGitDiff(execFn, repoRoot, [mb], paths);
+    untrackedMeta = await buildUntrackedFilesPatch(execFn, repoRoot, paths, {
+      currentPatchBytes: Buffer.byteLength(trackedPatch, "utf8"),
+    });
+    rawPatch = concatPatches(trackedPatch, untrackedMeta.patch);
   } else {
     const headCommit = await revParse("HEAD");
     const defaultBranch = await resolveDefaultBranch(repoRoot, execFn);
     let resolved = false;
+    let cachedUntracked = null;
+    const getUntracked = async (trackedPatch) => {
+      const trackedBytes = Buffer.byteLength(trackedPatch, "utf8");
+      if (
+        cachedUntracked &&
+        trackedBytes + Buffer.byteLength(cachedUntracked.patch, "utf8") <= MAX_DIFF_BYTES
+      ) {
+        return cachedUntracked;
+      }
+      cachedUntracked = await buildUntrackedFilesPatch(execFn, repoRoot, paths, {
+        currentPatchBytes: trackedBytes,
+      });
+      return cachedUntracked;
+    };
 
     if (defaultBranch && headCommit) {
       const mb = await mergeBase(defaultBranch, "HEAD");
       if (mb) {
         const candidate = await runGitDiff(execFn, repoRoot, [mb], paths);
-        if (candidate.trim().length > 0) {
+        const untracked = await getUntracked(candidate);
+        if (candidate.trim().length > 0 || untracked.patch.length > 0) {
           title = `${defaultBranch} vs working tree`;
-          rawPatch = candidate;
+          untrackedMeta = untracked;
+          rawPatch = concatPatches(candidate, untracked.patch);
           resolved = true;
         }
       }
@@ -735,9 +1088,11 @@ export async function loadDiff(source, options = {}) {
 
     if (!resolved && headCommit) {
       const uncommitted = await runGitDiff(execFn, repoRoot, ["HEAD"], paths);
-      if (uncommitted.trim().length > 0) {
+      const untracked = await getUntracked(uncommitted);
+      if (uncommitted.trim().length > 0 || untracked.patch.length > 0) {
         title = "Uncommitted Changes";
-        rawPatch = uncommitted;
+        untrackedMeta = untracked;
+        rawPatch = concatPatches(uncommitted, untracked.patch);
         resolved = true;
       }
     }
@@ -754,12 +1109,24 @@ export async function loadDiff(source, options = {}) {
     if (!resolved) {
       title = "Working Tree";
       const staged = await runGitDiff(execFn, repoRoot, ["--cached"], paths);
-      rawPatch =
+      const tracked =
         staged.trim().length > 0 ? staged : await runGitDiff(execFn, repoRoot, [], paths);
+      untrackedMeta = await getUntracked(tracked);
+      rawPatch = concatPatches(tracked, untrackedMeta.patch);
     }
   }
 
   const parsed = parseDiffPatch(rawPatch);
+  if (untrackedMeta.preTruncatedPaths.size > 0) {
+    for (const file of parsed.files) {
+      if (untrackedMeta.preTruncatedPaths.has(file.canonicalPath)) {
+        file.truncated = true;
+      }
+    }
+  }
+  const truncatedFiles = Boolean(parsed.truncatedFiles || untrackedMeta.truncatedFiles);
+  const totalFiles = (parsed.totalFiles ?? parsed.fileCount) + untrackedMeta.skippedFiles;
+
   return {
     source: {
       ...source,
@@ -770,12 +1137,13 @@ export async function loadDiff(source, options = {}) {
     title,
     branch,
     files: parsed.files,
-    truncatedFiles: Boolean(parsed.truncatedFiles),
+    truncatedFiles,
     stats: {
       fileCount: parsed.fileCount,
+      totalFiles,
       additions: parsed.additions,
       deletions: parsed.deletions,
-      truncatedFiles: Boolean(parsed.truncatedFiles),
+      truncatedFiles,
     },
   };
 }

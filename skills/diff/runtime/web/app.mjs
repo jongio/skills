@@ -1,4 +1,5 @@
 import {
+  Component,
   html,
   mountCanvas,
   useState,
@@ -14,6 +15,8 @@ import {
   tokenizeCodeLine,
   buildFileTree,
 } from "./diff-view-model.mjs";
+
+const EMPTY_ARRAY = Object.freeze([]);
 
 function statusBadgeMeta(status) {
   if (status === "pending") {
@@ -49,20 +52,42 @@ export function getAutoCollapseReason(file) {
   return null;
 }
 
-function CodeTokens({ text, language, segments, highlightClass }) {
-  if (Array.isArray(segments) && segments.length > 0) {
-    return segments.map((seg, idx) =>
-      seg.changed
-        ? html`<span key=${idx} class=${highlightClass}>${seg.text}</span>`
-        : seg.text,
-    );
-  }
+function renderTokenSpans(text, language, keyPrefix = "t") {
   const tokens = tokenizeCodeLine(text, language);
   return tokens.map((tok, idx) =>
     tok.kind === "plain"
       ? tok.text
-      : html`<span key=${idx} class=${`tok-${tok.kind}`}>${tok.text}</span>`,
+      : html`<span key=${`${keyPrefix}:${idx}`} class=${`tok-${tok.kind}`}>${tok.text}</span>`,
   );
+}
+
+function CodeTokens({ text, language, segments, highlightClass }) {
+  if (Array.isArray(segments) && segments.length > 0) {
+    return segments.flatMap((seg, idx) =>
+      seg.changed
+        ? [
+            html`<span key=${`s:${idx}`} class=${highlightClass}>${renderTokenSpans(seg.text, language, `s${idx}`)}</span>`,
+          ]
+        : renderTokenSpans(seg.text, language, `u${idx}`),
+    );
+  }
+  return renderTokenSpans(text, language);
+}
+
+function commentableCellProps(enabled, onActivate, label) {
+  if (!enabled) return {};
+  return {
+    tabIndex: 0,
+    role: "button",
+    "aria-label": label,
+    onClick: onActivate,
+    onKeyDown: (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onActivate();
+      }
+    },
+  };
 }
 
 function FileTreeNodes({
@@ -154,15 +179,176 @@ function FileTreeNodes({
   `;
 }
 
+function CommentComposer({ activeComposer, onSaveComment, onCancelComposer, busyAction }) {
+  const [draftBody, setDraftBody] = useState("");
+  const trimmed = draftBody.trim();
+
+  const submit = async () => {
+    if (!trimmed) return;
+    const ok = await onSaveComment(activeComposer, trimmed);
+    if (ok) {
+      setDraftBody("");
+    }
+  };
+
+  return html`
+    <div class="dv-composer">
+      <div class="dv-composer-label">
+        Commenting on ${activeComposer.file}:${activeComposer.line} (${activeComposer.side})
+      </div>
+      <textarea
+        class="ck-input"
+        placeholder="Write an inline review comment..."
+        value=${draftBody}
+        onInput=${(e) => setDraftBody(e.currentTarget.value)}
+        onKeyDown=${(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            submit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            onCancelComposer();
+          }
+        }}
+      ></textarea>
+      <div class="dv-composer-actions">
+        <button
+          type="button"
+          class="ck-btn"
+          disabled=${busyAction}
+          onClick=${onCancelComposer}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="ck-btn ck-btn-primary"
+          disabled=${busyAction || !trimmed}
+          onClick=${submit}
+        >
+          <${Icon} name="message-square-plus" size=${14} />
+          Add comment
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function CommentCard({ comment, canEditComments, busyAction, onEditComment, onDeleteComment }) {
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(comment.body || "");
+
+  useEffect(() => {
+    if (!editing) {
+      setEditDraft(comment.body || "");
+    }
+  }, [comment.body, editing]);
+
+  const trimmed = editDraft.trim();
+  const saveEdit = async () => {
+    if (!trimmed) return;
+    const ok = await onEditComment(comment.id, trimmed);
+    if (ok) {
+      setEditing(false);
+    }
+  };
+
+  return html`
+    <div class="dv-comment-card">
+      <div class="dv-comment-head">
+        <span class="ck-mono">
+          ${comment.file}:${comment.line} (${comment.side}) - ${comment.createdAt ? relativeTime(comment.createdAt) : "saved"}
+        </span>
+        <div class="ck-row">
+          ${comment.stale
+            ? html`<span class="ck-badge ck-badge-muted" title="Diff changed at this line since comment was added">Stale</span>`
+            : null}
+          ${canEditComments && !editing
+            ? html`
+                <button
+                  type="button"
+                  class="ck-btn"
+                  title="Edit comment"
+                  disabled=${busyAction}
+                  onClick=${() => {
+                    setEditDraft(comment.body || "");
+                    setEditing(true);
+                  }}
+                >
+                  Edit
+                </button>
+              `
+            : null}
+          ${canEditComments
+            ? html`
+                <button
+                  type="button"
+                  class="ck-btn dv-icon-btn"
+                  title="Delete comment"
+                  disabled=${busyAction}
+                  onClick=${() => onDeleteComment(comment.id)}
+                >
+                  <${Icon} name="trash-2" size=${12} />
+                </button>
+              `
+            : null}
+        </div>
+      </div>
+      ${editing
+        ? html`
+            <div class="dv-composer">
+              <textarea
+                class="ck-input"
+                aria-label="Edit review comment"
+                value=${editDraft}
+                onInput=${(e) => setEditDraft(e.currentTarget.value)}
+                onKeyDown=${(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                    e.preventDefault();
+                    saveEdit();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setEditing(false);
+                    setEditDraft(comment.body || "");
+                  }
+                }}
+              ></textarea>
+              <div class="dv-composer-actions">
+                <button
+                  type="button"
+                  class="ck-btn"
+                  disabled=${busyAction}
+                  onClick=${() => {
+                    setEditing(false);
+                    setEditDraft(comment.body || "");
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  class="ck-btn ck-btn-primary"
+                  disabled=${busyAction || !trimmed}
+                  onClick=${saveEdit}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          `
+        : html`<div class="dv-comment-body">${comment.body}</div>`}
+    </div>
+  `;
+}
+
 function ThreadRows({
   colSpan,
   rowComments,
   composerHere,
   activeComposer,
-  draftBody,
-  setDraftBody,
   onSaveComment,
   onCancelComposer,
+  onEditComment,
   onDeleteComment,
   canEditComments,
   busyAction,
@@ -174,75 +360,25 @@ function ThreadRows({
       <td colSpan=${colSpan} class="dv-thread-cell">
         ${rowComments.map(
           (c) => html`
-            <div key=${c.id} class="dv-comment-card">
-              <div class="dv-comment-head">
-                <span class="ck-mono">
-                  ${c.file}:${c.line} (${c.side}) · ${c.createdAt ? relativeTime(c.createdAt) : "saved"}
-                </span>
-                <div class="ck-row">
-                  ${c.stale
-                    ? html`<span class="ck-badge ck-badge-muted" title="Diff changed at this line since comment was added">Stale</span>`
-                    : null}
-                  ${canEditComments
-                    ? html`
-                        <button
-                          type="button"
-                          class="ck-btn dv-icon-btn"
-                          title="Delete comment"
-                          disabled=${busyAction}
-                          onClick=${() => onDeleteComment(c.id)}
-                        >
-                          <${Icon} name="trash-2" size=${12} />
-                        </button>
-                      `
-                    : null}
-                </div>
-              </div>
-              <div class="dv-comment-body">${c.body}</div>
-            </div>
+            <${CommentCard}
+              key=${c.id}
+              comment=${c}
+              canEditComments=${canEditComments}
+              busyAction=${busyAction}
+              onEditComment=${onEditComment}
+              onDeleteComment=${onDeleteComment}
+            />
           `,
         )}
-        ${composerHere
+        ${composerHere && activeComposer
           ? html`
-              <div class="dv-composer">
-                <div class="dv-composer-label">
-                  Commenting on ${activeComposer.file}:${activeComposer.line} (${activeComposer.side})
-                </div>
-                <textarea
-                  class="ck-input"
-                  placeholder="Write an inline review comment..."
-                  value=${draftBody}
-                  onInput=${(e) => setDraftBody(e.currentTarget.value)}
-                  onKeyDown=${(e) => {
-                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                      e.preventDefault();
-                      onSaveComment();
-                    } else if (e.key === "Escape") {
-                      e.preventDefault();
-                      onCancelComposer();
-                    }
-                  }}
-                ></textarea>
-                <div class="dv-composer-actions">
-                  <button
-                    type="button"
-                    class="ck-btn"
-                    disabled=${busyAction}
-                    onClick=${onCancelComposer}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    class="ck-btn ck-btn-primary"
-                    disabled=${busyAction || !draftBody.trim()}
-                    onClick=${onSaveComment}
-                  >
-                    <${Icon} name="message-square-plus" size=${14} />
-                    Add comment
-                  </button>
-                </div>
-              </div>
+              <${CommentComposer}
+                key=${`${activeComposer.file}:${activeComposer.side}:${activeComposer.line}`}
+                activeComposer=${activeComposer}
+                onSaveComment=${onSaveComment}
+                onCancelComposer=${onCancelComposer}
+                busyAction=${busyAction}
+              />
             `
           : null}
       </td>
@@ -250,7 +386,7 @@ function ThreadRows({
   `;
 }
 
-function FileDiffCard({
+function FileDiffCardInner({
   file,
   viewMode,
   splitLeftPct,
@@ -264,12 +400,11 @@ function FileDiffCard({
   onToggleViewed,
   commentsForFile,
   canEditComments,
-  activeComposer,
+  activeComposerForFile,
   onOpenComposer,
-  draftBody,
-  setDraftBody,
   onSaveComment,
   onCancelComposer,
+  onEditComment,
   onDeleteComment,
   busyAction,
 }) {
@@ -279,15 +414,37 @@ function FileDiffCard({
   const rightCodeWidth = `calc((100% - 96px) * ${(100 - splitLeftPct) / 100})`;
   const showCollapsedCta = Boolean(isCollapsed && autoCollapseReason && !isViewed);
 
-  const commentLookup = useMemo(() => {
+  const visibleAnchors = useMemo(() => {
+    const anchors = new Set();
+    if (file.isBinary || !Array.isArray(file.hunks)) return anchors;
+    for (const hunk of file.hunks) {
+      for (const ln of hunk.lines) {
+        if (ln.type === "meta") continue;
+        if (ln.type !== "add" && ln.oldLine !== null) {
+          anchors.add(`left:${ln.oldLine}`);
+        }
+        if (ln.type !== "del" && ln.newLine !== null) {
+          anchors.add(`right:${ln.newLine}`);
+        }
+      }
+    }
+    return anchors;
+  }, [file.hunks, file.isBinary]);
+
+  const { commentLookup, unanchoredComments } = useMemo(() => {
     const byAnchor = new Map();
+    const unanchored = [];
     for (const c of commentsForFile) {
       const key = `${c.side}:${c.line}`;
+      if (!visibleAnchors.has(key)) {
+        unanchored.push(c);
+        continue;
+      }
       if (!byAnchor.has(key)) byAnchor.set(key, []);
       byAnchor.get(key).push(c);
     }
-    return byAnchor;
-  }, [commentsForFile]);
+    return { commentLookup: byAnchor, unanchoredComments: unanchored };
+  }, [commentsForFile, visibleAnchors]);
 
   const splitHunks = useMemo(() => {
     if (viewMode !== "split" || file.isBinary) return [];
@@ -337,9 +494,37 @@ function FileDiffCard({
         </div>
       </header>
 
+      ${unanchoredComments.length > 0
+        ? html`
+            <div class="dv-unanchored-threads">
+              <div class="dv-unanchored-label">Outdated / file-level comments</div>
+              ${unanchoredComments.map(
+                (c) => html`
+                  <${CommentCard}
+                    key=${c.id}
+                    comment=${c}
+                    canEditComments=${canEditComments}
+                    busyAction=${busyAction}
+                    onEditComment=${onEditComment}
+                    onDeleteComment=${onDeleteComment}
+                  />
+                `,
+              )}
+            </div>
+          `
+        : null}
+
       ${!isCollapsed
         ? html`
             <div class="dv-file-body">
+              ${file.truncated
+                ? html`
+                    <div class="ck-callout dv-file-truncation-notice">
+                      <${Icon} name="circle-dot" size=${14} />
+                      <span>This file diff was truncated because it exceeded the per-file line or size limit.</span>
+                    </div>
+                  `
+                : null}
               ${file.isBinary
                 ? html`<div class="dv-hunk-header">Binary file changed</div>`
                 : viewMode === "split"
@@ -379,26 +564,32 @@ function FileDiffCard({
                               const rightLine = r?.newLine ?? null;
                               const isContextPair = l && r && l === r;
 
-                              const leftComments = leftLine !== null ? commentLookup.get(`left:${leftLine}`) || [] : [];
-                              const rightComments = rightLine !== null ? commentLookup.get(`right:${rightLine}`) || [] : [];
-                              const rowComments = [...leftComments, ...rightComments];
+                              const leftComments = leftLine !== null ? commentLookup.get(`left:${leftLine}`) || EMPTY_ARRAY : EMPTY_ARRAY;
+                              const rightComments = rightLine !== null ? commentLookup.get(`right:${rightLine}`) || EMPTY_ARRAY : EMPTY_ARRAY;
+                              const rowComments =
+                                leftComments.length === 0
+                                  ? rightComments
+                                  : rightComments.length === 0
+                                    ? leftComments
+                                    : [...leftComments, ...rightComments];
 
                               const composerOnLeft =
-                                activeComposer &&
-                                activeComposer.file === canonical &&
-                                activeComposer.side === "left" &&
-                                activeComposer.line === leftLine;
+                                activeComposerForFile &&
+                                activeComposerForFile.side === "left" &&
+                                activeComposerForFile.line === leftLine;
                               const composerOnRight =
-                                activeComposer &&
-                                activeComposer.file === canonical &&
-                                activeComposer.side === "right" &&
-                                activeComposer.line === rightLine;
+                                activeComposerForFile &&
+                                activeComposerForFile.side === "right" &&
+                                activeComposerForFile.line === rightLine;
                               const composerHere = Boolean(composerOnLeft || composerOnRight);
 
                               const lineFocused =
                                 isFocusedFile &&
                                 focusedLine !== null &&
                                 (leftLine === focusedLine || rightLine === focusedLine);
+
+                              const canCommentLeft = Boolean(canEditComments && canonical && leftLine !== null);
+                              const canCommentRight = Boolean(canEditComments && canonical && rightLine !== null);
 
                               const mainRow = html`
                                 <tr
@@ -407,14 +598,14 @@ function FileDiffCard({
                                   class=${lineFocused ? "dv-line-focused" : ""}
                                 >
                                   <td
-                                    class=${`dv-ln${l ? (l.type === "del" ? " dv-cell-del" : "") : " dv-cell-empty"}${canEditComments && canonical && leftLine !== null ? " commentable" : ""}`}
-                                    onClick=${() => {
-                                      if (canEditComments && canonical && leftLine !== null) {
-                                        onOpenComposer(canonical, leftLine, "left");
-                                      }
-                                    }}
+                                    class=${`dv-ln${l ? (l.type === "del" ? " dv-cell-del" : "") : " dv-cell-empty"}${canCommentLeft ? " commentable" : ""}`}
+                                    ...${commentableCellProps(
+                                      canCommentLeft,
+                                      () => onOpenComposer(canonical, leftLine, "left"),
+                                      `Comment on ${canonical} old line ${leftLine}`,
+                                    )}
                                   >
-                                    ${canEditComments && canonical && leftLine !== null
+                                    ${canCommentLeft
                                       ? html`<span class="dv-ln-plus" aria-hidden="true">+</span>`
                                       : null}
                                     ${leftLine !== null ? leftLine : ""}
@@ -433,14 +624,14 @@ function FileDiffCard({
                                       : ""}
                                   </td>
                                   <td
-                                    class=${`dv-ln${r ? (r.type === "add" ? " dv-cell-add" : "") : " dv-cell-empty"}${canEditComments && canonical && rightLine !== null ? " commentable" : ""}`}
-                                    onClick=${() => {
-                                      if (canEditComments && canonical && rightLine !== null) {
-                                        onOpenComposer(canonical, rightLine, "right");
-                                      }
-                                    }}
+                                    class=${`dv-ln${r ? (r.type === "add" ? " dv-cell-add" : "") : " dv-cell-empty"}${canCommentRight ? " commentable" : ""}`}
+                                    ...${commentableCellProps(
+                                      canCommentRight,
+                                      () => onOpenComposer(canonical, rightLine, "right"),
+                                      `Comment on ${canonical} new line ${rightLine}`,
+                                    )}
                                   >
-                                    ${canEditComments && canonical && rightLine !== null
+                                    ${canCommentRight
                                       ? html`<span class="dv-ln-plus" aria-hidden="true">+</span>`
                                       : null}
                                     ${rightLine !== null ? rightLine : ""}
@@ -473,11 +664,10 @@ function FileDiffCard({
                                     colSpan=${4}
                                     rowComments=${rowComments}
                                     composerHere=${composerHere}
-                                    activeComposer=${activeComposer}
-                                    draftBody=${draftBody}
-                                    setDraftBody=${setDraftBody}
+                                    activeComposer=${activeComposerForFile}
                                     onSaveComment=${onSaveComment}
                                     onCancelComposer=${onCancelComposer}
+                                    onEditComment=${onEditComment}
                                     onDeleteComment=${onDeleteComment}
                                     canEditComments=${canEditComments}
                                     busyAction=${busyAction}
@@ -518,25 +708,32 @@ function FileDiffCard({
 
                               const leftComments =
                                 ln.type !== "add" && oldLine !== null
-                                  ? commentLookup.get(`left:${oldLine}`) || []
-                                  : [];
+                                  ? commentLookup.get(`left:${oldLine}`) || EMPTY_ARRAY
+                                  : EMPTY_ARRAY;
                               const rightComments =
                                 ln.type !== "del" && newLine !== null
-                                  ? commentLookup.get(`right:${newLine}`) || []
-                                  : [];
-                              const rowComments = [...leftComments, ...rightComments];
+                                  ? commentLookup.get(`right:${newLine}`) || EMPTY_ARRAY
+                                  : EMPTY_ARRAY;
+                              const rowComments =
+                                leftComments.length === 0
+                                  ? rightComments
+                                  : rightComments.length === 0
+                                    ? leftComments
+                                    : [...leftComments, ...rightComments];
 
                               const composerHere = Boolean(
-                                activeComposer &&
-                                  activeComposer.file === canonical &&
-                                  ((activeComposer.side === "left" && ln.type !== "add" && activeComposer.line === oldLine) ||
-                                    (activeComposer.side === "right" && ln.type !== "del" && activeComposer.line === newLine)),
+                                activeComposerForFile &&
+                                  ((activeComposerForFile.side === "left" && ln.type !== "add" && activeComposerForFile.line === oldLine) ||
+                                    (activeComposerForFile.side === "right" && ln.type !== "del" && activeComposerForFile.line === newLine)),
                               );
 
                               const lineFocused =
                                 isFocusedFile &&
                                 focusedLine !== null &&
                                 (oldLine === focusedLine || newLine === focusedLine);
+
+                              const canCommentLeft = Boolean(canEditComments && canonical && oldLine !== null);
+                              const canCommentRight = Boolean(canEditComments && canonical && newLine !== null);
 
                               const mainRow = html`
                                 <tr
@@ -545,27 +742,27 @@ function FileDiffCard({
                                   class=${`${rowCls}${lineFocused ? " dv-line-focused" : ""}`}
                                 >
                                   <td
-                                    class=${`dv-ln dv-ln-unified${canEditComments && canonical && oldLine !== null ? " commentable" : ""}`}
-                                    onClick=${() => {
-                                      if (canEditComments && canonical && oldLine !== null) {
-                                        onOpenComposer(canonical, oldLine, "left");
-                                      }
-                                    }}
+                                    class=${`dv-ln dv-ln-unified${canCommentLeft ? " commentable" : ""}`}
+                                    ...${commentableCellProps(
+                                      canCommentLeft,
+                                      () => onOpenComposer(canonical, oldLine, "left"),
+                                      `Comment on ${canonical} old line ${oldLine}`,
+                                    )}
                                   >
-                                    ${canEditComments && canonical && oldLine !== null
+                                    ${canCommentLeft
                                       ? html`<span class="dv-ln-plus" aria-hidden="true">+</span>`
                                       : null}
                                     ${oldLine !== null ? oldLine : ""}
                                   </td>
                                   <td
-                                    class=${`dv-ln dv-ln-unified${canEditComments && canonical && newLine !== null ? " commentable" : ""}`}
-                                    onClick=${() => {
-                                      if (canEditComments && canonical && newLine !== null) {
-                                        onOpenComposer(canonical, newLine, "right");
-                                      }
-                                    }}
+                                    class=${`dv-ln dv-ln-unified${canCommentRight ? " commentable" : ""}`}
+                                    ...${commentableCellProps(
+                                      canCommentRight,
+                                      () => onOpenComposer(canonical, newLine, "right"),
+                                      `Comment on ${canonical} new line ${newLine}`,
+                                    )}
                                   >
-                                    ${canEditComments && canonical && newLine !== null
+                                    ${canCommentRight
                                       ? html`<span class="dv-ln-plus" aria-hidden="true">+</span>`
                                       : null}
                                     ${newLine !== null ? newLine : ""}
@@ -589,11 +786,10 @@ function FileDiffCard({
                                     colSpan=${3}
                                     rowComments=${rowComments}
                                     composerHere=${composerHere}
-                                    activeComposer=${activeComposer}
-                                    draftBody=${draftBody}
-                                    setDraftBody=${setDraftBody}
+                                    activeComposer=${activeComposerForFile}
                                     onSaveComment=${onSaveComment}
                                     onCancelComposer=${onCancelComposer}
+                                    onEditComment=${onEditComment}
                                     onDeleteComment=${onDeleteComment}
                                     canEditComments=${canEditComments}
                                     busyAction=${busyAction}
@@ -625,6 +821,58 @@ function FileDiffCard({
   `;
 }
 
+function areCommentsArrayEqual(prevList, nextList) {
+  if (prevList === nextList) return true;
+  if (!Array.isArray(prevList) || !Array.isArray(nextList)) return false;
+  if (prevList.length !== nextList.length) return false;
+  for (let i = 0; i < prevList.length; i += 1) {
+    const a = prevList[i];
+    const b = nextList[i];
+    if (
+      a !== b &&
+      (a?.id !== b?.id ||
+        a?.body !== b?.body ||
+        a?.stale !== b?.stale ||
+        a?.line !== b?.line ||
+        a?.side !== b?.side ||
+        a?.updatedAt !== b?.updatedAt)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function areComposerTargetsEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.file === b.file && a.line === b.line && a.side === b.side;
+}
+
+export class FileDiffCard extends Component {
+  shouldComponentUpdate(nextProps) {
+    const prev = this.props;
+    return !(
+      prev.file === nextProps.file &&
+      prev.viewMode === nextProps.viewMode &&
+      prev.splitLeftPct === nextProps.splitLeftPct &&
+      prev.isViewed === nextProps.isViewed &&
+      prev.isCollapsed === nextProps.isCollapsed &&
+      prev.autoCollapseReason === nextProps.autoCollapseReason &&
+      prev.isFocusedFile === nextProps.isFocusedFile &&
+      prev.focusedLine === nextProps.focusedLine &&
+      prev.canEditComments === nextProps.canEditComments &&
+      prev.busyAction === nextProps.busyAction &&
+      areComposerTargetsEqual(prev.activeComposerForFile, nextProps.activeComposerForFile) &&
+      areCommentsArrayEqual(prev.commentsForFile, nextProps.commentsForFile)
+    );
+  }
+
+  render(props) {
+    return html`<${FileDiffCardInner} ...${props} />`;
+  }
+}
+
 export function DiffCanvasApp({ state, invoke }) {
   // Local UI state strictly separated from SSE domain state so live updates
   // never overwrite focus, filter queries, or in-progress comment text.
@@ -638,25 +886,53 @@ export function DiffCanvasApp({ state, invoke }) {
   const [collapsedDirs, setCollapsedDirs] = useState({});
   const [collapsedFiles, setCollapsedFiles] = useState({});
   const [activeComposer, setActiveComposer] = useState(null);
-  const [draftBody, setDraftBody] = useState("");
   const [actionError, setActionError] = useState(null);
   const [busyAction, setBusyAction] = useState(false);
 
   const mainPaneRef = useRef(null);
+  const activeDragCleanupRef = useRef(null);
+  const sidebarWidthRef = useRef(sidebarWidth);
+  sidebarWidthRef.current = sidebarWidth;
+  const splitLeftPctRef = useRef(splitLeftPct);
+  splitLeftPctRef.current = splitLeftPct;
 
-  const files = state?.files || [];
-  const comments = state?.comments || [];
-  const viewedFiles = state?.viewedFiles || [];
+  const stableFilesRef = useRef({ domain: null, diffRev: -1, files: EMPTY_ARRAY });
+  const rawFiles = state?.files || EMPTY_ARRAY;
+  const currentDomain = state?.domain ?? null;
+  const currentDiffRev = typeof state?.diffRev === "number" ? state.diffRev : 0;
+  if (
+    stableFilesRef.current.domain !== currentDomain ||
+    stableFilesRef.current.diffRev !== currentDiffRev ||
+    (currentDiffRev === 0 && stableFilesRef.current.files !== rawFiles)
+  ) {
+    stableFilesRef.current = {
+      domain: currentDomain,
+      diffRev: currentDiffRev,
+      files: rawFiles,
+    };
+  }
+  const files = stableFilesRef.current.files;
+
+  const comments = state?.comments || EMPTY_ARRAY;
+  const viewedFiles = state?.viewedFiles || EMPTY_ARRAY;
 
   const viewedSet = useMemo(() => new Set(viewedFiles), [viewedFiles]);
 
+  const prevCommentsByFileRef = useRef(new Map());
   const commentsByFileMap = useMemo(() => {
-    const map = new Map();
+    const grouped = new Map();
     for (const c of comments) {
-      if (!map.has(c.file)) map.set(c.file, []);
-      map.get(c.file).push(c);
+      if (!grouped.has(c.file)) grouped.set(c.file, []);
+      grouped.get(c.file).push(c);
     }
-    return map;
+    const stabilized = new Map();
+    const prevMap = prevCommentsByFileRef.current;
+    for (const [f, list] of grouped.entries()) {
+      const prevList = prevMap.get(f);
+      stabilized.set(f, prevList && areCommentsArrayEqual(prevList, list) ? prevList : list);
+    }
+    prevCommentsByFileRef.current = stabilized;
+    return stabilized;
   }, [comments]);
 
   const commentCountsByFile = useMemo(() => {
@@ -666,6 +942,16 @@ export function DiffCanvasApp({ state, invoke }) {
     }
     return counts;
   }, [commentsByFileMap]);
+
+  const knownFileSet = useMemo(
+    () => new Set(files.map((f) => f.canonicalPath).filter(Boolean)),
+    [files],
+  );
+
+  const orphanComments = useMemo(
+    () => comments.filter((c) => !knownFileSet.has(c.file)),
+    [comments, knownFileSet],
+  );
 
   const filteredFiles = useMemo(() => {
     const q = fileQuery.trim().toLowerCase();
@@ -713,9 +999,14 @@ export function DiffCanvasApp({ state, invoke }) {
     });
   }, []);
 
+  const prevDomainRef = useRef(state?.domain);
   useEffect(() => {
-    setCollapsedFiles({});
-    setSelectedFile(null);
+    if (prevDomainRef.current !== state?.domain) {
+      prevDomainRef.current = state?.domain;
+      setCollapsedFiles({});
+      setSelectedFile(null);
+      setActiveComposer(null);
+    }
   }, [state?.domain]);
 
   useEffect(() => {
@@ -724,47 +1015,69 @@ export function DiffCanvasApp({ state, invoke }) {
     }
   }, [state?.focusSeq, state?.focusedFile, state?.focusedLine, scrollToFile]);
 
+  useEffect(
+    () => () => {
+      activeDragCleanupRef.current?.();
+    },
+    [],
+  );
+
+  const beginWindowDrag = useCallback((onMove) => {
+    activeDragCleanupRef.current?.();
+    const bodyStyle = typeof document !== "undefined" ? document.body?.style : null;
+    const prevUserSelect = bodyStyle?.userSelect || "";
+    if (bodyStyle) {
+      bodyStyle.userSelect = "none";
+    }
+    const cleanup = () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", cleanup);
+      }
+      if (bodyStyle) {
+        bodyStyle.userSelect = prevUserSelect;
+      }
+      if (activeDragCleanupRef.current === cleanup) {
+        activeDragCleanupRef.current = null;
+      }
+    };
+    activeDragCleanupRef.current = cleanup;
+    if (typeof window !== "undefined") {
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", cleanup);
+    }
+  }, []);
+
   const startSidebarResize = useCallback(
     (e) => {
       e.preventDefault();
       const startX = e.clientX;
-      const startWidth = sidebarWidth;
-      const onMove = (ev) => {
-        const next = Math.max(150, Math.min(window.innerWidth * 0.55, startWidth + (ev.clientX - startX)));
+      const startWidth = sidebarWidthRef.current;
+      beginWindowDrag((ev) => {
+        const viewportW = typeof window !== "undefined" && window.innerWidth ? window.innerWidth : 1200;
+        const next = Math.max(150, Math.min(viewportW * 0.55, startWidth + (ev.clientX - startX)));
         setSidebarWidth(Math.round(next));
-      };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      });
     },
-    [sidebarWidth],
+    [beginWindowDrag],
   );
 
   const startSplitResize = useCallback(
     (e) => {
       e.preventDefault();
-      const wrapEl = e.currentTarget.parentElement;
+      const wrapEl = e.currentTarget?.parentElement;
       if (!wrapEl) return;
       const rect = wrapEl.getBoundingClientRect();
       const codeWidth = Math.max(200, rect.width - 96);
       const startX = e.clientX;
-      const startPct = splitLeftPct;
-      const onMove = (ev) => {
+      const startPct = splitLeftPctRef.current;
+      beginWindowDrag((ev) => {
         const deltaPct = ((ev.clientX - startX) / codeWidth) * 100;
         const clamped = Math.max(20, Math.min(80, startPct + deltaPct));
         setSplitLeftPct(Math.round(clamped * 10) / 10);
-      };
-      const onUp = () => {
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
+      });
     },
-    [splitLeftPct],
+    [beginWindowDrag],
   );
 
   const runAction = useCallback(
@@ -783,6 +1096,10 @@ export function DiffCanvasApp({ state, invoke }) {
     [invoke],
   );
 
+  const handleToggleCollapse = useCallback((key, nextCollapsed) => {
+    setCollapsedFiles((prev) => ({ ...prev, [key]: Boolean(nextCollapsed) }));
+  }, []);
+
   const handleToggleViewed = useCallback(
     async (filePath, nextViewed) => {
       setCollapsedFiles((prev) => ({ ...prev, [filePath]: nextViewed }));
@@ -792,28 +1109,46 @@ export function DiffCanvasApp({ state, invoke }) {
   );
 
   const handleOpenComposer = useCallback((file, line, side) => {
-    setActiveComposer((prev) => {
-      if (prev && prev.file === file && prev.line === line && prev.side === side) {
-        return prev;
-      }
-      setDraftBody("");
-      return { file, line, side };
-    });
+    setActiveComposer((prev) =>
+      prev && prev.file === file && prev.line === line && prev.side === side
+        ? prev
+        : { file, line, side },
+    );
   }, []);
 
-  const handleSaveComment = useCallback(async () => {
-    if (!activeComposer || !draftBody.trim()) return;
-    const res = await runAction("add_comment", {
-      file: activeComposer.file,
-      line: activeComposer.line,
-      side: activeComposer.side,
-      body: draftBody.trim(),
-    });
-    if (res) {
-      setDraftBody("");
-      setActiveComposer(null);
-    }
-  }, [activeComposer, draftBody, runAction]);
+  const handleCancelComposer = useCallback(() => {
+    setActiveComposer(null);
+  }, []);
+
+  const handleSaveComment = useCallback(
+    async (composerTarget, trimmedBody) => {
+      if (!composerTarget || !trimmedBody) return false;
+      const res = await runAction("add_comment", {
+        file: composerTarget.file,
+        line: composerTarget.line,
+        side: composerTarget.side,
+        body: trimmedBody,
+      });
+      if (res) {
+        setActiveComposer(null);
+        return true;
+      }
+      return false;
+    },
+    [runAction],
+  );
+
+  const handleEditComment = useCallback(
+    async (commentId, trimmedBody) => {
+      if (!commentId || !trimmedBody) return false;
+      const res = await runAction("edit_comment", {
+        commentId,
+        body: trimmedBody,
+      });
+      return Boolean(res);
+    },
+    [runAction],
+  );
 
   const handleDeleteComment = useCallback(
     async (id) => {
@@ -826,9 +1161,51 @@ export function DiffCanvasApp({ state, invoke }) {
     const res = await runAction("submit_review", { notifyAgent: true });
     if (res) {
       setActiveComposer(null);
-      setDraftBody("");
     }
   }, [runAction]);
+
+  const handleReopenReview = useCallback(async () => {
+    await runAction("reopen_review", { clearComments: false });
+  }, [runAction]);
+
+  const computeEffectiveCollapsed = useCallback(
+    (file) => {
+      const canonical = file.canonicalPath || "";
+      const collapseKey = canonical || String(file.index);
+      const autoCollapseReason = getAutoCollapseReason(file);
+      const hasExplicitCollapse = Object.prototype.hasOwnProperty.call(
+        collapsedFiles,
+        collapseKey,
+      );
+      const targetedByFocus = Boolean(
+        canonical && (selectedFile === canonical || state?.focusedFile === canonical),
+      );
+      const isCollapsed = hasExplicitCollapse
+        ? Boolean(collapsedFiles[collapseKey])
+        : Boolean(autoCollapseReason) && !targetedByFocus;
+      return { collapseKey, autoCollapseReason, isCollapsed };
+    },
+    [collapsedFiles, selectedFile, state?.focusedFile],
+  );
+
+  const allFilteredExpanded = useMemo(
+    () =>
+      filteredFiles.length > 0 &&
+      filteredFiles.every((f) => !computeEffectiveCollapsed(f).isCollapsed),
+    [filteredFiles, computeEffectiveCollapsed],
+  );
+
+  const handleToggleAllFiles = useCallback(() => {
+    const nextCollapsed = allFilteredExpanded;
+    setCollapsedFiles((prev) => {
+      const next = { ...prev };
+      for (const f of filteredFiles) {
+        const key = f.canonicalPath || String(f.index);
+        next[key] = nextCollapsed;
+      }
+      return next;
+    });
+  }, [allFilteredExpanded, filteredFiles]);
 
   if (!state) {
     return html`
@@ -877,6 +1254,7 @@ export function DiffCanvasApp({ state, invoke }) {
 
   const badge = statusBadgeMeta(state.status);
   const canEditComments = state.status !== "addressed";
+  const trimmedFilterQuery = fileQuery.trim();
 
   return html`
     <div class=${`dv-shell${wrapLines ? " wrap-lines" : ""}`}>
@@ -928,11 +1306,10 @@ export function DiffCanvasApp({ state, invoke }) {
           />
         </div>
 
-        <div class="dv-seg" role="tablist" aria-label="Diff layout">
+        <div class="dv-seg" role="group" aria-label="Diff layout">
           <button
             type="button"
-            role="tab"
-            aria-selected=${viewMode === "split"}
+            aria-pressed=${viewMode === "split"}
             class=${`dv-seg-btn${viewMode === "split" ? " active" : ""}`}
             onClick=${() => setViewMode("split")}
           >
@@ -941,8 +1318,7 @@ export function DiffCanvasApp({ state, invoke }) {
           </button>
           <button
             type="button"
-            role="tab"
-            aria-selected=${viewMode === "unified"}
+            aria-pressed=${viewMode === "unified"}
             class=${`dv-seg-btn${viewMode === "unified" ? " active" : ""}`}
             onClick=${() => setViewMode("unified")}
           >
@@ -951,11 +1327,10 @@ export function DiffCanvasApp({ state, invoke }) {
           </button>
         </div>
 
-        <div class="dv-seg" role="tablist" aria-label="Line wrapping">
+        <div class="dv-seg" role="group" aria-label="Line wrapping">
           <button
             type="button"
-            role="tab"
-            aria-selected=${!wrapLines}
+            aria-pressed=${!wrapLines}
             class=${`dv-seg-btn${!wrapLines ? " active" : ""}`}
             onClick=${() => setWrapLines(false)}
           >
@@ -963,8 +1338,7 @@ export function DiffCanvasApp({ state, invoke }) {
           </button>
           <button
             type="button"
-            role="tab"
-            aria-selected=${wrapLines}
+            aria-pressed=${wrapLines}
             class=${`dv-seg-btn${wrapLines ? " active" : ""}`}
             onClick=${() => setWrapLines(true)}
           >
@@ -983,19 +1357,29 @@ export function DiffCanvasApp({ state, invoke }) {
           <${Icon} name="refresh-cw" size=${14} />
         </button>
 
-        <button
-          type="button"
-          class="ck-btn ck-btn-primary"
-          disabled=${busyAction || state.status === "addressed"}
-          onClick=${handleSubmitReview}
-        >
-          <${Icon} name="circle-check" size=${14} />
-          ${state.status === "pending"
-            ? "Resubmit Review"
-            : state.status === "addressed"
-              ? "Addressed"
-              : "Submit Review"}
-        </button>
+        ${state.status === "addressed"
+          ? html`
+              <button
+                type="button"
+                class="ck-btn"
+                disabled=${busyAction}
+                onClick=${handleReopenReview}
+              >
+                <${Icon} name="refresh-cw" size=${14} />
+                New Review Round
+              </button>
+            `
+          : html`
+              <button
+                type="button"
+                class="ck-btn ck-btn-primary"
+                disabled=${busyAction}
+                onClick=${handleSubmitReview}
+              >
+                <${Icon} name="circle-check" size=${14} />
+                ${state.status === "pending" ? "Resubmit Review" : "Submit Review"}
+              </button>
+            `}
       </header>
 
       ${actionError || state.error
@@ -1012,8 +1396,21 @@ export function DiffCanvasApp({ state, invoke }) {
           ? html`
               <aside class="dv-sidebar" style=${{ width: `${sidebarWidth}px` }} aria-label="Changed files">
                 <div class="dv-sidebar-header">
-                  <span>Changed files (${filteredFiles.length}/${files.length})</span>
-                  <span>${viewedSet.size} viewed</span>
+                  <span>Files (${filteredFiles.length}/${files.length})</span>
+                  <span class="dv-sidebar-meta">
+                    <span>${viewedSet.size} viewed</span>
+                    ${filteredFiles.length > 0
+                      ? html`
+                          <button
+                            type="button"
+                            class="dv-sidebar-toggle-btn"
+                            onClick=${handleToggleAllFiles}
+                          >
+                            ${allFilteredExpanded ? "Collapse all" : "Expand all"}
+                          </button>
+                        `
+                      : null}
+                  </span>
                 </div>
                 <div class="dv-tree-scroll">
                   <${FileTreeNodes}
@@ -1038,58 +1435,80 @@ export function DiffCanvasApp({ state, invoke }) {
           : null}
 
         <main class="dv-main" ref=${mainPaneRef}>
-          ${filteredFiles.length === 0
+          ${state.truncatedFiles
             ? html`
-                <div class="ck-empty">
-                  <p>No changed files match the current filter.</p>
+                <div class="ck-callout dv-truncation-banner">
+                  <${Icon} name="circle-dot" size=${16} />
+                  <span>
+                    Showing ${files.length}${state.stats?.totalFiles > files.length ? ` of ${state.stats.totalFiles}` : ""} changed files (diff truncated at size or file limit). Scope with file paths to inspect remaining files.
+                  </span>
                 </div>
               `
-            : filteredFiles.map((file) => {
-                const canonical = file.canonicalPath || "";
-                const collapseKey = canonical || String(file.index);
-              const autoCollapseReason = getAutoCollapseReason(file);
-              const hasExplicitCollapse = Object.prototype.hasOwnProperty.call(
-                collapsedFiles,
-                collapseKey,
-              );
-              const targetedByFocus = Boolean(
-                canonical && (selectedFile === canonical || state.focusedFile === canonical),
-              );
-              const isCollapsed = hasExplicitCollapse
-                ? Boolean(collapsedFiles[collapseKey])
-                : Boolean(autoCollapseReason) && !targetedByFocus;
+            : null}
 
-                return html`
-                  <${FileDiffCard}
-                    key=${`${canonical}:${file.index}`}
-                    file=${file}
-                    viewMode=${viewMode}
-                    splitLeftPct=${splitLeftPct}
-                    onStartSplitResize=${startSplitResize}
-                    isViewed=${viewedSet.has(canonical)}
-                  isCollapsed=${isCollapsed}
-                  autoCollapseReason=${autoCollapseReason}
-                    isFocusedFile=${ Boolean(canonical && state.focusedFile === canonical) }
-                    focusedLine=${state.focusedLine}
-                  onToggleCollapse=${(key, nextCollapsed) =>
-                    setCollapsedFiles((prev) => ({ ...prev, [key]: Boolean(nextCollapsed) }))}
-                    onToggleViewed=${handleToggleViewed}
-                    commentsForFile=${commentsByFileMap.get(canonical) || []}
-                    canEditComments=${canEditComments}
-                    activeComposer=${activeComposer}
-                    onOpenComposer=${handleOpenComposer}
-                    draftBody=${draftBody}
-                    setDraftBody=${setDraftBody}
-                    onSaveComment=${handleSaveComment}
-                    onCancelComposer=${() => {
-                      setActiveComposer(null);
-                      setDraftBody("");
-                    }}
-                    onDeleteComment=${handleDeleteComment}
-                    busyAction=${busyAction}
-                  />
-                `;
-              })}
+          ${orphanComments.length > 0
+            ? html`
+                <section class="dv-orphan-comments-card" aria-label="Comments on files outside current diff">
+                  <div class="dv-unanchored-label">Comments on files no longer in this diff</div>
+                  ${orphanComments.map(
+                    (c) => html`
+                      <${CommentCard}
+                        key=${c.id}
+                        comment=${c}
+                        canEditComments=${canEditComments}
+                        busyAction=${busyAction}
+                        onEditComment=${handleEditComment}
+                        onDeleteComment=${handleDeleteComment}
+                      />
+                    `,
+                  )}
+                </section>
+              `
+            : null}
+
+          ${files.length === 0
+            ? html`
+                <div class="ck-empty">
+                  <p>Working tree is clean - no changes detected.</p>
+                </div>
+              `
+            : filteredFiles.length === 0
+              ? html`
+                  <div class="ck-empty">
+                    <p>No changed files match "${trimmedFilterQuery}".</p>
+                  </div>
+                `
+              : filteredFiles.map((file) => {
+                  const canonical = file.canonicalPath || "";
+                  const { autoCollapseReason, isCollapsed } = computeEffectiveCollapsed(file);
+                  const isFocusedFile = Boolean(canonical && state.focusedFile === canonical);
+
+                  return html`
+                    <${FileDiffCard}
+                      key=${`${canonical}:${file.index}`}
+                      file=${file}
+                      viewMode=${viewMode}
+                      splitLeftPct=${splitLeftPct}
+                      onStartSplitResize=${startSplitResize}
+                      isViewed=${viewedSet.has(canonical)}
+                      isCollapsed=${isCollapsed}
+                      autoCollapseReason=${autoCollapseReason}
+                      isFocusedFile=${isFocusedFile}
+                      focusedLine=${isFocusedFile ? state.focusedLine : null}
+                      onToggleCollapse=${handleToggleCollapse}
+                      onToggleViewed=${handleToggleViewed}
+                      commentsForFile=${commentsByFileMap.get(canonical) || EMPTY_ARRAY}
+                      canEditComments=${canEditComments}
+                      activeComposerForFile=${activeComposer?.file === canonical ? activeComposer : null}
+                      onOpenComposer=${handleOpenComposer}
+                      onSaveComment=${handleSaveComment}
+                      onCancelComposer=${handleCancelComposer}
+                      onEditComment=${handleEditComment}
+                      onDeleteComment=${handleDeleteComment}
+                      busyAction=${busyAction}
+                    />
+                  `;
+                })}
         </main>
       </div>
     </div>
