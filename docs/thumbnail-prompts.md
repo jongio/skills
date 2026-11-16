@@ -486,3 +486,11 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: d0064a4103571a1886395552f201d292cda6fef3b7dafad7169dc4861de9c07b
+
+## diff (7d6140526ca4)
+
+Prompt: "Create a square thumbnail for the diff agent skill. Open a GitHub-style side-by-side diff viewer in a browser or canvas with inline review comments and structured review triage. Use a pure white background and a centered flat vector illustration. Show one hero surface with a clear left to right transformation into a completed skill package. Use small status badges, subtle guide lines, soft shadows, and one restrained accent palette. Include a small Octocat mark with a dotted tether. Use minimal text. Keep all important details legible at card size. Output exactly 1024x1024 pixels."
+
+Provider: placeholder
+model: deterministic-local-v1
+SHA-256: 7d6140526ca40be2d5d16947ef02e1169fd1db733f22766d3e2e2f7e8903861a
