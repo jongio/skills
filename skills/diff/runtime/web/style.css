@@ -1,0 +1,580 @@
+/* Native Diff Canvas styles built on Primer --ck-* tokens from /kit/theme.css.
+ * Every color derives from --ck-* or color-mix() so light and dark themes work
+ * seamlessly with zero hardcoded light-only or dark-only surfaces.
+ */
+
+:root {
+  --diff-add-bg: color-mix(in srgb, var(--ck-success) 15%, var(--ck-bg));
+  --diff-add-ln: color-mix(in srgb, var(--ck-success) 28%, var(--ck-bg-muted));
+  --diff-add-word: color-mix(in srgb, var(--ck-success) 38%, var(--ck-bg));
+  --diff-del-bg: color-mix(in srgb, var(--ck-danger) 15%, var(--ck-bg));
+  --diff-del-ln: color-mix(in srgb, var(--ck-danger) 28%, var(--ck-bg-muted));
+  --diff-del-word: color-mix(in srgb, var(--ck-danger) 38%, var(--ck-bg));
+  --diff-hunk-bg: color-mix(in srgb, var(--ck-accent) 13%, var(--ck-bg-muted));
+  --diff-empty-bg: color-mix(in srgb, var(--ck-bg-muted) 75%, var(--ck-bg) 25%);
+
+  --tok-kw: var(--ck-danger);
+  --tok-str: var(--ck-accent);
+  --tok-cmt: var(--ck-muted);
+  --tok-num: var(--ck-attention);
+  --tok-prop: var(--ck-success);
+}
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.dv-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+}
+
+/* ---- Top Toolbar --------------------------------------------------------- */
+.dv-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--ck-bg-muted);
+  border-bottom: 1px solid var(--ck-border);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.dv-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-right: 4px;
+}
+
+.dv-title {
+  font-weight: var(--ck-fw-semibold);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+
+.dv-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-family: var(--ck-mono);
+  white-space: nowrap;
+}
+
+.dv-add { color: var(--ck-success); font-weight: var(--ck-fw-semibold); }
+.dv-del { color: var(--ck-danger); font-weight: var(--ck-fw-semibold); }
+
+.dv-spacer { flex: 1 1 auto; }
+
+.dv-search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.dv-search-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--ck-muted);
+  pointer-events: none;
+  display: inline-flex;
+}
+
+.dv-search-input.ck-input {
+  width: 170px;
+  padding: 4px 8px 4px 26px;
+  font-size: 12px;
+}
+
+.dv-seg {
+  display: inline-flex;
+  background: var(--ck-bg-inset);
+  border: 1px solid var(--ck-border);
+  border-radius: var(--ck-radius);
+  padding: 2px;
+  gap: 2px;
+}
+
+.dv-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--ck-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: var(--ck-fw-medium);
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dv-seg-btn:hover { color: var(--ck-fg); }
+.dv-seg-btn.active {
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+  font-weight: var(--ck-fw-semibold);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.dv-icon-btn {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.dv-error-banner {
+  margin: 8px 12px 0;
+  flex-shrink: 0;
+}
+
+/* ---- Main Split Workspace ------------------------------------------------ */
+.dv-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dv-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 150px;
+  max-width: 55vw;
+  background: var(--ck-bg-muted);
+  border-right: 1px solid var(--ck-border);
+  overflow: hidden;
+}
+
+.dv-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: var(--ck-fw-semibold);
+  border-bottom: 1px solid var(--ck-border);
+  color: var(--ck-muted);
+}
+
+.dv-tree-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.dv-tree-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dv-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ck-fg);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.dv-tree-row:hover {
+  background: color-mix(in srgb, var(--ck-fg) 7%, transparent);
+}
+
+.dv-tree-row.active {
+  background: color-mix(in srgb, var(--ck-accent) 16%, transparent);
+  color: var(--ck-accent);
+  font-weight: var(--ck-fw-medium);
+}
+
+.dv-tree-row.viewed .dv-tree-label {
+  opacity: 0.62;
+}
+
+.dv-tree-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--ck-muted);
+}
+
+.dv-tree-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dv-tree-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-family: var(--ck-mono);
+  font-size: 11px;
+}
+
+.dv-comment-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: color-mix(in srgb, var(--ck-accent) 18%, transparent);
+  color: var(--ck-accent);
+}
+
+.dv-resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.12s ease;
+}
+
+.dv-resizer:hover,
+.dv-resizer.dragging {
+  background: var(--ck-accent);
+}
+
+/* ---- Diff Pane & File Cards ---------------------------------------------- */
+.dv-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dv-split-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ck-muted);
+  padding: 2px 4px;
+}
+
+.dv-split-slider {
+  width: 120px;
+  accent-color: var(--ck-accent);
+}
+
+.dv-file-card {
+  border: 1px solid var(--ck-border);
+  border-radius: var(--ck-radius);
+  background: var(--ck-bg);
+  overflow: hidden;
+}
+
+.dv-file-card.focused {
+  border-color: var(--ck-accent);
+}
+
+.dv-file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--ck-bg-muted);
+  border-bottom: 1px solid var(--ck-border);
+  font-size: 12px;
+}
+
+.dv-file-card.collapsed .dv-file-header {
+  border-bottom: none;
+}
+
+.dv-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--ck-muted);
+  padding: 2px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.dv-collapse-btn:hover {
+  color: var(--ck-fg);
+  background: var(--ck-bg-inset);
+}
+
+.dv-file-path {
+  font-family: var(--ck-mono);
+  font-weight: var(--ck-fw-semibold);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.dv-file-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.dv-viewed-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ck-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.dv-viewed-toggle input {
+  accent-color: var(--ck-accent);
+  cursor: pointer;
+}
+
+.dv-file-body {
+  overflow-x: auto;
+}
+
+.dv-hunk-header {
+  padding: 4px 12px;
+  background: var(--diff-hunk-bg);
+  color: var(--ck-accent);
+  font-family: var(--ck-mono);
+  font-size: 12px;
+  border-bottom: 1px solid var(--ck-border-muted);
+  border-top: 1px solid var(--ck-border-muted);
+}
+
+.dv-hunk-header:first-child {
+  border-top: none;
+}
+
+.dv-hunk-section {
+  color: var(--ck-muted);
+  margin-left: 8px;
+}
+
+.dv-split-wrap {
+  position: relative;
+}
+
+.dv-col-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  margin-left: -3px;
+  cursor: col-resize;
+  z-index: 4;
+  background: transparent;
+}
+
+.dv-col-resizer:hover,
+.dv-col-resizer.dragging {
+  background: color-mix(in srgb, var(--ck-accent) 55%, transparent);
+}
+
+.dv-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--ck-mono);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.dv-ln {
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
+  padding: 0 6px;
+  text-align: right;
+  color: var(--ck-muted);
+  background: var(--ck-bg-muted);
+  border-right: 1px solid var(--ck-border-muted);
+  user-select: none;
+  vertical-align: top;
+  position: relative;
+}
+
+.dv-ln-unified {
+  width: 44px;
+  min-width: 44px;
+  max-width: 44px;
+}
+
+.dv-ln.commentable {
+  cursor: pointer;
+}
+
+.dv-ln.commentable:hover {
+  color: var(--ck-accent);
+  font-weight: var(--ck-fw-semibold);
+}
+
+.dv-ln-plus {
+  display: none;
+  position: absolute;
+  left: 3px;
+  top: 2px;
+  color: var(--ck-accent);
+}
+
+.dv-ln.commentable:hover .dv-ln-plus {
+  display: inline-flex;
+}
+
+.dv-code {
+  padding: 0 10px;
+  vertical-align: top;
+  white-space: pre;
+  overflow-x: hidden;
+  text-overflow: clip;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+}
+
+.dv-shell.wrap-lines .dv-code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dv-prefix {
+  display: inline-block;
+  width: 12px;
+  user-select: none;
+  color: var(--ck-muted);
+}
+
+.dv-cell-add.dv-code,
+.dv-row-add .dv-code { background: var(--diff-add-bg); }
+.dv-cell-add.dv-ln,
+.dv-row-add .dv-ln { background: var(--diff-add-ln); color: var(--ck-fg); }
+
+.dv-cell-del.dv-code,
+.dv-row-del .dv-code { background: var(--diff-del-bg); }
+.dv-cell-del.dv-ln,
+.dv-row-del .dv-ln { background: var(--diff-del-ln); color: var(--ck-fg); }
+
+.dv-cell-empty {
+  background: var(--diff-empty-bg);
+}
+
+.dv-line-focused > td {
+  outline: 1px solid var(--ck-accent);
+}
+
+.dv-word-add {
+  background: var(--diff-add-word);
+  border-radius: 2px;
+}
+
+.dv-word-del {
+  background: var(--diff-del-word);
+  border-radius: 2px;
+}
+
+.tok-keyword { color: var(--tok-kw); font-weight: var(--ck-fw-medium); }
+.tok-string { color: var(--tok-str); }
+.tok-comment { color: var(--tok-cmt); font-style: italic; }
+.tok-number { color: var(--tok-num); }
+.tok-property { color: var(--tok-prop); }
+
+/* ---- Inline Comments & Composer ------------------------------------------ */
+.dv-thread-cell {
+  padding: 8px 12px;
+  background: var(--ck-bg-muted);
+  border-top: 1px solid var(--ck-border-muted);
+  border-bottom: 1px solid var(--ck-border-muted);
+  font-family: var(--ck-font);
+  white-space: normal;
+}
+
+.dv-comment-card {
+  max-width: 720px;
+  background: var(--ck-bg);
+  border: 1px solid var(--ck-border);
+  border-left: 3px solid var(--ck-accent);
+  border-radius: var(--ck-radius);
+  padding: 8px 12px;
+  margin-bottom: 6px;
+}
+
+.dv-comment-card:last-child {
+  margin-bottom: 0;
+}
+
+.dv-comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ck-muted);
+  margin-bottom: 4px;
+}
+
+.dv-comment-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.dv-composer {
+  max-width: 720px;
+  background: var(--ck-bg);
+  border: 1px solid var(--ck-border);
+  border-radius: var(--ck-radius);
+  padding: 10px 12px;
+}
+
+.dv-composer-label {
+  font-size: 11px;
+  color: var(--ck-muted);
+  font-family: var(--ck-mono);
+  margin-bottom: 6px;
+}
+
+.dv-composer textarea.ck-input {
+  min-height: 72px;
+  resize: vertical;
+  font-size: 13px;
+}
+
+.dv-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.dv-empty-wrap {
+  margin: auto;
+  max-width: 520px;
+  padding: 24px;
+}

@@ -11,7 +11,7 @@ install:
 
 ## What it does
 
-Opens a local GitHub-style side-by-side or unified diff viewer in your browser or Copilot App `browser` canvas with a collapsible file tree, resizable split panes, syntax highlighting, inline line comments, and deterministic `/diff review` triage.
+Opens a GitHub-style side-by-side or unified diff viewer in the native Copilot App `diff` canvas (or standalone zero-CDN browser viewer in terminal CLIs) with automatic Primer light/dark themes, a collapsible file tree, resizable split panes, `Viewed` tracking, inline line comments, and deterministic `/diff review` triage.
 
 ## Use it
 

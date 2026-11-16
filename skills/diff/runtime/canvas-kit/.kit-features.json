@@ -1,0 +1,47 @@
+{
+  "kitVersion": "2026-11-12.3",
+  "features": [
+    "core",
+    "icons:list",
+    "storage"
+  ],
+  "files": [
+    "core-client.mjs",
+    "format.mjs",
+    "icons.mjs",
+    "server.mjs",
+    "storage.mjs",
+    "theme.css",
+    "validate.mjs",
+    "vendor/lucide.mjs",
+    "vendor/preact-htm-standalone.mjs",
+    "version.mjs"
+  ],
+  "icons": [
+    "check",
+    "chevron-down",
+    "chevron-right",
+    "circle-check",
+    "circle-dot",
+    "circle-x",
+    "columns-2",
+    "file-code",
+    "file-diff",
+    "file-minus",
+    "file-plus",
+    "file-text",
+    "folder",
+    "folder-open",
+    "git-compare-arrows",
+    "git-pull-request",
+    "loader-circle",
+    "message-square",
+    "message-square-plus",
+    "panel-left",
+    "refresh-cw",
+    "rows-2",
+    "search",
+    "trash-2",
+    "wrap-text"
+  ]
+}

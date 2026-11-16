@@ -18,7 +18,7 @@ test("serializeJsonForScript neutralizes script-tag breakout, HTML comments, and
   assert.deepEqual(JSON.parse(encoded), payload);
 });
 
-test("renderDiffHtml enforces nonce CSP, pinned SHA-384 SRI hashes, and zero innerHTML sinks", () => {
+test("renderDiffHtml enforces zero external CDNs, strict nonce CSP, dark/light tokens, and zero innerHTML sinks", () => {
   const maliciousDiff = [
     "diff --git a/__proto__/pollute.js b/__proto__/pollute.js",
     "new file mode 100644",
@@ -40,28 +40,24 @@ test("renderDiffHtml enforces nonce CSP, pinned SHA-384 SRI hashes, and zero inn
     csrfToken: "a".repeat(64),
   });
 
+  assert.deepEqual(CDN_ASSETS, {});
+  assert.doesNotMatch(html, /https?:\/\//i);
   assert.match(nonce, /^[A-Za-z0-9+/=_-]{16,}$/);
   const escapedNonce = nonce.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  assert.match(headerCsp, /default-src 'none';/);
   assert.match(headerCsp, new RegExp(`script-src 'nonce-${escapedNonce}';`));
-  assert.doesNotMatch(headerCsp, /script-src[^;]*cdn\.jsdelivr\.net/);
   assert.match(html, new RegExp(`script-src &#39;nonce-${escapedNonce}&#39;;`));
   assert.doesNotMatch(html, /unsafe-inline.*script-src|script-src[^;]*unsafe-inline/);
   assert.doesNotMatch(html, /unsafe-eval/);
-
-  // Every CDN link/script carries verified sha384 integrity + crossorigin="anonymous"
-  for (const asset of Object.values(CDN_ASSETS)) {
-    assert.ok(html.includes(asset.url), `missing pinned URL ${asset.url}`);
-    assert.ok(html.includes(asset.integrity), `missing SRI ${asset.integrity}`);
-  }
-  assert.equal((html.match(/crossorigin="anonymous"/g) || []).length, 5);
+  assert.match(html, /prefers-color-scheme:\s*dark/);
 
   // Escaped title & coerced integer stats
   assert.doesNotMatch(html, /<title>Diff: PR <img/);
   assert.match(html, /\+0<\/span>/);
 
-  // Malicious </script> inside diff must never appear raw in HTML output
+  // Malicious </script> inside diff must never appear raw in HTML output (only the single inline nonce script closes)
   const scriptCloseCount = (html.match(/<\/script>/gi) || []).length;
-  assert.equal(scriptCloseCount, 4); // 3 external CDN scripts + 1 inline nonce script
+  assert.equal(scriptCloseCount, 1);
 
   // Client script uses Map() for file tree, scrubs /s/<token> via history.replaceState, and never touches innerHTML
   assert.doesNotMatch(html, /\.innerHTML\b/);

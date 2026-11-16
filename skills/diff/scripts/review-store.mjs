@@ -2,11 +2,39 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { assertSafeRepoRelativePath } from "./diff-spec.mjs";
+import {
+  MAX_DIFF_BYTES,
+  assertSafeRepoRelativePath,
+  resolveDiffContext,
+} from "./diff-spec.mjs";
 
 export const MAX_REVIEW_FILE_BYTES = 2 * 1024 * 1024;
+export const MAX_PATCH_FILE_BYTES = MAX_DIFF_BYTES;
 export const MAX_COMMENTS_PER_REVIEW = 500;
 export const MAX_COMMENT_BODY_CHARS = 16_384;
+export const MAX_VIEWED_FILES_PER_REVIEW = 5_000;
+
+const reviewWriteQueues = new Map();
+
+export async function withReviewLock(lockKey, work) {
+  const normalizedKey = path.resolve(String(lockKey));
+  const previous = reviewWriteQueues.get(normalizedKey) ?? Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.catch(() => {}).then(() => gate);
+  reviewWriteQueues.set(normalizedKey, queued);
+  try {
+    await previous.catch(() => {});
+    return await work();
+  } finally {
+    release();
+    if (reviewWriteQueues.get(normalizedKey) === queued) {
+      reviewWriteQueues.delete(normalizedKey);
+    }
+  }
+}
 
 const REPO_SLUG_RE = /^[A-Za-z0-9._-]+__[A-Za-z0-9._-]+$/;
 const BRANCH_SLUG_RE = /^[A-Za-z0-9._-]+$/;
@@ -173,6 +201,62 @@ export function getStaticHtmlFilePath({ reviewsRoot, repoSlug, branchSlug, revie
   return filePath;
 }
 
+export function getPatchFilePath({ reviewsRoot, repoSlug, branchSlug, reviewId }) {
+  const rootDir = resolveReviewsRoot(reviewsRoot);
+  const safeRepo = assertSafeRepoSlug(repoSlug);
+  const safeBranch = assertSafeBranchSlug(branchSlug);
+  const safeId = assertSafeReviewId(reviewId);
+  const dir = path.join(rootDir, safeRepo, safeBranch);
+  assertNoSymlinkChain(rootDir, dir);
+  const filePath = path.join(dir, `diff-${safeId}.patch`);
+  assertNoSymlinkChain(rootDir, filePath);
+  return filePath;
+}
+
+export function savePatchFile({ reviewsRoot, repoSlug, branchSlug, reviewId, patch }) {
+  const rootDir = resolveReviewsRoot(reviewsRoot);
+  const text = String(patch ?? "");
+  if (Buffer.byteLength(text, "utf8") > MAX_PATCH_FILE_BYTES) {
+    throw new Error(`Diff patch exceeds size limit (${MAX_PATCH_FILE_BYTES} bytes)`);
+  }
+  const filePath = getPatchFilePath({
+    reviewsRoot: rootDir,
+    repoSlug,
+    branchSlug,
+    reviewId,
+  });
+  writeSecureFileAtomic(rootDir, filePath, text);
+  return { filePath };
+}
+
+export function readPatchFile({ reviewsRoot, repoSlug, branchSlug, reviewId }) {
+  const rootDir = resolveReviewsRoot(reviewsRoot);
+  const resolved = getPatchFilePath({
+    reviewsRoot: rootDir,
+    repoSlug,
+    branchSlug,
+    reviewId,
+  });
+
+  const st = safeLstat(resolved);
+  if (!st) return null;
+  if (st.isSymbolicLink() || !st.isFile()) {
+    throw new Error(`Diff patch file is not a regular file: ${resolved}`);
+  }
+  if (st.size > MAX_PATCH_FILE_BYTES) {
+    throw new Error(`Diff patch file exceeds size limit (${MAX_PATCH_FILE_BYTES} bytes): ${resolved}`);
+  }
+
+  const realRoot = fs.realpathSync.native(rootDir);
+  const realFile = fs.realpathSync.native(resolved);
+  const rel = path.relative(realRoot, realFile);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(`Resolved diff patch file escapes reviews root: ${realFile}`);
+  }
+
+  return fs.readFileSync(resolved, "utf8");
+}
+
 export function writeSecureFileAtomic(reviewsRoot, targetPath, content) {
   const rootDir = resolveReviewsRoot(reviewsRoot);
   const resolvedTarget = path.resolve(targetPath);
@@ -265,6 +349,19 @@ export function validateCommentInput(raw) {
   };
 }
 
+function normalizeStatsSummary(stats) {
+  if (!stats || typeof stats !== "object" || Array.isArray(stats)) return undefined;
+  const toNonNeg = (val) => {
+    const n = Number.parseInt(String(val ?? 0), 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  };
+  return {
+    fileCount: toNonNeg(stats.fileCount),
+    additions: toNonNeg(stats.additions),
+    deletions: toNonNeg(stats.deletions),
+  };
+}
+
 export function validateReviewRecord(record) {
   if (!record || typeof record !== "object" || Array.isArray(record)) {
     throw new Error("Review record must be a JSON object");
@@ -279,12 +376,28 @@ export function validateReviewRecord(record) {
   if (!Array.isArray(record.comments) || record.comments.length > MAX_COMMENTS_PER_REVIEW) {
     throw new Error(`Review comments must be an array of at most ${MAX_COMMENTS_PER_REVIEW} items`);
   }
+  if (record.viewedFiles !== undefined) {
+    if (!Array.isArray(record.viewedFiles) || record.viewedFiles.length > MAX_VIEWED_FILES_PER_REVIEW) {
+      throw new Error(`Viewed files must be an array of at most ${MAX_VIEWED_FILES_PER_REVIEW} items`);
+    }
+  }
 
-  return {
+  const viewedFiles = Array.isArray(record.viewedFiles)
+    ? [
+        ...new Set(
+          record.viewedFiles.map((entry) =>
+            assertSafeRepoRelativePath(String(entry ?? "").trim(), "Viewed file path"),
+          ),
+        ),
+      ]
+    : [];
+
+  const normalized = {
     version: 1,
     reviewId,
     repoSlug: typeof record.repoSlug === "string" ? assertSafeRepoSlug(record.repoSlug) : undefined,
     branchSlug: typeof record.branchSlug === "string" ? assertSafeBranchSlug(record.branchSlug) : undefined,
+    title: typeof record.title === "string" ? record.title.replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").slice(0, 512) : "",
     diffSpec: String(record.diffSpec ?? ""),
     branch: String(record.branch ?? ""),
     baseSha: String(record.baseSha ?? ""),
@@ -293,8 +406,16 @@ export function validateReviewRecord(record) {
     closedAt: typeof record.closedAt === "string" ? record.closedAt : null,
     addressedAt: typeof record.addressedAt === "string" ? record.addressedAt : null,
     status: record.status,
+    viewedFiles,
     comments: record.comments.map((c) => validateCommentInput(c)),
   };
+
+  const stats = normalizeStatsSummary(record.stats);
+  if (stats) {
+    normalized.stats = stats;
+  }
+
+  return normalized;
 }
 
 export function readReviewFile(reviewsRoot, filePath) {
@@ -336,6 +457,83 @@ export function saveReviewRecord(reviewsRoot, record) {
   });
   writeSecureFileAtomic(rootDir, filePath, `${JSON.stringify(validated, null, 2)}\n`);
   return { filePath, record: validated };
+}
+
+export async function prepareDiffReview({
+  specArgs = [],
+  cwd = process.cwd(),
+  reviewsRoot,
+  execFn,
+} = {}) {
+  const rootDir = resolveReviewsRoot(reviewsRoot);
+  const ctx = resolveDiffContext(specArgs, { cwd, exec: execFn });
+  const reviewFile = getReviewFilePath({
+    reviewsRoot: rootDir,
+    repoSlug: ctx.repoSlug,
+    branchSlug: ctx.branchSlug,
+    reviewId: ctx.reviewId,
+  });
+
+  return withReviewLock(reviewFile, async () => {
+    let existing = null;
+    try {
+      existing = readReviewFile(rootDir, reviewFile);
+    } catch {
+      existing = null;
+    }
+
+    const statsSummary = {
+      fileCount: ctx.stats.fileCount,
+      additions: ctx.stats.additions,
+      deletions: ctx.stats.deletions,
+    };
+
+    const nextRecord = {
+      version: 1,
+      reviewId: ctx.reviewId,
+      repoSlug: ctx.repoSlug,
+      branchSlug: ctx.branchSlug,
+      title: ctx.title,
+      diffSpec: ctx.diffSpec,
+      branch: ctx.branch,
+      baseSha: ctx.baseSha,
+      headSha: ctx.headSha,
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+      closedAt: existing?.closedAt ?? null,
+      addressedAt: existing?.addressedAt ?? null,
+      status: existing?.status ?? "draft",
+      viewedFiles: existing?.viewedFiles ?? [],
+      stats: statsSummary,
+      comments: existing?.comments ?? [],
+    };
+
+    const savedReview = saveReviewRecord(rootDir, nextRecord);
+    const savedPatch = savePatchFile({
+      reviewsRoot: rootDir,
+      repoSlug: ctx.repoSlug,
+      branchSlug: ctx.branchSlug,
+      reviewId: ctx.reviewId,
+      patch: ctx.patch,
+    });
+
+    return {
+      status: "prepared",
+      reviewId: ctx.reviewId,
+      repoSlug: ctx.repoSlug,
+      branchSlug: ctx.branchSlug,
+      title: ctx.title,
+      diffSpec: ctx.diffSpec,
+      branch: ctx.branch,
+      baseSha: ctx.baseSha,
+      headSha: ctx.headSha,
+      largeDiffWarning: ctx.largeDiffWarning,
+      stats: statsSummary,
+      reviewFile: savedReview.filePath,
+      patchFile: savedPatch.filePath,
+      record: savedReview.record,
+      patch: ctx.patch,
+    };
+  });
 }
 
 export function listReviews({ reviewsRoot, repoSlug, includeAddressed = false } = {}) {

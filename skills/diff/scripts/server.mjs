@@ -290,6 +290,7 @@ export async function startDiffReviewServer({
     reviewId,
     repoSlug,
     branchSlug,
+    title: String(title ?? ""),
     diffSpec,
     branch,
     baseSha,
@@ -298,6 +299,14 @@ export async function startDiffReviewServer({
     closedAt: null,
     addressedAt: null,
     status: "draft",
+    viewedFiles: [],
+    stats: stats
+      ? {
+          fileCount: Number.parseInt(String(stats.fileCount ?? 0), 10) || 0,
+          additions: Number.parseInt(String(stats.additions ?? 0), 10) || 0,
+          deletions: Number.parseInt(String(stats.deletions ?? 0), 10) || 0,
+        }
+      : undefined,
     comments: [],
   };
 
@@ -308,12 +317,17 @@ export async function startDiffReviewServer({
     reviewId,
   });
 
-  // Preserve existing comments if re-opening an existing review for the exact same reviewId
+  // Preserve existing comments and viewedFiles if re-opening an existing review for the exact same reviewId
   try {
     const existing = readReviewFile(rootDir, reviewFilePath);
-    if (existing && Array.isArray(existing.comments) && existing.comments.length > 0) {
-      review.comments = existing.comments;
+    if (existing) {
       review.createdAt = existing.createdAt;
+      if (Array.isArray(existing.viewedFiles)) {
+        review.viewedFiles = existing.viewedFiles;
+      }
+      if (Array.isArray(existing.comments) && existing.comments.length > 0) {
+        review.comments = existing.comments;
+      }
     }
   } catch {
     // Proceed with clean draft if existing file is absent or unreadable

@@ -385,12 +385,23 @@ test("CLI end-to-end: static snapshot, review resolve, review list, and review a
   git("checkout", "-b", "feat/v2");
   fs.writeFileSync(path.join(repoDir, "index.js"), "export const v = 2;\nexport const extra = true;\n", "utf8");
 
-  // 1. Static render via CLI
+  // 1. Prepare durable patch + review JSON for native canvas
+  const prepIo = captureIo();
+  const prepCode = await runCli(["prepare", "--json", "--cwd", repoDir], prepIo);
+  assert.equal(prepCode, 0);
+  const prepJson = JSON.parse(prepIo.getStdout());
+  assert.equal(prepJson.status, "prepared");
+  assert.equal(prepJson.repoSlug, "example-org__cli-demo");
+  assert.match(prepJson.branchSlug, /^feat--v2-[a-f0-9]{8}$/);
+  assert.ok(fs.existsSync(prepJson.reviewFile));
+
+  // 1b. Static render via CLI
   const staticIo = captureIo();
   const staticCode = await runCli(["open", "--static", "--json", "--cwd", repoDir], staticIo);
   assert.equal(staticCode, 0);
   const staticJson = JSON.parse(staticIo.getStdout());
   assert.equal(staticJson.status, "static");
+  assert.equal(staticJson.reviewId, prepJson.reviewId);
   assert.ok(fs.existsSync(staticJson.htmlFile));
 
   // 2. Serve via CLI (--no-open --json), submit 1 comment over HTTP, and verify CLI exits cleanly

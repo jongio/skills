@@ -12,8 +12,10 @@ import {
   getStaticHtmlFilePath,
   inspectCommentStaleness,
   listReviews,
+  prepareDiffReview,
   readReviewFile,
   resolveReviewsRoot,
+  savePatchFile,
   saveReviewRecord,
   writeSecureFileAtomic,
 } from "./review-store.mjs";
@@ -22,9 +24,10 @@ import {
   startDiffReviewServer,
 } from "./server.mjs";
 
-const HELP_TEXT = `diff - GitHub-style side-by-side diff viewer and inline review CLI
+const HELP_TEXT = `diff - GitHub-style side-by-side diff canvas and inline review CLI
 
 Usage:
+  node scripts/diff.mjs prepare [--json] [--cwd <dir>] [<diff-spec>] [-- <paths...>]
   node scripts/diff.mjs [open] [--no-open] [--static] [--json] [--cwd <dir>] [<diff-spec>] [-- <paths...>]
   node scripts/diff.mjs review [resolve] [--json] [--cwd <dir>] [<id-or-diff-spec>]
   node scripts/diff.mjs review list [--all] [--json] [--cwd <dir>]
@@ -422,6 +425,13 @@ async function handleOpenCommand(specArgs, flags, io) {
 
   let runningServer;
   try {
+    savePatchFile({
+      reviewsRoot,
+      repoSlug: ctx.repoSlug,
+      branchSlug: ctx.branchSlug,
+      reviewId: ctx.reviewId,
+      patch: ctx.patch,
+    });
     runningServer = await startDiffReviewServer({
       diff: ctx.patch,
       title: ctx.title,
@@ -498,6 +508,47 @@ async function handleOpenCommand(specArgs, flags, io) {
   return 0;
 }
 
+async function handlePrepareCommand(specArgs, flags, io) {
+  const reviewsRoot = resolveReviewsRoot();
+  const prepared = await prepareDiffReview({
+    specArgs,
+    cwd: flags.cwd,
+    reviewsRoot,
+  });
+
+  if (flags.json) {
+    writeOut(
+      io.stdout,
+      {
+        status: "prepared",
+        reviewId: prepared.reviewId,
+        repoSlug: prepared.repoSlug,
+        branchSlug: prepared.branchSlug,
+        title: prepared.title,
+        diffSpec: prepared.diffSpec,
+        branch: prepared.branch,
+        largeDiffWarning: prepared.largeDiffWarning,
+        stats: prepared.stats,
+        reviewFile: prepared.reviewFile,
+        patchFile: prepared.patchFile,
+      },
+      true,
+    );
+  } else {
+    const lines = [];
+    if (prepared.largeDiffWarning) {
+      lines.push("Warning: Large diff (>2 MB). Consider narrowing: diff -- <file>");
+    }
+    lines.push(`Prepared review: ${prepared.reviewId} (${prepared.repoSlug}/${prepared.branchSlug})`);
+    lines.push(`Title: ${sanitizeTerminalText(prepared.title)}`);
+    lines.push(`Stats: +${prepared.stats.additions} -${prepared.stats.deletions} across ${prepared.stats.fileCount} file(s)`);
+    lines.push(`Review file: ${prepared.reviewFile}`);
+    lines.push(`Patch file: ${prepared.patchFile}`);
+    writeOut(io.stdout, lines.join("\n"), false);
+  }
+  return 0;
+}
+
 export async function runCli(argv = process.argv.slice(2), io = { stdout: process.stdout, stderr: process.stderr }) {
   try {
     const flags = extractCommonFlags(argv);
@@ -509,6 +560,9 @@ export async function runCli(argv = process.argv.slice(2), io = { stdout: proces
     const tokens = flags.rest;
     if (tokens[0] === "review") {
       return await handleReviewCommand(tokens.slice(1), flags, io);
+    }
+    if (tokens[0] === "prepare") {
+      return await handlePrepareCommand(tokens.slice(1), flags, io);
     }
 
     const specArgs = tokens[0] === "open" ? tokens.slice(1) : tokens;

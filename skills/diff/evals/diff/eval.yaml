@@ -22,9 +22,9 @@ scoring:
 stimuli:
   - name: open-and-canvas-routing
     prompt: >-
-      Use diff. Read scenario.md and explain the exact CLI invocation, default merge-base
-      working-tree comparison behavior, Copilot App browser canvas integration, and review
-      submission handoff. No network or mutations; use only the supplied observations.
+      Use diff. Read scenario.md and explain the exact CLI preparation command, default
+      merge-base working-tree comparison behavior, native Copilot App diff canvas call,
+      and review submission handoff. No network or mutations; use only the supplied observations.
     tags:
       scenario: open-and-canvas
       cost: low
@@ -43,23 +43,26 @@ stimuli:
         name: tool-calls-open-and-canvas-routing
         config:
           disallowed:
-            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|open_canvas|invoke_canvas_action|extensions_reload|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
       - type: prompt
         name: maps-diff-open-and-canvas-handoff
         config:
           scoring: scale_1_5
           threshold: 0.8
           prompt: >-
-            Score 5 only if the agent reads scenario.md and: (1) invokes scripts/diff.mjs
-            open with --no-open --json and -- src/router.ts src/auth.ts (without shell
+            Score 5 only if the agent reads scenario.md and: (1) prepares the path-filtered
+            diff via scripts/diff.mjs prepare -- src/router.ts src/auth.ts --json (or passes
+            spec "-- src/router.ts src/auth.ts" directly to canvasId "diff" without shell
             pipelines or git ext-diff), (2) explains that default diff compares
             merge-base(origin/main, HEAD) against the working tree so both committed branch
-            commits and unstaged edits are included, (3) opens the returned 127.0.0.1
-            bootstrap URL in the Copilot App browser canvas, and (4) instructs the user to
-            click Submit Review so comments persist for diff review. Score 1 if it uses raw
-            git diff > /tmp, omits --no-open for canvas mode, or mutates files.
+            commits and unstaged edits are included, (3) opens the native Copilot App canvas
+            via open_canvas with canvasId "diff" (and notes setup.mjs + extensions_reload if
+            unregistered, or scripts/diff.mjs open fallback for terminal CLIs), and
+            (4) instructs the user to click Submit Review so comments transition to pending
+            for diff review. Score 1 if it uses raw git diff > /tmp, ignores the native diff
+            canvas, or mutates files.
     rubric:
-      - Maps path-filtered visual diff in Copilot App to scripts/diff.mjs open --no-open --json -- <paths> and the browser canvas.
+      - Routes Copilot App visual diffs to scripts/diff.mjs prepare -- <paths> --json and open_canvas with canvasId "diff".
       - Explains merge-base working-tree comparison and the Submit Review handoff to diff review.
 
   - name: review-triage-and-stale-anchors
