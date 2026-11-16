@@ -275,8 +275,8 @@ function FileDiffCard({
 }) {
   const canonical = file.canonicalPath || "";
   const collapseKey = canonical || String(file.index);
-  const leftCodePct = `${splitLeftPct}%`;
-  const rightCodePct = `${100 - splitLeftPct}%`;
+  const leftCodeWidth = `calc((100% - 96px) * ${splitLeftPct / 100})`;
+  const rightCodeWidth = `calc((100% - 96px) * ${(100 - splitLeftPct) / 100})`;
   const showCollapsedCta = Boolean(isCollapsed && autoCollapseReason && !isViewed);
 
   const commentLookup = useMemo(() => {
@@ -313,7 +313,7 @@ function FileDiffCard({
           <${Icon} name=${isCollapsed ? "chevron-right" : "chevron-down"} size=${14} />
         </button>
         <${Icon} name=${fileIconName(file.status)} size=${14} />
-        <span class="dv-file-path">${file.displayPath || canonical}</span>
+        <span class="dv-file-path" title=${file.displayPath || canonical}>${file.displayPath || canonical}</span>
         ${file.status && file.status !== "modified"
           ? html`<span class="ck-badge ck-badge-muted">${file.status}</span>`
           : null}
@@ -358,9 +358,9 @@ function FileDiffCard({
                         <table class="dv-table dv-table-split">
                           <colgroup>
                             <col style="width: 48px" />
-                            <col style=${{ width: leftCodePct }} />
+                            <col style=${{ width: leftCodeWidth }} />
                             <col style="width: 48px" />
-                            <col style=${{ width: rightCodePct }} />
+                            <col style=${{ width: rightCodeWidth }} />
                           </colgroup>
                           <tbody>
                             ${rows.flatMap((row, rowIdx) => {

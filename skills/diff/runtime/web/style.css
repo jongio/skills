@@ -30,6 +30,8 @@ html, body, #app {
 .dv-shell {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 100%;
   height: 100%;
   background: var(--ck-bg);
   color: var(--ck-fg);
@@ -144,6 +146,8 @@ html, body, #app {
 .dv-workspace {
   display: flex;
   flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
 }
@@ -260,13 +264,13 @@ html, body, #app {
 
 /* ---- Diff Pane & File Cards ---------------------------------------------- */
 .dv-main {
-  flex: 1 1 auto;
+  display: block;
+  flex: 1 1 0%;
   min-width: 0;
+  min-height: 0;
   overflow-y: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+  overflow-x: hidden;
+  padding: 12px 14px 24px;
 }
 
 .dv-split-bar {
@@ -284,10 +288,18 @@ html, body, #app {
 }
 
 .dv-file-card {
+  width: 100%;
+  max-width: 100%;
+  flex-shrink: 0;
+  margin-bottom: 14px;
   border: 1px solid var(--ck-border);
   border-radius: var(--ck-radius);
   background: var(--ck-bg);
   overflow: hidden;
+}
+
+.dv-file-card:last-child {
+  margin-bottom: 0;
 }
 
 .dv-file-card.focused {
@@ -298,10 +310,17 @@ html, body, #app {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   padding: 7px 10px;
   background: var(--ck-bg-muted);
   border-bottom: 1px solid var(--ck-border);
   font-size: 12px;
+}
+
+.dv-collapse-btn,
+.dv-file-header > .ck-icon,
+.dv-file-header > .ck-badge {
+  flex-shrink: 0;
 }
 
 .dv-file-card.collapsed .dv-file-header {
@@ -340,10 +359,14 @@ html, body, #app {
 }
 
 .dv-file-path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--ck-mono);
   font-weight: var(--ck-fw-semibold);
   font-size: 12px;
-  word-break: break-all;
 }
 
 .dv-file-actions {

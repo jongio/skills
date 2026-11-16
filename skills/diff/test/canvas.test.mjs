@@ -778,12 +778,31 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
   const webDir = path.join(runtimeDir, "web");
   const appSource = fs.readFileSync(path.join(webDir, "app.mjs"), "utf8");
   const htmlSource = fs.readFileSync(path.join(webDir, "index.html"), "utf8");
+  const cssSource = fs.readFileSync(path.join(webDir, "style.css"), "utf8");
 
   // Guard against JSX empty fragments (`<>` / `</>`) which crash vendored `htm`
   assert.doesNotMatch(appSource, /<>|<\/>/, "app.mjs must never use <>...</> with htm");
   assert.doesNotMatch(appSource, /innerHTML|dangerouslySetInnerHTML/);
   assert.doesNotMatch(htmlSource, /https?:\/\//i);
   assert.doesNotMatch(htmlSource, /http-equiv="Content-Security-Policy"/i);
+
+  // Guard against Flexbox vertical card crushing in .dv-main and 100%+96px split <col> overflow
+  const dvMainBlock = cssSource.match(/\.dv-main\s*\{([^}]*)\}/);
+  assert.ok(dvMainBlock, ".dv-main rule must exist in style.css");
+  assert.match(dvMainBlock[1], /display:\s*block\s*;/, ".dv-main must be display: block to prevent column-flex shrink crushing");
+  assert.doesNotMatch(dvMainBlock[1], /flex-direction:\s*column/, ".dv-main must not use column flex layout");
+  assert.match(cssSource, /\.dv-file-card\s*\{[^}]*margin-bottom:\s*14px\s*;/, ".dv-file-card must define block vertical spacing");
+  assert.match(cssSource, /\.dv-file-path\s*\{[^}]*text-overflow:\s*ellipsis\s*;/, ".dv-file-path must truncate cleanly without header overflow");
+  assert.match(
+    appSource,
+    /calc\(\(100% - 96px\) \* \$\{splitLeftPct \/ 100\}\)/,
+    "Split <col> left width must subtract the two 48px line-number columns",
+  );
+  assert.match(
+    appSource,
+    /calc\(\(100% - 96px\) \* \$\{\(100 - splitLeftPct\) \/ 100\}\)/,
+    "Split <col> right width must subtract the two 48px line-number columns",
+  );
 
   // Verify every static and dynamic Lucide icon referenced in app.mjs exists in vendored icons.mjs
   const iconMatches = [...appSource.matchAll(/<(?:\$\{Icon\}|Icon)\s+name="([a-z0-9-]+)"/g)];
@@ -916,6 +935,16 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
 
   const fileCards = mainEl.querySelectorAll(".dv-file-card");
   assert.equal(fileCards.length, 3);
+
+  // Verify mounted Split <colgroup> <col> widths sum to 100% (48px + calc(...) + 48px + calc(...))
+  const splitTable = fileCards[0].querySelector(".dv-table-split");
+  assert.ok(splitTable, "Expanded Split file card must mount .dv-table-split");
+  const splitCols = splitTable.querySelectorAll("col");
+  assert.equal(splitCols.length, 4);
+  assert.equal(splitCols[1].style.width, "calc((100% - 96px) * 0.5)");
+  assert.equal(splitCols[3].style.width, "calc((100% - 96px) * 0.5)");
+  const filePathEl = fileCards[0].querySelector(".dv-file-path");
+  assert.equal(filePathEl.getAttribute("title"), "src/app.ts");
 
   // Verify zero inline <svg> inside line-number cells (.dv-ln)
   const lineCells = mainEl.querySelectorAll("td").filter((td) => td.className.includes("dv-ln"));
