@@ -160,6 +160,8 @@ unnecessary edits fail `diff-empty`. Skill Eval CI checks every review-scope
 trial, including its semantic rubric: one failed trial blocks the PR-skill eval
 job even if the suite's average score passes. Deterministic tests exercise that
 gate with passing, failing, missing, and filtered trial evidence on pull requests.
+Filtered runs use the actual tag expression and still require all five trials
+for every selected critical case, even when a case produced no records.
 Live model trials remain scheduled/manual; local gate tests are not model-run
 evidence.
 Separate local review flows cover a valid historical-scoring comment that must

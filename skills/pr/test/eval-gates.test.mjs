@@ -53,11 +53,33 @@ test("workspace edits and absent grading or trial evidence fail closed", () => {
 });
 
 test("manual filters may omit cases but never forgive failures in selected trials", () => {
-  assert.equal(assertReviewScopeTrials([], { filtered: true }), 0);
+  assert.equal(assertReviewScopeTrials([], { filter: "ci=targeted" }), 0);
   const selected = passing().filter((record) => record.stimulus === reviewScopeCases[0]);
-  assert.equal(assertReviewScopeTrials(selected, { filtered: true }), 5);
+  const filter = "scenario=critical-review-triage";
+  assert.equal(assertReviewScopeTrials(selected, { filter }), 5);
   selected[0].gradeResult.details.at(-1).passed = false;
-  assert.throws(() => assertReviewScopeTrials(selected, { filtered: true }), /cannot be averaged/);
+  assert.throws(() => assertReviewScopeTrials(selected, { filter }), /cannot be averaged/);
+});
+
+test("filtered runs reject a selected case when all of its trials are missing", () => {
+  const records = passing().filter((record) =>
+    record.stimulus === "review-scope-preserves-sound-workspace" ||
+    record.stimulus === "review-scope-valid-comment-deferred");
+  assert.throws(() => assertReviewScopeTrials(records, { filter: "ci=review-scope" }),
+    /review-scope-rejects-poor-implementation: expected 5 trials, received 0/);
+  assert.throws(() => assertReviewScopeTrials([], { filter: "ci=review-scope" }), /expected 5 trials, received 0/);
+});
+
+test("include lists and exclusions select the same critical cases as the eval tags", () => {
+  const records = passing();
+  assert.equal(assertReviewScopeTrials(records, { filter: "ci=review-scope" }), 15);
+  assert.equal(assertReviewScopeTrials(records, { filter: "ci!=review-scope" }), 10);
+  assert.equal(assertReviewScopeTrials(records, {
+    filter: "scenario=review-scope-workspace,valid-out-of-scope-comment",
+  }), 10);
+  assert.equal(assertReviewScopeTrials(records, { filter: "cost=low" }), 25);
+  assert.equal(assertReviewScopeTrials([], { filter: "cost!=low" }), 0);
+  assert.throws(() => assertReviewScopeTrials(records, { filter: "ci=review-scope --other" }), /Expected one/);
 });
 
 test("the CI command reports selected trials and exits unsuccessfully for a failed rubric", async (t) => {
@@ -78,7 +100,11 @@ test("the CI command reports selected trials and exits unsuccessfully for a fail
   assert.throws(() => run(file), (error) =>
     error.status === 1 && /review-scope trials cannot be averaged/.test(error.stderr));
   await writeFile(file, "");
-  assert.match(run(file, "--filtered"), /No review-scope trials were selected/);
+  assert.match(run(file, "--filter", "ci=targeted"), /No review-scope trials were selected/);
+  assert.throws(() => run(file, "--filter", "ci=review-scope"), (error) =>
+    error.status === 1 && /expected 5 trials, received 0/.test(error.stderr));
+  assert.throws(() => run(file, "--filter"), (error) =>
+    error.status === 1 && /Usage:/.test(error.stderr));
   assert.throws(() => run(file, "--unknown"), (error) =>
     error.status === 1 && /Usage:/.test(error.stderr));
 });
@@ -94,8 +120,21 @@ test("the canonical suite and CI both retain blocking review-scope checks", asyn
   assert.match(step, /if: matrix\.skill_id == 'pr'/);
   assert.match(step, /node scripts\/assert-review-scope\.mjs "\$summary"/);
   assert.match(step, /EVAL_FILTER: \$\{\{ inputs\.filter_tag \}\}/);
-  assert.match(step, /--filtered/);
+  assert.match(step, /--filter "\$EVAL_FILTER"/);
   assert.match(workflow, /--runs 5\b/);
+  for (const [key, values] of [["scenario", new Set()], ["ci", new Set()], ["cost", new Set()]]) {
+    const tagsByCase = new Map(reviewScopeCases.map((name) => {
+      const block = spec.split(`  - name: ${name}\n`)[1].split("\n  - name:")[0];
+      const tags = block.split("\n    tags:")[1].split("\n    rubric:")[0];
+      const value = tags.match(new RegExp(`^      ${key}: ([a-z0-9-]+)$`, "m"))?.[1];
+      if (value) values.add(value);
+      return [name, value];
+    }));
+    for (const value of values) {
+      const selected = passing().filter(({ stimulus }) => tagsByCase.get(stimulus) === value);
+      assert.equal(assertReviewScopeTrials(selected, { filter: `${key}=${value}` }), selected.length);
+    }
+  }
 });
 
 test("the workspace fixture satisfies the unchanged contract before a trial", () => {

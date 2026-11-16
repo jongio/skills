@@ -264,7 +264,7 @@ jobs:
           test -n "$summary"
           # A failed scope decision must block even when the suite mean passes.
           if [ -n "${EVAL_FILTER:-}" ]; then
-            node scripts/assert-review-scope.mjs "$summary" --filtered
+            node scripts/assert-review-scope.mjs "$summary" --filter "$EVAL_FILTER"
           else
             node scripts/assert-review-scope.mjs "$summary"
           fi
