@@ -262,6 +262,28 @@ test("critical review triage rejects over-engineering and resolves declined bot 
   assert.match(triageEval, /keeps human[\s\S]*T14/i);
 });
 
+test("review edits require supported scope evidence and subtractive cleanup", async () => {
+  const comments = skill.split("**Comments**:")[1]?.split("\n")[0];
+  assert.ok(comments);
+  assert.match(skill, /Establish the user-approved goal, supported inputs, and architecture boundaries before preflight/);
+  assert.match(comments, /Before each review-driven edit, record in the existing finding ledger the reachable supported input\/caller path, concrete material impact/);
+  assert.match(comments, /how this PR introduces\/worsens or is tightly coupled to the defect, and the smallest fix/);
+  assert.match(comments, /Missing evidence.*bounded inspection or reporting the gap, not speculative code/);
+  assert.match(comments, /Priority labels and repeated bot warnings are not proof/);
+  assert.match(comments, /do not invent unsupported data shapes, duplicate upstream responsibilities, add optional modes, or repeat existing output/);
+  assert.match(comments, /remove or simplify that addition before layering on compensating logic/);
+  assert.match(comments, /ask before expanding the supported contract or architecture/);
+  assert.match(skill, /Repeat this scope audit after each review-fix batch before committing or pushing/);
+  assert.match(skill, /remove unnecessary review-driven additions and their obsolete tests, not legitimate fixes or unrelated edits/);
+  for (const file of ["../README.md", "../../../site/src/content/skills/pr.md"]) {
+    const text = (await readFile(new URL(file, import.meta.url), "utf8")).replace(/\s+/g, " ");
+    assert.match(text, /Before each review-driven edit.*reachable supported input\/caller path, concrete material impact/);
+    assert.match(text, /ask before expanding the supported contract or architecture/);
+    assert.match(text, /remove or simplify that addition before layering on compensating logic/);
+    assert.match(text, /not legitimate fixes or unrelated edits/);
+  }
+});
+
 test("delivery batches repairs, bounds repeated failures, and avoids review-round acknowledgments", () => {
   assert.match(skill, /wait for applicable current-head CI to pass before requesting or re-requesting reviews/);
   assert.match(skill, /unless the user requests early review/);
@@ -335,6 +357,10 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "bounded-evidence-led-ci-repairs",
     "closer-look-prose-and-preexisting-automerge",
     "critical-triage-and-declined-bot-thread-resolution",
+    "review-scope-and-subtractive-cleanup",
+    "review-scope-preserves-sound-workspace",
+    "review-scope-valid-comment-deferred",
+    "review-scope-rejects-poor-implementation",
   ]);
   assert.equal((evalSpec.match(/type: diff-empty/g) ?? []).length, cases.length);
   assert.equal((evalSpec.match(/type: skill-invocation/g) ?? []).length, cases.length);

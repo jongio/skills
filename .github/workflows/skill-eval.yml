@@ -252,3 +252,19 @@ jobs:
               )
             ))
           ' "$summary" > /dev/null
+
+      - name: Assert PR review-scope trials
+        if: matrix.skill_id == 'pr'
+        working-directory: ${{ matrix.skill }}
+        env:
+          EVAL_FILTER: ${{ inputs.filter_tag }}
+        run: |
+          set -euo pipefail
+          summary=$(find vally-results -name results.jsonl -type f -print -quit)
+          test -n "$summary"
+          # A failed scope decision must block even when the suite mean passes.
+          if [ -n "${EVAL_FILTER:-}" ]; then
+            node scripts/assert-review-scope.mjs "$summary" --filtered
+          else
+            node scripts/assert-review-scope.mjs "$summary"
+          fi
