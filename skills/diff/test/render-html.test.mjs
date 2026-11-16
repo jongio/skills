@@ -63,8 +63,9 @@ test("renderDiffHtml enforces nonce CSP, pinned SHA-384 SRI hashes, and zero inn
   const scriptCloseCount = (html.match(/<\/script>/gi) || []).length;
   assert.equal(scriptCloseCount, 4); // 3 external CDN scripts + 1 inline nonce script
 
-  // Client script uses Map() for file tree and never touches innerHTML
+  // Client script uses Map() for file tree, scrubs /s/<token> via history.replaceState, and never touches innerHTML
   assert.doesNotMatch(html, /\.innerHTML\b/);
+  assert.match(html, /window\.history\.replaceState\(null,\s*"",\s*"\/"\)/);
   assert.match(html, /Submit Review/);
 });
 

@@ -17,6 +17,7 @@ import {
 
 export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 export const MAX_URL_LENGTH = 2048;
+export const MAX_BOOTSTRAP_HITS = 8;
 export const DEFAULT_BOOT_TIMEOUT_MS = 10 * 60 * 1000;
 export const DEFAULT_HEARTBEAT_TIMEOUT_MS = 90 * 1000;
 export const DEFAULT_MAX_LIFETIME_MS = 30 * 60 * 1000;
@@ -343,7 +344,7 @@ export async function startDiffReviewServer({
 
   let boundPort = 0;
   let sessionCookieName = "";
-  let bootstrapConsumed = false;
+  let bootstrapHits = 0;
   let sessionActivated = false;
   let closed = false;
   let bootTimer = null;
@@ -386,38 +387,24 @@ export async function startDiffReviewServer({
   }
 
   function isAuthorizedMutation(req) {
+    if (!sessionActivated) return false;
     const expectedOrigin = `http://127.0.0.1:${boundPort}`;
     const headerToken = req.headers["x-diff-token"];
     const tokenValue = Array.isArray(headerToken) ? headerToken[0] : headerToken;
     if (!constantTimeEquals(csrfToken, tokenValue)) return false;
 
-    const originHeader = req.headers.origin;
-    const secFetchSite = req.headers["sec-fetch-site"];
-
-    if (originHeader !== undefined && originHeader !== expectedOrigin) {
-      return false;
-    }
-    if (secFetchSite !== undefined && secFetchSite !== "same-origin") {
-      return false;
-    }
-    if (originHeader !== expectedOrigin && secFetchSite !== "same-origin") {
-      return false;
-    }
-    return true;
+    return req.headers.origin === expectedOrigin;
   }
 
   function isAuthorizedApiRead(req) {
+    if (!sessionActivated) return false;
     const expectedOrigin = `http://127.0.0.1:${boundPort}`;
     const headerToken = req.headers["x-diff-token"];
     const tokenValue = Array.isArray(headerToken) ? headerToken[0] : headerToken;
     if (!constantTimeEquals(csrfToken, tokenValue)) return false;
 
     const originHeader = req.headers.origin;
-    const secFetchSite = req.headers["sec-fetch-site"];
     if (originHeader !== undefined && originHeader !== expectedOrigin) {
-      return false;
-    }
-    if (secFetchSite !== undefined && secFetchSite !== "same-origin") {
       return false;
     }
     return true;
@@ -426,6 +413,27 @@ export async function startDiffReviewServer({
   function hasValidSessionCookie(req) {
     const candidates = getCookieCandidates(req.headers.cookie, sessionCookieName);
     return candidates.some((candidate) => constantTimeEquals(sessionSecret, candidate));
+  }
+
+  function sendViewerHtml(res, extraHeaders = {}) {
+    const rendered = renderDiffHtml({
+      diff,
+      title,
+      additions: stats?.additions,
+      deletions: stats?.deletions,
+      fileCount: stats?.fileCount,
+      canonicalFiles,
+      serveMode: true,
+      csrfToken,
+    });
+    const bodyBytes = Buffer.from(rendered.html, "utf8");
+    res.writeHead(200, {
+      ...baseSecurityHeaders(rendered.headerCsp),
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Length": bodyBytes.length,
+      ...extraHeaders,
+    });
+    res.end(bodyBytes);
   }
 
   const server = http.createServer(async (req, res) => {
@@ -448,62 +456,41 @@ export async function startDiffReviewServer({
 
       const bootMatch = pathname.match(BOOTSTRAP_PATH_RE);
       if (bootMatch && method === "GET") {
-        if (bootstrapConsumed || reqUrl.search !== "" || !constantTimeEquals(bootstrapToken, bootMatch[1])) {
-          sendText(res, 403, "Forbidden: invalid or consumed session bootstrap token");
+        if (
+          bootstrapHits >= MAX_BOOTSTRAP_HITS ||
+          reqUrl.search !== "" ||
+          !constantTimeEquals(bootstrapToken, bootMatch[1])
+        ) {
+          sendText(res, 403, "Forbidden: invalid or exhausted session bootstrap token");
           return;
         }
-        bootstrapConsumed = true;
+        bootstrapHits += 1;
         sessionActivated = true;
         if (bootTimer) { clearTimeout(bootTimer); bootTimer = null; }
         resetHeartbeatTimer();
 
-        res.writeHead(302, {
-          ...baseSecurityHeaders(),
-          "Set-Cookie": `${sessionCookieName}=${sessionSecret}; HttpOnly; SameSite=Strict; Path=/`,
-          Location: "/",
+        sendViewerHtml(res, {
+          "Set-Cookie": `${sessionCookieName}=${sessionSecret}; HttpOnly; SameSite=Lax; Path=/`,
         });
-        res.end();
         return;
       }
-
-      if (!hasValidSessionCookie(req)) {
-        sendText(res, 403, "Forbidden: active session required");
-        return;
-      }
-
-      resetHeartbeatTimer();
 
       if (pathname === "/" && method === "GET") {
-        const secFetchSite = req.headers["sec-fetch-site"];
-        if (secFetchSite !== undefined && secFetchSite !== "same-origin" && secFetchSite !== "none") {
-          sendText(res, 403, "Forbidden: cross-origin navigation blocked");
+        if (!hasValidSessionCookie(req)) {
+          sendText(res, 403, "Forbidden: active session required");
           return;
         }
-        const rendered = renderDiffHtml({
-          diff,
-          title,
-          additions: stats?.additions,
-          deletions: stats?.deletions,
-          fileCount: stats?.fileCount,
-          canonicalFiles,
-          serveMode: true,
-          csrfToken,
-        });
-        const bodyBytes = Buffer.from(rendered.html, "utf8");
-        res.writeHead(200, {
-          ...baseSecurityHeaders(rendered.headerCsp),
-          "Content-Type": "text/html; charset=utf-8",
-          "Content-Length": bodyBytes.length,
-        });
-        res.end(bodyBytes);
+        resetHeartbeatTimer();
+        sendViewerHtml(res);
         return;
       }
 
       if (pathname === "/api/comments" && method === "GET") {
         if (!isAuthorizedApiRead(req)) {
-          sendText(res, 403, "Forbidden: invalid CSRF or Fetch Metadata header");
+          sendText(res, 403, "Forbidden: invalid CSRF or Origin header");
           return;
         }
+        resetHeartbeatTimer();
         sendJson(res, 200, review.comments);
         return;
       }
@@ -513,6 +500,7 @@ export async function startDiffReviewServer({
           sendText(res, 403, "Forbidden: invalid CSRF or Origin header");
           return;
         }
+        resetHeartbeatTimer();
         req.resume();
         sendJson(res, 200, { ok: true });
         return;
@@ -523,6 +511,7 @@ export async function startDiffReviewServer({
           sendText(res, 403, "Forbidden: invalid CSRF or Origin header");
           return;
         }
+        resetHeartbeatTimer();
         const payload = await readBoundedJsonBody(req);
         const comment = validateCommentInput(payload);
         await runExclusiveMutation(async () => {
@@ -551,6 +540,7 @@ export async function startDiffReviewServer({
           sendText(res, 403, "Forbidden: invalid CSRF or Origin header");
           return;
         }
+        resetHeartbeatTimer();
         const targetId = deleteMatch[1];
         await runExclusiveMutation(async () => {
           if (review.status === "pending") {
@@ -574,6 +564,7 @@ export async function startDiffReviewServer({
           sendText(res, 403, "Forbidden: invalid CSRF or Origin header");
           return;
         }
+        resetHeartbeatTimer();
         await readBoundedJsonBody(req);
         await runExclusiveMutation(async () => {
           const prevStatus = review.status;

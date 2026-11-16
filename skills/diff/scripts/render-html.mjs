@@ -585,6 +585,11 @@ export function renderDiffHtml({
       "use strict";
       var SERVE_MODE = ${Boolean(serveMode)};
       var CSRF_TOKEN = ${csrfJson};
+      if (SERVE_MODE && window.location.pathname.indexOf("/s/") === 0 && window.history && typeof window.history.replaceState === "function") {
+        try {
+          window.history.replaceState(null, "", "/");
+        } catch (_e) {}
+      }
       var diffString = ${diffJson};
       var canonicalFiles = ${canonicalFilesJson};
       var currentView = "side-by-side";

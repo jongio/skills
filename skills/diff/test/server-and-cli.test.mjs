@@ -104,41 +104,55 @@ test("server enforces loopback binding, Host validation, cookie bootstrap, CSRF 
   });
   assert.equal(badBootstrap.statusCode, 403);
 
-  // 4. Valid bootstrap sets HttpOnly; SameSite=Strict cookie and redirects to /
+  // 4. Valid bootstrap serves 200 OK HTML directly, sets HttpOnly; SameSite=Lax cookie, and scrubs URL via history.replaceState
   const bootstrapPath = new URL(srv.bootstrapUrl).pathname;
   const goodBootstrap = await httpRequest({
     port: srv.port,
     reqPath: bootstrapPath,
+    headers: { "Sec-Fetch-Site": "cross-site" },
   });
-  assert.equal(goodBootstrap.statusCode, 302);
-  assert.equal(goodBootstrap.headers.location, "/");
+  assert.equal(goodBootstrap.statusCode, 200);
+  assert.match(goodBootstrap.headers["content-type"], /text\/html/);
+  assert.equal(goodBootstrap.headers["x-content-type-options"], "nosniff");
+  assert.match(goodBootstrap.headers["cache-control"], /no-store/);
+  assert.match(goodBootstrap.body, /window\.history\.replaceState\(null,\s*"",\s*"\/"\)/);
   const setCookie = goodBootstrap.headers["set-cookie"]?.[0] ?? "";
   assert.match(setCookie, new RegExp(`^diff_session_${srv.port}=`));
   assert.match(setCookie, /HttpOnly/);
-  assert.match(setCookie, /SameSite=Strict/);
+  assert.match(setCookie, /SameSite=Lax/);
   const cookieHeader = setCookie.split(";")[0];
 
-  // 4b. Bootstrap token is strictly single-use
-  const replayBootstrap = await httpRequest({
+  const csrfMatch = goodBootstrap.body.match(/var CSRF_TOKEN = "([a-f0-9]{64})"/);
+  assert.ok(csrfMatch, "expected CSRF_TOKEN in bootstrap HTML");
+  const csrfToken = csrfMatch[1];
+
+  // 4b. Bootstrap supports WebView2 double-mount idempotently up to MAX_BOOTSTRAP_HITS, then rejects excess hits
+  const secondBootstrap = await httpRequest({
+    port: srv.port,
+    reqPath: bootstrapPath,
+    headers: { "Sec-Fetch-Site": "cross-site" },
+  });
+  assert.equal(secondBootstrap.statusCode, 200);
+
+  for (let hit = 2; hit < 8; hit += 1) {
+    const extraBoot = await httpRequest({ port: srv.port, reqPath: bootstrapPath });
+    assert.equal(extraBoot.statusCode, 200);
+  }
+  const exhaustedBootstrap = await httpRequest({
     port: srv.port,
     reqPath: bootstrapPath,
   });
-  assert.equal(replayBootstrap.statusCode, 403);
+  assert.equal(exhaustedBootstrap.statusCode, 403);
 
-  // 5. Authenticated GET / serves HTML and embeds per-session CSRF token
+  // 5. Authenticated GET / continues to serve HTML when session cookie is present (including WebView2 Sec-Fetch-Site values)
   const pageRes = await httpRequest({
     port: srv.port,
     reqPath: "/",
-    headers: { Cookie: cookieHeader },
+    headers: { Cookie: cookieHeader, "Sec-Fetch-Site": "cross-site" },
   });
   assert.equal(pageRes.statusCode, 200);
-  assert.equal(pageRes.headers["x-content-type-options"], "nosniff");
-  assert.match(pageRes.headers["cache-control"], /no-store/);
-  const csrfMatch = pageRes.body.match(/var CSRF_TOKEN = "([a-f0-9]{64})"/);
-  assert.ok(csrfMatch, "expected CSRF_TOKEN in rendered HTML");
-  const csrfToken = csrfMatch[1];
 
-  // 5b. GET /api/comments requires X-Diff-Token and blocks cross-port Sec-Fetch-Site
+  // 5b. GET /api/comments requires X-Diff-Token + matching Origin (if present) and works WITHOUT cookies in WebView2
   const unauthCommentsGet = await httpRequest({
     port: srv.port,
     reqPath: "/api/comments",
@@ -146,29 +160,28 @@ test("server enforces loopback binding, Host validation, cookie bootstrap, CSRF 
   });
   assert.equal(unauthCommentsGet.statusCode, 403);
 
-  const sameSitePortGet = await httpRequest({
+  const forgedOriginGet = await httpRequest({
     port: srv.port,
     reqPath: "/api/comments",
     headers: {
-      Cookie: cookieHeader,
+      Origin: `http://127.0.0.1:${srv.port === 65535 ? 65534 : srv.port + 1}`,
       "X-Diff-Token": csrfToken,
-      "Sec-Fetch-Site": "same-site",
     },
   });
-  assert.equal(sameSitePortGet.statusCode, 403);
+  assert.equal(forgedOriginGet.statusCode, 403);
 
-  const validCommentsGet = await httpRequest({
+  const cookielessWebViewGet = await httpRequest({
     port: srv.port,
     reqPath: "/api/comments",
     headers: {
-      Cookie: cookieHeader,
+      Origin: srv.originUrl,
       "X-Diff-Token": csrfToken,
-      "Sec-Fetch-Site": "same-origin",
+      "Sec-Fetch-Site": "cross-site",
     },
   });
-  assert.equal(validCommentsGet.statusCode, 200);
+  assert.equal(cookielessWebViewGet.statusCode, 200);
 
-  // 6. Cross-origin POST rejected even with valid cookie and CSRF token
+  // 6. Cross-origin POST rejected even with valid CSRF token
   const crossOrigin = await httpRequest({
     port: srv.port,
     method: "POST",
@@ -183,8 +196,8 @@ test("server enforces loopback binding, Host validation, cookie bootstrap, CSRF 
   });
   assert.equal(crossOrigin.statusCode, 403);
 
-  // 7. Sec-Fetch-Site: cross-site rejected even without Origin
-  const crossFetchSite = await httpRequest({
+  // 7. Missing Origin on POST rejected even with valid CSRF token
+  const missingOriginPost = await httpRequest({
     port: srv.port,
     method: "POST",
     reqPath: "/api/comments",
@@ -196,7 +209,7 @@ test("server enforces loopback binding, Host validation, cookie bootstrap, CSRF 
     },
     body: JSON.stringify({ id: "comment-0001", file: "src/app.js", line: "1", side: "right", body: "hi" }),
   });
-  assert.equal(crossFetchSite.statusCode, 403);
+  assert.equal(missingOriginPost.statusCode, 403);
 
   // 8. Missing X-Diff-Token rejected (blocks plain HTML form CSRF)
   const missingToken = await httpRequest({
@@ -225,7 +238,6 @@ test("server enforces loopback binding, Host validation, cookie bootstrap, CSRF 
     method: "POST",
     reqPath: "/api/comments",
     headers: {
-      Cookie: cookieHeader,
       Origin: srv.originUrl,
       "Content-Type": "application/json",
       "X-Diff-Token": csrfToken,
@@ -234,14 +246,26 @@ test("server enforces loopback binding, Host validation, cookie bootstrap, CSRF 
   });
   assert.equal(tooLarge.statusCode, 413);
 
-  // 10. Legitimate add, delete, re-add, and Submit Review (/api/done) lifecycle
+  // 10. Cookie-less WebView2 add, heartbeat, delete, re-add, and Submit Review (/api/done) lifecycle
+  const hbRes = await httpRequest({
+    port: srv.port,
+    method: "POST",
+    reqPath: "/api/heartbeat",
+    headers: {
+      Origin: srv.originUrl,
+      "X-Diff-Token": csrfToken,
+      "Sec-Fetch-Site": "cross-site",
+    },
+  });
+  assert.equal(hbRes.statusCode, 200);
+
   const addTemp = await httpRequest({
     port: srv.port,
     method: "POST",
     reqPath: "/api/comments",
     headers: {
-      Cookie: cookieHeader,
       Origin: srv.originUrl,
+      "Sec-Fetch-Site": "cross-site",
       "Content-Type": "application/json",
       "X-Diff-Token": csrfToken,
     },
@@ -260,8 +284,8 @@ test("server enforces loopback binding, Host validation, cookie bootstrap, CSRF 
     method: "DELETE",
     reqPath: "/api/comments/comment-temp01",
     headers: {
-      Cookie: cookieHeader,
       Origin: srv.originUrl,
+      "Sec-Fetch-Site": "cross-site",
       "X-Diff-Token": csrfToken,
     },
   });
@@ -273,8 +297,8 @@ test("server enforces loopback binding, Host validation, cookie bootstrap, CSRF 
     method: "POST",
     reqPath: "/api/comments",
     headers: {
-      Cookie: cookieHeader,
       Origin: srv.originUrl,
+      "Sec-Fetch-Site": "cross-site",
       "Content-Type": "application/json",
       "X-Diff-Token": csrfToken,
     },
@@ -293,8 +317,8 @@ test("server enforces loopback binding, Host validation, cookie bootstrap, CSRF 
     method: "POST",
     reqPath: "/api/done",
     headers: {
-      Cookie: cookieHeader,
       Origin: srv.originUrl,
+      "Sec-Fetch-Site": "cross-site",
       "Content-Type": "application/json",
       "X-Diff-Token": csrfToken,
     },
