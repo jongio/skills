@@ -348,4 +348,102 @@ test("parseDiffPatch and normalizeCanonicalPath preserve trailing whitespace and
   assert.equal(parsed.files[3].canonicalPath, "src/literal\\name.ts");
 });
 
+test("parseDiffPatch handles diff --cc combined blocks, headerless multi-file unified diffs, mid-hunk empty context lines, and noprefix a/b renames without losing or misattaching hunks", () => {
+  // 1. Combined/unmerged diff --cc after a normal diff --git file must not overwrite File 1's path or drop conflict hunks
+  const combinedAfterGitPatch = [
+    "diff --git a/src/clean.ts b/src/clean.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/clean.ts",
+    "+++ b/src/clean.ts",
+    "@@ -1,1 +1,1 @@",
+    "-export const clean = 1;",
+    "+export const clean = 2;",
+    "diff --cc src/conflict.ts",
+    "index 3333333,4444444..0000000",
+    "--- a/src/conflict.ts",
+    "+++ b/src/conflict.ts",
+    "@@@ -1,3 -1,3 +1,5 @@@ export function merge()",
+    "  const shared = true;",
+    "- const ours = 1;",
+    " -const theirs = 2;",
+    "++<<<<<<< HEAD",
+    " +const ours = 10;",
+    "++=======",
+    "+ const theirs = 20;",
+    "++>>>>>>> branch",
+  ].join("\n");
+
+  const combinedParsed = parseDiffPatch(combinedAfterGitPatch);
+  assert.equal(combinedParsed.files.length, 2);
+  assert.equal(combinedParsed.files[0].canonicalPath, "src/clean.ts");
+  assert.equal(combinedParsed.files[0].hunks.length, 1);
+  assert.equal(combinedParsed.files[0].hunks[0].lines[1].text, "export const clean = 2;");
+  assert.equal(combinedParsed.files[1].canonicalPath, "src/conflict.ts");
+  assert.equal(combinedParsed.files[1].hunks.length, 1);
+  assert.equal(combinedParsed.files[1].additions, 5);
+  assert.equal(combinedParsed.files[1].deletions, 2);
+
+  // 2. Plain multi-file unified diff without diff --git headers + active-hunk '--- '/'+++ ' content lines + blank context line
+  const unifiedMultiPatch = [
+    "--- a/src/first.ts\t2026-01-01 00:00:00 +0000",
+    "+++ b/src/first.ts\t2026-01-01 00:00:00 +0000",
+    "@@ -1,4 +1,4 @@",
+    " const top = 1;",
+    "",
+    "---- dashed-old",
+    "++++ plus-new",
+    " const bottom = 2;",
+    "--- a/src/second.ts\t2026-01-01 00:00:00 +0000",
+    "+++ b/src/second.ts\t2026-01-01 00:00:00 +0000",
+    "@@ -1,1 +1,2 @@",
+    " export const second = true;",
+    "+export const addedInSecond = 42;",
+    "--- a/src/removed.ts",
+    "+++ /dev/null",
+    "@@ -1,1 +0,0 @@",
+    "-export const gone = true;",
+  ].join("\n");
+
+  const unifiedParsed = parseDiffPatch(unifiedMultiPatch);
+  assert.equal(unifiedParsed.files.length, 3);
+  assert.equal(unifiedParsed.files[0].canonicalPath, "src/first.ts");
+  assert.equal(unifiedParsed.files[0].hunks.length, 1);
+  assert.equal(unifiedParsed.files[0].additions, 1);
+  assert.equal(unifiedParsed.files[0].deletions, 1);
+  assert.equal(unifiedParsed.files[0].hunks[0].lines[1].type, "context");
+  assert.equal(unifiedParsed.files[0].hunks[0].lines[1].text, "");
+  assert.equal(unifiedParsed.files[0].hunks[0].lines[2].text, "--- dashed-old");
+  assert.equal(unifiedParsed.files[0].hunks[0].lines[3].text, "+++ plus-new");
+  assert.equal(unifiedParsed.files[1].canonicalPath, "src/second.ts");
+  assert.equal(unifiedParsed.files[1].hunks.length, 1);
+  assert.equal(unifiedParsed.files[1].additions, 1);
+  assert.equal(unifiedParsed.files[2].canonicalPath, "src/removed.ts");
+  assert.equal(unifiedParsed.files[2].status, "deleted");
+
+  // 3. diff.noprefix rename across real top-level a/ and b/ directories preserves authoritative renameFrom/renameTo
+  const noprefixRenamePatch = [
+    "diff --git a/source.ts b/target.ts",
+    "similarity index 80%",
+    "rename from a/source.ts",
+    "rename to b/target.ts",
+    "index 1111111..2222222 100644",
+    "--- a/source.ts",
+    "+++ b/target.ts",
+    "@@ -1,1 +1,1 @@",
+    "-export const x = 1;",
+    "+export const x = 2;",
+  ].join("\n");
+
+  const noprefixRenameParsed = parseDiffPatch(noprefixRenamePatch);
+  assert.equal(noprefixRenameParsed.files.length, 1);
+  assert.equal(noprefixRenameParsed.files[0].oldPath, "a/source.ts");
+  assert.equal(noprefixRenameParsed.files[0].newPath, "b/target.ts");
+  assert.equal(noprefixRenameParsed.files[0].canonicalPath, "b/target.ts");
+  assert.equal(
+    noprefixRenameParsed.files[0].displayPath,
+    "a/source.ts -> b/target.ts",
+  );
+});
+
+
 

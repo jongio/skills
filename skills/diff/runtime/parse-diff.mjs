@@ -285,6 +285,30 @@ function parseGitDiffPaths(line) {
   return { oldPath: "", newPath: "", srcPrefix: "a", dstPrefix: "b" };
 }
 
+function parseCombinedDiffPath(line) {
+  const rawRest = line.startsWith("diff --cc ")
+    ? line.slice("diff --cc ".length)
+    : line.slice("diff --combined ".length);
+  const pathText = extractHeaderToken(rawRest.trim());
+  return {
+    oldPath: pathText,
+    newPath: pathText,
+    srcPrefix: "a",
+    dstPrefix: "b",
+  };
+}
+
+function inferUnifiedHeaderPrefixes(rawOldLine, rawNewLine) {
+  const oldTok = extractHeaderToken(rawOldLine.slice(4));
+  const newTok = extractHeaderToken(rawNewLine.slice(4));
+  const oldHasA = oldTok === "/dev/null" || oldTok.startsWith("a/");
+  const newHasB = newTok === "/dev/null" || newTok.startsWith("b/");
+  if (oldHasA && newHasB && (oldTok.startsWith("a/") || newTok.startsWith("b/"))) {
+    return { srcPrefix: "a", dstPrefix: "b" };
+  }
+  return { srcPrefix: "", dstPrefix: "" };
+}
+
 export function detectLanguageFromPath(filePath) {
   const lower = String(filePath ?? "").toLowerCase();
   const base = lower.split("/").pop() || "";
@@ -359,22 +383,55 @@ export function parseDiffPatch(
   let totalFilesSeen = 0;
   let current = null;
   let currentHunk = null;
+  let currentHunkPrefixLen = 1;
+  let oldRemaining = 0;
+  let newRemaining = 0;
   let currentLineCount = 0;
   let oldCursor = 0;
   let newCursor = 0;
   let totalAdditions = 0;
   let totalDeletions = 0;
 
+  const createFileRecord = (parsed) => ({
+    index: 0,
+    oldPath: parsed.oldPath,
+    newPath: parsed.newPath,
+    srcPrefix: parsed.srcPrefix,
+    dstPrefix: parsed.dstPrefix,
+    renameFrom: "",
+    renameTo: "",
+    copyFrom: "",
+    copyTo: "",
+    canonicalPath: "",
+    displayPath: "",
+    status: "modified",
+    isBinary: false,
+    indexHeader: "",
+    oldMode: "",
+    newMode: "",
+    language: "text",
+    additions: 0,
+    deletions: 0,
+    truncated: false,
+    hunks: [],
+  });
+
   const finalizeFile = () => {
     if (!current) return;
     const rawTarget =
-      current.newPath ||
-      current.renameTo ||
-      current.copyTo ||
-      current.oldPath ||
-      current.renameFrom ||
-      current.copyFrom ||
-      "";
+      current.status === "deleted"
+        ? current.oldPath ||
+          current.renameFrom ||
+          current.copyFrom ||
+          current.newPath ||
+          ""
+        : current.newPath ||
+          current.renameTo ||
+          current.copyTo ||
+          current.oldPath ||
+          current.renameFrom ||
+          current.copyFrom ||
+          "";
     const canonicalPath = normalizeCanonicalPath(rawTarget);
     const normOld = normalizeCanonicalPath(
       current.oldPath || current.renameFrom || current.copyFrom || "",
@@ -404,41 +461,48 @@ export function parseDiffPatch(
     }
     current = null;
     currentHunk = null;
+    currentHunkPrefixLen = 1;
+    oldRemaining = 0;
+    newRemaining = 0;
     currentLineCount = 0;
   };
 
+  const stripCr = (s) => (s.endsWith("\r") ? s.slice(0, -1) : s);
+
   for (let idx = 0; idx < lines.length; idx += 1) {
-    const rawLine = lines[idx];
-    const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+    const line = stripCr(lines[idx]);
 
     if (line.startsWith("diff --git ")) {
       finalizeFile();
       totalFilesSeen += 1;
-      const parsed = parseGitDiffPaths(line);
-      current = {
-        index: 0,
-        oldPath: parsed.oldPath,
-        newPath: parsed.newPath,
-        srcPrefix: parsed.srcPrefix,
-        dstPrefix: parsed.dstPrefix,
-        renameFrom: "",
-        renameTo: "",
-        copyFrom: "",
-        copyTo: "",
-        canonicalPath: "",
-        displayPath: "",
-        status: "modified",
-        isBinary: false,
-        indexHeader: "",
-        oldMode: "",
-        newMode: "",
-        language: "text",
-        additions: 0,
-        deletions: 0,
-        truncated: false,
-        hunks: [],
-      };
+      current = createFileRecord(parseGitDiffPaths(line));
       continue;
+    }
+
+    if (line.startsWith("diff --cc ") || line.startsWith("diff --combined ")) {
+      finalizeFile();
+      totalFilesSeen += 1;
+      current = createFileRecord(parseCombinedDiffPath(line));
+      continue;
+    }
+
+    const nextLine = idx + 1 < lines.length ? stripCr(lines[idx + 1]) : "";
+    const hunkDrained = !currentHunk || (oldRemaining <= 0 && newRemaining <= 0);
+    if (
+      hunkDrained &&
+      line.startsWith("--- ") &&
+      nextLine.startsWith("+++ ") &&
+      (!current || current.hunks.length > 0 || current.isBinary)
+    ) {
+      finalizeFile();
+      totalFilesSeen += 1;
+      const prefixes = inferUnifiedHeaderPrefixes(line, nextLine);
+      current = createFileRecord({
+        oldPath: "",
+        newPath: "",
+        srcPrefix: prefixes.srcPrefix,
+        dstPrefix: prefixes.dstPrefix,
+      });
     }
 
     if (!current) continue;
@@ -452,8 +516,47 @@ export function parseDiffPatch(
       const section = hunkMatch[5] ? hunkMatch[5].trim() : "";
       oldCursor = oldStart;
       newCursor = newStart;
+      oldRemaining = oldCount;
+      newRemaining = newCount;
+      currentHunkPrefixLen = 1;
       currentHunk = {
         header: `@@ -${hunkMatch[1]}${hunkMatch[2] !== undefined ? `,${hunkMatch[2]}` : ""} +${hunkMatch[3]}${hunkMatch[4] !== undefined ? `,${hunkMatch[4]}` : ""} @@`,
+        section,
+        oldStart,
+        oldCount,
+        newStart,
+        newCount,
+        lines: [],
+      };
+      if (!current.truncated) {
+        current.hunks.push(currentHunk);
+      }
+      continue;
+    }
+
+    const combinedHunkMatch = line.match(
+      /^(@{3,}) -(\d+)(?:,(\d+))? (?:-\d+(?:,\d+)? )*\+(\d+)(?:,(\d+))? \1(.*)$/,
+    );
+    if (combinedHunkMatch) {
+      const markers = combinedHunkMatch[1];
+      const oldStart = Number.parseInt(combinedHunkMatch[2], 10);
+      const oldCount =
+        combinedHunkMatch[3] === undefined
+          ? 1
+          : Number.parseInt(combinedHunkMatch[3], 10);
+      const newStart = Number.parseInt(combinedHunkMatch[4], 10);
+      const newCount =
+        combinedHunkMatch[5] === undefined
+          ? 1
+          : Number.parseInt(combinedHunkMatch[5], 10);
+      const section = combinedHunkMatch[6] ? combinedHunkMatch[6].trim() : "";
+      oldCursor = oldStart;
+      newCursor = newStart;
+      oldRemaining = oldCount;
+      newRemaining = newCount;
+      currentHunkPrefixLen = markers.length - 1;
+      currentHunk = {
+        header: line.slice(0, line.indexOf(` ${markers}`, markers.length) + markers.length + 1),
         section,
         oldStart,
         oldCount,
@@ -502,14 +605,122 @@ export function parseDiffPatch(
       } else if (line.startsWith("--- ")) {
         const rawOld = line.slice(4);
         const stripped = stripHeaderPrefix(rawOld, current.srcPrefix);
-        if (stripped) current.oldPath = stripped;
-        else if (extractHeaderToken(rawOld) === "/dev/null") current.status = "added";
+        if (stripped) {
+          if (!current.renameFrom && !current.copyFrom) {
+            current.oldPath = stripped;
+          }
+        } else if (extractHeaderToken(rawOld) === "/dev/null") {
+          current.status = "added";
+        }
       } else if (line.startsWith("+++ ")) {
         const rawNew = line.slice(4);
         const stripped = stripHeaderPrefix(rawNew, current.dstPrefix);
-        if (stripped) current.newPath = stripped;
-        else if (extractHeaderToken(rawNew) === "/dev/null") current.status = "deleted";
+        if (stripped) {
+          if (!current.renameTo && !current.copyTo) {
+            current.newPath = stripped;
+          }
+        } else if (extractHeaderToken(rawNew) === "/dev/null") {
+          current.status = "deleted";
+        }
       }
+      continue;
+    }
+
+    if (currentHunkPrefixLen > 1) {
+      if (line.startsWith("\\")) {
+        if (currentLineCount < maxLinesPerFile) {
+          currentHunk.lines.push({
+            type: "meta",
+            oldLine: null,
+            newLine: null,
+            text: line,
+          });
+          currentLineCount += 1;
+        }
+        continue;
+      }
+      if (line === "" && oldRemaining > 0 && newRemaining > 0) {
+        const oLine = oldCursor;
+        const nLine = newCursor;
+        oldCursor += 1;
+        newCursor += 1;
+        oldRemaining -= 1;
+        newRemaining -= 1;
+        if (currentLineCount < maxLinesPerFile) {
+          currentHunk.lines.push({
+            type: "context",
+            oldLine: oLine,
+            newLine: nLine,
+            text: "",
+          });
+          currentLineCount += 1;
+        } else {
+          current.truncated = true;
+        }
+        continue;
+      }
+      if (line.length >= currentHunkPrefixLen) {
+        const prefixCols = line.slice(0, currentHunkPrefixLen);
+        if (/^[+ -]+$/.test(prefixCols)) {
+          const bodyText = line.slice(currentHunkPrefixLen);
+          if (prefixCols.includes("+")) {
+            current.additions += 1;
+            totalAdditions += 1;
+            const lineNum = newCursor;
+            newCursor += 1;
+            newRemaining -= 1;
+            if (currentLineCount < maxLinesPerFile) {
+              currentHunk.lines.push({
+                type: "add",
+                oldLine: null,
+                newLine: lineNum,
+                text: bodyText,
+              });
+              currentLineCount += 1;
+            } else {
+              current.truncated = true;
+            }
+          } else if (prefixCols.includes("-")) {
+            current.deletions += 1;
+            totalDeletions += 1;
+            const lineNum = oldCursor;
+            oldCursor += 1;
+            if (prefixCols[0] === "-") oldRemaining -= 1;
+            if (currentLineCount < maxLinesPerFile) {
+              currentHunk.lines.push({
+                type: "del",
+                oldLine: lineNum,
+                newLine: null,
+                text: bodyText,
+              });
+              currentLineCount += 1;
+            } else {
+              current.truncated = true;
+            }
+          } else {
+            const oLine = oldCursor;
+            const nLine = newCursor;
+            oldCursor += 1;
+            newCursor += 1;
+            oldRemaining -= 1;
+            newRemaining -= 1;
+            if (currentLineCount < maxLinesPerFile) {
+              currentHunk.lines.push({
+                type: "context",
+                oldLine: oLine,
+                newLine: nLine,
+                text: bodyText,
+              });
+              currentLineCount += 1;
+            } else {
+              current.truncated = true;
+            }
+          }
+          continue;
+        }
+      }
+      currentHunk = null;
+      currentHunkPrefixLen = 1;
       continue;
     }
 
@@ -518,6 +729,7 @@ export function parseDiffPatch(
       totalAdditions += 1;
       const lineNum = newCursor;
       newCursor += 1;
+      newRemaining -= 1;
       if (currentLineCount < maxLinesPerFile) {
         currentHunk.lines.push({
           type: "add",
@@ -534,6 +746,7 @@ export function parseDiffPatch(
       totalDeletions += 1;
       const lineNum = oldCursor;
       oldCursor += 1;
+      oldRemaining -= 1;
       if (currentLineCount < maxLinesPerFile) {
         currentHunk.lines.push({
           type: "del",
@@ -550,6 +763,8 @@ export function parseDiffPatch(
       const nLine = newCursor;
       oldCursor += 1;
       newCursor += 1;
+      oldRemaining -= 1;
+      newRemaining -= 1;
       if (currentLineCount < maxLinesPerFile) {
         currentHunk.lines.push({
           type: "context",
@@ -570,6 +785,24 @@ export function parseDiffPatch(
           text: line,
         });
         currentLineCount += 1;
+      }
+    } else if (line === "" && oldRemaining > 0 && newRemaining > 0) {
+      const oLine = oldCursor;
+      const nLine = newCursor;
+      oldCursor += 1;
+      newCursor += 1;
+      oldRemaining -= 1;
+      newRemaining -= 1;
+      if (currentLineCount < maxLinesPerFile) {
+        currentHunk.lines.push({
+          type: "context",
+          oldLine: oLine,
+          newLine: nLine,
+          text: "",
+        });
+        currentLineCount += 1;
+      } else {
+        current.truncated = true;
       }
     } else if (line === "" && idx === lines.length - 1) {
       // Trailing newline after split("\n")
