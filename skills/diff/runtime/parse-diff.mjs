@@ -18,6 +18,8 @@ const GIT_SHORTNAME_SEGMENT_RE = /^(?:\.git|git~[0-9]+|\.git[~.].*)$/i;
 
 const UTF8_ENCODER = new TextEncoder();
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: false });
+const MNEMONIC_SRC_PREFIXES = new Set(["a", "i", "c", "w", "o"]);
+const MNEMONIC_DST_PREFIXES = new Set(["b", "i", "c", "w", "o"]);
 
 export function unquoteGitHeaderPath(raw) {
   if (typeof raw !== "string") return "";
@@ -25,30 +27,36 @@ export function unquoteGitHeaderPath(raw) {
   if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
     const inner = trimmed.slice(1, -1);
     const bytes = [];
-    for (let i = 0; i < inner.length; i += 1) {
-      const ch = inner[i];
+    for (let i = 0; i < inner.length; ) {
+      const cp = inner.codePointAt(i);
+      const stepChars = cp > 0xffff ? 2 : 1;
+      const ch = String.fromCodePoint(cp);
       if (ch !== "\\") {
         const encoded = UTF8_ENCODER.encode(ch);
         for (let b = 0; b < encoded.length; b += 1) bytes.push(encoded[b]);
+        i += stepChars;
         continue;
       }
-      const next = inner[i + 1];
-      if (next === undefined) {
+      if (i + 1 >= inner.length) {
         bytes.push(0x5c);
         break;
       }
-      if (next >= "0" && next <= "7") {
-        let octal = next;
+      const nextUnit = inner[i + 1];
+      if (nextUnit >= "0" && nextUnit <= "7") {
+        let octal = nextUnit;
         let step = 1;
         while (step < 3 && inner[i + 1 + step] >= "0" && inner[i + 1 + step] <= "7") {
           octal += inner[i + 1 + step];
           step += 1;
         }
         bytes.push(Number.parseInt(octal, 8) & 0xff);
-        i += step;
+        i += 1 + step;
         continue;
       }
-      i += 1;
+      const nextCp = inner.codePointAt(i + 1);
+      const nextChars = nextCp > 0xffff ? 2 : 1;
+      const next = String.fromCodePoint(nextCp);
+      i += 1 + nextChars;
       switch (next) {
         case "a": bytes.push(0x07); break;
         case "b": bytes.push(0x08); break;
@@ -100,8 +108,39 @@ export const normalizeRepoRelativePath = normalizeCanonicalPath;
 function stripHeaderPrefix(rawHeaderPath, prefix) {
   const unquoted = unquoteGitHeaderPath(rawHeaderPath.replace(/\t.*$/, ""));
   if (unquoted === "/dev/null") return "";
-  if (unquoted.startsWith(`${prefix}/`)) return unquoted.slice(prefix.length + 1);
+  if (prefix && unquoted.startsWith(`${prefix}/`)) {
+    return unquoted.slice(prefix.length + 1);
+  }
   return unquoted;
+}
+
+function isSupportedDiffPrefixPair(p1, p2) {
+  return (
+    p1 !== p2 &&
+    MNEMONIC_SRC_PREFIXES.has(p1) &&
+    MNEMONIC_DST_PREFIXES.has(p2)
+  );
+}
+
+function stripDiffTokenPrefixes(first, second) {
+  if (first.length > 2 && second.length > 2 && first[1] === "/" && second[1] === "/") {
+    const p1 = first[0];
+    const p2 = second[0];
+    if (isSupportedDiffPrefixPair(p1, p2)) {
+      return {
+        oldPath: first.slice(2),
+        newPath: second.slice(2),
+        srcPrefix: p1,
+        dstPrefix: p2,
+      };
+    }
+  }
+  return {
+    oldPath: first,
+    newPath: second,
+    srcPrefix: "",
+    dstPrefix: "",
+  };
 }
 
 function scanQuotedTokenEnd(str, openQuoteIdx) {
@@ -124,10 +163,7 @@ function parseGitDiffPaths(line) {
     if (endIdx > 0) {
       const first = unquoteGitHeaderPath(rest.slice(0, endIdx + 1));
       const second = unquoteGitHeaderPath(rest.slice(endIdx + 1).trim());
-      return {
-        oldPath: first.startsWith("a/") ? first.slice(2) : first,
-        newPath: second.startsWith("b/") ? second.slice(2) : second,
-      };
+      return stripDiffTokenPrefixes(first, second);
     }
   }
   if (!rest.startsWith('"') && rest.endsWith('"')) {
@@ -139,32 +175,79 @@ function parseGitDiffPaths(line) {
       if (endIdx === rest.length - 1) {
         const first = unquoteGitHeaderPath(rest.slice(0, spaceQuoteIdx).trim());
         const second = unquoteGitHeaderPath(rest.slice(spaceQuoteIdx + 1));
-        return {
-          oldPath: first.startsWith("a/") ? first.slice(2) : first,
-          newPath: second.startsWith("b/") ? second.slice(2) : second,
-        };
+        return stripDiffTokenPrefixes(first, second);
       }
       searchFrom = spaceQuoteIdx + 2;
     }
   }
-  const marker = " b/";
-  if (rest.startsWith("a/") && rest.length >= 7 && (rest.length - 5) % 2 === 0) {
+  if (rest.length >= 7 && rest[1] === "/" && (rest.length - 5) % 2 === 0) {
+    const p1 = rest[0];
     const pathLen = (rest.length - 5) / 2;
     const candidate = rest.slice(2, 2 + pathLen);
-    if (rest.slice(2 + pathLen) === ` b/${candidate}`) {
-      return { oldPath: candidate, newPath: candidate };
+    const sepAndSecond = rest.slice(2 + pathLen);
+    if (
+      sepAndSecond.length === pathLen + 3 &&
+      sepAndSecond[0] === " " &&
+      sepAndSecond[2] === "/" &&
+      isSupportedDiffPrefixPair(p1, sepAndSecond[1]) &&
+      sepAndSecond.slice(3) === candidate
+    ) {
+      return {
+        oldPath: candidate,
+        newPath: candidate,
+        srcPrefix: p1,
+        dstPrefix: sepAndSecond[1],
+      };
     }
   }
-  const splitIdx = rest.lastIndexOf(marker);
-  if (splitIdx > 0) {
-    const first = rest.slice(0, splitIdx);
-    const second = rest.slice(splitIdx + 3);
+  if (rest.length >= 3 && (rest.length - 1) % 2 === 0) {
+    const half = (rest.length - 1) / 2;
+    if (rest[half] === " " && rest.slice(0, half) === rest.slice(half + 1)) {
+      const samePath = rest.slice(0, half);
+      return {
+        oldPath: samePath,
+        newPath: samePath,
+        srcPrefix: "",
+        dstPrefix: "",
+      };
+    }
+  }
+  if (rest.length >= 7 && rest[1] === "/" && MNEMONIC_SRC_PREFIXES.has(rest[0])) {
+    const p1 = rest[0];
+    if (p1 === "a") {
+      const splitIdx = rest.lastIndexOf(" b/");
+      if (splitIdx > 1) {
+        return {
+          oldPath: rest.slice(2, splitIdx),
+          newPath: rest.slice(splitIdx + 3),
+          srcPrefix: "a",
+          dstPrefix: "b",
+        };
+      }
+    }
+    for (const p2 of MNEMONIC_DST_PREFIXES) {
+      if (!isSupportedDiffPrefixPair(p1, p2)) continue;
+      const splitIdx = rest.lastIndexOf(` ${p2}/`);
+      if (splitIdx > 1) {
+        return {
+          oldPath: rest.slice(2, splitIdx),
+          newPath: rest.slice(splitIdx + 3),
+          srcPrefix: p1,
+          dstPrefix: p2,
+        };
+      }
+    }
+  }
+  const singleSpaceIdx = rest.indexOf(" ");
+  if (singleSpaceIdx > 0 && singleSpaceIdx === rest.lastIndexOf(" ")) {
     return {
-      oldPath: first.startsWith("a/") ? first.slice(2) : first,
-      newPath: second,
+      oldPath: rest.slice(0, singleSpaceIdx),
+      newPath: rest.slice(singleSpaceIdx + 1),
+      srcPrefix: "",
+      dstPrefix: "",
     };
   }
-  return { oldPath: "", newPath: "" };
+  return { oldPath: "", newPath: "", srcPrefix: "a", dstPrefix: "b" };
 }
 
 export function detectLanguageFromPath(filePath) {
@@ -275,6 +358,8 @@ export function parseDiffPatch(
     current.canonicalPath = canonicalPath;
     current.displayPath = displayPath;
     current.language = detectLanguageFromPath(canonicalPath || normNew || normOld);
+    delete current.srcPrefix;
+    delete current.dstPrefix;
 
     if (files.length < maxFiles) {
       current.index = files.length;
@@ -299,6 +384,8 @@ export function parseDiffPatch(
         index: 0,
         oldPath: parsed.oldPath,
         newPath: parsed.newPath,
+        srcPrefix: parsed.srcPrefix,
+        dstPrefix: parsed.dstPrefix,
         renameFrom: "",
         renameTo: "",
         copyFrom: "",
@@ -378,11 +465,11 @@ export function parseDiffPatch(
         current.isBinary = true;
         if (current.status === "modified") current.status = "binary";
       } else if (line.startsWith("--- ")) {
-        const stripped = stripHeaderPrefix(line.slice(4), "a");
+        const stripped = stripHeaderPrefix(line.slice(4), current.srcPrefix);
         if (stripped) current.oldPath = stripped;
         else if (line.slice(4).trim() === "/dev/null") current.status = "added";
       } else if (line.startsWith("+++ ")) {
-        const stripped = stripHeaderPrefix(line.slice(4), "b");
+        const stripped = stripHeaderPrefix(line.slice(4), current.dstPrefix);
         if (stripped) current.newPath = stripped;
         else if (line.slice(4).trim() === "/dev/null") current.status = "deleted";
       }

@@ -694,4 +694,233 @@ test("CLI entry point emits structured JSON errors to stdout with --json and pla
   assert.match(pathAfterDashErr.stderr, /diff error:/);
 });
 
+test("live background serve runtime adopts external CLI address/reopen updates without overwriting them and listSavedReviews includes >2MiB reviews", async (t) => {
+  const { root, copilotHome } = createGitFixtureRepo(t);
+  const env = { ...process.env, COPILOT_HOME: copilotHome };
+  const ac = new AbortController();
+  t.after(() => ac.abort());
+
+  let panelUrl = "";
+  let activeDomain = "";
+  const serveOut = createCaptureStream();
+  const servePromise = runCli(
+    ["serve", "--cwd", root, "--no-open", "--print-url", "--json"],
+    {
+      env,
+      stdout: serveOut.stream,
+      abortSignal: ac.signal,
+      onReady: ({ url, domain }) => {
+        panelUrl = url;
+        activeDomain = domain;
+      },
+    },
+  );
+
+  while (!panelUrl) {
+    await new Promise((r) => setTimeout(r, 15));
+  }
+
+  // 1. Concurrent 3-way add_comment calls must serialize cleanly without dropping comments
+  const [addRes1, addRes2, addRes3] = await Promise.all([
+    postPanelAction(panelUrl, "add_comment", {
+      file: "src/service.ts",
+      line: 2,
+      side: "right",
+      body: "Please guard against overflow",
+    }),
+    postPanelAction(panelUrl, "add_comment", {
+      file: "src/service.ts",
+      line: 2,
+      side: "right",
+      body: "Also document return contract",
+    }),
+    postPanelAction(panelUrl, "add_comment", {
+      file: "src/service.ts",
+      line: 2,
+      side: "right",
+      body: "Verify negative input handling",
+    }),
+  ]);
+  assert.equal(addRes1.status, 200);
+  assert.equal(addRes2.status, 200);
+  assert.equal(addRes3.status, 200);
+  const firstCommentId = addRes1.body.result.comment.id;
+
+  const submitRes = await postPanelAction(panelUrl, "submit_review", {
+    notifyAgent: true,
+  });
+  assert.equal(submitRes.status, 200);
+  assert.equal(submitRes.body.result.commentCount, 3);
+
+  // 2. Edit repo file to fix the review (fp_v1 -> fp_v2), then run external `cli.mjs address --cwd`
+  fs.writeFileSync(
+    path.join(root, "src", "service.ts"),
+    "export function compute(x: number): number {\n  return Number.isSafeInteger(x * 2) ? x * 2 : 0;\n}\n",
+    "utf8",
+  );
+  const addrRes = await runCli(["address", "--cwd", root, "--json"], {
+    env,
+    stdout: createCaptureStream().stream,
+  });
+  assert.equal(addrRes.status, "addressed");
+
+  // 3. Unrefreshed viewer actions (`check_updates`, `focus_file`, `toggle_viewed`, `add_comment`) and `refresh` MUST preserve "addressed"
+  const checkUpdatesRes = await postPanelAction(panelUrl, "check_updates", {});
+  assert.equal(checkUpdatesRes.status, 200);
+  assert.equal(checkUpdatesRes.body.result.changed, true);
+
+  const focusRes = await postPanelAction(panelUrl, "focus_file", {
+    file: "src/service.ts",
+    line: 2,
+  });
+  assert.equal(focusRes.status, 200);
+
+  const toggleRes = await postPanelAction(panelUrl, "toggle_viewed", {
+    file: "src/service.ts",
+  });
+  assert.equal(toggleRes.status, 200);
+
+  const lockedCommentRes = await postPanelAction(panelUrl, "add_comment", {
+    file: "src/service.ts",
+    line: 2,
+    side: "right",
+    body: "Should be blocked while addressed",
+  });
+  assert.equal(lockedCommentRes.status, 400);
+  assert.equal(lockedCommentRes.body.ok, false);
+  assert.equal(lockedCommentRes.body.code, "review_locked");
+  assert.match(lockedCommentRes.body.message, /already been addressed/i);
+
+  const postFixRefreshRes = await postPanelAction(panelUrl, "refresh", {});
+  assert.equal(postFixRefreshRes.status, 200);
+  assert.equal(postFixRefreshRes.body.result.changed, true);
+  assert.equal(postFixRefreshRes.body.result.status, "addressed");
+
+  const checkAfterViewerOps = await runCli(["review", "--cwd", root, "--json"], {
+    env,
+    stdout: createCaptureStream().stream,
+  });
+  assert.equal(Boolean(activeDomain), true);
+  assert.equal(
+    checkAfterViewerOps.status,
+    "addressed",
+    "Viewer check_updates / focus_file / toggle_viewed / refresh must preserve external CLI 'addressed' status after fixing files",
+  );
+
+  // 4. External `cli.mjs reopen --clear-comments` followed by a failing `delete_comment` on a cleared ID must NOT resurrect cleared comments
+  const reopenRes = await runCli(
+    ["reopen", "--clear-comments", "--cwd", root, "--json"],
+    {
+      env,
+      stdout: createCaptureStream().stream,
+    },
+  );
+  assert.equal(reopenRes.status, "draft");
+  assert.equal(reopenRes.commentCount, 0);
+
+  const staleDeleteRes = await postPanelAction(panelUrl, "delete_comment", {
+    id: firstCommentId,
+  });
+  assert.equal(staleDeleteRes.status, 400);
+  assert.equal(staleDeleteRes.body.code, "not_found");
+
+  await postPanelAction(panelUrl, "toggle_viewed", {
+    file: "src/service.ts",
+  });
+  const afterStaleDeleteCheck = await runCli(["review", "--cwd", root, "--json"], {
+    env,
+    stdout: createCaptureStream().stream,
+  });
+  assert.equal(afterStaleDeleteCheck.status, "draft");
+  assert.equal(afterStaleDeleteCheck.commentCount, 0);
+
+  // 5. Submit Round 2, edit file (fp_v2 -> fp_v3), run offline `address --domain`, and verify `refresh` keeps "addressed" then reopens on fp_v4
+  const commentAfterReopen = await postPanelAction(panelUrl, "add_comment", {
+    file: "src/service.ts",
+    line: 2,
+    side: "right",
+    body: "Round 2 comment",
+  });
+  assert.equal(commentAfterReopen.status, 200);
+  assert.equal(commentAfterReopen.body.result.commentCount, 1);
+  await postPanelAction(panelUrl, "submit_review", { notifyAgent: false });
+
+  fs.writeFileSync(
+    path.join(root, "src", "service.ts"),
+    "export function compute(x: number): number {\n  return Number.isFinite(x) ? x * 2 : 0;\n}\n",
+    "utf8",
+  );
+  const outsideDir = makeTempDir("diff-cli-outside-");
+  t.after(() => fs.rmSync(outsideDir, { recursive: true, force: true }));
+  const offlineAddr = await runCli(
+    ["address", "--domain", activeDomain, "--cwd", outsideDir, "--json"],
+    {
+      env,
+      stdout: createCaptureStream().stream,
+    },
+  );
+  assert.equal(offlineAddr.status, "addressed");
+
+  const offlineRefresh = await postPanelAction(panelUrl, "refresh", {});
+  assert.equal(offlineRefresh.status, 200);
+  assert.equal(offlineRefresh.body.result.status, "addressed");
+
+  // Further edit AFTER refresh seeded fp_v3 MUST auto-reopen to "draft"
+  fs.writeFileSync(
+    path.join(root, "src", "service.ts"),
+    "export function compute(x: number): number {\n  return x * 3;\n}\n",
+    "utf8",
+  );
+  const autoReopenRefresh = await postPanelAction(panelUrl, "refresh", {});
+  assert.equal(autoReopenRefresh.status, 200);
+  assert.equal(autoReopenRefresh.body.result.status, "draft");
+
+  ac.abort();
+  await servePromise;
+
+  // 5. Verify listSavedReviews includes valid >2 MiB reviews (up to MAX_REVIEW_ARTIFACT_BYTES)
+  const artifactsDir = path.join(copilotHome, "extensions", "diff", "artifacts");
+  const largeComments = Array.from({ length: 145 }, (_, idx) => ({
+    id: `c_${idx}`,
+    file: "src/service.ts",
+    line: 2,
+    side: "right",
+    body: "x".repeat(16_000),
+    stale: false,
+    createdAt: "2026-04-19T12:00:00.000Z",
+  }));
+  const largeFilePath = path.join(artifactsDir, "pr__example-org__large__293.json");
+  fs.writeFileSync(
+    largeFilePath,
+    JSON.stringify(
+      {
+        domain: "pr__example-org__large__293",
+        source: { mode: "pr", repo: "example-org/large", pr: 293, paths: [] },
+        title: "example-org/large#293 - Large Review",
+        status: "pending",
+        comments: largeComments,
+        updatedAt: "2026-04-19T12:00:00.000Z",
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  assert.equal(
+    fs.statSync(largeFilePath).size > 2 * 1024 * 1024,
+    true,
+    "Fixture review artifact must exceed 2 MiB",
+  );
+
+  const pendingReviews = listSavedReviews({ env, statusFilter: "pending" });
+  assert.equal(
+    pendingReviews.some(
+      (r) => r.domain === "pr__example-org__large__293" && r.commentCount === 145,
+    ),
+    true,
+    "Valid >2 MiB pending reviews must be listed by cli.mjs list",
+  );
+});
+
+
 

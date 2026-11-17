@@ -6,6 +6,7 @@ import {
   pairSplitRows,
   parseDiffPatch,
   tokenizeCodeLine,
+  unquoteGitHeaderPath,
 } from "../runtime/parse-diff.mjs";
 import {
   buildFileTree as buildWebFileTree,
@@ -231,3 +232,70 @@ test("parseDiffPatch supports copy from / copy to headers with plain and quoted 
   assert.equal(parsed.files[1].canonicalPath, "src/space copy.ts");
   assert.equal(parsed.files[1].displayPath, "src/space base.ts -> src/space copy.ts");
 });
+
+test("unquoteGitHeaderPath preserves astral emoji code points and parseDiffPatch handles mnemonicPrefix and noprefix headers", () => {
+  assert.equal(
+    unquoteGitHeaderPath('"b/docs/launch 🚀.md"'),
+    "b/docs/launch 🚀.md",
+  );
+  assert.equal(
+    unquoteGitHeaderPath('"a/notes/party 🎉\\tcheck.md"'),
+    "a/notes/party 🎉\tcheck.md",
+  );
+
+  const emojiUntrackedPatch = [
+    'diff --git "a/docs/launch 🚀.md" "b/docs/launch 🚀.md"',
+    "new file mode 100644",
+    "--- /dev/null",
+    '+++ "b/docs/launch 🚀.md"',
+    "@@ -0,0 +1,1 @@",
+    "+Ship it 🚀",
+  ].join("\n");
+  const emojiParsed = parseDiffPatch(emojiUntrackedPatch);
+  assert.equal(emojiParsed.files.length, 1);
+  assert.equal(emojiParsed.files[0].canonicalPath, "docs/launch 🚀.md");
+  assert.equal(emojiParsed.files[0].canonicalPath.includes("\uFFFD"), false);
+
+  const prefixVariantsPatch = [
+    "diff --git i/src/worktree.ts w/src/worktree.ts",
+    "index 1111111..2222222 100644",
+    "--- i/src/worktree.ts",
+    "+++ w/src/worktree.ts",
+    "@@ -1,1 +1,1 @@",
+    "-export const v = 1;",
+    "+export const v = 2;",
+    "diff --git c/assets/logo.png i/assets/logo.png",
+    "index 1111111..3333333 100644",
+    "Binary files c/assets/logo.png and i/assets/logo.png differ",
+    'diff --git "o/docs/guide v1.md" "w/docs/guide v1.md"',
+    "old mode 100644",
+    "new mode 100755",
+    "diff --git a/c/main.c b/c/main.c",
+    "index 4444444..5555555 100644",
+    "--- a/c/main.c",
+    "+++ b/c/main.c",
+    "@@ -1,1 +1,1 @@",
+    "-int main() { return 0; }",
+    "+int main() { return 1; }",
+    "diff --git c/noprefix.c c/noprefix.c",
+    "index 6666666..7777777 100644",
+    "--- c/noprefix.c",
+    "+++ c/noprefix.c",
+    "@@ -1,1 +1,1 @@",
+    "-int x = 1;",
+    "+int x = 2;",
+  ].join("\n");
+
+  const parsedVariants = parseDiffPatch(prefixVariantsPatch);
+  assert.deepEqual(
+    parsedVariants.files.map((f) => f.canonicalPath),
+    [
+      "src/worktree.ts",
+      "assets/logo.png",
+      "docs/guide v1.md",
+      "c/main.c",
+      "c/noprefix.c",
+    ],
+  );
+});
+

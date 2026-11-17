@@ -11,7 +11,11 @@ import { fileURLToPath } from "node:url";
 
 import { createCanvasRuntime } from "../runtime/canvas-kit/server.mjs";
 import { userStore } from "../runtime/canvas-kit/storage.mjs";
-import { createDiffCanvasConfig, openDiffInstance } from "../runtime/canvas.mjs";
+import {
+  MAX_REVIEW_ARTIFACT_BYTES,
+  createDiffCanvasConfig,
+  openDiffInstance,
+} from "../runtime/canvas.mjs";
 import {
   resolveCurrentBranchPrNumber,
   resolveTrustedExecutable,
@@ -27,7 +31,7 @@ const VALID_STATUSES = new Set(["draft", "pending", "addressed"]);
 const DEFAULT_IDLE_TIMEOUT_MS = 1_800_000;
 const MIN_IDLE_TIMEOUT_MS = 100;
 const MAX_IDLE_TIMEOUT_MS = 86_400_000;
-const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
+const MAX_ARTIFACT_BYTES = MAX_REVIEW_ARTIFACT_BYTES;
 
 const USAGE_TEXT = [
   "Usage:",

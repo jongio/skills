@@ -638,6 +638,8 @@ async function runGitDiff(execFn, repoRoot, refArgs, paths) {
     "--no-ext-diff",
     "--no-color",
     "--no-textconv",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
     ...refArgs,
     "--",
     ...paths,

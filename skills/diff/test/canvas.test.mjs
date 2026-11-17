@@ -2480,6 +2480,14 @@ test("cached-domain reopen retries after transient failure, preserves non-secret
   const clearedState = await coldRt.getState("pr__example-org__emu-repo__77");
   assert.equal(clearedState.error, null);
   assert.equal(clearedState.source.account, undefined);
+  const clearedSavedDisk = await customStore(
+    "pr__example-org__emu-repo__77.json",
+  ).load(null);
+  assert.equal(
+    clearedSavedDisk.source.account,
+    undefined,
+    "Clearing source.account on cached reopen must persist to disk",
+  );
 
   // Seed an unlinked saved account and verify cold open without explicit account falls back to ambient auth
   await customStore("pr__example-org__emu-repo__78.json").save({
@@ -3242,4 +3250,48 @@ test("legacy unseeded viewedFileFingerprints survive offline/--domain saves, sub
     );
   }
 });
+
+test("loadDiff pins Git prefixes under diff.mnemonicPrefix, preserves untracked emoji paths, enforces unwrapped horizontal scroll CSS, and caps review artifact byte size", async (t) => {
+  const repoDir = fs.realpathSync.native(makeTempDir("diff-mnemonic-emoji-"));
+  t.after(() => fs.rmSync(repoDir, { recursive: true, force: true }));
+
+  execFileSync("git", ["init", "-b", "main"], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "dev@example.com"], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["config", "user.name", "Example Dev"], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["config", "diff.mnemonicPrefix", "true"], { cwd: repoDir, stdio: "ignore" });
+
+  fs.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+  fs.mkdirSync(path.join(repoDir, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, "src", "app.ts"), "export const a = 1;\n", "utf8");
+  execFileSync("git", ["add", "."], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", "initial"], { cwd: repoDir, stdio: "ignore" });
+
+  fs.writeFileSync(path.join(repoDir, "src", "app.ts"), "export const a = 2;\n", "utf8");
+  fs.writeFileSync(path.join(repoDir, "docs", "launch 🚀.md"), "# Launch 🚀\n", "utf8");
+
+  const loaded = await loadDiff({ mode: "git", cwd: repoDir, spec: "", paths: [] });
+  assert.deepEqual(
+    loaded.files.map((f) => f.canonicalPath).sort(),
+    ["docs/launch 🚀.md", "src/app.ts"],
+  );
+  assert.equal(
+    loaded.files.some((f) => f.canonicalPath.includes("\uFFFD")),
+    false,
+  );
+
+  // Verify unwrapped vs wrapped CSS rules in runtime/web/style.css
+  const cssText = fs.readFileSync(
+    new URL("../runtime/web/style.css", import.meta.url),
+    "utf8",
+  );
+  const dvCodeBlock = cssText.match(/\.dv-code\s*\{[^}]+\}/)?.[0] || "";
+  assert.equal(
+    /overflow-x:\s*hidden/.test(dvCodeBlock),
+    false,
+    "Unwrapped .dv-code must not clip long lines with overflow-x: hidden",
+  );
+  assert.match(cssText, /\.dv-table-unified\s*\{[^}]*width:\s*max-content/);
+  assert.match(cssText, /\.dv-shell\.wrap-lines\s+\.dv-code\s*\{[^}]*overflow-x:\s*hidden/);
+});
+
 

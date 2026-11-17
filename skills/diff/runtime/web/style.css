@@ -522,8 +522,14 @@ html, body, #app {
   margin-left: 8px;
 }
 
+.dv-hunk-wrap {
+  min-width: 100%;
+  width: max-content;
+}
+
 .dv-split-wrap {
   position: relative;
+  min-width: 100%;
 }
 
 .dv-col-resizer {
@@ -549,6 +555,12 @@ html, body, #app {
   font-family: var(--ck-mono);
   font-size: 12px;
   line-height: 20px;
+}
+
+.dv-table-unified {
+  min-width: 100%;
+  width: max-content;
+  table-layout: auto;
 }
 
 .dv-ln {
@@ -606,15 +618,33 @@ html, body, #app {
   padding: 0 10px;
   vertical-align: top;
   white-space: pre;
-  overflow-x: hidden;
+  overflow-x: auto;
   text-overflow: clip;
   background: var(--ck-bg);
   color: var(--ck-fg);
 }
 
+.dv-table-unified .dv-code {
+  width: 100%;
+  overflow-x: visible;
+}
+
+.dv-shell.wrap-lines .dv-hunk-wrap,
+.dv-shell.wrap-lines .dv-split-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.dv-shell.wrap-lines .dv-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
 .dv-shell.wrap-lines .dv-code {
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-x: hidden;
 }
 
 .dv-prefix {
@@ -669,6 +699,8 @@ html, body, #app {
 }
 
 .dv-comment-card {
+  position: sticky;
+  left: 12px;
   max-width: 720px;
   background: var(--ck-bg);
   border: 1px solid var(--ck-border);
@@ -700,6 +732,8 @@ html, body, #app {
 }
 
 .dv-composer {
+  position: sticky;
+  left: 12px;
   max-width: 720px;
   background: var(--ck-bg);
   border: 1px solid var(--ck-border);

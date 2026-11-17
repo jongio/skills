@@ -422,9 +422,23 @@ function ThreadRows({
   `;
 }
 
+function estimateVisualColumns(text) {
+  if (!text) return 0;
+  let cols = 0;
+  for (let i = 0; i < text.length; ) {
+    const cp = text.codePointAt(i);
+    if (cp === 0x09) cols += 4;
+    else if (cp > 0x7f) cols += 2;
+    else cols += 1;
+    i += cp > 0xffff ? 2 : 1;
+  }
+  return cols;
+}
+
 function FileDiffCardInner({
   file,
   viewMode,
+  wrapLines,
   splitLeftPct,
   onStartSplitResize,
   isViewed,
@@ -485,10 +499,23 @@ function FileDiffCardInner({
 
   const splitHunks = useMemo(() => {
     if (viewMode !== "split" || file.isBinary) return [];
-    return file.hunks.map((hunk) => ({
-      hunk,
-      rows: pairSplitRows(hunk.lines),
-    }));
+    return file.hunks.map((hunk) => {
+      const rows = pairSplitRows(hunk.lines);
+      let maxLeftCols = 0;
+      let maxRightCols = 0;
+      for (const row of rows) {
+        if (row.kind === "meta") continue;
+        if (row.left?.text) {
+          const leftCols = estimateVisualColumns(row.left.text);
+          if (leftCols > maxLeftCols) maxLeftCols = leftCols;
+        }
+        if (row.right?.text) {
+          const rightCols = estimateVisualColumns(row.right.text);
+          if (rightCols > maxRightCols) maxRightCols = rightCols;
+        }
+      }
+      return { hunk, rows, maxLeftCols, maxRightCols };
+    });
   }, [file.hunks, file.isBinary, viewMode]);
 
   return html`
@@ -566,8 +593,23 @@ function FileDiffCardInner({
               ${file.isBinary
                 ? html`<div class="dv-hunk-header">Binary file changed</div>`
                 : viewMode === "split"
-                  ? splitHunks.map(({ hunk, rows }, hunkIdx) => html`
-                      <div key=${hunkIdx} class="dv-split-wrap">
+                  ? splitHunks.map(({ hunk, rows, maxLeftCols, maxRightCols }, hunkIdx) => {
+                      const leftShare = Math.max(splitLeftPct / 100, 0.2);
+                      const rightShare = Math.max((100 - splitLeftPct) / 100, 0.2);
+                      const neededCols = !wrapLines
+                        ? Math.ceil(
+                            Math.max(
+                              maxLeftCols > 0 ? (maxLeftCols + 4) / leftShare : 0,
+                              maxRightCols > 0 ? (maxRightCols + 4) / rightShare : 0,
+                            ),
+                          )
+                        : 0;
+                      const splitWrapStyle =
+                        !wrapLines && neededCols > 0
+                          ? { minWidth: `max(100%, calc(144px + ${neededCols}ch))` }
+                          : undefined;
+                      return html`
+                      <div key=${hunkIdx} class="dv-split-wrap" style=${splitWrapStyle}>
                         <div class="dv-hunk-header">
                           <span>${hunk.header}</span>
                           ${hunk.section ? html`<span class="dv-hunk-section">${hunk.section}</span>` : null}
@@ -719,9 +761,10 @@ function FileDiffCardInner({
                           </tbody>
                         </table>
                       </div>
-                    `)
+                    `;
+                    })
                   : file.hunks.map((hunk, hunkIdx) => html`
-                      <div key=${hunkIdx}>
+                      <div key=${hunkIdx} class="dv-hunk-wrap">
                         <div class="dv-hunk-header">
                           <span>${hunk.header}</span>
                           ${hunk.section ? html`<span class="dv-hunk-section">${hunk.section}</span>` : null}
@@ -899,6 +942,7 @@ export class FileDiffCard extends Component {
     return !(
       prev.file === nextProps.file &&
       prev.viewMode === nextProps.viewMode &&
+      prev.wrapLines === nextProps.wrapLines &&
       prev.splitLeftPct === nextProps.splitLeftPct &&
       prev.isViewed === nextProps.isViewed &&
       prev.isCollapsed === nextProps.isCollapsed &&
@@ -2060,6 +2104,7 @@ export function DiffCanvasApp({ state, invoke }) {
                       key=${`${canonical}:${file.index}`}
                       file=${file}
                       viewMode=${viewMode}
+                      wrapLines=${wrapLines}
                       splitLeftPct=${splitLeftPct}
                       onStartSplitResize=${startSplitResize}
                       isViewed=${viewedSet.has(canonical)}
