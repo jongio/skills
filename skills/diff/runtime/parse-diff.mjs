@@ -384,6 +384,7 @@ export function parseDiffPatch(
   let current = null;
   let currentHunk = null;
   let currentHunkPrefixLen = 1;
+  let combinedParentRemaining = [];
   let oldRemaining = 0;
   let newRemaining = 0;
   let currentLineCount = 0;
@@ -462,6 +463,7 @@ export function parseDiffPatch(
     current = null;
     currentHunk = null;
     currentHunkPrefixLen = 1;
+    combinedParentRemaining = [];
     oldRemaining = 0;
     newRemaining = 0;
     currentLineCount = 0;
@@ -487,7 +489,12 @@ export function parseDiffPatch(
     }
 
     const nextLine = idx + 1 < lines.length ? stripCr(lines[idx + 1]) : "";
-    const hunkDrained = !currentHunk || (oldRemaining <= 0 && newRemaining <= 0);
+    const hunkDrained =
+      !currentHunk ||
+      (newRemaining <= 0 &&
+        (currentHunkPrefixLen > 1
+          ? combinedParentRemaining.every((rem) => rem <= 0)
+          : oldRemaining <= 0));
     if (
       hunkDrained &&
       line.startsWith("--- ") &&
@@ -518,6 +525,7 @@ export function parseDiffPatch(
       newCursor = newStart;
       oldRemaining = oldCount;
       newRemaining = newCount;
+      combinedParentRemaining = [];
       currentHunkPrefixLen = 1;
       currentHunk = {
         header: `@@ -${hunkMatch[1]}${hunkMatch[2] !== undefined ? `,${hunkMatch[2]}` : ""} +${hunkMatch[3]}${hunkMatch[4] !== undefined ? `,${hunkMatch[4]}` : ""} @@`,
@@ -535,39 +543,53 @@ export function parseDiffPatch(
     }
 
     const combinedHunkMatch = line.match(
-      /^(@{3,}) -(\d+)(?:,(\d+))? (?:-\d+(?:,\d+)? )*\+(\d+)(?:,(\d+))? \1(.*)$/,
+      /^(@{3,}) ((?:-\d+(?:,\d+)? )+)\+(\d+)(?:,(\d+))? \1(.*)$/,
     );
     if (combinedHunkMatch) {
       const markers = combinedHunkMatch[1];
-      const oldStart = Number.parseInt(combinedHunkMatch[2], 10);
-      const oldCount =
-        combinedHunkMatch[3] === undefined
-          ? 1
-          : Number.parseInt(combinedHunkMatch[3], 10);
-      const newStart = Number.parseInt(combinedHunkMatch[4], 10);
-      const newCount =
-        combinedHunkMatch[5] === undefined
-          ? 1
-          : Number.parseInt(combinedHunkMatch[5], 10);
-      const section = combinedHunkMatch[6] ? combinedHunkMatch[6].trim() : "";
-      oldCursor = oldStart;
-      newCursor = newStart;
-      oldRemaining = oldCount;
-      newRemaining = newCount;
-      currentHunkPrefixLen = markers.length - 1;
-      currentHunk = {
-        header: line.slice(0, line.indexOf(` ${markers}`, markers.length) + markers.length + 1),
-        section,
-        oldStart,
-        oldCount,
-        newStart,
-        newCount,
-        lines: [],
-      };
-      if (!current.truncated) {
-        current.hunks.push(currentHunk);
+      const parentSpecs = combinedHunkMatch[2].trim().split(" ");
+      if (parentSpecs.length === markers.length - 1) {
+        const parentRanges = parentSpecs.map((spec) => {
+          const commaIdx = spec.indexOf(",");
+          const start = Number.parseInt(
+            commaIdx >= 0 ? spec.slice(1, commaIdx) : spec.slice(1),
+            10,
+          );
+          const count =
+            commaIdx >= 0 ? Number.parseInt(spec.slice(commaIdx + 1), 10) : 1;
+          return { start, count };
+        });
+        const oldStart = parentRanges[0].start;
+        const oldCount = parentRanges[0].count;
+        const newStart = Number.parseInt(combinedHunkMatch[3], 10);
+        const newCount =
+          combinedHunkMatch[4] === undefined
+            ? 1
+            : Number.parseInt(combinedHunkMatch[4], 10);
+        const section = combinedHunkMatch[5] ? combinedHunkMatch[5].trim() : "";
+        oldCursor = oldStart;
+        newCursor = newStart;
+        oldRemaining = oldCount;
+        newRemaining = newCount;
+        combinedParentRemaining = parentRanges.map((r) => r.count);
+        currentHunkPrefixLen = markers.length - 1;
+        currentHunk = {
+          header: line.slice(
+            0,
+            line.indexOf(` ${markers}`, markers.length) + markers.length + 1,
+          ),
+          section,
+          oldStart,
+          oldCount,
+          newStart,
+          newCount,
+          lines: [],
+        };
+        if (!current.truncated) {
+          current.hunks.push(currentHunk);
+        }
+        continue;
       }
-      continue;
     }
 
     if (!currentHunk) {
@@ -639,13 +661,20 @@ export function parseDiffPatch(
         }
         continue;
       }
-      if (line === "" && oldRemaining > 0 && newRemaining > 0) {
+      if (
+        line === "" &&
+        newRemaining > 0 &&
+        combinedParentRemaining.every((rem) => rem > 0)
+      ) {
         const oLine = oldCursor;
         const nLine = newCursor;
         oldCursor += 1;
         newCursor += 1;
         oldRemaining -= 1;
         newRemaining -= 1;
+        for (let p = 0; p < combinedParentRemaining.length; p += 1) {
+          combinedParentRemaining[p] -= 1;
+        }
         if (currentLineCount < maxLinesPerFile) {
           currentHunk.lines.push({
             type: "context",
@@ -661,35 +690,26 @@ export function parseDiffPatch(
       }
       if (line.length >= currentHunkPrefixLen) {
         const prefixCols = line.slice(0, currentHunkPrefixLen);
-        if (/^[+ -]+$/.test(prefixCols)) {
+        const hasPlus = prefixCols.includes("+");
+        const hasMinus = prefixCols.includes("-");
+        if (/^[+ -]+$/.test(prefixCols) && !(hasPlus && hasMinus)) {
           const bodyText = line.slice(currentHunkPrefixLen);
-          if (prefixCols.includes("+")) {
-            current.additions += 1;
-            totalAdditions += 1;
-            const lineNum = newCursor;
-            newCursor += 1;
-            newRemaining -= 1;
-            if (currentLineCount < maxLinesPerFile) {
-              currentHunk.lines.push({
-                type: "add",
-                oldLine: null,
-                newLine: lineNum,
-                text: bodyText,
-              });
-              currentLineCount += 1;
-            } else {
-              current.truncated = true;
+          if (hasMinus) {
+            for (let p = 0; p < currentHunkPrefixLen; p += 1) {
+              if (prefixCols[p] === "-") combinedParentRemaining[p] -= 1;
             }
-          } else if (prefixCols.includes("-")) {
+            const inFirstParent = prefixCols[0] === "-";
+            const oLine = inFirstParent ? oldCursor : null;
+            if (inFirstParent) {
+              oldCursor += 1;
+              oldRemaining -= 1;
+            }
             current.deletions += 1;
             totalDeletions += 1;
-            const lineNum = oldCursor;
-            oldCursor += 1;
-            if (prefixCols[0] === "-") oldRemaining -= 1;
             if (currentLineCount < maxLinesPerFile) {
               currentHunk.lines.push({
                 type: "del",
-                oldLine: lineNum,
+                oldLine: oLine,
                 newLine: null,
                 text: bodyText,
               });
@@ -698,13 +718,33 @@ export function parseDiffPatch(
               current.truncated = true;
             }
           } else {
-            const oLine = oldCursor;
+            for (let p = 0; p < currentHunkPrefixLen; p += 1) {
+              if (prefixCols[p] === " ") combinedParentRemaining[p] -= 1;
+            }
+            const inFirstParent = prefixCols[0] === " ";
+            const oLine = inFirstParent ? oldCursor : null;
+            if (inFirstParent) {
+              oldCursor += 1;
+              oldRemaining -= 1;
+            }
             const nLine = newCursor;
-            oldCursor += 1;
             newCursor += 1;
-            oldRemaining -= 1;
             newRemaining -= 1;
-            if (currentLineCount < maxLinesPerFile) {
+            if (!inFirstParent) {
+              current.additions += 1;
+              totalAdditions += 1;
+              if (currentLineCount < maxLinesPerFile) {
+                currentHunk.lines.push({
+                  type: "add",
+                  oldLine: null,
+                  newLine: nLine,
+                  text: bodyText,
+                });
+                currentLineCount += 1;
+              } else {
+                current.truncated = true;
+              }
+            } else if (currentLineCount < maxLinesPerFile) {
               currentHunk.lines.push({
                 type: "context",
                 oldLine: oLine,
@@ -721,6 +761,7 @@ export function parseDiffPatch(
       }
       currentHunk = null;
       currentHunkPrefixLen = 1;
+      combinedParentRemaining = [];
       continue;
     }
 

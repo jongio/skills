@@ -349,7 +349,8 @@ test("parseDiffPatch and normalizeCanonicalPath preserve trailing whitespace and
 });
 
 test("parseDiffPatch handles diff --cc combined blocks, headerless multi-file unified diffs, mid-hunk empty context lines, and noprefix a/b renames without losing or misattaching hunks", () => {
-  // 1. Combined/unmerged diff --cc after a normal diff --git file must not overwrite File 1's path or drop conflict hunks
+  // 1. Combined/unmerged diff --cc after a normal diff --git file must not overwrite File 1's path,
+  // drop conflict hunks, or miscalculate first-parent line numbers on mixed prefixes (' -' and ' +')
   const combinedAfterGitPatch = [
     "diff --git a/src/clean.ts b/src/clean.ts",
     "index 1111111..2222222 100644",
@@ -362,26 +363,68 @@ test("parseDiffPatch handles diff --cc combined blocks, headerless multi-file un
     "index 3333333,4444444..0000000",
     "--- a/src/conflict.ts",
     "+++ b/src/conflict.ts",
-    "@@@ -1,3 -1,3 +1,5 @@@ export function merge()",
-    "  const shared = true;",
-    "- const ours = 1;",
-    " -const theirs = 2;",
-    "++<<<<<<< HEAD",
-    " +const ours = 10;",
-    "++=======",
-    "+ const theirs = 20;",
-    "++>>>>>>> branch",
+    "@@@ -1,4 -1,4 +1,5 @@@ export function merge()",
+    "  const top = true;",
+    "- const p0OnlyDel = 1;",
+    " -const p1OnlyDel = 2;",
+    " +const keptFromP0 = 10;",
+    "+ const keptFromP1 = 20;",
+    "++const resolved = 30;",
+    "  const bottom = false;",
+    "diff --combined src/other-parent-del.ts",
+    "index 5555555,6666666..7777777",
+    "--- a/src/other-parent-del.ts",
+    "+++ b/src/other-parent-del.ts",
+    "@@@ -1,2 -1,3 +1,3 @@@",
+    "  top",
+    " -other-parent-only",
+    "++resolved",
+    "  bottom",
   ].join("\n");
 
   const combinedParsed = parseDiffPatch(combinedAfterGitPatch);
-  assert.equal(combinedParsed.files.length, 2);
+  assert.equal(combinedParsed.files.length, 3);
   assert.equal(combinedParsed.files[0].canonicalPath, "src/clean.ts");
   assert.equal(combinedParsed.files[0].hunks.length, 1);
   assert.equal(combinedParsed.files[0].hunks[0].lines[1].text, "export const clean = 2;");
+
   assert.equal(combinedParsed.files[1].canonicalPath, "src/conflict.ts");
   assert.equal(combinedParsed.files[1].hunks.length, 1);
-  assert.equal(combinedParsed.files[1].additions, 5);
+  assert.equal(combinedParsed.files[1].additions, 2);
   assert.equal(combinedParsed.files[1].deletions, 2);
+  assert.deepEqual(
+    combinedParsed.files[1].hunks[0].lines.map((l) => ({
+      type: l.type,
+      oldLine: l.oldLine,
+      newLine: l.newLine,
+      text: l.text,
+    })),
+    [
+      { type: "context", oldLine: 1, newLine: 1, text: "const top = true;" },
+      { type: "del", oldLine: 2, newLine: null, text: "const p0OnlyDel = 1;" },
+      { type: "del", oldLine: null, newLine: null, text: "const p1OnlyDel = 2;" },
+      { type: "context", oldLine: 3, newLine: 2, text: "const keptFromP0 = 10;" },
+      { type: "add", oldLine: null, newLine: 3, text: "const keptFromP1 = 20;" },
+      { type: "add", oldLine: null, newLine: 4, text: "const resolved = 30;" },
+      { type: "context", oldLine: 4, newLine: 5, text: "const bottom = false;" },
+    ],
+  );
+
+  assert.equal(combinedParsed.files[2].canonicalPath, "src/other-parent-del.ts");
+  assert.deepEqual(
+    combinedParsed.files[2].hunks[0].lines.map((l) => ({
+      type: l.type,
+      oldLine: l.oldLine,
+      newLine: l.newLine,
+      text: l.text,
+    })),
+    [
+      { type: "context", oldLine: 1, newLine: 1, text: "top" },
+      { type: "del", oldLine: null, newLine: null, text: "other-parent-only" },
+      { type: "add", oldLine: null, newLine: 2, text: "resolved" },
+      { type: "context", oldLine: 2, newLine: 3, text: "bottom" },
+    ],
+  );
 
   // 2. Plain multi-file unified diff without diff --git headers + active-hunk '--- '/'+++ ' content lines + blank context line
   const unifiedMultiPatch = [
