@@ -42,11 +42,12 @@ html, body, #app {
   display: flex;
   align-items: center;
   gap: 6px;
+  row-gap: 6px;
   padding: 6px 10px;
   background: var(--ck-bg-muted);
   border-bottom: 1px solid var(--ck-border);
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow-x: hidden;
   flex-shrink: 0;
 }
 
@@ -58,7 +59,7 @@ html, body, #app {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 0 1 auto;
+  flex: 1 1 180px;
   min-width: 0;
   margin-right: 2px;
 }
@@ -69,7 +70,17 @@ html, body, #app {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 210px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.dv-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+  min-width: 0;
 }
 
 .dv-stats {
@@ -84,8 +95,6 @@ html, body, #app {
 
 .dv-add { color: var(--ck-success); font-weight: var(--ck-fw-semibold); }
 .dv-del { color: var(--ck-danger); font-weight: var(--ck-fw-semibold); }
-
-.dv-spacer { flex: 1 1 8px; min-width: 4px; }
 
 .dv-search-wrap {
   position: relative;
@@ -143,6 +152,71 @@ html, body, #app {
 .dv-icon-btn {
   padding: 4px 8px;
   font-size: 12px;
+}
+
+.dv-refresh-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.dv-refresh-btn.dv-refresh-has-updates {
+  border-color: var(--ck-accent);
+  color: var(--ck-accent);
+}
+
+.dv-update-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ck-accent);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.dv-refresh-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.dv-update-banner {
+  margin: 8px 12px 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-color: color-mix(in srgb, var(--ck-accent) 45%, var(--ck-border));
+  background: color-mix(in srgb, var(--ck-accent) 10%, var(--ck-bg-muted));
+}
+
+.dv-update-banner-msg {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: var(--ck-fw-medium);
+}
+
+.dv-update-banner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.dv-autorefresh-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ck-muted);
+  cursor: pointer;
+  user-select: none;
 }
 
 .dv-error-banner,

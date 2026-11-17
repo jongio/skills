@@ -15,6 +15,7 @@ import {
   computeDomainIdForSource,
   loadDiff,
   normalizeDiffSource,
+  probeDiffContext,
   sanitizePublicErrorMessage,
 } from "./diff-loader.mjs";
 
@@ -170,24 +171,96 @@ export function findLineText(files, canonicalFile, side, lineNumber) {
   return { found: false, text: null };
 }
 
-export function computeDiffFingerprint(files) {
+export function computeFileFingerprint(file) {
+  if (!file || typeof file !== "object") return "";
   const hash = createHash("sha256");
-  for (const file of Array.isArray(files) ? files : []) {
-    hash.update(
-      `${file.canonicalPath || ""}\0${file.status || ""}\0${file.isBinary ? 1 : 0}\0${file.additions || 0}\0${file.deletions || 0}\n`,
-      "utf8",
-    );
-    for (const hunk of Array.isArray(file.hunks) ? file.hunks : []) {
-      hash.update(`${hunk.header || ""}\n`, "utf8");
-      for (const ln of Array.isArray(hunk.lines) ? hunk.lines : []) {
-        hash.update(
-          `${ln.type}:${ln.oldLine ?? ""}:${ln.newLine ?? ""}:${ln.text ?? ""}\n`,
-          "utf8",
-        );
-      }
+  hash.update(
+    `${file.canonicalPath || ""}\0${file.oldPath || ""}\0${file.newPath || ""}\0${file.status || ""}\0${file.isBinary ? 1 : 0}\0${file.truncated ? 1 : 0}\0${file.indexHeader || ""}\0${file.oldMode || ""}\0${file.newMode || ""}\0${file.additions || 0}\0${file.deletions || 0}\n`,
+    "utf8",
+  );
+  for (const hunk of Array.isArray(file.hunks) ? file.hunks : []) {
+    hash.update(`${hunk.header || ""}\n`, "utf8");
+    for (const ln of Array.isArray(hunk.lines) ? hunk.lines : []) {
+      hash.update(
+        `${ln.type}:${ln.oldLine ?? ""}:${ln.newLine ?? ""}:${ln.text ?? ""}\n`,
+        "utf8",
+      );
     }
   }
   return hash.digest("hex").slice(0, 16);
+}
+
+export function computeDiffFingerprint(files) {
+  const hash = createHash("sha256");
+  for (const file of Array.isArray(files) ? files : []) {
+    hash.update(`${file.canonicalPath || ""}:${computeFileFingerprint(file)}\n`, "utf8");
+  }
+  return hash.digest("hex").slice(0, 16);
+}
+
+function createFingerprintDictionary() {
+  return Object.create(null);
+}
+
+function normalizeViewedFingerprintMap(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const map = createFingerprintDictionary();
+  for (const [k, v] of Object.entries(raw)) {
+    const cleanKey = normalizeCanonicalPath(k);
+    if (cleanKey && typeof v === "string" && v.length > 0 && v.length <= 128) {
+      map[cleanKey] = v;
+    }
+  }
+  return map;
+}
+
+export function reconcileViewedFiles(viewedFiles, viewedFileFingerprints, files) {
+  const currentFingerprints = new Map();
+  for (const file of Array.isArray(files) ? files : []) {
+    if (file?.canonicalPath) {
+      currentFingerprints.set(file.canonicalPath, computeFileFingerprint(file));
+    }
+  }
+
+  const prevMap = normalizeViewedFingerprintMap(viewedFileFingerprints);
+  const nextViewedFiles = [];
+  const nextFingerprints = createFingerprintDictionary();
+  const invalidatedFiles = [];
+  const seen = new Set();
+
+  for (const rawPath of Array.isArray(viewedFiles) ? viewedFiles : []) {
+    const cleanPath = normalizeCanonicalPath(rawPath);
+    if (!cleanPath || seen.has(cleanPath)) continue;
+    seen.add(cleanPath);
+
+    const currentFp = currentFingerprints.get(cleanPath);
+    if (!currentFp) {
+      invalidatedFiles.push(cleanPath);
+      continue;
+    }
+
+    if (prevMap !== null) {
+      const recordedFp =
+        Object.hasOwn(prevMap, cleanPath) && typeof prevMap[cleanPath] === "string"
+          ? prevMap[cleanPath]
+          : null;
+      if (!recordedFp || recordedFp !== currentFp) {
+        invalidatedFiles.push(cleanPath);
+        continue;
+      }
+    }
+
+    nextViewedFiles.push(cleanPath);
+    nextFingerprints[cleanPath] = currentFp;
+  }
+
+  return {
+    viewedFiles: nextViewedFiles,
+    viewedFileFingerprints: nextFingerprints,
+    invalidatedFiles,
+  };
 }
 
 export function reconcileComments(comments, files) {
@@ -217,6 +290,7 @@ export function createEmptyDiffState(domain = "unconfigured", error = null) {
     loaded: false,
     diffRev: 0,
     diffFingerprint: null,
+    contextSignature: null,
     error,
     source: null,
     title: "Diff Viewer",
@@ -230,6 +304,7 @@ export function createEmptyDiffState(domain = "unconfigured", error = null) {
       deletions: 0,
     },
     viewedFiles: [],
+    viewedFileFingerprints: createFingerprintDictionary(),
     comments: [],
     files: [],
     truncatedFiles: false,
@@ -575,6 +650,9 @@ export function createDiffCanvasConfig({
           hasSaved && Array.isArray(saved.viewedFiles)
             ? saved.viewedFiles.map((p) => normalizeCanonicalPath(p)).filter(Boolean)
             : [];
+        const savedViewedFingerprints = hasSaved
+          ? normalizeViewedFingerprintMap(saved.viewedFileFingerprints)
+          : null;
         const savedComments =
           hasSaved && Array.isArray(saved.comments) ? saved.comments : [];
         const savedStatus =
@@ -640,6 +718,7 @@ export function createDiffCanvasConfig({
               loaded: false,
               diffRev: 0,
               diffFingerprint: savedFingerprint,
+              contextSignature: null,
               error: null,
               source: savedPublicSource,
               title: saved.title || "Diff Viewer",
@@ -648,6 +727,8 @@ export function createDiffCanvasConfig({
               status: savedStatus,
               stats: { fileCount: 0, totalFiles: 0, additions: 0, deletions: 0 },
               viewedFiles: savedViewed,
+              viewedFileFingerprints:
+                savedViewedFingerprints || createFingerprintDictionary(),
               comments: savedComments,
               files: [],
               truncatedFiles: false,
@@ -694,6 +775,11 @@ export function createDiffCanvasConfig({
           loadedDomainKeys.add(domainId);
           const diffFingerprint = computeDiffFingerprint(diff.files);
           const reconciled = reconcileComments(savedComments, diff.files);
+          const reconciledViewed = reconcileViewedFiles(
+            savedViewed,
+            savedViewedFingerprints,
+            diff.files,
+          );
           const nextStatus =
             savedStatus === "addressed" &&
             savedFingerprint &&
@@ -713,6 +799,7 @@ export function createDiffCanvasConfig({
             loaded: true,
             diffRev: 1,
             diffFingerprint,
+            contextSignature: diff.contextSignature || null,
             error: null,
             source: toPublicSource(storedSource),
             title: diff.title || (hasSaved ? saved.title : "") || "Diff Viewer",
@@ -720,7 +807,8 @@ export function createDiffCanvasConfig({
             branch: diff.branch || (hasSaved ? saved.branch : "") || "",
             status: nextStatus,
             stats: diff.stats,
-            viewedFiles: savedViewed,
+            viewedFiles: reconciledViewed.viewedFiles,
+            viewedFileFingerprints: reconciledViewed.viewedFileFingerprints,
             comments: reconciled,
             files: diff.files,
             truncatedFiles: Boolean(diff.truncatedFiles),
@@ -745,6 +833,7 @@ export function createDiffCanvasConfig({
               loaded: false,
               diffRev: 0,
               diffFingerprint: savedFingerprint,
+              contextSignature: null,
               error: sanitizePublicErrorMessage(err),
               source: savedPublicSource || toPublicSource(baselineSource),
               title: saved.title || "Diff Viewer",
@@ -753,6 +842,8 @@ export function createDiffCanvasConfig({
               status: savedStatus,
               stats: { fileCount: 0, totalFiles: 0, additions: 0, deletions: 0 },
               viewedFiles: savedViewed,
+              viewedFileFingerprints:
+                savedViewedFingerprints || createFingerprintDictionary(),
               comments: savedComments,
               files: [],
               truncatedFiles: false,
@@ -831,6 +922,9 @@ export function createDiffCanvasConfig({
         status: state.status || "draft",
         diffFingerprint: state.diffFingerprint || null,
         viewedFiles: Array.isArray(state.viewedFiles) ? state.viewedFiles : [],
+        viewedFileFingerprints:
+          normalizeViewedFingerprintMap(state.viewedFileFingerprints) ||
+          createFingerprintDictionary(),
         comments: Array.isArray(state.comments) ? state.comments : [],
         submittedAt: state.submittedAt || null,
         addressedAt: state.addressedAt || null,
@@ -846,9 +940,60 @@ export function createDiffCanvasConfig({
     },
 
     actions: {
+      check_updates: {
+        description:
+          "Probe the active Git checkout or GitHub PR metadata for context changes without reloading diff hunks or mutating state.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+        handler: async ({ state, ctx }) => {
+          const domainId = ctx?.domainId || state?.domain || "default";
+          const checkedAt = new Date().toISOString();
+          const fullSource =
+            pendingReopenSources.get(domainId) || domainSources.get(domainId) || null;
+          const sourceMode = fullSource?.mode || state?.source?.mode || null;
+          if (!fullSource || !state?.loaded || !state?.contextSignature) {
+            return {
+              ok: true,
+              changed: false,
+              sourceMode,
+              checkedAt,
+            };
+          }
+          try {
+            const probe = await probeDiffContext(fullSource, { execFn, env });
+            if (!probe?.contextSignature) {
+              return {
+                ok: true,
+                changed: false,
+                sourceMode,
+                checkedAt,
+              };
+            }
+            return {
+              ok: true,
+              changed: probe.contextSignature !== state.contextSignature,
+              contextSignature: probe.contextSignature,
+              sourceMode,
+              checkedAt,
+            };
+          } catch {
+            return {
+              ok: true,
+              changed: false,
+              sourceMode,
+              checkedAt,
+              transientError: true,
+            };
+          }
+        },
+      },
+
       refresh: {
         description:
-          "Reload the diff from Git or GitHub PR while preserving viewed files and reconciling stale flags on inline comments.",
+          "Reload the diff from Git or GitHub PR while preserving unchanged viewed files, unviewing modified files, and reconciling stale flags on inline comments.",
         inputSchema: {
           type: "object",
           properties: {},
@@ -873,13 +1018,29 @@ export function createDiffCanvasConfig({
             domainSources.set(domainId, storedSource);
             hydratedDomains.add(domainId);
             const nextFingerprint = computeDiffFingerprint(diff.files);
+            const nextContextSig = diff.contextSignature || null;
             const now = new Date().toISOString();
             let commentCount = 0;
             let nextStatus = "draft";
             let nextRev = 1;
+            let changed = false;
+            let invalidatedViewedFiles = [];
             set((cur) => {
               const reconciled = reconcileComments(cur.comments || [], diff.files);
+              const reconciledViewed = reconcileViewedFiles(
+                cur.viewedFiles,
+                cur.viewedFileFingerprints,
+                diff.files,
+              );
+              invalidatedViewedFiles = reconciledViewed.invalidatedFiles;
               commentCount = reconciled.length;
+              changed = Boolean(
+                !cur.loaded ||
+                  cur.diffFingerprint !== nextFingerprint ||
+                  (cur.contextSignature &&
+                    nextContextSig &&
+                    cur.contextSignature !== nextContextSig),
+              );
               const autoReopened =
                 cur.status === "addressed" &&
                 cur.diffFingerprint &&
@@ -891,6 +1052,7 @@ export function createDiffCanvasConfig({
                 loaded: true,
                 diffRev: nextRev,
                 diffFingerprint: nextFingerprint,
+                contextSignature: nextContextSig,
                 error: null,
                 source: toPublicSource(storedSource),
                 title: diff.title,
@@ -898,6 +1060,8 @@ export function createDiffCanvasConfig({
                 branch: diff.branch || cur.branch || "",
                 status: nextStatus,
                 stats: diff.stats,
+                viewedFiles: reconciledViewed.viewedFiles,
+                viewedFileFingerprints: reconciledViewed.viewedFileFingerprints,
                 comments: reconciled,
                 files: diff.files,
                 truncatedFiles: Boolean(diff.truncatedFiles),
@@ -908,10 +1072,12 @@ export function createDiffCanvasConfig({
             });
             return {
               ok: true,
+              changed,
               stats: diff.stats,
               commentCount,
               status: nextStatus,
               diffRev: nextRev,
+              invalidatedViewedFiles,
             };
           } catch (err) {
             const message = sanitizePublicErrorMessage(err);
@@ -970,27 +1136,45 @@ export function createDiffCanvasConfig({
             );
           }
           const normalizedFile = assertFileInDiff(state, input.file);
-          const viewedSet = new Set(
-            Array.isArray(state.viewedFiles) ? state.viewedFiles : [],
+          const targetFileObj = (state.files || []).find(
+            (f) => f.canonicalPath === normalizedFile,
           );
-          let viewed;
-          if (viewedSet.has(normalizedFile)) {
-            viewedSet.delete(normalizedFile);
-            viewed = false;
-          } else {
-            viewedSet.add(normalizedFile);
-            viewed = true;
-          }
-          const viewedFiles = [...viewedSet];
-          set((cur) => ({
-            ...cur,
-            viewedFiles,
-            updatedAt: new Date().toISOString(),
-          }));
+          const targetFp = targetFileObj ? computeFileFingerprint(targetFileObj) : "";
+          let viewed = false;
+          let viewedCount = 0;
+          set((cur) => {
+            const viewedSet = new Set(
+              Array.isArray(cur.viewedFiles) ? cur.viewedFiles : [],
+            );
+            const nextFingerprints = Object.assign(
+              createFingerprintDictionary(),
+              normalizeViewedFingerprintMap(cur.viewedFileFingerprints) ||
+                createFingerprintDictionary(),
+            );
+            if (viewedSet.has(normalizedFile)) {
+              viewedSet.delete(normalizedFile);
+              delete nextFingerprints[normalizedFile];
+              viewed = false;
+            } else {
+              viewedSet.add(normalizedFile);
+              if (targetFp) {
+                nextFingerprints[normalizedFile] = targetFp;
+              }
+              viewed = true;
+            }
+            const viewedFiles = [...viewedSet];
+            viewedCount = viewedFiles.length;
+            return {
+              ...cur,
+              viewedFiles,
+              viewedFileFingerprints: nextFingerprints,
+              updatedAt: new Date().toISOString(),
+            };
+          });
           return {
             file: normalizedFile,
             viewed,
-            viewedCount: viewedFiles.length,
+            viewedCount,
           };
         },
       },

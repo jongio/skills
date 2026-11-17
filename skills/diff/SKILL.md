@@ -40,10 +40,11 @@ Resolve `<skill-dir>` from this `SKILL.md` directory.
 2. To switch an existing `diff` panel to a different target (another PR, branch, or repository), call `open_canvas` again with the **same** `instanceId` and the new `input` so `canvas-kit` switches domain slots cleanly without overwriting the prior target's review state.
 3. Coordinate with the open panel via `invoke_canvas_action`:
    - `get_review`: inspect `{ title, branch, source, status, stats, viewedFiles, commentCount, comments }` (without echoing raw diff hunks).
-   - `refresh`: reload the current domain's Git or PR diff while preserving `viewedFiles`, updating `stale` flags on inline comments, and auto-reopening `addressed` reviews if the diff changed.
+   - `check_updates`: lightweight probe (`{ ok: true, changed, sourceMode, checkedAt }`) detecting Git working-tree/index/commit changes or GitHub PR head/base/state updates without reloading full diffs or mutating state.
+   - `refresh`: reload the current domain's Git or PR diff while preserving `viewedFiles` for unchanged files, automatically unmarking `Viewed` on files whose diff hunks changed, updating `stale` flags on inline comments, and auto-reopening `addressed` reviews if the diff changed.
    - `reopen_review`: start a new review round (`{ clearComments?: boolean }`) after an `addressed` round.
    - `focus_file`: scroll to `{ file, line? }`.
-4. Tell the user the loaded diff summary (`fileCount`, `+additions`, `-deletions`) and remind them to click **Submit Review** in the canvas toolbar when finished leaving inline comments.
+4. Tell the user the loaded diff summary (`fileCount`, `+additions`, `-deletions`) and remind them they can press **Refresh** (`R`) or enable **Auto-refresh** when context changes, and click **Submit Review** in the toolbar when finished leaving inline comments.
 
 #### Surface 2: Cross-harness CLI (`scripts/cli.mjs`)
 
@@ -79,5 +80,5 @@ Resolve `<skill-dir>` from this `SKILL.md` directory.
 ## Exit Criteria
 
 - `open_canvas({ canvasId: "diff", ... })` (in Copilot App) or `node "<skill-dir>/scripts/cli.mjs" serve` (in CLI harnesses) loads the requested local Git diff or GitHub pull request diff (`gh pr diff`) accurately, including blank `+`/`-` lines, renames, and uncommitted branch edits in default mode.
-- The viewer renders with Primer light and dark theming, Split/Unified toggle, Wrap toggle, file filter, collapsible file tree, auto-collapsed lockfiles/large files, `Viewed` checkboxes, inline line comments, and **Submit Review** agent handoff.
+- The viewer renders with Primer light and dark theming, responsive toolbar **Refresh** (`R` shortcut) with live context-change banner and draft-safe **Auto-refresh**, Split/Unified toggle, Wrap toggle, file filter, collapsible file tree, auto-collapsed lockfiles/large files, smart per-file `Viewed` checkboxes (auto-cleared when a file's hunks change), inline line comments, and **Submit Review** agent handoff.
 - Review triage reads comments via `get_review` (or `cli.mjs review`), flags `stale: true` anchors explicitly, verifies claims against repository code before editing, runs targeted validation, and marks the review `addressed` only when complete.

@@ -291,6 +291,9 @@ export function parseDiffPatch(
         displayPath: "",
         status: "modified",
         isBinary: false,
+        indexHeader: "",
+        oldMode: "",
+        newMode: "",
         language: "text",
         additions: 0,
         deletions: 0,
@@ -329,8 +332,16 @@ export function parseDiffPatch(
     if (!currentHunk) {
       if (line.startsWith("new file mode ")) {
         current.status = "added";
+        current.newMode = line.slice("new file mode ".length).trim();
       } else if (line.startsWith("deleted file mode ")) {
         current.status = "deleted";
+        current.oldMode = line.slice("deleted file mode ".length).trim();
+      } else if (line.startsWith("old mode ")) {
+        current.oldMode = line.slice("old mode ".length).trim();
+      } else if (line.startsWith("new mode ")) {
+        current.newMode = line.slice("new mode ".length).trim();
+      } else if (line.startsWith("index ")) {
+        current.indexHeader = line.slice("index ".length).trim();
       } else if (line.startsWith("rename from ")) {
         current.status = "renamed";
         current.renameFrom = unquoteGitHeaderPath(line.slice("rename from ".length));

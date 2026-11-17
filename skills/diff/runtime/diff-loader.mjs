@@ -816,7 +816,16 @@ async function buildUntrackedFilesPatch(
       const isBinary = slice.subarray(0, probeLen).includes(0);
 
       if (isBinary) {
-        chunk = `diff --git ${headerA} ${headerB}\nnew file mode 100644\nBinary files /dev/null and ${headerB} differ\n`;
+        const binaryDigest = createHash("sha256")
+          .update(`${lstat.size}:`)
+          .update(slice)
+          .digest("hex")
+          .slice(0, 12);
+        chunk =
+          `diff --git ${headerA} ${headerB}\n` +
+          `new file mode 100644\n` +
+          `index 0000000..${binaryDigest}\n` +
+          `Binary files /dev/null and ${headerB} differ\n`;
       } else {
         fileWasSizeTruncated = lstat.size > bytesRead;
         let text = slice.toString("utf8");
@@ -865,6 +874,503 @@ async function buildUntrackedFilesPatch(
   };
 }
 
+const PR_VIEW_JSON_FIELDS =
+  "number,title,headRefName,baseRefName,headRefOid,baseRefOid,state";
+const MAX_PROBE_WORKTREE_FILES = 400;
+const MAX_PROBE_HASH_TOTAL_BYTES = 4 * 1024 * 1024;
+
+function computePrContextSignature(source, meta) {
+  if (!meta || typeof meta !== "object") return null;
+  const hash = createHash("sha256");
+  hash.update(
+    JSON.stringify({
+      mode: "pr",
+      repo: source.repo || null,
+      pr: source.pr,
+      headRefOid: typeof meta.headRefOid === "string" ? meta.headRefOid : "",
+      baseRefOid: typeof meta.baseRefOid === "string" ? meta.baseRefOid : "",
+      state: typeof meta.state === "string" ? meta.state : "",
+      title: typeof meta.title === "string" ? meta.title.trim() : "",
+      headRefName: typeof meta.headRefName === "string" ? meta.headRefName : "",
+      baseRefName: typeof meta.baseRefName === "string" ? meta.baseRefName : "",
+      paths: Array.isArray(source.paths) ? source.paths : [],
+    }),
+    "utf8",
+  );
+  return hash.digest("hex").slice(0, 32);
+}
+
+function sliceAfterNthSpace(text, spaceCount) {
+  let idx = 0;
+  for (let n = 0; n < spaceCount; n += 1) {
+    const next = text.indexOf(" ", idx);
+    if (next < 0) return "";
+    idx = next + 1;
+  }
+  return text.slice(idx);
+}
+
+function extractWorktreeCandidatePathsFromPorcelainV2Z(rawStatus) {
+  if (!rawStatus) return [];
+  const tokens = rawStatus.split("\0");
+  const candidates = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const entry = tokens[i];
+    if (!entry) continue;
+    if (entry.startsWith("? ")) {
+      candidates.push(entry.slice(2));
+    } else if (entry.startsWith("1 ")) {
+      const xy = entry.slice(2, 4);
+      const rel = sliceAfterNthSpace(entry, 8);
+      if (xy[1] !== "." && rel) {
+        candidates.push(rel);
+      }
+    } else if (entry.startsWith("2 ")) {
+      const xy = entry.slice(2, 4);
+      const rel = sliceAfterNthSpace(entry, 9);
+      i += 1; // consume NUL-separated <origPath>
+      if (xy[1] !== "." && rel) {
+        candidates.push(rel);
+      }
+    } else if (entry.startsWith("u ")) {
+      const rel = sliceAfterNthSpace(entry, 10);
+      if (rel) {
+        candidates.push(rel);
+      }
+    }
+  }
+  return candidates;
+}
+
+function collectWorktreeFileStamps(repoRoot, rawCandidatePaths) {
+  if (!Array.isArray(rawCandidatePaths) || rawCandidatePaths.length === 0) {
+    return [];
+  }
+  let repoRootReal;
+  try {
+    repoRootReal = fs.realpathSync.native(repoRoot);
+  } catch {
+    repoRootReal = path.resolve(repoRoot);
+  }
+
+  const normalizedUnique = [
+    ...new Set(rawCandidatePaths.map((p) => normalizeCanonicalPath(p)).filter(Boolean)),
+  ].sort();
+
+  const stamps = [];
+  let hashedBytesTotal = 0;
+
+  for (let i = 0; i < normalizedUnique.length && i < MAX_PROBE_WORKTREE_FILES; i += 1) {
+    const relPath = normalizedUnique[i];
+    const absPath = path.resolve(repoRootReal, relPath);
+    if (!pathIsWithin(absPath, repoRootReal)) continue;
+
+    let lstat;
+    try {
+      lstat = fs.lstatSync(absPath);
+    } catch {
+      stamps.push(`${relPath}:missing`);
+      continue;
+    }
+    if (lstat.isSymbolicLink() || !lstat.isFile()) {
+      continue;
+    }
+    try {
+      const parentReal = fs.realpathSync.native(path.dirname(absPath));
+      if (!pathIsWithin(parentReal, repoRootReal)) continue;
+    } catch {
+      continue;
+    }
+
+    const size = lstat.size;
+    const mtimeTrunc = Math.trunc(lstat.mtimeMs);
+    let contentDigest = "";
+
+    if (
+      size > 0 &&
+      size <= MAX_UNTRACKED_FILE_BYTES &&
+      hashedBytesTotal + size <= MAX_PROBE_HASH_TOTAL_BYTES
+    ) {
+      let fd = null;
+      try {
+        const flags = (fs.constants.O_RDONLY ?? 0) | (fs.constants.O_NOFOLLOW ?? 0);
+        fd = fs.openSync(absPath, flags);
+        const buf = Buffer.allocUnsafe(size);
+        let bytesRead = 0;
+        while (bytesRead < size) {
+          const n = fs.readSync(fd, buf, bytesRead, size - bytesRead, bytesRead);
+          if (n <= 0) break;
+          bytesRead += n;
+        }
+        hashedBytesTotal += bytesRead;
+        contentDigest = createHash("sha256")
+          .update(buf.subarray(0, bytesRead))
+          .digest("hex")
+          .slice(0, 16);
+      } catch {
+        contentDigest = "unreadable";
+      } finally {
+        if (fd !== null) {
+          try {
+            fs.closeSync(fd);
+          } catch {
+            // Ignore close errors
+          }
+        }
+      }
+    }
+
+    stamps.push(`${relPath}:${size}:${mtimeTrunc}:${contentDigest}`);
+  }
+
+  return stamps;
+}
+
+async function computeGitContextSignature(execFn, repoRoot, parsedSpec, paths = []) {
+  const revParse = async (ref) =>
+    (
+      await tryExec(execFn, "git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+        cwd: repoRoot,
+      })
+    )?.trim() ?? null;
+  const mergeBase = async (a, b) =>
+    (await tryExec(execFn, "git", ["merge-base", a, b], { cwd: repoRoot }))?.trim() ?? null;
+
+  const branch =
+    (await tryExec(execFn, "git", ["branch", "--show-current"], { cwd: repoRoot }))?.trim() ||
+    "detached-head";
+  const pathTail = paths.length > 0 ? ["--", ...paths] : ["--"];
+
+  if (parsedSpec.kind === "two-dot" || parsedSpec.kind === "three-dot") {
+    const baseOid = await revParse(parsedSpec.baseRef);
+    if (!baseOid) {
+      throw new Error(`Unknown base revision: ${parsedSpec.baseRef}`);
+    }
+    const headOid = await revParse(parsedSpec.headRef);
+    if (!headOid) {
+      throw new Error(`Unknown head revision: ${parsedSpec.headRef}`);
+    }
+    const specExpr =
+      parsedSpec.kind === "two-dot"
+        ? `${parsedSpec.baseRef}..${parsedSpec.headRef}`
+        : `${parsedSpec.baseRef}...${parsedSpec.headRef}`;
+    let rawRangeScope = "";
+    if (paths.length > 0) {
+      rawRangeScope = await execFn(
+        "git",
+        [
+          "-c",
+          "core.quotepath=true",
+          "diff",
+          "--raw",
+          "--no-abbrev",
+          "--no-ext-diff",
+          "--no-color",
+          "--no-textconv",
+          specExpr,
+          "--",
+          ...paths,
+        ],
+        { cwd: repoRoot },
+      );
+    }
+    return createHash("sha256")
+      .update(
+        JSON.stringify(
+          paths.length > 0
+            ? {
+                mode: "git",
+                kind: parsedSpec.kind,
+                specExpr,
+                paths,
+                rawRangeScope,
+              }
+            : {
+                mode: "git",
+                kind: parsedSpec.kind,
+                specExpr,
+                baseOid,
+                headOid,
+                paths,
+              },
+        ),
+        "utf8",
+      )
+      .digest("hex")
+      .slice(0, 32);
+  }
+
+  if (parsedSpec.kind === "staged") {
+    const headOid = await revParse("HEAD");
+    const stagedRaw = headOid
+      ? await execFn(
+          "git",
+          [
+            "-c",
+            "core.quotepath=true",
+            "diff-index",
+            "--cached",
+            "--raw",
+            "--no-abbrev",
+            "--no-ext-diff",
+            "HEAD",
+            ...pathTail,
+          ],
+          { cwd: repoRoot },
+        )
+      : await execFn("git", ["ls-files", "--stage", "-z", ...pathTail], {
+          cwd: repoRoot,
+        });
+    return createHash("sha256")
+      .update(
+        JSON.stringify({
+          mode: "git",
+          kind: "staged",
+          branch,
+          headOid,
+          paths,
+          stagedRaw,
+        }),
+        "utf8",
+      )
+      .digest("hex")
+      .slice(0, 32);
+  }
+
+  const headOid = await revParse("HEAD");
+  let refMeta = null;
+  if (parsedSpec.kind === "ref") {
+    const resolvedRef = await revParse(parsedSpec.ref);
+    if (!resolvedRef) {
+      throw new Error(`Unknown revision: ${parsedSpec.ref}`);
+    }
+    const mbOid = headOid ? ((await mergeBase(parsedSpec.ref, "HEAD")) ?? resolvedRef) : resolvedRef;
+    refMeta = { ref: parsedSpec.ref, resolvedRef, mbOid };
+  } else if (parsedSpec.kind === "default") {
+    const defaultBranch = await resolveDefaultBranch(repoRoot, execFn);
+    const defaultOid = defaultBranch ? await revParse(defaultBranch) : null;
+    const mbOid = defaultBranch && headOid ? await mergeBase(defaultBranch, "HEAD") : null;
+    const prevOid = headOid ? await revParse("HEAD~1") : null;
+    refMeta = { defaultBranch, defaultOid, mbOid, prevOid };
+  }
+
+  const rawStatus = await execFn(
+    "git",
+    ["status", "--porcelain=v2", "-z", "--untracked-files=all", ...pathTail],
+    { cwd: repoRoot },
+  );
+  const candidatePaths = extractWorktreeCandidatePathsFromPorcelainV2Z(rawStatus);
+  const fileStamps = collectWorktreeFileStamps(repoRoot, candidatePaths);
+
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        mode: "git",
+        kind: parsedSpec.kind,
+        branch,
+        headOid,
+        refMeta,
+        paths,
+        rawStatus,
+        fileStamps,
+      }),
+      "utf8",
+    )
+    .digest("hex")
+    .slice(0, 32);
+}
+
+async function resolvePrExecutionTarget(source, execFn) {
+  let execCwd = os.tmpdir();
+  const repoArgs = [];
+  if (source.repo) {
+    repoArgs.push("--repo", source.repo);
+  } else if (source.cwd) {
+    assertSafeCheckoutDir(source.cwd);
+    let stat;
+    try {
+      stat = fs.statSync(source.cwd);
+    } catch {
+      throw new Error("Workspace directory does not exist");
+    }
+    if (!stat.isDirectory()) {
+      throw new Error("Workspace path is not a directory");
+    }
+    const top = (
+      await execFn("git", ["rev-parse", "--show-toplevel"], { cwd: source.cwd })
+    ).trim();
+    execCwd = assertSafeResolvedRepoRoot(path.resolve(top), source.cwd);
+  }
+  const untrustedRoots = source.cwd ? [source.cwd] : [];
+  const prNumText = String(source.pr);
+  const repoLabel = source.repo ? `${source.repo}#${source.pr}` : `PR #${source.pr}`;
+  return { execCwd, repoArgs, untrustedRoots, prNumText, repoLabel };
+}
+
+async function executePrWithAccountFallback(source, { execFn, env, execCwd, untrustedRoots, repoLabel }, runPrCommands) {
+  let resolvedAccount = null;
+  let result;
+  const explicitAccount = assertSafeGitHubAccount(source.account);
+  const preferredAccount =
+    !explicitAccount && !source.clearAccount
+      ? assertSafeGitHubAccount(source.preferredAccount)
+      : null;
+
+  if (explicitAccount) {
+    const token = await resolveExplicitAccountToken(explicitAccount, {
+      execFn,
+      execCwd,
+      untrustedRoots,
+      env,
+    });
+    try {
+      result = await runPrCommands(token);
+      resolvedAccount = explicitAccount;
+    } catch (err) {
+      if (isGhAuthOrNotFoundError(err)) {
+        throw new Error(
+          `Unable to load ${repoLabel} with GitHub account '${explicitAccount}': repository not found or account lacks access.`,
+        );
+      }
+      throw err;
+    }
+  } else {
+    let loadedViaPreferred = false;
+    if (preferredAccount) {
+      let prefToken = null;
+      try {
+        prefToken = await resolveExplicitAccountToken(preferredAccount, {
+          execFn,
+          execCwd,
+          untrustedRoots,
+          env,
+        });
+      } catch {
+        prefToken = null;
+      }
+      if (prefToken) {
+        try {
+          result = await runPrCommands(prefToken);
+          resolvedAccount = preferredAccount;
+          loadedViaPreferred = true;
+        } catch (prefErr) {
+          if (!isGhAuthOrNotFoundError(prefErr)) {
+            throw prefErr;
+          }
+        }
+      }
+    }
+
+    if (!loadedViaPreferred) {
+      try {
+        result = await runPrCommands(null);
+      } catch (primaryErr) {
+        if (!isGhAuthOrNotFoundError(primaryErr)) {
+          throw primaryErr;
+        }
+        const fallbackTokens = collectFallbackAccountTokens(env);
+        let recovered = false;
+        for (const candidateToken of fallbackTokens) {
+          try {
+            result = await runPrCommands(candidateToken);
+            recovered = true;
+            break;
+          } catch (retryErr) {
+            if (!isGhAuthOrNotFoundError(retryErr)) {
+              throw retryErr;
+            }
+          }
+        }
+        if (!recovered) {
+          const namedTarget = source.repo || repoLabel;
+          throw new Error(
+            `Unable to load ${repoLabel}: could not resolve '${namedTarget}' or authenticate with available GitHub accounts. Verify access via 'gh auth status' or pass 'account' in open_canvas input.`,
+          );
+        }
+      }
+    }
+  }
+
+  return { result, resolvedAccount };
+}
+
+export async function probeDiffContext(source, options = {}) {
+  if (!source) {
+    throw new Error("No diff source configured");
+  }
+  const execFn = options.execFn ?? defaultExec;
+  const env = options.env ?? process.env;
+
+  if (source.mode === "pr") {
+    const { execCwd, repoArgs, untrustedRoots, prNumText, repoLabel } =
+      await resolvePrExecutionTarget(source, execFn);
+    const { result: rawMeta, resolvedAccount } = await executePrWithAccountFallback(
+      source,
+      { execFn, env, execCwd, untrustedRoots, repoLabel },
+      async (tokenOverride) => {
+        const envOpt = tokenOverride
+          ? { env: { GH_HOST: "github.com", GH_TOKEN: tokenOverride } }
+          : {};
+        return execFn(
+          "gh",
+          ["pr", "view", prNumText, ...repoArgs, "--json", PR_VIEW_JSON_FIELDS],
+          {
+            cwd: execCwd,
+            untrustedRoots,
+            ...envOpt,
+          },
+        );
+      },
+    );
+    const meta = JSON.parse(rawMeta);
+    return {
+      source: {
+        mode: "pr",
+        repo: source.repo,
+        pr: source.pr,
+        ...(resolvedAccount ? { account: resolvedAccount } : {}),
+        cwd: source.cwd,
+        paths: [...(source.paths ?? [])],
+      },
+      contextSignature: computePrContextSignature(source, meta),
+    };
+  }
+
+  assertSafeCheckoutDir(source.cwd);
+  let cwdStat;
+  try {
+    cwdStat = fs.statSync(source.cwd);
+  } catch {
+    throw new Error("Target directory does not exist");
+  }
+  if (!cwdStat.isDirectory()) {
+    throw new Error("Target path is not a directory");
+  }
+
+  const repoRoot = assertSafeResolvedRepoRoot(
+    path.resolve(
+      (await execFn("git", ["rev-parse", "--show-toplevel"], { cwd: source.cwd })).trim(),
+    ),
+    source.cwd,
+  );
+  const parsedSpec = parseGitSpec(source.spec);
+  const paths = source.paths ?? [];
+  const contextSignature = await computeGitContextSignature(
+    execFn,
+    repoRoot,
+    parsedSpec,
+    paths,
+  );
+  return {
+    source: {
+      ...source,
+      cwd: repoRoot,
+      paths: [...paths],
+    },
+    contextSignature,
+  };
+}
+
 export async function loadDiff(source, options = {}) {
   if (!source) {
     throw new Error("No diff source configured");
@@ -873,145 +1379,39 @@ export async function loadDiff(source, options = {}) {
   const env = options.env ?? process.env;
 
   if (source.mode === "pr") {
-    let execCwd = os.tmpdir();
-    const repoArgs = [];
-    if (source.repo) {
-      repoArgs.push("--repo", source.repo);
-    } else if (source.cwd) {
-      assertSafeCheckoutDir(source.cwd);
-      let stat;
-      try {
-        stat = fs.statSync(source.cwd);
-      } catch {
-        throw new Error("Workspace directory does not exist");
-      }
-      if (!stat.isDirectory()) {
-        throw new Error("Workspace path is not a directory");
-      }
-      const top = (
-        await execFn("git", ["rev-parse", "--show-toplevel"], { cwd: source.cwd })
-      ).trim();
-      execCwd = assertSafeResolvedRepoRoot(path.resolve(top), source.cwd);
-    }
+    const { execCwd, repoArgs, untrustedRoots, prNumText, repoLabel } =
+      await resolvePrExecutionTarget(source, execFn);
 
-    const untrustedRoots = source.cwd ? [source.cwd] : [];
-    const prNumText = String(source.pr);
-    const repoLabel = source.repo ? `${source.repo}#${source.pr}` : `PR #${source.pr}`;
-
-    const runPrCommands = async (tokenOverride) => {
-      const envOpt = tokenOverride
-        ? { env: { GH_HOST: "github.com", GH_TOKEN: tokenOverride } }
-        : {};
-      return Promise.all([
-        execFn("gh", ["pr", "diff", prNumText, ...repoArgs, "--color", "never"], {
-          cwd: execCwd,
-          untrustedRoots,
-          maxBuffer: MAX_DIFF_BYTES,
-          ...envOpt,
-        }),
-        tryExec(
-          execFn,
-          "gh",
-          [
-            "pr",
-            "view",
-            prNumText,
-            ...repoArgs,
-            "--json",
-            "number,title,headRefName,baseRefName",
-          ],
-          {
+    const {
+      result: [rawPatch, rawMeta],
+      resolvedAccount,
+    } = await executePrWithAccountFallback(
+      source,
+      { execFn, env, execCwd, untrustedRoots, repoLabel },
+      async (tokenOverride) => {
+        const envOpt = tokenOverride
+          ? { env: { GH_HOST: "github.com", GH_TOKEN: tokenOverride } }
+          : {};
+        return Promise.all([
+          execFn("gh", ["pr", "diff", prNumText, ...repoArgs, "--color", "never"], {
             cwd: execCwd,
             untrustedRoots,
+            maxBuffer: MAX_DIFF_BYTES,
             ...envOpt,
-          },
-        ),
-      ]);
-    };
-
-    let rawPatch;
-    let rawMeta;
-    let resolvedAccount = null;
-    const explicitAccount = assertSafeGitHubAccount(source.account);
-    const preferredAccount =
-      !explicitAccount && !source.clearAccount
-        ? assertSafeGitHubAccount(source.preferredAccount)
-        : null;
-
-    if (explicitAccount) {
-      const token = await resolveExplicitAccountToken(explicitAccount, {
-        execFn,
-        execCwd,
-        untrustedRoots,
-        env,
-      });
-      try {
-        [rawPatch, rawMeta] = await runPrCommands(token);
-        resolvedAccount = explicitAccount;
-      } catch (err) {
-        if (isGhAuthOrNotFoundError(err)) {
-          throw new Error(
-            `Unable to load ${repoLabel} with GitHub account '${explicitAccount}': repository not found or account lacks access.`,
-          );
-        }
-        throw err;
-      }
-    } else {
-      let loadedViaPreferred = false;
-      if (preferredAccount) {
-        let prefToken = null;
-        try {
-          prefToken = await resolveExplicitAccountToken(preferredAccount, {
+          }),
+          tryExec(
             execFn,
-            execCwd,
-            untrustedRoots,
-            env,
-          });
-        } catch {
-          prefToken = null;
-        }
-        if (prefToken) {
-          try {
-            [rawPatch, rawMeta] = await runPrCommands(prefToken);
-            resolvedAccount = preferredAccount;
-            loadedViaPreferred = true;
-          } catch (prefErr) {
-            if (!isGhAuthOrNotFoundError(prefErr)) {
-              throw prefErr;
-            }
-          }
-        }
-      }
-
-      if (!loadedViaPreferred) {
-        try {
-          [rawPatch, rawMeta] = await runPrCommands(null);
-        } catch (primaryErr) {
-          if (!isGhAuthOrNotFoundError(primaryErr)) {
-            throw primaryErr;
-          }
-          const fallbackTokens = collectFallbackAccountTokens(env);
-          let recovered = false;
-          for (const candidateToken of fallbackTokens) {
-            try {
-              [rawPatch, rawMeta] = await runPrCommands(candidateToken);
-              recovered = true;
-              break;
-            } catch (retryErr) {
-              if (!isGhAuthOrNotFoundError(retryErr)) {
-                throw retryErr;
-              }
-            }
-          }
-          if (!recovered) {
-            const namedTarget = source.repo || repoLabel;
-            throw new Error(
-              `Unable to load ${repoLabel}: could not resolve '${namedTarget}' or authenticate with available GitHub accounts. Verify access via 'gh auth status' or pass 'account' in open_canvas input.`,
-            );
-          }
-        }
-      }
-    }
+            "gh",
+            ["pr", "view", prNumText, ...repoArgs, "--json", PR_VIEW_JSON_FIELDS],
+            {
+              cwd: execCwd,
+              untrustedRoots,
+              ...envOpt,
+            },
+          ),
+        ]);
+      },
+    );
 
     let meta = null;
     if (rawMeta) {
@@ -1026,6 +1426,7 @@ export async function loadDiff(source, options = {}) {
     const prTitle = typeof meta?.title === "string" && meta.title.trim() ? meta.title.trim() : "";
     const title = prTitle ? `${repoLabel} - ${prTitle}` : repoLabel;
     const branch = typeof meta?.headRefName === "string" ? meta.headRefName : "";
+    const contextSignature = computePrContextSignature(source, meta);
 
     return {
       source: {
@@ -1039,6 +1440,7 @@ export async function loadDiff(source, options = {}) {
       diffSpec: repoLabel,
       title,
       branch,
+      contextSignature,
       files: parsed.files,
       truncatedFiles: Boolean(parsed.truncatedFiles),
       stats: {
@@ -1216,6 +1618,17 @@ export async function loadDiff(source, options = {}) {
   }
   const truncatedFiles = Boolean(parsed.truncatedFiles || untrackedMeta.truncatedFiles);
   const totalFiles = (parsed.totalFiles ?? parsed.fileCount) + untrackedMeta.skippedFiles;
+  let contextSignature = null;
+  try {
+    contextSignature = await computeGitContextSignature(
+      execFn,
+      repoRoot,
+      parsedSpec,
+      paths,
+    );
+  } catch {
+    contextSignature = null;
+  }
 
   return {
     source: {
@@ -1226,6 +1639,7 @@ export async function loadDiff(source, options = {}) {
     diffSpec: source.spec || title,
     title,
     branch,
+    contextSignature,
     files: parsed.files,
     truncatedFiles,
     stats: {

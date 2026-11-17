@@ -4,6 +4,7 @@ import {
   mountCanvas,
   useState,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useCallback,
@@ -17,6 +18,18 @@ import {
 } from "./diff-view-model.mjs";
 
 const EMPTY_ARRAY = Object.freeze([]);
+
+function createNullMap() {
+  return Object.create(null);
+}
+
+function cloneNullMap(src) {
+  return Object.assign(Object.create(null), src || null);
+}
+
+function hasOwnKey(obj, key) {
+  return Boolean(obj && Object.prototype.hasOwnProperty.call(obj, key));
+}
 
 function statusBadgeMeta(status) {
   if (status === "pending") {
@@ -105,7 +118,8 @@ function FileTreeNodes({
       ${nodes.map((node) => {
         const padLeft = `${8 + depth * 14}px`;
         if (node.kind === "dir") {
-          const isCollapsed = Boolean(collapsedDirs[node.path]);
+          const isCollapsed =
+            hasOwnKey(collapsedDirs, node.path) && Boolean(collapsedDirs[node.path]);
           return html`
             <li key=${`dir:${node.path}`}>
               <button
@@ -234,7 +248,14 @@ function CommentComposer({ activeComposer, onSaveComment, onCancelComposer, busy
   `;
 }
 
-function CommentCard({ comment, canEditComments, busyAction, onEditComment, onDeleteComment }) {
+function CommentCard({
+  comment,
+  canEditComments,
+  busyAction,
+  onEditComment,
+  onDeleteComment,
+  onEditOpenChange,
+}) {
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(comment.body || "");
 
@@ -243,6 +264,18 @@ function CommentCard({ comment, canEditComments, busyAction, onEditComment, onDe
       setEditDraft(comment.body || "");
     }
   }, [comment.body, editing]);
+
+  useEffect(() => {
+    if (!canEditComments && editing) {
+      setEditing(false);
+    }
+  }, [canEditComments, editing]);
+
+  useEffect(() => {
+    if (!editing || typeof onEditOpenChange !== "function") return undefined;
+    onEditOpenChange(1);
+    return () => onEditOpenChange(-1);
+  }, [editing, onEditOpenChange]);
 
   const trimmed = editDraft.trim();
   const saveEdit = async () => {
@@ -350,6 +383,7 @@ function ThreadRows({
   onCancelComposer,
   onEditComment,
   onDeleteComment,
+  onEditOpenChange,
   canEditComments,
   busyAction,
 }) {
@@ -367,6 +401,7 @@ function ThreadRows({
               busyAction=${busyAction}
               onEditComment=${onEditComment}
               onDeleteComment=${onDeleteComment}
+              onEditOpenChange=${onEditOpenChange}
             />
           `,
         )}
@@ -406,6 +441,7 @@ function FileDiffCardInner({
   onCancelComposer,
   onEditComment,
   onDeleteComment,
+  onEditOpenChange,
   busyAction,
 }) {
   const canonical = file.canonicalPath || "";
@@ -507,6 +543,7 @@ function FileDiffCardInner({
                     busyAction=${busyAction}
                     onEditComment=${onEditComment}
                     onDeleteComment=${onDeleteComment}
+                    onEditOpenChange=${onEditOpenChange}
                   />
                 `,
               )}
@@ -671,6 +708,7 @@ function FileDiffCardInner({
                                     onCancelComposer=${onCancelComposer}
                                     onEditComment=${onEditComment}
                                     onDeleteComment=${onDeleteComment}
+                                    onEditOpenChange=${onEditOpenChange}
                                     canEditComments=${canEditComments}
                                     busyAction=${busyAction}
                                   />
@@ -795,6 +833,7 @@ function FileDiffCardInner({
                                     onCancelComposer=${onCancelComposer}
                                     onEditComment=${onEditComment}
                                     onDeleteComment=${onDeleteComment}
+                                    onEditOpenChange=${onEditOpenChange}
                                     canEditComments=${canEditComments}
                                     busyAction=${busyAction}
                                   />
@@ -887,15 +926,35 @@ export function DiffCanvasApp({ state, invoke }) {
   const [splitLeftPct, setSplitLeftPct] = useState(50);
   const [fileQuery, setFileQuery] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
-  const [collapsedDirs, setCollapsedDirs] = useState({});
-  const [collapsedFiles, setCollapsedFiles] = useState({});
+  const [collapsedDirs, setCollapsedDirs] = useState(() => createNullMap());
+  const [collapsedFiles, setCollapsedFiles] = useState(() => createNullMap());
   const [activeComposer, setActiveComposer] = useState(null);
+  const [activeEditCount, setActiveEditCount] = useState(0);
   const [actionError, setActionError] = useState(null);
   const [manualHandoffNeeded, setManualHandoffNeeded] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasContextUpdates, setHasContextUpdates] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [refreshFeedback, setRefreshFeedback] = useState(null);
 
   const mainPaneRef = useRef(null);
   const activeDragCleanupRef = useRef(null);
+  const refreshInFlightRef = useRef(false);
+  const probeInFlightRef = useRef(false);
+  const probeEpochRef = useRef(0);
+  const pendingScrollRestoreRef = useRef(null);
+  const refreshToastTimerRef = useRef(null);
+  const invokeRef = useRef(invoke);
+  invokeRef.current = invoke;
+  const busyActionRef = useRef(busyAction);
+  busyActionRef.current = busyAction;
+  const domainRef = useRef(state?.domain ?? null);
+  domainRef.current = state?.domain ?? null;
+  const diffRevRef = useRef(typeof state?.diffRev === "number" ? state.diffRev : 0);
+  diffRevRef.current = typeof state?.diffRev === "number" ? state.diffRev : 0;
+  const contextSigRef = useRef(state?.contextSignature || null);
+  contextSigRef.current = state?.contextSignature || null;
   const sidebarWidthRef = useRef(sidebarWidth);
   sidebarWidthRef.current = sidebarWidth;
   const splitLeftPctRef = useRef(splitLeftPct);
@@ -982,9 +1041,14 @@ export function DiffCanvasApp({ state, invoke }) {
 
   const scrollToFile = useCallback((canonicalPath, line = null) => {
     setSelectedFile(canonicalPath);
-    setCollapsedFiles((prev) =>
-      prev[canonicalPath] === false ? prev : { ...prev, [canonicalPath]: false },
-    );
+    setCollapsedFiles((prev) => {
+      if (hasOwnKey(prev, canonicalPath) && prev[canonicalPath] === false) {
+        return prev;
+      }
+      const next = cloneNullMap(prev);
+      next[canonicalPath] = false;
+      return next;
+    });
     const schedule =
       typeof requestAnimationFrame === "function"
         ? requestAnimationFrame
@@ -1022,15 +1086,89 @@ export function DiffCanvasApp({ state, invoke }) {
   useEffect(() => {
     if (prevDomainRef.current !== state?.domain) {
       prevDomainRef.current = state?.domain;
-      setCollapsedFiles({});
-      setCollapsedDirs({});
+      probeEpochRef.current += 1;
+      pendingScrollRestoreRef.current = null;
+      setCollapsedFiles(createNullMap());
+      setCollapsedDirs(createNullMap());
       setFileQuery("");
       setActionError(null);
       setManualHandoffNeeded(false);
       setSelectedFile(null);
       setActiveComposer(null);
+      setHasContextUpdates(false);
+      setRefreshFeedback(null);
+      if (refreshToastTimerRef.current) {
+        clearTimeout(refreshToastTimerRef.current);
+        refreshToastTimerRef.current = null;
+      }
     }
   }, [state?.domain]);
+
+  useEffect(() => {
+    probeEpochRef.current += 1;
+    setHasContextUpdates(false);
+  }, [state?.domain, state?.diffRev, state?.contextSignature]);
+
+  useLayoutEffect(() => {
+    const pending = pendingScrollRestoreRef.current;
+    if (!pending) return;
+    if (pending.domain !== currentDomain) {
+      pendingScrollRestoreRef.current = null;
+      return;
+    }
+    if (currentDiffRev > pending.prevRev) {
+      pendingScrollRestoreRef.current = null;
+      if (mainPaneRef.current) {
+        mainPaneRef.current.scrollTop = pending.scrollTop;
+      }
+    }
+  }, [currentDomain, currentDiffRev]);
+
+  const prevViewedSnapshotRef = useRef({
+    domain: null,
+    diffRev: 0,
+    viewedSet: new Set(),
+  });
+  useEffect(() => {
+    const prevSnap = prevViewedSnapshotRef.current;
+    if (prevSnap.domain !== currentDomain) {
+      prevViewedSnapshotRef.current = {
+        domain: currentDomain,
+        diffRev: currentDiffRev,
+        viewedSet,
+      };
+      return;
+    }
+    if (currentDiffRev > prevSnap.diffRev && prevSnap.viewedSet.size > 0) {
+      const unviewedOnRefresh = files.filter(
+        (f) =>
+          f.canonicalPath &&
+          prevSnap.viewedSet.has(f.canonicalPath) &&
+          !viewedSet.has(f.canonicalPath),
+      );
+      if (unviewedOnRefresh.length > 0) {
+        setCollapsedFiles((prev) => {
+          let next = null;
+          for (const f of unviewedOnRefresh) {
+            const p = f.canonicalPath;
+            if (!p || !hasOwnKey(prev, p) || prev[p] !== true) continue;
+            if (!next) next = cloneNullMap(prev);
+            if (getAutoCollapseReason(f)) {
+              delete next[p];
+            } else {
+              next[p] = false;
+            }
+          }
+          return next || prev;
+        });
+      }
+    }
+    prevViewedSnapshotRef.current = {
+      domain: currentDomain,
+      diffRev: currentDiffRev,
+      viewedSet,
+    };
+  }, [currentDomain, currentDiffRev, viewedSet, files]);
 
   useEffect(() => {
     if (state?.status && state.status !== "pending") {
@@ -1047,6 +1185,10 @@ export function DiffCanvasApp({ state, invoke }) {
   useEffect(
     () => () => {
       activeDragCleanupRef.current?.();
+      if (refreshToastTimerRef.current) {
+        clearTimeout(refreshToastTimerRef.current);
+        refreshToastTimerRef.current = null;
+      }
     },
     [],
   );
@@ -1126,7 +1268,221 @@ export function DiffCanvasApp({ state, invoke }) {
   );
 
   const handleToggleCollapse = useCallback((key, nextCollapsed) => {
-    setCollapsedFiles((prev) => ({ ...prev, [key]: Boolean(nextCollapsed) }));
+    setCollapsedFiles((prev) => {
+      const val = Boolean(nextCollapsed);
+      if (hasOwnKey(prev, key) && prev[key] === val) return prev;
+      const next = cloneNullMap(prev);
+      next[key] = val;
+      return next;
+    });
+  }, []);
+
+  const handleCommentEditOpenChange = useCallback((delta) => {
+    setActiveEditCount((n) => Math.max(0, n + delta));
+  }, []);
+
+  const handleRefresh = useCallback(async ({ manual = false } = {}) => {
+    if (refreshInFlightRef.current || busyActionRef.current) return null;
+    const startDomain = domainRef.current;
+    const startRev = diffRevRef.current;
+    const savedScrollTop = mainPaneRef.current
+      ? mainPaneRef.current.scrollTop
+      : null;
+    if (savedScrollTop !== null) {
+      pendingScrollRestoreRef.current = {
+        domain: startDomain,
+        scrollTop: savedScrollTop,
+        prevRev: startRev,
+      };
+    }
+    probeEpochRef.current += 1;
+    refreshInFlightRef.current = true;
+    setIsRefreshing(true);
+    if (manual) {
+      setActionError(null);
+    }
+    try {
+      const res = await invokeRef.current("refresh", {});
+      if (domainRef.current !== startDomain) {
+        if (pendingScrollRestoreRef.current?.domain === startDomain) {
+          pendingScrollRestoreRef.current = null;
+        }
+        return res;
+      }
+      if (res && res.ok === false) {
+        if (pendingScrollRestoreRef.current?.domain === startDomain) {
+          pendingScrollRestoreRef.current = null;
+        }
+        if (manual && res.error) {
+          setActionError(String(res.error));
+        }
+        return res;
+      }
+      probeEpochRef.current += 1;
+      setHasContextUpdates(false);
+      if (savedScrollTop !== null) {
+        const schedule =
+          typeof requestAnimationFrame === "function"
+            ? requestAnimationFrame
+            : (fn) => setTimeout(fn, 0);
+        schedule(() => {
+          const pending = pendingScrollRestoreRef.current;
+          if (pending && pending.domain === startDomain) {
+            pendingScrollRestoreRef.current = null;
+            if (mainPaneRef.current) {
+              mainPaneRef.current.scrollTop = savedScrollTop;
+            }
+          }
+        });
+      }
+      if (manual) {
+        const msg = res?.changed ? "Diff updated" : "Already up to date";
+        setRefreshFeedback(msg);
+        if (refreshToastTimerRef.current) {
+          clearTimeout(refreshToastTimerRef.current);
+        }
+        const toastTimer = setTimeout(() => {
+          refreshToastTimerRef.current = null;
+          setRefreshFeedback(null);
+        }, 2500);
+        if (typeof toastTimer === "object" && typeof toastTimer?.unref === "function") {
+          toastTimer.unref();
+        }
+        refreshToastTimerRef.current = toastTimer;
+      }
+      return res;
+    } catch (err) {
+      if (pendingScrollRestoreRef.current?.domain === startDomain) {
+        pendingScrollRestoreRef.current = null;
+      }
+      if (manual && domainRef.current === startDomain) {
+        setActionError(String(err?.message ?? err));
+      }
+      return null;
+    } finally {
+      refreshInFlightRef.current = false;
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  const handleRefreshRef = useRef(handleRefresh);
+  handleRefreshRef.current = handleRefresh;
+
+  useEffect(() => {
+    if (!state?.loaded || !state?.source?.mode) return undefined;
+    const pollMs = state.source.mode === "pr" ? 20_000 : 5_000;
+    let disposed = false;
+
+    const runProbe = async () => {
+      if (disposed || refreshInFlightRef.current || probeInFlightRef.current) {
+        return;
+      }
+      if (typeof document !== "undefined" && document.hidden) {
+        return;
+      }
+      const startEpoch = probeEpochRef.current;
+      probeInFlightRef.current = true;
+      try {
+        const res = await invokeRef.current("check_updates", {});
+        if (
+          disposed ||
+          refreshInFlightRef.current ||
+          probeEpochRef.current !== startEpoch ||
+          res?.transientError
+        ) {
+          return;
+        }
+        if (res?.contextSignature && contextSigRef.current) {
+          setHasContextUpdates(res.contextSignature !== contextSigRef.current);
+        } else if (typeof res?.changed === "boolean") {
+          setHasContextUpdates(res.changed);
+        }
+      } catch {
+        // Ignore transient probe errors
+      } finally {
+        probeInFlightRef.current = false;
+      }
+    };
+
+    const timerId = setInterval(runProbe, pollMs);
+    if (typeof timerId === "object" && typeof timerId?.unref === "function") {
+      timerId.unref();
+    }
+    const onFocus = () => {
+      runProbe();
+    };
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        runProbe();
+      }
+    };
+
+    if (typeof window !== "undefined" && window.addEventListener) {
+      window.addEventListener("focus", onFocus);
+    }
+    if (typeof document !== "undefined" && document.addEventListener) {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+
+    return () => {
+      disposed = true;
+      clearInterval(timerId);
+      if (typeof window !== "undefined" && window.removeEventListener) {
+        window.removeEventListener("focus", onFocus);
+      }
+      if (typeof document !== "undefined" && document.removeEventListener) {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+    };
+  }, [state?.loaded, state?.domain, state?.source?.mode]);
+
+  const hasActiveDraft = activeComposer !== null || activeEditCount > 0;
+
+  useEffect(() => {
+    if (
+      hasContextUpdates &&
+      autoRefresh &&
+      !hasActiveDraft &&
+      !isRefreshing &&
+      !busyAction
+    ) {
+      handleRefresh({ manual: false });
+    }
+  }, [hasContextUpdates, autoRefresh, hasActiveDraft, isRefreshing, busyAction, handleRefresh]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.addEventListener) return undefined;
+    const isEditableElement = (el) => {
+      if (!el || typeof el !== "object") return false;
+      const tag = String(el.tagName || el.localName || el.nodeName || "").toUpperCase();
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+        return true;
+      }
+      if (el.isContentEditable) return true;
+      if (typeof el.getAttribute === "function") {
+        const ce = el.getAttribute("contenteditable");
+        if (ce === "" || ce === "true") return true;
+      }
+      if (typeof el.closest === "function") {
+        if (el.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']")) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const onKeyDown = (e) => {
+      if (!e || e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (busyActionRef.current || refreshInFlightRef.current) return;
+      if (String(e.key || "").toLowerCase() !== "r") return;
+      if (isEditableElement(e.target)) return;
+      if (typeof document !== "undefined" && isEditableElement(document.activeElement)) {
+        return;
+      }
+      e.preventDefault();
+      handleRefreshRef.current({ manual: true });
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   const handleToggleViewed = useCallback(
@@ -1135,13 +1491,15 @@ export function DiffCanvasApp({ state, invoke }) {
       if (!res) return;
       const targetFile = files.find((f) => f.canonicalPath === filePath) || null;
       setCollapsedFiles((prev) => {
-        if (nextViewed) {
-          return prev[filePath] === true ? prev : { ...prev, [filePath]: true };
+        const wantCollapsed = Boolean(
+          nextViewed || (targetFile && getAutoCollapseReason(targetFile)),
+        );
+        if (hasOwnKey(prev, filePath) && prev[filePath] === wantCollapsed) {
+          return prev;
         }
-        if (targetFile && getAutoCollapseReason(targetFile)) {
-          return prev[filePath] === true ? prev : { ...prev, [filePath]: true };
-        }
-        return prev[filePath] === false ? prev : { ...prev, [filePath]: false };
+        const next = cloneNullMap(prev);
+        next[filePath] = wantCollapsed;
+        return next;
       });
     },
     [files, runAction],
@@ -1218,10 +1576,7 @@ export function DiffCanvasApp({ state, invoke }) {
       const canonical = file.canonicalPath || "";
       const collapseKey = canonical || String(file.index);
       const autoCollapseReason = getAutoCollapseReason(file);
-      const hasExplicitCollapse = Object.prototype.hasOwnProperty.call(
-        collapsedFiles,
-        collapseKey,
-      );
+      const hasExplicitCollapse = hasOwnKey(collapsedFiles, collapseKey);
       const targetedByFocus = Boolean(
         canonical && (selectedFile === canonical || state?.focusedFile === canonical),
       );
@@ -1243,7 +1598,7 @@ export function DiffCanvasApp({ state, invoke }) {
   const handleToggleAllFiles = useCallback(() => {
     const nextCollapsed = allFilteredExpanded;
     setCollapsedFiles((prev) => {
-      const next = { ...prev };
+      const next = cloneNullMap(prev);
       for (const f of filteredFiles) {
         const key = f.canonicalPath || String(f.index);
         next[key] = nextCollapsed;
@@ -1264,12 +1619,26 @@ export function DiffCanvasApp({ state, invoke }) {
   }
 
   if (!state.loaded) {
+    const unloadedRetryLabel = state.error ? "Retry" : "Refresh";
     return html`
       <div class="dv-shell">
         <header class="dv-toolbar">
           <div class="dv-title-group">
             <${Icon} name="git-compare-arrows" size=${16} />
             <span class="dv-title">Diff Viewer</span>
+          </div>
+          <div class="dv-toolbar-actions">
+            <button
+              type="button"
+              class="ck-btn dv-refresh-btn"
+              title="Refresh diff from current context (R)"
+              aria-label=${`${unloadedRetryLabel} diff`}
+              disabled=${busyAction || isRefreshing}
+              onClick=${() => handleRefresh({ manual: true })}
+            >
+              <${Icon} name="refresh-cw" size=${14} class=${isRefreshing ? "ck-spinner" : ""} />
+              <span>${unloadedRetryLabel}</span>
+            </button>
           </div>
         </header>
         <div class="dv-empty-wrap">
@@ -1283,14 +1652,25 @@ export function DiffCanvasApp({ state, invoke }) {
               <span class="ck-mono">spec</span>) or target a GitHub pull request directly
               (<span class="ck-mono">repo</span>, <span class="ck-mono">pr</span>).
             </p>
-            ${state.error
+            ${state.error || actionError
               ? html`
                   <div class="ck-callout ck-error">
                     <${Icon} name="circle-x" size=${16} />
-                    <span>${state.error}</span>
+                    <span>${state.error || actionError}</span>
                   </div>
                 `
               : null}
+            <div class="ck-row">
+              <button
+                type="button"
+                class="ck-btn ck-btn-primary dv-unloaded-retry-btn"
+                disabled=${busyAction || isRefreshing}
+                onClick=${() => handleRefresh({ manual: true })}
+              >
+                <${Icon} name="refresh-cw" size=${14} class=${isRefreshing ? "ck-spinner" : ""} />
+                <span>${unloadedRetryLabel}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1337,95 +1717,145 @@ export function DiffCanvasApp({ state, invoke }) {
             `
           : null}
 
-        <div class="dv-spacer"></div>
+        <div class="dv-toolbar-actions">
+          <div class="dv-search-wrap">
+            <span class="dv-search-icon"><${Icon} name="search" size=${12} /></span>
+            <input
+              type="search"
+              class="ck-input dv-search-input"
+              placeholder="Filter files..."
+              aria-label="Filter changed files"
+              value=${fileQuery}
+              onInput=${(e) => setFileQuery(e.currentTarget.value)}
+            />
+          </div>
 
-        <div class="dv-search-wrap">
-          <span class="dv-search-icon"><${Icon} name="search" size=${12} /></span>
-          <input
-            type="search"
-            class="ck-input dv-search-input"
-            placeholder="Filter files..."
-            aria-label="Filter changed files"
-            value=${fileQuery}
-            onInput=${(e) => setFileQuery(e.currentTarget.value)}
-          />
+          <div class="dv-seg" role="group" aria-label="Diff layout">
+            <button
+              type="button"
+              aria-pressed=${viewMode === "split"}
+              class=${`dv-seg-btn${viewMode === "split" ? " active" : ""}`}
+              onClick=${() => setViewMode("split")}
+            >
+              <${Icon} name="columns-2" size=${14} />
+              Split
+            </button>
+            <button
+              type="button"
+              aria-pressed=${viewMode === "unified"}
+              class=${`dv-seg-btn${viewMode === "unified" ? " active" : ""}`}
+              onClick=${() => setViewMode("unified")}
+            >
+              <${Icon} name="rows-2" size=${14} />
+              Unified
+            </button>
+          </div>
+
+          <div class="dv-seg" role="group" aria-label="Line wrapping">
+            <button
+              type="button"
+              aria-pressed=${!wrapLines}
+              class=${`dv-seg-btn${!wrapLines ? " active" : ""}`}
+              onClick=${() => setWrapLines(false)}
+            >
+              No wrap
+            </button>
+            <button
+              type="button"
+              aria-pressed=${wrapLines}
+              class=${`dv-seg-btn${wrapLines ? " active" : ""}`}
+              onClick=${() => setWrapLines(true)}
+            >
+              <${Icon} name="wrap-text" size=${14} />
+              Wrap
+            </button>
+          </div>
+
+          ${refreshFeedback
+            ? html`
+                <span class="ck-badge ck-badge-muted dv-refresh-toast" role="status">
+                  <${Icon} name="check" size=${12} />
+                  ${refreshFeedback}
+                </span>
+              `
+            : null}
+
+          <button
+            type="button"
+            class=${`ck-btn dv-refresh-btn${hasContextUpdates ? " dv-refresh-has-updates" : ""}`}
+            title="Refresh diff from current context (R)"
+            aria-label="Refresh diff"
+            disabled=${busyAction || isRefreshing}
+            onClick=${() => handleRefresh({ manual: true })}
+          >
+            <${Icon} name="refresh-cw" size=${14} class=${isRefreshing ? "ck-spinner" : ""} />
+            <span>Refresh</span>
+            ${hasContextUpdates
+              ? html`<span class="dv-update-dot" aria-hidden="true"></span>`
+              : null}
+          </button>
+
+          ${state.status === "addressed"
+            ? html`
+                <button
+                  type="button"
+                  class="ck-btn"
+                  disabled=${busyAction || isRefreshing}
+                  onClick=${handleReopenReview}
+                >
+                  <${Icon} name="refresh-cw" size=${14} />
+                  New Review Round
+                </button>
+              `
+            : html`
+                <button
+                  type="button"
+                  class="ck-btn ck-btn-primary"
+                  disabled=${busyAction || isRefreshing}
+                  onClick=${handleSubmitReview}
+                >
+                  <${Icon} name="circle-check" size=${14} />
+                  ${state.status === "pending" ? "Resubmit Review" : "Submit Review"}
+                </button>
+              `}
         </div>
-
-        <div class="dv-seg" role="group" aria-label="Diff layout">
-          <button
-            type="button"
-            aria-pressed=${viewMode === "split"}
-            class=${`dv-seg-btn${viewMode === "split" ? " active" : ""}`}
-            onClick=${() => setViewMode("split")}
-          >
-            <${Icon} name="columns-2" size=${14} />
-            Split
-          </button>
-          <button
-            type="button"
-            aria-pressed=${viewMode === "unified"}
-            class=${`dv-seg-btn${viewMode === "unified" ? " active" : ""}`}
-            onClick=${() => setViewMode("unified")}
-          >
-            <${Icon} name="rows-2" size=${14} />
-            Unified
-          </button>
-        </div>
-
-        <div class="dv-seg" role="group" aria-label="Line wrapping">
-          <button
-            type="button"
-            aria-pressed=${!wrapLines}
-            class=${`dv-seg-btn${!wrapLines ? " active" : ""}`}
-            onClick=${() => setWrapLines(false)}
-          >
-            No wrap
-          </button>
-          <button
-            type="button"
-            aria-pressed=${wrapLines}
-            class=${`dv-seg-btn${wrapLines ? " active" : ""}`}
-            onClick=${() => setWrapLines(true)}
-          >
-            <${Icon} name="wrap-text" size=${14} />
-            Wrap
-          </button>
-        </div>
-
-        <button
-          type="button"
-          class="ck-btn dv-icon-btn"
-          title="Reload diff"
-          disabled=${busyAction}
-          onClick=${() => runAction("refresh", {})}
-        >
-          <${Icon} name="refresh-cw" size=${14} />
-        </button>
-
-        ${state.status === "addressed"
-          ? html`
-              <button
-                type="button"
-                class="ck-btn"
-                disabled=${busyAction}
-                onClick=${handleReopenReview}
-              >
-                <${Icon} name="refresh-cw" size=${14} />
-                New Review Round
-              </button>
-            `
-          : html`
-              <button
-                type="button"
-                class="ck-btn ck-btn-primary"
-                disabled=${busyAction}
-                onClick=${handleSubmitReview}
-              >
-                <${Icon} name="circle-check" size=${14} />
-                ${state.status === "pending" ? "Resubmit Review" : "Submit Review"}
-              </button>
-            `}
       </header>
+
+      ${hasContextUpdates
+        ? html`
+            <div class="ck-callout dv-update-banner" role="status">
+              <div class="dv-update-banner-msg">
+                <${Icon} name="refresh-cw" size=${15} class=${isRefreshing ? "ck-spinner" : ""} />
+                <span>
+                  ${state.source?.mode === "pr"
+                    ? "New changes detected in pull request"
+                    : "Changes detected in Git context"}${autoRefresh && hasActiveDraft
+                    ? " (Auto-refresh paused while editing comment)"
+                    : ""}
+                </span>
+              </div>
+              <div class="dv-update-banner-actions">
+                <label class="dv-autorefresh-toggle">
+                  <input
+                    type="checkbox"
+                    checked=${autoRefresh}
+                    onChange=${(e) => setAutoRefresh(Boolean(e.currentTarget.checked))}
+                  />
+                  <span>Auto-refresh</span>
+                </label>
+                <button
+                  type="button"
+                  class="ck-btn ck-btn-primary dv-banner-refresh-btn"
+                  disabled=${busyAction || isRefreshing}
+                  onClick=${() => handleRefresh({ manual: true })}
+                >
+                  <${Icon} name="refresh-cw" size=${13} class=${isRefreshing ? "ck-spinner" : ""} />
+                  <span>Refresh diff</span>
+                </button>
+              </div>
+            </div>
+          `
+        : null}
 
       ${actionError || state.error
         ? html`
@@ -1472,7 +1902,13 @@ export function DiffCanvasApp({ state, invoke }) {
                     depth=${0}
                     collapsedDirs=${collapsedDirs}
                     onToggleDir=${(dirPath) =>
-                      setCollapsedDirs((prev) => ({ ...prev, [dirPath]: !prev[dirPath] }))}
+                      setCollapsedDirs((prev) => {
+                        const next = cloneNullMap(prev);
+                        next[dirPath] = !(
+                          hasOwnKey(prev, dirPath) && Boolean(prev[dirPath])
+                        );
+                        return next;
+                      })}
                     selectedFile=${selectedFile}
                     onSelectFile=${(filePath) => scrollToFile(filePath)}
                     viewedSet=${viewedSet}
@@ -1513,6 +1949,7 @@ export function DiffCanvasApp({ state, invoke }) {
                         busyAction=${busyAction}
                         onEditComment=${handleEditComment}
                         onDeleteComment=${handleDeleteComment}
+                        onEditOpenChange=${handleCommentEditOpenChange}
                       />
                     `,
                   )}
@@ -1566,6 +2003,7 @@ export function DiffCanvasApp({ state, invoke }) {
                       onCancelComposer=${handleCancelComposer}
                       onEditComment=${handleEditComment}
                       onDeleteComment=${handleDeleteComment}
+                      onEditOpenChange=${handleCommentEditOpenChange}
                       busyAction=${cardBusyAction}
                     />
                   `;

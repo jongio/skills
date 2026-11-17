@@ -10,10 +10,12 @@ import { userStore } from "../runtime/canvas-kit/storage.mjs";
 import { hasIcon } from "../runtime/canvas-kit/icons.mjs";
 import { html, render } from "../runtime/canvas-kit/vendor/preact-htm-standalone.mjs";
 import {
+  computeFileFingerprint,
   createDiffCanvasConfig,
   isDomainCached,
   isDomainHydrated,
   openDiffInstance,
+  reconcileViewedFiles,
 } from "../runtime/canvas.mjs";
 import {
   assertSafeCheckoutDir,
@@ -25,6 +27,7 @@ import {
   computeDomainId,
   encodeCopilotGhAccountEnvKey,
   loadDiff,
+  probeDiffContext,
 } from "../runtime/diff-loader.mjs";
 import { parseDiffPatch } from "../runtime/parse-diff.mjs";
 import { applySetup, findInstalledPluginDiffExtension, planSetup } from "../scripts/setup.mjs";
@@ -561,6 +564,13 @@ test("GitHub PR mode works without a local checkout, persists lightweight state 
     " export function handle(req) {",
     "+  const token = req.headers['x-token'];",
     "   return token;",
+    "diff --git a/src/constants.ts b/src/constants.ts",
+    "index 4444444..5555555 100644",
+    "--- a/src/constants.ts",
+    "+++ b/src/constants.ts",
+    "@@ -1,1 +1,1 @@",
+    "-export const VERSION = 1;",
+    "+export const VERSION = 2;",
   ].join("\n");
 
   const ghCalls = [];
@@ -615,7 +625,7 @@ test("GitHub PR mode works without a local checkout, persists lightweight state 
     "--repo",
     "example-org/api-gateway",
     "--json",
-    "number,title,headRefName,baseRefName",
+    "number,title,headRefName,baseRefName,headRefOid,baseRefOid,state",
   ]);
 
   // Add comment + toggle viewed + submit review from UI (triggers askAgent)
@@ -657,6 +667,11 @@ test("GitHub PR mode works without a local checkout, persists lightweight state 
     { file: "src/handler.ts" },
     { instanceId: "pr-293" },
   );
+  await runtimeOne.invokeFromAgent(
+    "toggle_viewed",
+    { file: "src/constants.ts" },
+    { instanceId: "pr-293" },
+  );
 
   const submitHttp = await fetch(capEndpoint("/action", panel.url), {
     method: "POST",
@@ -688,12 +703,14 @@ test("GitHub PR mode works without a local checkout, persists lightweight state 
   const savedDiskJson = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
   assert.equal("files" in savedDiskJson, false);
   assert.equal(savedDiskJson.status, "pending");
-  assert.deepEqual(savedDiskJson.viewedFiles, ["src/handler.ts"]);
+  assert.deepEqual(savedDiskJson.viewedFiles, ["src/handler.ts", "src/constants.ts"]);
+  assert.equal(typeof savedDiskJson.viewedFileFingerprints?.["src/handler.ts"], "string");
+  assert.equal(typeof savedDiskJson.viewedFileFingerprints?.["src/constants.ts"], "string");
   assert.equal(savedDiskJson.comments.length, 1);
 
   await runtimeOne.shutdown();
 
-  // Simulate new commit pushed to PR #293 changing line 2, then reopen in a brand-new runtime
+  // Simulate new commit pushed to PR #293 changing line 2 of src/handler.ts while src/constants.ts stays unchanged
   currentPatch = [
     "diff --git a/src/handler.ts b/src/handler.ts",
     "index 1111111..3333333 100644",
@@ -703,6 +720,13 @@ test("GitHub PR mode works without a local checkout, persists lightweight state 
     " export function handle(req) {",
     "+  const token = sanitizeToken(req.headers['x-token']);",
     "   return token;",
+    "diff --git a/src/constants.ts b/src/constants.ts",
+    "index 4444444..5555555 100644",
+    "--- a/src/constants.ts",
+    "+++ b/src/constants.ts",
+    "@@ -1,1 +1,1 @@",
+    "-export const VERSION = 1;",
+    "+export const VERSION = 2;",
   ].join("\n");
 
   const runtimeTwo = createCanvasRuntime(
@@ -722,7 +746,11 @@ test("GitHub PR mode works without a local checkout, persists lightweight state 
     { instanceId: "pr-293-reopened" },
   );
   assert.equal(restoredReview.status, "pending");
-  assert.deepEqual(restoredReview.viewedFiles, ["src/handler.ts"]);
+  assert.deepEqual(
+    restoredReview.viewedFiles,
+    ["src/constants.ts"],
+    "Modified src/handler.ts must automatically unmark Viewed while unchanged src/constants.ts stays Viewed",
+  );
   assert.equal(restoredReview.comments.length, 1);
   assert.equal(restoredReview.comments[0].stale, true);
 
@@ -1100,6 +1128,15 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
   assert.doesNotMatch(appSource, /innerHTML|dangerouslySetInnerHTML/);
   assert.doesNotMatch(htmlSource, /https?:\/\//i);
   assert.doesNotMatch(htmlSource, /http-equiv="Content-Security-Policy"/i);
+
+  // Guard against narrow side-panel toolbar clipping (.dv-toolbar must wrap cleanly without horizontal overflow)
+  const dvToolbarBlock = cssSource.match(/\.dv-toolbar\s*\{([^}]*)\}/);
+  assert.ok(dvToolbarBlock, ".dv-toolbar rule must exist in style.css");
+  assert.match(dvToolbarBlock[1], /flex-wrap:\s*wrap\s*;/, ".dv-toolbar must wrap in narrow 550-750px side panels");
+  assert.match(dvToolbarBlock[1], /overflow-x:\s*hidden\s*;/, ".dv-toolbar must avoid horizontal scroll clipping");
+  const dvTitleGroupBlock = cssSource.match(/\.dv-title-group\s*\{([^}]*)\}/);
+  assert.ok(dvTitleGroupBlock, ".dv-title-group rule must exist in style.css");
+  assert.match(dvTitleGroupBlock[1], /flex:\s*1\s+1\s+180px\s*;/, ".dv-title-group must shrink/grow cleanly");
 
   // Guard against Flexbox vertical card crushing in .dv-main and 100%+96px split <col> overflow
   const dvMainBlock = cssSource.match(/\.dv-main\s*\{([^}]*)\}/);
@@ -1780,6 +1817,375 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
     "When notifiedAgent is true (Copilot App), .dv-handoff-banner must stay hidden",
   );
 
+  // Verify !state.loaded Retry/Refresh button, labeled Refresh button, 'R' shortcut (ignored in inputs),
+  // scrollTop preservation, check_updates live banner (0 FileDiffCard re-renders), draft-safe Auto-refresh,
+  // and automatic card un-collapse when a viewed file's hunks change on refresh
+  let refreshCalls = 0;
+  let probeChangedResult = false;
+  let probeSignatureResult = null;
+  let refreshReturnPayload = { ok: true, changed: false, invalidatedViewedFiles: [] };
+  let liveUiState = {
+    domain: "pr__example-org__demo__401",
+    loaded: false,
+    diffRev: 0,
+    contextSignature: null,
+    error: "Temporary network failure",
+    source: { mode: "pr", repo: "example-org/demo", pr: 401, paths: [] },
+    title: "example-org/demo#401",
+    status: "draft",
+    stats: { fileCount: 0, totalFiles: 0, additions: 0, deletions: 0 },
+    viewedFiles: [],
+    comments: [],
+    files: [],
+    focusedFile: null,
+    focusedLine: null,
+    focusSeq: 0,
+  };
+
+  const renderLiveUi = () =>
+    render(
+      html`<${DiffCanvasApp}
+        state=${liveUiState}
+        invoke=${async (name) => {
+          if (name === "check_updates") {
+            return {
+              ok: true,
+              changed: probeChangedResult,
+              ...(probeSignatureResult ? { contextSignature: probeSignatureResult } : {}),
+              sourceMode: liveUiState.source?.mode || "pr",
+              checkedAt: new Date().toISOString(),
+            };
+          }
+          if (name === "refresh") {
+            refreshCalls += 1;
+            return refreshReturnPayload;
+          }
+          return { ok: true };
+        }}
+      />`,
+      cr2Container,
+    );
+
+  // 1. !state.loaded screen renders labeled Retry button and triggers refresh
+  renderLiveUi();
+  const unloadedRetryBtn = cr2Container.querySelector(".dv-unloaded-retry-btn");
+  assert.ok(unloadedRetryBtn, "!state.loaded card must render a Retry/Refresh button");
+  assert.match(unloadedRetryBtn.textContent, /Retry/);
+  const unloadedRetryClick = [...(unloadedRetryBtn.listeners.get("click") || [])][0];
+  await unloadedRetryClick.call(unloadedRetryBtn, { type: "click" });
+  assert.equal(refreshCalls, 1);
+
+  // 2. Loaded screen renders labeled Refresh button, preserves scrollTop, shows feedback toast, and handles 'R' shortcut
+  const refreshParsed = parseDiffPatch(
+    [
+      "diff --git a/src/alpha.ts b/src/alpha.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/alpha.ts",
+      "+++ b/src/alpha.ts",
+      "@@ -1,1 +1,1 @@",
+      "-export const alpha = 1;",
+      "+export const alpha = 2;",
+      "diff --git a/src/beta.ts b/src/beta.ts",
+      "index 3333333..4444444 100644",
+      "--- a/src/beta.ts",
+      "+++ b/src/beta.ts",
+      "@@ -1,1 +1,1 @@",
+      "-export const beta = 1;",
+      "+export const beta = 2;",
+    ].join("\n"),
+  );
+  liveUiState = {
+    ...liveUiState,
+    loaded: true,
+    error: null,
+    diffRev: 1,
+    contextSignature: "sig_v1",
+    stats: {
+      fileCount: refreshParsed.fileCount,
+      totalFiles: refreshParsed.totalFiles,
+      additions: refreshParsed.additions,
+      deletions: refreshParsed.deletions,
+    },
+    viewedFiles: ["src/alpha.ts", "src/beta.ts"],
+    files: refreshParsed.files,
+  };
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 15));
+
+  const toolbarRefreshBtn = cr2Container.querySelector(".dv-refresh-btn");
+  assert.ok(toolbarRefreshBtn, "Toolbar must render .dv-refresh-btn");
+  assert.match(toolbarRefreshBtn.textContent, /Refresh/, "Toolbar Refresh button must have visible 'Refresh' text label");
+
+  const mainPaneEl = cr2Container.querySelector(".dv-main");
+  mainPaneEl.scrollTop = 340;
+
+  // Manually collapse both viewed cards (simulating user having checked Viewed on both)
+  const liveCardsInitial = cr2Container.querySelectorAll(".dv-file-card");
+  for (const card of liveCardsInitial) {
+    const collapseBtn = card.querySelector(".dv-collapse-btn");
+    const clickFn = [...(collapseBtn.listeners.get("click") || [])][0];
+    clickFn.call(collapseBtn, { type: "click" });
+  }
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 15));
+  assert.equal(cr2Container.querySelectorAll(".dv-file-card")[0].className.includes("collapsed"), true);
+  assert.equal(cr2Container.querySelectorAll(".dv-file-card")[1].className.includes("collapsed"), true);
+
+  // Pressing 'r' inside an INPUT must NOT trigger refresh; pressing 'r' outside inputs MUST trigger refresh
+  const keydownHandlers = [...(windowListeners.get("keydown") || [])];
+  assert.ok(keydownHandlers.length >= 1, "Window keydown shortcut listener must be registered");
+  const searchInputEl = cr2Container.querySelector(".dv-search-input");
+  for (const fn of keydownHandlers) {
+    fn({ key: "r", target: searchInputEl, preventDefault() {} });
+    fn({ key: "r", ctrlKey: true, target: mainPaneEl, preventDefault() {} });
+  }
+  assert.equal(refreshCalls, 1, "Shortcut 'r' must ignore INPUT targets and Ctrl+R");
+
+  let shortcutPrevented = false;
+  for (const fn of keydownHandlers) {
+    fn({
+      key: "R",
+      target: mainPaneEl,
+      preventDefault() {
+        shortcutPrevented = true;
+      },
+    });
+  }
+  await new Promise((r) => setTimeout(r, 25));
+  assert.equal(shortcutPrevented, true);
+  assert.equal(refreshCalls, 2, "Pressing 'R' outside inputs must trigger refresh");
+  assert.equal(mainPaneEl.scrollTop, 340, "Refresh must preserve .dv-main scrollTop");
+  assert.match(
+    cr2Container.querySelector(".dv-refresh-toast")?.textContent || "",
+    /Already up to date/,
+  );
+
+  // 3. Background check_updates on window focus renders .dv-update-banner with 0 FileDiffCard re-renders
+  probeChangedResult = true;
+  fileCardRenderCalls = 0;
+  for (const fn of windowListeners.get("focus") || []) {
+    await fn();
+  }
+  await new Promise((r) => setTimeout(r, 25));
+  assert.equal(
+    fileCardRenderCalls,
+    0,
+    "Background check_updates banner appearance must not re-render FileDiffCards",
+  );
+  const updateBanner = cr2Container.querySelector(".dv-update-banner");
+  assert.ok(updateBanner, ".dv-update-banner must appear when check_updates reports changed: true");
+  assert.match(updateBanner.textContent, /New changes detected in pull request/);
+  assert.ok(cr2Container.querySelector(".dv-update-dot"), "Refresh button must show update indicator dot");
+
+  // 4. Draft-safe Auto-refresh: pauses while an inline comment composer is open, then refreshes once closed
+  // Expand first card so we can open a line composer
+  const alphaCollapseBtn = cr2Container.querySelectorAll(".dv-file-card")[0].querySelector(".dv-collapse-btn");
+  [...(alphaCollapseBtn.listeners.get("click") || [])][0].call(alphaCollapseBtn, { type: "click" });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 10));
+
+  const commentableLineCell = cr2Container.querySelector(".commentable");
+  assert.ok(commentableLineCell);
+  [...(commentableLineCell.listeners.get("click") || [])][0].call(commentableLineCell, { type: "click" });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(cr2Container.querySelector(".dv-composer"), "Inline comment composer should be open");
+
+  // Re-collapse alpha card before Auto-refresh triggers so we also test un-collapsing invalidated viewed file!
+  [...(alphaCollapseBtn.listeners.get("click") || [])][0].call(alphaCollapseBtn, { type: "click" });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 10));
+
+  const autoRefreshCheckbox = cr2Container
+    .querySelector(".dv-update-banner")
+    .querySelector("input");
+  autoRefreshCheckbox.checked = true;
+  [...(autoRefreshCheckbox.listeners.get("change") || [])][0].call(autoRefreshCheckbox, {
+    type: "change",
+    currentTarget: autoRefreshCheckbox,
+    target: autoRefreshCheckbox,
+  });
+  await new Promise((r) => setTimeout(r, 25));
+  assert.equal(
+    refreshCalls,
+    2,
+    "Auto-refresh must pause while an inline comment composer draft is open",
+  );
+  assert.match(
+    cr2Container.querySelector(".dv-update-banner").textContent,
+    /Auto-refresh paused while editing comment/,
+  );
+
+  // Cancel composer -> Auto-refresh immediately fires!
+  // Simulate server refresh invalidating src/alpha.ts (hunks changed) while keeping src/beta.ts viewed
+  refreshReturnPayload = {
+    ok: true,
+    changed: true,
+    invalidatedViewedFiles: ["src/alpha.ts"],
+  };
+  // Re-open alpha temporarily to click Cancel on composer, or cancel via handleCancelComposer:
+  [...(alphaCollapseBtn.listeners.get("click") || [])][0].call(alphaCollapseBtn, { type: "click" });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 10));
+  const cancelComposerBtns = cr2Container
+    .querySelector(".dv-composer")
+    .querySelectorAll("button");
+  const cancelBtn = cancelComposerBtns.find((b) => b.textContent.trim() === "Cancel");
+  assert.ok(cancelBtn);
+  // Collapse alpha right before cancelling so we verify diffRev Viewed->Unviewed uncollapses alpha while beta stays collapsed!
+  [...(alphaCollapseBtn.listeners.get("click") || [])][0].call(alphaCollapseBtn, { type: "click" });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 10));
+  // Trigger Escape on composer or re-open to cancel: let's open, leave collapsed state on beta, and test SSE diffRev transition!
+  [...(alphaCollapseBtn.listeners.get("click") || [])][0].call(alphaCollapseBtn, { type: "click" });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 10));
+  const activeCancelBtn = cr2Container
+    .querySelector(".dv-composer")
+    .querySelectorAll("button")
+    .find((b) => b.textContent.trim() === "Cancel");
+  [...(activeCancelBtn.listeners.get("click") || [])][0].call(activeCancelBtn, { type: "click" });
+  await new Promise((r) => setTimeout(r, 140));
+  assert.equal(
+    refreshCalls,
+    3,
+    "Closing the active comment composer must automatically run deferred Auto-refresh",
+  );
+  assert.equal(
+    cr2Container.querySelector(".dv-update-banner"),
+    null,
+    "Update banner must clear once refresh succeeds",
+  );
+
+  // Collapse both cards, then push SSE diffRev=2 where src/alpha.ts was invalidated from viewedFiles while src/beta.ts stayed viewed
+  probeChangedResult = false;
+  for (const card of cr2Container.querySelectorAll(".dv-file-card")) {
+    if (!card.className.includes("collapsed")) {
+      const btn = card.querySelector(".dv-collapse-btn");
+      [...(btn.listeners.get("click") || [])][0].call(btn, { type: "click" });
+    }
+  }
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(cr2Container.querySelectorAll(".dv-file-card")[0].className.includes("collapsed"), true);
+  assert.equal(cr2Container.querySelectorAll(".dv-file-card")[1].className.includes("collapsed"), true);
+
+  const refreshParsedV2 = parseDiffPatch(
+    [
+      "diff --git a/src/alpha.ts b/src/alpha.ts",
+      "index 1111111..9999999 100644",
+      "--- a/src/alpha.ts",
+      "+++ b/src/alpha.ts",
+      "@@ -1,1 +1,1 @@",
+      "-export const alpha = 1;",
+      "+export const alpha = 99;",
+      "diff --git a/src/beta.ts b/src/beta.ts",
+      "index 3333333..4444444 100644",
+      "--- a/src/beta.ts",
+      "+++ b/src/beta.ts",
+      "@@ -1,1 +1,1 @@",
+      "-export const beta = 1;",
+      "+export const beta = 2;",
+    ].join("\n"),
+  );
+  liveUiState = {
+    ...liveUiState,
+    diffRev: 2,
+    contextSignature: "sig_v2",
+    viewedFiles: ["src/beta.ts"],
+    files: refreshParsedV2.files,
+  };
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 140));
+  assert.equal(
+    cr2Container.querySelectorAll(".dv-file-card")[0].className.includes("collapsed"),
+    false,
+    "File whose Viewed status was invalidated on refresh must automatically expand",
+  );
+  assert.equal(
+    cr2Container.querySelectorAll(".dv-file-card")[1].className.includes("collapsed"),
+    true,
+    "Unchanged file that remained Viewed must stay collapsed across refresh",
+  );
+
+  // 5. Unanchored comment editing pauses Auto-refresh, and reverted contextSignature clears .dv-update-banner
+  const specialTreeParsed = parseDiffPatch(
+    [
+      "diff --git a/constructor/util.ts b/constructor/util.ts",
+      "index 1111111..2222222 100644",
+      "--- a/constructor/util.ts",
+      "+++ b/constructor/util.ts",
+      "@@ -1,1 +1,1 @@",
+      "-export const u = 1;",
+      "+export const u = 2;",
+    ].join("\n"),
+  );
+  liveUiState = {
+    ...liveUiState,
+    diffRev: 3,
+    contextSignature: "sig_v3",
+    viewedFiles: [],
+    comments: [
+      {
+        id: "c_unanchored",
+        file: "constructor/util.ts",
+        line: 999,
+        side: "right",
+        body: "Outdated line note",
+        stale: true,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ],
+    files: specialTreeParsed.files,
+  };
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 140));
+
+  // Sidebar tree must render constructor/util.ts expanded by default (not hidden by Object.prototype.constructor)
+  const sidebarTreeText = cr2Container.querySelector(".dv-sidebar")?.textContent || "";
+  assert.match(sidebarTreeText, /constructor/);
+  assert.match(sidebarTreeText, /util\.ts/);
+
+  // Open Edit on the unanchored comment card -> activeEditCount > 0 pauses Auto-refresh
+  const unanchoredEditBtn = cr2Container
+    .querySelector(".dv-unanchored-threads")
+    .querySelectorAll("button")
+    .find((b) => b.textContent.trim() === "Edit");
+  assert.ok(unanchoredEditBtn, "Unanchored comment card must render Edit button");
+  [...(unanchoredEditBtn.listeners.get("click") || [])][0].call(unanchoredEditBtn, { type: "click" });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 140));
+
+  const callsBeforeUnanchoredProbe = refreshCalls;
+  probeChangedResult = true;
+  probeSignatureResult = "sig_v4_dirty";
+  for (const fn of windowListeners.get("focus") || []) {
+    await fn();
+  }
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(
+    refreshCalls,
+    callsBeforeUnanchoredProbe,
+    "Auto-refresh must pause while editing an unanchored comment",
+  );
+  assert.match(
+    cr2Container.querySelector(".dv-update-banner")?.textContent || "",
+    /Auto-refresh paused while editing comment/,
+  );
+
+  // Revert changes so check_updates reports the matching sig_v3 signature -> banner clears automatically!
+  probeChangedResult = false;
+  probeSignatureResult = "sig_v3";
+  for (const fn of windowListeners.get("focus") || []) {
+    await fn();
+  }
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(
+    cr2Container.querySelector(".dv-update-banner"),
+    null,
+    "Reverting context changes back to current contextSignature must clear .dv-update-banner",
+  );
+
   render(null, cr2Container);
 });
 
@@ -2156,3 +2562,379 @@ test("opening Git diff from a repository subdirectory shares repo-root domainId 
 
   ac.abort();
 });
+
+test("probeDiffContext, check_updates, and smart viewedFiles invalidation cover Git dirty re-saves, --staged isolation, untracked files, commit ranges, and PR headRefOid updates", async (t) => {
+  const repoDir = makeTempDir("diff-probe-git-");
+  const storeHome = makeTempDir("diff-probe-home-");
+  const prevHome = process.env.COPILOT_HOME;
+  process.env.COPILOT_HOME = storeHome;
+
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.COPILOT_HOME;
+    else process.env.COPILOT_HOME = prevHome;
+    fs.rmSync(repoDir, { recursive: true, force: true });
+    fs.rmSync(storeHome, { recursive: true, force: true });
+  });
+
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: repoDir, encoding: "utf8", windowsHide: true });
+  git("init", "-b", "main");
+  git("config", "user.name", "Probe Test");
+  git("config", "user.email", "probe@example.com");
+
+  fs.mkdirSync(path.join(repoDir, "src"), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, "src", "a.ts"), "export const a = 1;\n", "utf8");
+  fs.writeFileSync(path.join(repoDir, "src", "b.ts"), "export const b = 1;\n", "utf8");
+  fs.writeFileSync(path.join(repoDir, "src", "staged.ts"), "export const s = 1;\n", "utf8");
+  git("add", ".");
+  git("commit", "-m", "initial");
+
+  git("checkout", "-b", "feat/probe");
+  fs.writeFileSync(path.join(repoDir, "src", "a.ts"), "export const a = 2;\n", "utf8");
+  fs.writeFileSync(path.join(repoDir, "src", "b.ts"), "export const b = 2;\n", "utf8");
+
+  let saveCount = 0;
+  const countingStore = (safeFile) => {
+    const inner = userStore("diff", safeFile);
+    return {
+      load: (fallback) => inner.load(fallback),
+      save: async (val) => {
+        saveCount += 1;
+        return inner.save(val);
+      },
+    };
+  };
+
+  const cfg = createDiffCanvasConfig({ storeFactory: countingStore });
+  const rt = createCanvasRuntime(cfg);
+  t.after(() => rt.shutdown());
+
+  await openDiffInstance(rt, cfg, {
+    instanceId: "git-probe-panel",
+    input: { cwd: repoDir },
+    workspacePath: repoDir,
+  });
+
+  const savesBeforeProbe = saveCount;
+  const initialProbe = await rt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "git-probe-panel", workspacePath: repoDir },
+  );
+  assert.equal(initialProbe.ok, true);
+  assert.equal(initialProbe.changed, false);
+  assert.equal(initialProbe.sourceMode, "git");
+  assert.equal(saveCount, savesBeforeProbe, "check_updates must not write durable state to disk");
+
+  // Mark both src/a.ts and src/b.ts Viewed
+  await rt.invokeFromAgent(
+    "toggle_viewed",
+    { file: "src/a.ts" },
+    { instanceId: "git-probe-panel", workspacePath: repoDir },
+  );
+  await rt.invokeFromAgent(
+    "toggle_viewed",
+    { file: "src/b.ts" },
+    { instanceId: "git-probe-panel", workspacePath: repoDir },
+  );
+
+  // Re-save already-dirty src/a.ts with the exact same byte length (20 bytes)
+  fs.writeFileSync(path.join(repoDir, "src", "a.ts"), "export const a = 3;\n", "utf8");
+  const dirtyResaveProbe = await rt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "git-probe-panel", workspacePath: repoDir },
+  );
+  assert.equal(dirtyResaveProbe.changed, true, "Re-saving an already-dirty file must be detected");
+
+  // Refresh invalidates Viewed on modified src/a.ts while preserving unchanged src/b.ts
+  const refreshAfterEdit = await rt.invokeFromAgent(
+    "refresh",
+    {},
+    { instanceId: "git-probe-panel", workspacePath: repoDir },
+  );
+  assert.equal(refreshAfterEdit.ok, true);
+  assert.equal(refreshAfterEdit.changed, true);
+  assert.deepEqual(refreshAfterEdit.invalidatedViewedFiles, ["src/a.ts"]);
+
+  const reviewAfterEdit = await rt.invokeFromAgent(
+    "get_review",
+    {},
+    { instanceId: "git-probe-panel", workspacePath: repoDir },
+  );
+  assert.deepEqual(reviewAfterEdit.viewedFiles, ["src/b.ts"]);
+
+  const postRefreshProbe = await rt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "git-probe-panel", workspacePath: repoDir },
+  );
+  assert.equal(postRefreshProbe.changed, false);
+
+  // Untracked file inside a brand-new nested directory is detected on creation AND on edit
+  fs.mkdirSync(path.join(repoDir, "src", "nested"), { recursive: true });
+  fs.writeFileSync(path.join(repoDir, "src", "nested", "untracked.ts"), "export const u = 1;\n", "utf8");
+  const untrackedCreatedProbe = await rt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "git-probe-panel", workspacePath: repoDir },
+  );
+  assert.equal(untrackedCreatedProbe.changed, true);
+  await rt.invokeFromAgent("refresh", {}, { instanceId: "git-probe-panel", workspacePath: repoDir });
+  fs.writeFileSync(path.join(repoDir, "src", "nested", "untracked.ts"), "export const u = 2;\n", "utf8");
+  const untrackedEditedProbe = await rt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "git-probe-panel", workspacePath: repoDir },
+  );
+  assert.equal(untrackedEditedProbe.changed, true);
+
+  // --staged isolation: unstaged edits and untracked files must NOT falsely trigger --staged!
+  fs.writeFileSync(path.join(repoDir, "src", "staged.ts"), "export const s = 2;\n", "utf8");
+  git("add", "src/staged.ts");
+
+  await openDiffInstance(rt, cfg, {
+    instanceId: "staged-probe-panel",
+    input: { cwd: repoDir, spec: "--staged" },
+    workspacePath: repoDir,
+  });
+  const stagedCleanProbe = await rt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "staged-probe-panel", workspacePath: repoDir },
+  );
+  assert.equal(stagedCleanProbe.changed, false);
+
+  // Edit unstaged src/a.ts and add another untracked file without git add
+  fs.writeFileSync(path.join(repoDir, "src", "a.ts"), "export const a = 4;\n", "utf8");
+  fs.writeFileSync(path.join(repoDir, "src", "nested", "extra.ts"), "export const e = 1;\n", "utf8");
+  const stagedAfterUnstagedEdit = await rt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "staged-probe-panel", workspacePath: repoDir },
+  );
+  assert.equal(
+    stagedAfterUnstagedEdit.changed,
+    false,
+    "Unstaged working-tree edits and untracked files must not trigger --staged updates",
+  );
+
+  // Staging a new change DOES trigger --staged
+  fs.writeFileSync(path.join(repoDir, "src", "staged.ts"), "export const s = 3;\n", "utf8");
+  git("add", "src/staged.ts");
+  const stagedAfterIndexUpdate = await rt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "staged-probe-panel", workspacePath: repoDir },
+  );
+  assert.equal(stagedAfterIndexUpdate.changed, true);
+
+  // Commit range (main..feat/probe) with and without path scoping
+  git("commit", "-m", "commit staged.ts");
+  const rangeBase = await probeDiffContext({
+    mode: "git",
+    cwd: repoDir,
+    spec: "main..feat/probe",
+    paths: [],
+  });
+  const rangeScopedB = await probeDiffContext({
+    mode: "git",
+    cwd: repoDir,
+    spec: "main..feat/probe",
+    paths: ["src/b.ts"],
+  });
+  // Unstaged edits do not change commit range signatures
+  fs.writeFileSync(path.join(repoDir, "src", "a.ts"), "export const a = 5;\n", "utf8");
+  assert.equal(
+    (await probeDiffContext({ mode: "git", cwd: repoDir, spec: "main..feat/probe", paths: [] }))
+      .contextSignature,
+    rangeBase.contextSignature,
+  );
+  // Committing src/a.ts updates full range, while path-scoped src/b.ts range stays identical
+  git("add", "src/a.ts");
+  git("commit", "-m", "commit a.ts");
+  assert.notEqual(
+    (await probeDiffContext({ mode: "git", cwd: repoDir, spec: "main..feat/probe", paths: [] }))
+      .contextSignature,
+    rangeBase.contextSignature,
+  );
+  assert.equal(
+    (
+      await probeDiffContext({
+        mode: "git",
+        cwd: repoDir,
+        spec: "main..feat/probe",
+        paths: ["src/b.ts"],
+      })
+    ).contextSignature,
+    rangeScopedB.contextSignature,
+  );
+
+  // PR check_updates runs ONLY 'gh pr view' (never 'gh pr diff') and swallows transient errors cleanly
+  let prHeadOid = "1111111111111111111111111111111111111111";
+  let prShouldFail = false;
+  const prSubcommands = [];
+  const prExecMock = async (_cmd, args) => {
+    prSubcommands.push(args[1]);
+    if (prShouldFail) {
+      throw new Error("dial tcp: lookup api.github.com: i/o timeout");
+    }
+    if (args[0] === "pr" && args[1] === "diff") {
+      return [
+        "diff --git a/src/pr.ts b/src/pr.ts",
+        "index 1111111..2222222 100644",
+        "--- a/src/pr.ts",
+        "+++ b/src/pr.ts",
+        "@@ -1,1 +1,1 @@",
+        "-export const pr = 1;",
+        "+export const pr = 2;",
+      ].join("\n");
+    }
+    if (args[0] === "pr" && args[1] === "view") {
+      return JSON.stringify({
+        number: 99,
+        title: "Probe PR",
+        headRefName: "feat/pr",
+        baseRefName: "main",
+        headRefOid: prHeadOid,
+        baseRefOid: "0000000000000000000000000000000000000000",
+        state: "OPEN",
+      });
+    }
+    throw new Error(`Unexpected gh command: ${args.join(" ")}`);
+  };
+
+  const prCfg = createDiffCanvasConfig({ execFn: prExecMock, storeFactory: countingStore });
+  const prRt = createCanvasRuntime(prCfg);
+  t.after(() => prRt.shutdown());
+
+  await openDiffInstance(prRt, prCfg, {
+    instanceId: "pr-probe-panel",
+    input: { repo: "example-org/service", pr: 99 },
+    workspacePath: "",
+  });
+
+  prSubcommands.length = 0;
+  const prUnchangedProbe = await prRt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "pr-probe-panel" },
+  );
+  assert.equal(prUnchangedProbe.changed, false);
+  assert.deepEqual(prSubcommands, ["view"], "PR check_updates must never invoke gh pr diff");
+
+  prHeadOid = "2222222222222222222222222222222222222222";
+  prSubcommands.length = 0;
+  const prUpdatedProbe = await prRt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "pr-probe-panel" },
+  );
+  assert.equal(prUpdatedProbe.changed, true);
+  assert.deepEqual(prSubcommands, ["view"], "PR check_updates must only invoke gh pr view");
+
+  prShouldFail = true;
+  const prTransientProbe = await prRt.invokeFromAgent(
+    "check_updates",
+    {},
+    { instanceId: "pr-probe-panel" },
+  );
+  assert.equal(prTransientProbe.ok, true);
+  assert.equal(prTransientProbe.changed, false);
+  assert.equal(prTransientProbe.transientError, true);
+  const prStateAfterTransient = await prRt.getState("pr__example-org__service__99");
+  assert.equal(prStateAfterTransient.error, null, "Transient probe error must not set state.error");
+
+  // Direct unit check on reconcileViewedFiles
+  const unitFiles = parseDiffPatch(
+    [
+      "diff --git a/src/keep.ts b/src/keep.ts",
+      "--- a/src/keep.ts",
+      "+++ b/src/keep.ts",
+      "@@ -1,1 +1,1 @@",
+      "-const k = 1;",
+      "+const k = 2;",
+    ].join("\n"),
+  ).files;
+  const keepFp = computeFileFingerprint(unitFiles[0]);
+  const unitReconciled = reconcileViewedFiles(
+    ["src/keep.ts", "src/removed.ts"],
+    { "src/keep.ts": keepFp, "src/removed.ts": "deadbeef00000000" },
+    unitFiles,
+  );
+  assert.deepEqual(unitReconciled.viewedFiles, ["src/keep.ts"]);
+  assert.deepEqual(unitReconciled.invalidatedFiles, ["src/removed.ts"]);
+
+  // Binary index header & file mode changes produce distinct fingerprints, and reserved property names round-trip cleanly
+  const binV1 = parseDiffPatch(
+    [
+      "diff --git a/assets/icon.png b/assets/icon.png",
+      "index 1111111..2222222 100644",
+      "Binary files a/assets/icon.png and b/assets/icon.png differ",
+      "diff --git a/scripts/run.sh b/scripts/run.sh",
+      "old mode 100644",
+      "new mode 100755",
+    ].join("\n"),
+  ).files;
+  const binV2 = parseDiffPatch(
+    [
+      "diff --git a/assets/icon.png b/assets/icon.png",
+      "index 1111111..3333333 100644",
+      "Binary files a/assets/icon.png and b/assets/icon.png differ",
+      "diff --git a/scripts/run.sh b/scripts/run.sh",
+      "old mode 100755",
+      "new mode 100644",
+    ].join("\n"),
+  ).files;
+  assert.notEqual(computeFileFingerprint(binV1[0]), computeFileFingerprint(binV2[0]));
+  assert.notEqual(computeFileFingerprint(binV1[1]), computeFileFingerprint(binV2[1]));
+
+  const specialFilesV1 = parseDiffPatch(
+    [
+      "diff --git a/__proto__ b/__proto__",
+      "index 1111111..2222222 100644",
+      "--- a/__proto__",
+      "+++ b/__proto__",
+      "@@ -1,1 +1,1 @@",
+      "-alpha",
+      "+beta",
+      "diff --git a/constructor b/constructor",
+      "index 3333333..4444444 100644",
+      "--- a/constructor",
+      "+++ b/constructor",
+      "@@ -1,1 +1,1 @@",
+      "-one",
+      "+two",
+    ].join("\n"),
+  ).files;
+  const specialFilesV2 = parseDiffPatch(
+    [
+      "diff --git a/__proto__ b/__proto__",
+      "index 1111111..9999999 100644",
+      "--- a/__proto__",
+      "+++ b/__proto__",
+      "@@ -1,1 +1,1 @@",
+      "-alpha",
+      "+gamma",
+      "diff --git a/constructor b/constructor",
+      "index 3333333..4444444 100644",
+      "--- a/constructor",
+      "+++ b/constructor",
+      "@@ -1,1 +1,1 @@",
+      "-one",
+      "+two",
+    ].join("\n"),
+  ).files;
+  const initialSpecialMap = Object.create(null);
+  initialSpecialMap["__proto__"] = computeFileFingerprint(specialFilesV1[0]);
+  initialSpecialMap["constructor"] = computeFileFingerprint(specialFilesV1[1]);
+  const roundTrippedJson = JSON.parse(JSON.stringify(initialSpecialMap));
+  const reconciledSpecial = reconcileViewedFiles(
+    ["__proto__", "constructor"],
+    roundTrippedJson,
+    specialFilesV2,
+  );
+  assert.deepEqual(reconciledSpecial.invalidatedFiles, ["__proto__"]);
+  assert.deepEqual(reconciledSpecial.viewedFiles, ["constructor"]);
+});
+
