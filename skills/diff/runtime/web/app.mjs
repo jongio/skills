@@ -595,6 +595,8 @@ function FileDiffCardInner({
                                 <tr
                                   key=${`r:${rowIdx}`}
                                   data-line=${rightLine ?? leftLine ?? undefined}
+                                  data-old-line=${leftLine ?? undefined}
+                                  data-new-line=${rightLine ?? undefined}
                                   class=${lineFocused ? "dv-line-focused" : ""}
                                 >
                                   <td
@@ -739,6 +741,8 @@ function FileDiffCardInner({
                                 <tr
                                   key=${`u:${lineIdx}`}
                                   data-line=${newLine ?? oldLine ?? undefined}
+                                  data-old-line=${oldLine ?? undefined}
+                                  data-new-line=${newLine ?? undefined}
                                   class=${`${rowCls}${lineFocused ? " dv-line-focused" : ""}`}
                                 >
                                   <td
@@ -963,6 +967,16 @@ export function DiffCanvasApp({ state, invoke }) {
     );
   }, [files, fileQuery]);
 
+  const viewedFilteredCount = useMemo(
+    () =>
+      filteredFiles.reduce(
+        (acc, f) =>
+          acc + (f.canonicalPath && viewedSet.has(f.canonicalPath) ? 1 : 0),
+        0,
+      ),
+    [filteredFiles, viewedSet],
+  );
+
   const fileTree = useMemo(() => buildFileTree(filteredFiles), [filteredFiles]);
 
   const scrollToFile = useCallback((canonicalPath, line = null) => {
@@ -981,14 +995,18 @@ export function DiffCanvasApp({ state, invoke }) {
       for (const card of cards) {
         if (card.getAttribute("data-canonical-file") !== canonicalPath) continue;
         if (line !== null) {
-          const escapedLine =
-            typeof CSS !== "undefined" && typeof CSS.escape === "function"
-              ? CSS.escape(String(line))
-              : String(line).replace(/"/g, '\\"');
-          const lineRow = card.querySelector(`tr[data-line="${escapedLine}"]`);
-          if (lineRow?.scrollIntoView) {
-            lineRow.scrollIntoView({ behavior: "smooth", block: "center" });
-            return;
+          const parsedLine = Number.parseInt(String(line), 10);
+          if (Number.isInteger(parsedLine) && parsedLine > 0) {
+            const lineStr = String(parsedLine);
+            const lineRow =
+              card.querySelector(`tr[data-new-line="${lineStr}"]`) ||
+              card.querySelector(
+                `tr[data-old-line="${lineStr}"], tr[data-line="${lineStr}"]`,
+              );
+            if (lineRow?.scrollIntoView) {
+              lineRow.scrollIntoView({ behavior: "smooth", block: "center" });
+              return;
+            }
           }
         }
         if (card.scrollIntoView) {
@@ -1004,6 +1022,9 @@ export function DiffCanvasApp({ state, invoke }) {
     if (prevDomainRef.current !== state?.domain) {
       prevDomainRef.current = state?.domain;
       setCollapsedFiles({});
+      setCollapsedDirs({});
+      setFileQuery("");
+      setActionError(null);
       setSelectedFile(null);
       setActiveComposer(null);
     }
@@ -1013,7 +1034,7 @@ export function DiffCanvasApp({ state, invoke }) {
     if (state?.focusSeq && state?.focusedFile) {
       scrollToFile(state.focusedFile, state.focusedLine ?? null);
     }
-  }, [state?.focusSeq, state?.focusedFile, state?.focusedLine, scrollToFile]);
+  }, [state?.domain, state?.focusSeq, state?.focusedFile, state?.focusedLine, scrollToFile]);
 
   useEffect(
     () => () => {
@@ -1102,10 +1123,20 @@ export function DiffCanvasApp({ state, invoke }) {
 
   const handleToggleViewed = useCallback(
     async (filePath, nextViewed) => {
-      setCollapsedFiles((prev) => ({ ...prev, [filePath]: nextViewed }));
-      await runAction("toggle_viewed", { file: filePath });
+      const res = await runAction("toggle_viewed", { file: filePath });
+      if (!res) return;
+      const targetFile = files.find((f) => f.canonicalPath === filePath) || null;
+      setCollapsedFiles((prev) => {
+        if (nextViewed) {
+          return prev[filePath] === true ? prev : { ...prev, [filePath]: true };
+        }
+        if (targetFile && getAutoCollapseReason(targetFile)) {
+          return prev[filePath] === true ? prev : { ...prev, [filePath]: true };
+        }
+        return prev[filePath] === false ? prev : { ...prev, [filePath]: false };
+      });
     },
-    [runAction],
+    [files, runAction],
   );
 
   const handleOpenComposer = useCallback((file, line, side) => {
@@ -1398,7 +1429,7 @@ export function DiffCanvasApp({ state, invoke }) {
                 <div class="dv-sidebar-header">
                   <span>Files (${filteredFiles.length}/${files.length})</span>
                   <span class="dv-sidebar-meta">
-                    <span>${viewedSet.size} viewed</span>
+                    <span>${viewedFilteredCount} viewed</span>
                     ${filteredFiles.length > 0
                       ? html`
                           <button
@@ -1482,6 +1513,13 @@ export function DiffCanvasApp({ state, invoke }) {
                   const canonical = file.canonicalPath || "";
                   const { autoCollapseReason, isCollapsed } = computeEffectiveCollapsed(file);
                   const isFocusedFile = Boolean(canonical && state.focusedFile === canonical);
+                  const fileComments = commentsByFileMap.get(canonical) || EMPTY_ARRAY;
+                  const fileComposer =
+                    activeComposer?.file === canonical ? activeComposer : null;
+                  const cardBusyAction =
+                    fileComments.length > 0 || fileComposer !== null
+                      ? busyAction
+                      : false;
 
                   return html`
                     <${FileDiffCard}
@@ -1497,15 +1535,15 @@ export function DiffCanvasApp({ state, invoke }) {
                       focusedLine=${isFocusedFile ? state.focusedLine : null}
                       onToggleCollapse=${handleToggleCollapse}
                       onToggleViewed=${handleToggleViewed}
-                      commentsForFile=${commentsByFileMap.get(canonical) || EMPTY_ARRAY}
+                      commentsForFile=${fileComments}
                       canEditComments=${canEditComments}
-                      activeComposerForFile=${activeComposer?.file === canonical ? activeComposer : null}
+                      activeComposerForFile=${fileComposer}
                       onOpenComposer=${handleOpenComposer}
                       onSaveComment=${handleSaveComment}
                       onCancelComposer=${handleCancelComposer}
                       onEditComment=${handleEditComment}
                       onDeleteComment=${handleDeleteComment}
-                      busyAction=${busyAction}
+                      busyAction=${cardBusyAction}
                     />
                   `;
                 })}

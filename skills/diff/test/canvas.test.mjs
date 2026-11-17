@@ -9,7 +9,12 @@ import { createCanvasRuntime } from "../runtime/canvas-kit/server.mjs";
 import { userStore } from "../runtime/canvas-kit/storage.mjs";
 import { hasIcon } from "../runtime/canvas-kit/icons.mjs";
 import { html, render } from "../runtime/canvas-kit/vendor/preact-htm-standalone.mjs";
-import { createDiffCanvasConfig } from "../runtime/canvas.mjs";
+import {
+  createDiffCanvasConfig,
+  isDomainCached,
+  isDomainHydrated,
+  openDiffInstance,
+} from "../runtime/canvas.mjs";
 import {
   assertSafeCheckoutDir,
   assertSafeGitHubAccount,
@@ -17,6 +22,7 @@ import {
   assertSafePathspecs,
   assertSafePrNumber,
   assertSafeRepoFullName,
+  computeDomainId,
   encodeCopilotGhAccountEnvKey,
   loadDiff,
 } from "../runtime/diff-loader.mjs";
@@ -727,7 +733,18 @@ test("GitHub PR mode works without a local checkout, persists lightweight state 
   );
   assert.equal(addrRes.status, "addressed");
 
-  // Editing comments while status === "addressed" is rejected
+  // Mutating review actions while status === "addressed" all throw uniform review_locked message
+  const expectedLockedRe =
+    /Review has already been addressed; call reopen_review or start a New Review Round first/;
+  await assert.rejects(
+    () =>
+      runtimeTwo.invokeFromAgent(
+        "add_comment",
+        { file: "src/handler.ts", line: 2, side: "right", body: "Blocked add" },
+        { instanceId: "pr-293-reopened" },
+      ),
+    expectedLockedRe,
+  );
   await assert.rejects(
     () =>
       runtimeTwo.invokeFromAgent(
@@ -735,7 +752,25 @@ test("GitHub PR mode works without a local checkout, persists lightweight state 
         { commentId: restoredReview.comments[0].id, body: "Blocked while addressed" },
         { instanceId: "pr-293-reopened" },
       ),
-    /marked addressed/,
+    expectedLockedRe,
+  );
+  await assert.rejects(
+    () =>
+      runtimeTwo.invokeFromAgent(
+        "delete_comment",
+        { id: restoredReview.comments[0].id },
+        { instanceId: "pr-293-reopened" },
+      ),
+    expectedLockedRe,
+  );
+  await assert.rejects(
+    () =>
+      runtimeTwo.invokeFromAgent(
+        "submit_review",
+        { notifyAgent: false },
+        { instanceId: "pr-293-reopened" },
+      ),
+    expectedLockedRe,
   );
 
   // Refresh with identical diff keeps status === "addressed"
@@ -963,7 +998,12 @@ class StrictElement {
   querySelector(selector) {
     return this.querySelectorAll(selector)[0] || null;
   }
+
+  scrollIntoView() {
+    StrictElement.scrollHistory.push(this);
+  }
 }
+StrictElement.scrollHistory = [];
 
 class StrictSVGElement extends StrictElement {}
 
@@ -989,7 +1029,9 @@ class StrictText {
   }
 }
 
-function matchesSimpleSelector(el, selector) {
+function matchesSingleSelector(el, rawSel) {
+  const selector = rawSel.trim();
+  if (!selector) return false;
   if (selector.startsWith(".")) {
     const targetCls = selector.slice(1);
     return el.className.split(/\s+/).includes(targetCls);
@@ -997,7 +1039,21 @@ function matchesSimpleSelector(el, selector) {
   if (selector === "[data-canonical-file]") {
     return el.getAttribute("data-canonical-file") !== null;
   }
+  const attrMatch = selector.match(/^([a-z0-9-]+)?\[([a-z0-9-]+)="([^"]*)"\]$/i);
+  if (attrMatch) {
+    const [, tagPart, attrName, attrVal] = attrMatch;
+    if (tagPart && el.localName.toLowerCase() !== tagPart.toLowerCase()) {
+      return false;
+    }
+    return el.getAttribute(attrName) === attrVal;
+  }
   return el.localName.toLowerCase() === selector.toLowerCase();
+}
+
+function matchesSimpleSelector(el, selector) {
+  return String(selector)
+    .split(",")
+    .some((part) => matchesSingleSelector(el, part));
 }
 
 function createStrictDocument() {
@@ -1089,11 +1145,13 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
   const prevDoc = globalThis.document;
   const prevWin = globalThis.window;
   const prevSvg = globalThis.SVGElement;
+  const prevRaf = globalThis.requestAnimationFrame;
   const prevSkip = globalThis.__DIFF_SKIP_AUTO_MOUNT__;
   t.after(() => {
     globalThis.document = prevDoc;
     globalThis.window = prevWin;
     globalThis.SVGElement = prevSvg;
+    globalThis.requestAnimationFrame = prevRaf;
     globalThis.__DIFF_SKIP_AUTO_MOUNT__ = prevSkip;
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
@@ -1116,6 +1174,7 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
 
   globalThis.__DIFF_SKIP_AUTO_MOUNT__ = true;
   globalThis.SVGElement = StrictSVGElement;
+  globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 0);
   const strictDoc = createStrictDocument();
   strictDoc.body = strictDoc.createElement("body");
   globalThis.document = strictDoc;
@@ -1123,6 +1182,7 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
   const windowListeners = new Map();
   globalThis.window = {
     innerWidth: 1200,
+    requestAnimationFrame: (cb) => setTimeout(cb, 0),
     addEventListener(type, fn) {
       if (!windowListeners.has(type)) windowListeners.set(type, new Set());
       windowListeners.get(type).add(fn);
@@ -1221,9 +1281,11 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
   };
 
   let fileCardRenderCalls = 0;
+  let renderedCardPaths = [];
   const origCardRender = FileDiffCard.prototype.render;
   FileDiffCard.prototype.render = function (...args) {
     fileCardRenderCalls += 1;
+    renderedCardPaths.push(this.props?.file?.canonicalPath || "");
     return origCardRender.apply(this, args);
   };
   t.after(() => {
@@ -1396,4 +1458,624 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
   render(null, container);
   assert.equal(strictDoc.body.style.userSelect, "");
   assert.equal((windowListeners.get("mousemove") || new Set()).size, 0);
+
+  // Verify:
+  // (a) busyAction isolation: clicking Viewed on 1 file when comments === [] re-renders ONLY that 1 FileDiffCard
+  // (b) unchecking Viewed on an auto-collapsed lockfile keeps it auto-collapsed (does NOT explode it open)
+  // (c) failed toggle_viewed does not collapse the file
+  // (d) sidebar Viewed count reflects filteredFiles only (ignoring ghost viewedFiles)
+  // (e) scrollToFile locates shifted oldLine / newLine rows accurately via data-old-line / data-new-line
+  const shiftedPatch = [
+    "diff --git a/src/shifted.ts b/src/shifted.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/shifted.ts",
+    "+++ b/src/shifted.ts",
+    "@@ -10,2 +25,2 @@",
+    "-const deletedAtTen = true;",
+    " const pairedOld11New25 = false;",
+    "diff --git a/package-lock.json b/package-lock.json",
+    "index 3333333..4444444 100644",
+    "--- a/package-lock.json",
+    "+++ b/package-lock.json",
+    "@@ -1,1 +1,2 @@",
+    " {}",
+    "+// lockfile",
+    "diff --git a/src/untouched.ts b/src/untouched.ts",
+    "index 5555555..6666666 100644",
+    "--- a/src/untouched.ts",
+    "+++ b/src/untouched.ts",
+    "@@ -1,1 +1,1 @@",
+    "-export const v = 1;",
+    "+export const v = 2;",
+  ].join("\n");
+  const shiftedParsed = parseDiffPatch(shiftedPatch);
+  let cr2State = {
+    domain: "pr__example-org__demo__300",
+    loaded: true,
+    diffRev: 1,
+    truncatedFiles: false,
+    error: null,
+    title: "example-org/demo#300",
+    status: "draft",
+    stats: {
+      fileCount: shiftedParsed.fileCount,
+      totalFiles: shiftedParsed.totalFiles,
+      additions: shiftedParsed.additions,
+      deletions: shiftedParsed.deletions,
+    },
+    viewedFiles: ["ghost-deleted.ts", "package-lock.json"],
+    comments: [],
+    files: shiftedParsed.files,
+    focusedFile: null,
+    focusedLine: null,
+    focusSeq: 0,
+  };
+
+  let shouldFailToggle = false;
+  const cr2Container = globalThis.document.createElement("div");
+  const rerenderCr2 = () =>
+    render(
+      html`<${DiffCanvasApp}
+        state=${cr2State}
+        invoke=${async (name, input) => {
+          if (name === "toggle_viewed") {
+            if (shouldFailToggle) throw new Error("Simulated network error");
+            const set = new Set(cr2State.viewedFiles);
+            if (set.has(input.file)) set.delete(input.file);
+            else set.add(input.file);
+            cr2State = { ...cr2State, viewedFiles: [...set] };
+            return { ok: true };
+          }
+          return { ok: true };
+        }}
+      />`,
+      cr2Container,
+    );
+
+  rerenderCr2();
+  const sidebarHeader = cr2Container.querySelector(".dv-sidebar-header");
+  assert.match(
+    sidebarHeader.textContent,
+    /1 viewed/,
+    "Sidebar Viewed count must ignore ghost viewedFiles outside filteredFiles",
+  );
+
+  // Toggling Viewed on src/shifted.ts when comments === [] must NOT re-render package-lock.json or src/untouched.ts
+  const cr2Cards = cr2Container.querySelectorAll(".dv-file-card");
+  assert.equal(cr2Cards.length, 3);
+  const shiftedCheckbox = cr2Cards[0].querySelector("input");
+  fileCardRenderCalls = 0;
+  shouldFailToggle = true;
+  const shiftChange = [...(shiftedCheckbox.listeners.get("change") || [])][0];
+  await shiftChange.call(shiftedCheckbox, { type: "change" });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(
+    fileCardRenderCalls,
+    0,
+    "Failed toggle_viewed with 0 comments must trigger 0 FileDiffCard re-renders and must not collapse the file",
+  );
+  assert.equal(cr2Cards[0].className.includes("collapsed"), false);
+
+  shouldFailToggle = false;
+  renderedCardPaths = [];
+  await shiftChange.call(shiftedCheckbox, { type: "change" });
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(
+    renderedCardPaths,
+    ["src/shifted.ts"],
+    "busyAction + collapse during toggle_viewed must only re-render the 1 toggled FileDiffCard",
+  );
+  renderedCardPaths = [];
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.deepEqual(
+    renderedCardPaths,
+    ["src/shifted.ts"],
+    "SSE viewedFiles update must only re-render the 1 toggled FileDiffCard",
+  );
+  assert.equal(cr2Cards[0].className.includes("collapsed"), true);
+
+  // Unchecking Viewed on package-lock.json (auto-collapsed lockfile) must keep it auto-collapsed!
+  const lockCheckbox = cr2Cards[1].querySelector("input");
+  const lockChange = [...(lockCheckbox.listeners.get("change") || [])][0];
+  await lockChange.call(lockCheckbox, { type: "change" });
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(
+    cr2Cards[1].className.includes("collapsed"),
+    true,
+    "Unchecking Viewed on package-lock.json must return it to auto-collapsed state instead of expanding",
+  );
+  assert.ok(
+    cr2Cards[1].querySelector(".dv-collapsed-notice"),
+    "Unchecked auto-collapsed lockfile must show its collapsed CTA again",
+  );
+
+  // Unchecking Viewed on normal file src/shifted.ts expands it back open
+  await shiftChange.call(shiftedCheckbox, { type: "change" });
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(cr2Cards[0].className.includes("collapsed"), false);
+
+  // Verify scrollToFile finds both deleted line (oldLine=10) and paired shifted line (oldLine=11, newLine=25)
+  StrictElement.scrollHistory = [];
+  cr2State = {
+    ...cr2State,
+    focusedFile: "src/shifted.ts",
+    focusedLine: 10,
+    focusSeq: 1,
+  };
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 180));
+  assert.equal(StrictElement.scrollHistory.length, 1);
+  assert.equal(StrictElement.scrollHistory[0].localName, "tr");
+  assert.equal(StrictElement.scrollHistory[0].getAttribute("data-old-line"), "10");
+  assert.equal(StrictElement.scrollHistory[0].getAttribute("data-new-line"), null);
+
+  cr2State = {
+    ...cr2State,
+    focusedFile: "src/shifted.ts",
+    focusedLine: 11,
+    focusSeq: 2,
+  };
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 180));
+  assert.equal(StrictElement.scrollHistory.length, 2);
+  assert.equal(StrictElement.scrollHistory[1].localName, "tr");
+  assert.equal(StrictElement.scrollHistory[1].getAttribute("data-old-line"), "11");
+  assert.equal(StrictElement.scrollHistory[1].getAttribute("data-new-line"), "25");
+
+  // Even when package-lock.json was focused via focusFile, checking then unchecking Viewed keeps it collapsed
+  cr2State = {
+    ...cr2State,
+    focusedFile: "package-lock.json",
+    focusedLine: null,
+    focusSeq: 3,
+  };
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 10));
+  await lockChange.call(lockCheckbox, { type: "change" });
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(cr2Cards[1].className.includes("collapsed"), true);
+  await lockChange.call(lockCheckbox, { type: "change" });
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(
+    cr2Cards[1].className.includes("collapsed"),
+    true,
+    "Unchecking Viewed on focused package-lock.json must keep it collapsed",
+  );
+
+  // Domain switch must reset stale fileQuery, collapsedDirs, and actionError so new domain's focusedFile renders and scrolls
+  const filterInput = cr2Container.querySelector(".dv-search-input");
+  filterInput.value = "untouched";
+  const filterHandler = [...(filterInput.listeners.get("input") || [])][0];
+  filterHandler.call(filterInput, { type: "input", target: filterInput, currentTarget: filterInput });
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(cr2Container.querySelectorAll(".dv-file-card").length, 1);
+
+  shouldFailToggle = true;
+  const untouchedCheckbox = cr2Container.querySelector(".dv-file-card").querySelector("input");
+  const untouchedChange = [...(untouchedCheckbox.listeners.get("change") || [])][0];
+  await untouchedChange.call(untouchedCheckbox, { type: "change" });
+  shouldFailToggle = false;
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(cr2Container.querySelector(".dv-error-banner"));
+
+  StrictElement.scrollHistory = [];
+  cr2State = {
+    ...cr2State,
+    domain: "git__cr2_next_domain",
+    diffRev: 2,
+    files: [
+      {
+        canonicalPath: "src/new-domain-file.ts",
+        displayPath: "src/new-domain-file.ts",
+        status: "added",
+        additions: 1,
+        deletions: 0,
+        hunks: [
+          {
+            header: "@@ -0,0 +1,1 @@",
+            lines: [{ type: "add", oldLine: null, newLine: 1, content: "export const switched = true;" }],
+          },
+        ],
+      },
+    ],
+    focusedFile: "src/new-domain-file.ts",
+    focusedLine: null,
+    focusSeq: 1,
+  };
+  rerenderCr2();
+  await new Promise((r) => setTimeout(r, 180));
+  assert.equal(
+    cr2Container.querySelector(".dv-error-banner"),
+    null,
+    "Domain switch must clear stale actionError banner",
+  );
+  assert.equal(
+    cr2Container.querySelectorAll(".dv-file-card").length,
+    1,
+    "Domain switch must clear stale fileQuery so new domain files render",
+  );
+  assert.equal(StrictElement.scrollHistory.length, 1);
+
+  render(null, cr2Container);
+});
+
+test("cached-domain reopen retries after transient failure, preserves non-secret account in durable source, and computes fresh status", async (t) => {
+  const storeHome = makeTempDir("diff-cached-reopen-");
+  const prevHome = process.env.COPILOT_HOME;
+  process.env.COPILOT_HOME = storeHome;
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.COPILOT_HOME;
+    else process.env.COPILOT_HOME = prevHome;
+    fs.rmSync(storeHome, { recursive: true, force: true });
+  });
+  const customStore = (file) => userStore("diff", file);
+
+  const samplePatch = [
+    "diff --git a/src/private.ts b/src/private.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/private.ts",
+    "+++ b/src/private.ts",
+    "@@ -1,1 +1,2 @@",
+    " export const ok = true;",
+    "+export const emu = true;",
+  ].join("\n");
+
+  const fakeEnv = {
+    ...process.env,
+    COPILOT_GH_ACCOUNT_github_2E_com_sample_5F_emu: "ghs_secret_emu_token_value",
+  };
+
+  let failWithoutEmu = true;
+  const seenTokens = [];
+  const mockExecFn = async (_cmd, args, opts) => {
+    const token = opts?.env?.GH_TOKEN || "";
+    seenTokens.push(token);
+    if (failWithoutEmu && token !== "ghs_secret_emu_token_value") {
+      throw new Error("GraphQL: Could not resolve to a Repository with the name 'example-org/emu-repo'.");
+    }
+    if (args[0] === "pr" && args[1] === "diff") {
+      return samplePatch;
+    }
+    if (args[0] === "pr" && args[1] === "view") {
+      return JSON.stringify({
+        number: 77,
+        title: "EMU PR",
+        headRefName: "feat/emu",
+        baseRefName: "main",
+      });
+    }
+    throw new Error(`Unexpected command: ${args.join(" ")}`);
+  };
+
+  // Seed a durable review file (e.g. from an earlier online session)
+  await customStore("pr__example-org__emu-repo__77.json").save({
+    domain: "pr__example-org__emu-repo__77",
+    source: {
+      mode: "pr",
+      repo: "example-org/emu-repo",
+      pr: 77,
+      paths: [],
+    },
+    title: "example-org/emu-repo#77: EMU PR",
+    status: "draft",
+    viewedFiles: [],
+    comments: [],
+    updatedAt: new Date().toISOString(),
+  });
+
+  // 1. First open fails (e.g. offline/no fallback token initially) -> caches { loaded: false, error }
+  const noFallbackEnv = { PATH: process.env.PATH };
+  const cfg = createDiffCanvasConfig({
+    execFn: mockExecFn,
+    env: noFallbackEnv,
+    storeFactory: customStore,
+  });
+  const rt = createCanvasRuntime(cfg);
+  t.after(() => rt.shutdown());
+
+  assert.equal(isDomainCached({ repo: "example-org/emu-repo", pr: 77 }, { workspacePath: "" }, cfg), false);
+  const firstOpen = await rt.openInstance({
+    instanceId: "emu-panel",
+    input: { repo: "example-org/emu-repo", pr: 77 },
+    ctx: { instanceId: "emu-panel", workspacePath: "" },
+  });
+  assert.equal(firstOpen.status, "Diff Viewer (ready)");
+  assert.equal(isDomainHydrated({ repo: "example-org/emu-repo", pr: 77 }, { workspacePath: "" }, cfg), false);
+  assert.equal(isDomainCached({ repo: "example-org/emu-repo", pr: 77 }, { workspacePath: "" }, cfg), true);
+
+  // 2. Now token becomes available or user supplies `account: "sample_emu"` on reopen
+  Object.assign(noFallbackEnv, fakeEnv);
+  const reopenCtx = {
+    instanceId: "emu-panel",
+    input: { repo: "example-org/emu-repo", pr: 77, account: "sample_emu" },
+    workspacePath: "",
+  };
+  const wasCached = isDomainCached(reopenCtx.input, reopenCtx, cfg);
+  assert.equal(wasCached, true);
+
+  const rawOpened = await rt.openInstance({
+    instanceId: reopenCtx.instanceId,
+    input: reopenCtx.input,
+    ctx: reopenCtx,
+  });
+  if (wasCached) {
+    await rt.invokeFromAgent("refresh", {}, reopenCtx);
+  }
+  const domainId = computeDomainId(reopenCtx.input, reopenCtx.workspacePath);
+  const latestState = await rt.getState(domainId);
+  const finalStatus = cfg.statusLine(reopenCtx, latestState);
+  assert.notEqual(rawOpened.status, finalStatus);
+  assert.match(finalStatus, /example-org\/emu-repo#77 - EMU PR \| 1 files \(\+1\/-0\) \| draft \(0 comments\)/);
+  assert.equal(latestState.loaded, true);
+  assert.equal(latestState.source.account, "sample_emu");
+  assert.equal(JSON.stringify(latestState).includes("ghs_secret_emu_token_value"), false);
+
+  // 3. Verify durable JSON saved non-secret `account: "sample_emu"` (never the token) and a cold getState restores it
+  const savedDiskText = fs.readFileSync(
+    path.join(storeHome, "extensions", "diff", "artifacts", "pr__example-org__emu-repo__77.json"),
+    "utf8",
+  );
+  assert.equal(savedDiskText.includes("ghs_secret_emu_token_value"), false);
+  const savedDiskObj = JSON.parse(savedDiskText);
+  assert.equal(savedDiskObj.source.account, "sample_emu");
+
+  await rt.shutdown();
+
+  // Cold getState(domainId) with NO openInstance call reconstructs `account: "sample_emu"` from savedPublicSource!
+  const coldCfg = createDiffCanvasConfig({
+    execFn: mockExecFn,
+    env: fakeEnv,
+    storeFactory: customStore,
+  });
+  const coldRt = createCanvasRuntime(coldCfg);
+  t.after(() => coldRt.shutdown());
+
+  const coldState = await coldRt.getState("pr__example-org__emu-repo__77");
+  assert.equal(coldState.loaded, true);
+  assert.equal(coldState.source.account, "sample_emu");
+
+  // 4. Verify typo'd explicit account on reopen does NOT poison domainSources,
+  //    account: "" clears saved account, and inherited unlinked account falls back cleanly
+  const openTypo = await openDiffInstance(coldRt, coldCfg, {
+    instanceId: "emu-panel-2",
+    input: { repo: "example-org/emu-repo", pr: 77, account: "nonexistent_acct" },
+    workspacePath: "",
+  });
+  assert.match(openTypo.status, /example-org\/emu-repo#77/);
+  const afterTypoState = await coldRt.getState("pr__example-org__emu-repo__77");
+  assert.match(afterTypoState.error || "", /nonexistent_acct/);
+  // Reopening without account still uses the prior working source ("sample_emu")!
+  const recoveredOpen = await openDiffInstance(coldRt, coldCfg, {
+    instanceId: "emu-panel-2",
+    input: { repo: "example-org/emu-repo", pr: 77 },
+    workspacePath: "",
+  });
+  assert.match(recoveredOpen.status, /1 files \(\+1\/-0\)/);
+  const recoveredState = await coldRt.getState("pr__example-org__emu-repo__77");
+  assert.equal(recoveredState.error, null);
+  assert.equal(recoveredState.source.account, "sample_emu");
+
+  // Now allow ambient auth and clear saved account explicitly via account: ""
+  failWithoutEmu = false;
+  await openDiffInstance(coldRt, coldCfg, {
+    instanceId: "emu-panel-2",
+    input: { repo: "example-org/emu-repo", pr: 77, account: "" },
+    workspacePath: "",
+  });
+  const clearedState = await coldRt.getState("pr__example-org__emu-repo__77");
+  assert.equal(clearedState.error, null);
+  assert.equal(clearedState.source.account, undefined);
+
+  // Seed an unlinked saved account and verify cold open without explicit account falls back to ambient auth
+  await customStore("pr__example-org__emu-repo__78.json").save({
+    domain: "pr__example-org__emu-repo__78",
+    source: {
+      mode: "pr",
+      repo: "example-org/emu-repo",
+      pr: 78,
+      account: "unlinked_former_account",
+      paths: [],
+    },
+    title: "example-org/emu-repo#78",
+    status: "draft",
+    viewedFiles: ["src/private.ts"],
+    comments: [],
+    updatedAt: new Date().toISOString(),
+  });
+  const fallbackCfg = createDiffCanvasConfig({
+    execFn: mockExecFn,
+    env: { PATH: process.env.PATH },
+    storeFactory: customStore,
+  });
+  const fallbackRt = createCanvasRuntime(fallbackCfg);
+  t.after(() => fallbackRt.shutdown());
+
+  const fallbackOpened = await openDiffInstance(fallbackRt, fallbackCfg, {
+    instanceId: "emu-panel-fallback",
+    input: { repo: "example-org/emu-repo", pr: 78 },
+    workspacePath: "",
+  });
+  assert.match(fallbackOpened.status, /1 files \(\+1\/-0\)/);
+  const fallbackState = await fallbackRt.getState("pr__example-org__emu-repo__78");
+  assert.equal(fallbackState.loaded, true);
+  assert.equal(fallbackState.source.account, undefined);
+  assert.deepEqual(fallbackState.viewedFiles, ["src/private.ts"]);
+});
+
+test("opening Git diff from a repository subdirectory shares repo-root domainId and saves durably, and openDiffInstance pushes SSE on cold domain switch", async (t) => {
+  const storeHome = makeTempDir("diff-subdir-home-");
+  const repoDir = makeTempDir("diff-subdir-repo-");
+  const prevHome = process.env.COPILOT_HOME;
+  process.env.COPILOT_HOME = storeHome;
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.COPILOT_HOME;
+    else process.env.COPILOT_HOME = prevHome;
+    fs.rmSync(storeHome, { recursive: true, force: true });
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  execFileSync("git", ["init", "-b", "main"], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "dev@example.com"], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["config", "user.name", "Example Dev"], { cwd: repoDir, stdio: "ignore" });
+
+  const subDir = path.join(repoDir, "packages", "sub");
+  fs.mkdirSync(subDir, { recursive: true });
+  fs.writeFileSync(path.join(subDir, "mod.ts"), "export const x = 1;\n", "utf8");
+  execFileSync("git", ["add", "."], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", "initial"], { cwd: repoDir, stdio: "ignore" });
+
+  fs.writeFileSync(path.join(subDir, "mod.ts"), "export const x = 2;\n", "utf8");
+
+  // Subdirectory workspacePath resolves to exact same domainId as repoDir (for both Git and checkout-inferred PR)
+  const rootDomainId = computeDomainId({}, repoDir);
+  const subDomainId = computeDomainId({}, subDir);
+  assert.equal(subDomainId, rootDomainId);
+  assert.equal(computeDomainId({ pr: 42 }, subDir), computeDomainId({ pr: 42 }, repoDir));
+
+  const customStore = (file) => userStore("diff", file);
+  const cfg = createDiffCanvasConfig({ storeFactory: customStore });
+  const rt = createCanvasRuntime(cfg);
+  t.after(() => rt.shutdown());
+
+  await openDiffInstance(rt, cfg, {
+    instanceId: "subdir-panel",
+    input: {},
+    workspacePath: subDir,
+  });
+  await rt.invokeFromAgent(
+    "add_comment",
+    { file: "packages/sub/mod.ts", line: 1, side: "right", body: "Persisted from subdir" },
+    { instanceId: "subdir-panel", workspacePath: subDir },
+  );
+  await rt.shutdown();
+
+  // Restart runtime and open from repo root -> comment saved from subdir is loaded!
+  const cfgReloaded = createDiffCanvasConfig({ storeFactory: customStore });
+  const rtReloaded = createCanvasRuntime(cfgReloaded);
+  t.after(() => rtReloaded.shutdown());
+
+  await openDiffInstance(rtReloaded, cfgReloaded, {
+    instanceId: "root-panel",
+    input: {},
+    workspacePath: repoDir,
+  });
+  const reloadedState = await rtReloaded.getState(rootDomainId);
+  assert.equal(reloadedState.comments.length, 1);
+  assert.equal(reloadedState.comments[0].body, "Persisted from subdir");
+
+  // Now verify re-targeting an open instanceId with a live SSE client to a cold PR domain pushes SSE immediately!
+  const prMockExec = async (_cmd, args) => {
+    const prNum = Number(args[2]);
+    if (args[0] === "pr" && args[1] === "diff") {
+      return [
+        `diff --git a/src/pr${prNum}.ts b/src/pr${prNum}.ts`,
+        "new file mode 100644",
+        "--- /dev/null",
+        `+++ b/src/pr${prNum}.ts`,
+        "@@ -0,0 +1,1 @@",
+        `+export const pr = ${prNum};`,
+      ].join("\n");
+    }
+    if (args[0] === "pr" && args[1] === "view") {
+      return JSON.stringify({
+        number: prNum,
+        title: `PR Number ${prNum}`,
+        headRefName: `feat/pr-${prNum}`,
+        baseRefName: "main",
+      });
+    }
+    throw new Error(`Unexpected command: ${args.join(" ")}`);
+  };
+
+  const sseCfg = createDiffCanvasConfig({ execFn: prMockExec, storeFactory: customStore });
+  const sseRt = createCanvasRuntime(sseCfg);
+  t.after(() => sseRt.shutdown());
+
+  const openedPr1 = await openDiffInstance(sseRt, sseCfg, {
+    instanceId: "switchable-panel",
+    input: { repo: "example-org/widgets", pr: 1 },
+    workspacePath: "",
+  });
+  assert.match(openedPr1.status, /PR Number 1/);
+
+  const ac = new AbortController();
+  t.after(() => ac.abort());
+
+  const sseRes = await fetch(capEndpoint("/events", openedPr1.url), {
+    headers: { Accept: "text/event-stream" },
+    signal: ac.signal,
+  });
+  assert.equal(sseRes.status, 200);
+  const streamIter = sseSnapshots(sseRes.body.getReader());
+
+  const initialSse = await streamIter.next();
+  assert.equal(initialSse.value.domain, "pr__example-org__widgets__1");
+  assert.equal(initialSse.value.files[0].canonicalPath, "src/pr1.ts");
+
+  // Re-target the SAME instanceId to cold uncached PR #2 (no focusFile, !wasCached)
+  const openedPr2 = await openDiffInstance(sseRt, sseCfg, {
+    instanceId: "switchable-panel",
+    input: { repo: "example-org/widgets", pr: 2 },
+    workspacePath: "",
+  });
+  assert.equal(openedPr2.url, openedPr1.url);
+  assert.match(openedPr2.status, /PR Number 2/);
+
+  const switchedSse = await Promise.race([
+    streamIter.next(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Timed out waiting for cold-domain switch SSE push")), 2000),
+    ),
+  ]);
+  assert.equal(switchedSse.value.domain, "pr__example-org__widgets__2");
+  assert.equal(switchedSse.value.files[0].canonicalPath, "src/pr2.ts");
+
+  // Failing focusFile on a brand-new instanceId closes the newly started server and leaves focusedFile null
+  await assert.rejects(
+    openDiffInstance(sseRt, sseCfg, {
+      instanceId: "leaked-panel",
+      input: { repo: "example-org/widgets", pr: 3, focusFile: "src/missing.ts" },
+      workspacePath: "",
+    }),
+    /not part of the loaded diff/,
+  );
+  assert.equal(sseRt._instances.has("leaked-panel"), false);
+  const pr3State = await sseRt.getState("pr__example-org__widgets__3");
+  assert.equal(pr3State.focusedFile, null);
+  assert.equal(pr3State.focusSeq, 0);
+
+  // Failing focusFile when re-targeting an already-open instanceId (both cold PR #4 and cached PR #3) restores inst.domainId & SSE
+  await assert.rejects(
+    openDiffInstance(sseRt, sseCfg, {
+      instanceId: "switchable-panel",
+      input: { repo: "example-org/widgets", pr: 4, focusFile: "src/missing.ts" },
+      workspacePath: "",
+    }),
+    /not part of the loaded diff/,
+  );
+  assert.equal(sseRt._instances.get("switchable-panel").domainId, "pr__example-org__widgets__2");
+
+  await assert.rejects(
+    openDiffInstance(sseRt, sseCfg, {
+      instanceId: "switchable-panel",
+      input: { repo: "example-org/widgets", pr: 3, focusFile: "src/missing.ts" },
+      workspacePath: "",
+    }),
+    /not part of the loaded diff/,
+  );
+  assert.equal(sseRt._instances.get("switchable-panel").domainId, "pr__example-org__widgets__2");
+  // Wait for the refresh + restored SSE events on cached PR #3 rollback and verify last pushed state is PR #2
+  const cachedAttemptEvent1 = await streamIter.next();
+  const cachedAttemptEvent2 = await streamIter.next();
+  assert.equal(cachedAttemptEvent1.value.domain, "pr__example-org__widgets__3");
+  assert.equal(cachedAttemptEvent2.value.domain, "pr__example-org__widgets__2");
+
+  ac.abort();
 });

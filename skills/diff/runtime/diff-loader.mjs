@@ -385,16 +385,44 @@ function sanitizeSegment(raw, fallback = "item") {
   return cleaned.slice(0, 48);
 }
 
+function resolveLocalGitTopLevel(startDir) {
+  let stat;
+  try {
+    stat = fs.statSync(startDir);
+  } catch {
+    return startDir;
+  }
+  if (!stat.isDirectory()) return startDir;
+
+  let cur = path.resolve(startDir);
+  while (true) {
+    if (fs.existsSync(path.join(cur, ".git"))) {
+      assertSafeResolvedRepoRoot(cur, startDir);
+      try {
+        return fs.realpathSync.native(cur);
+      } catch {
+        return cur;
+      }
+    }
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return startDir;
+}
+
 export function normalizeDiffSource(input = {}, workspacePath = "") {
   const paths = assertSafePathspecs(input?.paths);
-  const account = assertSafeGitHubAccount(input?.account);
+  const hasExplicitAccountProp = typeof input?.account === "string";
+  const clearAccount = hasExplicitAccountProp && input.account.trim() === "";
+  const account = clearAccount ? null : assertSafeGitHubAccount(input?.account);
   const rawRepo = typeof input?.repo === "string" && input.repo.trim() ? input.repo.trim() : "";
   const hasPr = input?.pr !== undefined && input?.pr !== null;
 
   if (rawRepo && !hasPr) {
     throw new Error("'pr' is required when 'repo' is provided");
   }
-  if (account && !hasPr) {
+  if ((account || clearAccount) && !hasPr) {
     throw new Error("'pr' is required when 'account' is provided");
   }
 
@@ -418,7 +446,19 @@ export function normalizeDiffSource(input = {}, workspacePath = "") {
   if (hasPr) {
     const pr = assertSafePrNumber(input.pr);
     const repo = rawRepo ? assertSafeRepoFullName(rawRepo) : null;
-    if (!repo && !candidateCwd) {
+    let normalizedPrCwd = null;
+    if (!repo && candidateCwd) {
+      if (explicitCwd) {
+        normalizedPrCwd = resolveLocalGitTopLevel(candidateCwd);
+      } else {
+        try {
+          normalizedPrCwd = resolveLocalGitTopLevel(candidateCwd);
+        } catch {
+          normalizedPrCwd = "";
+        }
+      }
+    }
+    if (!repo && !normalizedPrCwd) {
       throw new Error("Provide 'repo' (owner/repo) or open from a local repository checkout for PR diffs");
     }
     return {
@@ -426,7 +466,8 @@ export function normalizeDiffSource(input = {}, workspacePath = "") {
       repo,
       pr,
       ...(account ? { account } : {}),
-      cwd: repo ? null : candidateCwd,
+      ...(clearAccount ? { clearAccount: true } : {}),
+      cwd: repo ? null : normalizedPrCwd,
       paths,
     };
   }
@@ -436,9 +477,20 @@ export function normalizeDiffSource(input = {}, workspacePath = "") {
     return null;
   }
 
+  let normalizedGitCwd = candidateCwd;
+  if (explicitCwd) {
+    normalizedGitCwd = resolveLocalGitTopLevel(candidateCwd);
+  } else {
+    try {
+      normalizedGitCwd = resolveLocalGitTopLevel(candidateCwd);
+    } catch {
+      return null;
+    }
+  }
+
   return {
     mode: "git",
-    cwd: candidateCwd,
+    cwd: normalizedGitCwd,
     spec: parsedSpec.spec,
     paths,
   };
@@ -879,7 +931,13 @@ export async function loadDiff(source, options = {}) {
 
     let rawPatch;
     let rawMeta;
+    let resolvedAccount = null;
     const explicitAccount = assertSafeGitHubAccount(source.account);
+    const preferredAccount =
+      !explicitAccount && !source.clearAccount
+        ? assertSafeGitHubAccount(source.preferredAccount)
+        : null;
+
     if (explicitAccount) {
       const token = await resolveExplicitAccountToken(explicitAccount, {
         execFn,
@@ -889,6 +947,7 @@ export async function loadDiff(source, options = {}) {
       });
       try {
         [rawPatch, rawMeta] = await runPrCommands(token);
+        resolvedAccount = explicitAccount;
       } catch (err) {
         if (isGhAuthOrNotFoundError(err)) {
           throw new Error(
@@ -898,30 +957,58 @@ export async function loadDiff(source, options = {}) {
         throw err;
       }
     } else {
-      try {
-        [rawPatch, rawMeta] = await runPrCommands(null);
-      } catch (primaryErr) {
-        if (!isGhAuthOrNotFoundError(primaryErr)) {
-          throw primaryErr;
+      let loadedViaPreferred = false;
+      if (preferredAccount) {
+        let prefToken = null;
+        try {
+          prefToken = await resolveExplicitAccountToken(preferredAccount, {
+            execFn,
+            execCwd,
+            untrustedRoots,
+            env,
+          });
+        } catch {
+          prefToken = null;
         }
-        const fallbackTokens = collectFallbackAccountTokens(env);
-        let recovered = false;
-        for (const candidateToken of fallbackTokens) {
+        if (prefToken) {
           try {
-            [rawPatch, rawMeta] = await runPrCommands(candidateToken);
-            recovered = true;
-            break;
-          } catch (retryErr) {
-            if (!isGhAuthOrNotFoundError(retryErr)) {
-              throw retryErr;
+            [rawPatch, rawMeta] = await runPrCommands(prefToken);
+            resolvedAccount = preferredAccount;
+            loadedViaPreferred = true;
+          } catch (prefErr) {
+            if (!isGhAuthOrNotFoundError(prefErr)) {
+              throw prefErr;
             }
           }
         }
-        if (!recovered) {
-          const namedTarget = source.repo || repoLabel;
-          throw new Error(
-            `Unable to load ${repoLabel}: could not resolve '${namedTarget}' or authenticate with available GitHub accounts. Verify access via 'gh auth status' or pass 'account' in open_canvas input.`,
-          );
+      }
+
+      if (!loadedViaPreferred) {
+        try {
+          [rawPatch, rawMeta] = await runPrCommands(null);
+        } catch (primaryErr) {
+          if (!isGhAuthOrNotFoundError(primaryErr)) {
+            throw primaryErr;
+          }
+          const fallbackTokens = collectFallbackAccountTokens(env);
+          let recovered = false;
+          for (const candidateToken of fallbackTokens) {
+            try {
+              [rawPatch, rawMeta] = await runPrCommands(candidateToken);
+              recovered = true;
+              break;
+            } catch (retryErr) {
+              if (!isGhAuthOrNotFoundError(retryErr)) {
+                throw retryErr;
+              }
+            }
+          }
+          if (!recovered) {
+            const namedTarget = source.repo || repoLabel;
+            throw new Error(
+              `Unable to load ${repoLabel}: could not resolve '${namedTarget}' or authenticate with available GitHub accounts. Verify access via 'gh auth status' or pass 'account' in open_canvas input.`,
+            );
+          }
         }
       }
     }
@@ -942,8 +1029,11 @@ export async function loadDiff(source, options = {}) {
 
     return {
       source: {
-        ...source,
-        ...(explicitAccount ? { account: explicitAccount } : {}),
+        mode: "pr",
+        repo: source.repo,
+        pr: source.pr,
+        ...(resolvedAccount ? { account: resolvedAccount } : {}),
+        cwd: source.cwd,
         paths: [...(source.paths ?? [])],
       },
       diffSpec: repoLabel,

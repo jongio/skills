@@ -104,35 +104,55 @@ function stripHeaderPrefix(rawHeaderPath, prefix) {
   return unquoted;
 }
 
+function scanQuotedTokenEnd(str, openQuoteIdx) {
+  let i = openQuoteIdx + 1;
+  while (i < str.length) {
+    if (str[i] === "\\") {
+      i += 2;
+      continue;
+    }
+    if (str[i] === '"') return i;
+    i += 1;
+  }
+  return -1;
+}
+
 function parseGitDiffPaths(line) {
   const rest = line.slice("diff --git ".length).trim();
   if (rest.startsWith('"')) {
-    let i = 1;
-    while (i < rest.length) {
-      if (rest[i] === "\\") {
-        i += 2;
-        continue;
-      }
-      if (rest[i] === '"') break;
-      i += 1;
+    const endIdx = scanQuotedTokenEnd(rest, 0);
+    if (endIdx > 0) {
+      const first = unquoteGitHeaderPath(rest.slice(0, endIdx + 1));
+      const second = unquoteGitHeaderPath(rest.slice(endIdx + 1).trim());
+      return {
+        oldPath: first.startsWith("a/") ? first.slice(2) : first,
+        newPath: second.startsWith("b/") ? second.slice(2) : second,
+      };
     }
-    const first = unquoteGitHeaderPath(rest.slice(0, i + 1));
-    const second = unquoteGitHeaderPath(rest.slice(i + 1).trim());
-    return {
-      oldPath: first.startsWith("a/") ? first.slice(2) : first,
-      newPath: second.startsWith("b/") ? second.slice(2) : second,
-    };
+  }
+  if (!rest.startsWith('"') && rest.endsWith('"')) {
+    let searchFrom = 0;
+    while (searchFrom < rest.length) {
+      const spaceQuoteIdx = rest.indexOf(' "', searchFrom);
+      if (spaceQuoteIdx === -1) break;
+      const endIdx = scanQuotedTokenEnd(rest, spaceQuoteIdx + 1);
+      if (endIdx === rest.length - 1) {
+        const first = unquoteGitHeaderPath(rest.slice(0, spaceQuoteIdx).trim());
+        const second = unquoteGitHeaderPath(rest.slice(spaceQuoteIdx + 1));
+        return {
+          oldPath: first.startsWith("a/") ? first.slice(2) : first,
+          newPath: second.startsWith("b/") ? second.slice(2) : second,
+        };
+      }
+      searchFrom = spaceQuoteIdx + 2;
+    }
   }
   const marker = " b/";
-  if (rest.startsWith("a/")) {
-    const body = rest.slice(2);
-    if (body.length % 2 === 1 && body[(body.length - 1) / 2] === " ") {
-      const half = (body.length - 1) / 2;
-      const left = body.slice(0, half);
-      const right = body.slice(half + 1);
-      if (right === `b/${left}`) {
-        return { oldPath: left, newPath: left };
-      }
+  if (rest.startsWith("a/") && rest.length >= 7 && (rest.length - 5) % 2 === 0) {
+    const pathLen = (rest.length - 5) / 2;
+    const candidate = rest.slice(2, 2 + pathLen);
+    if (rest.slice(2 + pathLen) === ` b/${candidate}`) {
+      return { oldPath: candidate, newPath: candidate };
     }
   }
   const splitIdx = rest.lastIndexOf(marker);

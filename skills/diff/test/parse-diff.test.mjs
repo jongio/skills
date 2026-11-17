@@ -137,3 +137,62 @@ test("computeInlineWordDiff and tokenizeCodeLine stay linear and safe on patholo
   assert.ok(sqlLine.some((t) => t.kind === "keyword" && t.text === "select"));
   assert.ok(sqlLine.some((t) => t.kind === "keyword" && t.text === "where"));
 });
+
+test("parseDiffPatch parses all four combinations of quoted and unquoted diff --git paths", () => {
+  const mixedQuotePatch = [
+    'diff --git "a/old space.ts" "b/new space.ts"',
+    "similarity index 100%",
+    'rename from "old space.ts"',
+    'rename to "new space.ts"',
+    'diff --git "a/old space.ts" b/newplain.ts',
+    "old mode 100644",
+    "new mode 100755",
+    'diff --git a/oldplain.ts "b/new space.ts"',
+    "old mode 100644",
+    "new mode 100755",
+    'diff --git a/dir with space/file.ts b/dir with space/file.ts',
+    "index 1111111..2222222 100644",
+    "--- a/dir with space/file.ts",
+    "+++ b/dir with space/file.ts",
+    "@@ -1,1 +1,1 @@",
+    "-export const a = 1;",
+    "+export const a = 2;",
+    'diff --git a/plain.ts "b/sub \\"quoted\\" b/file.ts"',
+    "old mode 100644",
+    "new mode 100755",
+    "diff --git a/docs/plan b/spec.md b/docs/plan b/spec.md",
+    "index 3333333..4444444 100644",
+    "--- a/docs/plan b/spec.md",
+    "+++ b/docs/plan b/spec.md",
+    "@@ -1,1 +1,1 @@",
+    "-old",
+    "+new",
+  ].join("\n");
+
+  const parsed = parseDiffPatch(mixedQuotePatch);
+  assert.equal(parsed.files.length, 6);
+
+  assert.equal(parsed.files[0].oldPath, "old space.ts");
+  assert.equal(parsed.files[0].newPath, "new space.ts");
+  assert.equal(parsed.files[0].canonicalPath, "new space.ts");
+
+  assert.equal(parsed.files[1].oldPath, "old space.ts");
+  assert.equal(parsed.files[1].newPath, "newplain.ts");
+  assert.equal(parsed.files[1].canonicalPath, "newplain.ts");
+
+  assert.equal(parsed.files[2].oldPath, "oldplain.ts");
+  assert.equal(parsed.files[2].newPath, "new space.ts");
+  assert.equal(parsed.files[2].canonicalPath, "new space.ts");
+
+  assert.equal(parsed.files[3].oldPath, "dir with space/file.ts");
+  assert.equal(parsed.files[3].newPath, "dir with space/file.ts");
+  assert.equal(parsed.files[3].canonicalPath, "dir with space/file.ts");
+
+  assert.equal(parsed.files[4].oldPath, "plain.ts");
+  assert.equal(parsed.files[4].newPath, 'sub "quoted" b/file.ts');
+  assert.equal(parsed.files[4].canonicalPath, 'sub "quoted" b/file.ts');
+
+  assert.equal(parsed.files[5].oldPath, "docs/plan b/spec.md");
+  assert.equal(parsed.files[5].newPath, "docs/plan b/spec.md");
+  assert.equal(parsed.files[5].canonicalPath, "docs/plan b/spec.md");
+});

@@ -5,7 +5,7 @@
 // state, and action handlers live in canvas.mjs and diff-loader.mjs.
 
 import { createCanvas, joinSession, CanvasError } from "@github/copilot-sdk/extension";
-import { canvasConfig, isDomainHydrated } from "./canvas.mjs";
+import { canvasConfig, openDiffInstance } from "./canvas.mjs";
 import { createCanvasRuntime, CanvasKitError } from "./canvas-kit/server.mjs";
 
 const runtime = createCanvasRuntime(canvasConfig);
@@ -73,28 +73,10 @@ const canvas = createCanvas({
     try {
       await ready;
       checkSession(ctx, session);
-      const enrichedCtx = {
+      return await openDiffInstance(runtime, canvasConfig, {
         ...ctx,
-        input: ctx?.input ?? {},
         workspacePath: resolveSessionWorkingDirectory(ctx),
-      };
-      const alreadyWarm = isDomainHydrated(enrichedCtx.input, enrichedCtx);
-      const opened = await runtime.openInstance({
-        instanceId: ctx.instanceId,
-        input: ctx.input,
-        ctx: enrichedCtx,
       });
-      if (alreadyWarm) {
-        await runtime.invokeFromAgent("refresh", {}, enrichedCtx);
-      }
-      if (ctx?.input?.focusFile) {
-        await runtime.invokeFromAgent(
-          "focus_file",
-          { file: ctx.input.focusFile },
-          enrichedCtx,
-        );
-      }
-      return opened;
     } catch (err) {
       throw toCanvasError(err);
     }

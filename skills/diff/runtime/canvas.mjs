@@ -22,6 +22,9 @@ const ASSETS_DIR = fileURLToPath(new URL("./web/", import.meta.url));
 const MAX_COMMENTS_PER_REVIEW = 500;
 const MAX_COMMENT_BODY_CHARS = 16_384;
 const SAFE_INSTANCE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const SAFE_GITHUB_ACCOUNT_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,38})$/;
+const REVIEW_LOCKED_MESSAGE =
+  "Review has already been addressed; call reopen_review or start a New Review Round first";
 
 export const DIFF_OPEN_INPUT_SCHEMA = {
   type: "object",
@@ -106,10 +109,16 @@ function normalizeOptionalFocusFile(rawFocusFile) {
 function toPublicSource(source) {
   if (!source || typeof source !== "object") return null;
   if (source.mode === "pr") {
+    const safeAccount =
+      typeof source.account === "string" &&
+      SAFE_GITHUB_ACCOUNT_RE.test(source.account.trim())
+        ? source.account.trim()
+        : null;
     return {
       mode: "pr",
       repo: source.repo || null,
       pr: source.pr,
+      ...(safeAccount ? { account: safeAccount } : {}),
       paths: Array.isArray(source.paths) ? [...source.paths] : [],
     };
   }
@@ -340,11 +349,42 @@ function hasExplicitSourceFields(input) {
   return Boolean(
     input.repo ||
       input.pr !== undefined ||
-      input.account ||
+      input.account !== undefined ||
       input.cwd ||
       input.spec ||
       (Array.isArray(input.paths) && input.paths.length > 0),
   );
+}
+
+function mergeAccountFromPrior(fullSource, input, priorAccount) {
+  if (!fullSource || fullSource.mode !== "pr") return fullSource;
+  if (typeof input?.account === "string") {
+    if (input.account.trim() === "") {
+      const { account: _drop, preferredAccount: _dropPref, ...rest } = fullSource;
+      return { ...rest, clearAccount: true };
+    }
+    return fullSource;
+  }
+  if (fullSource.account || fullSource.clearAccount) return fullSource;
+  const safePrior =
+    typeof priorAccount === "string" &&
+    SAFE_GITHUB_ACCOUNT_RE.test(priorAccount.trim())
+      ? priorAccount.trim()
+      : null;
+  return safePrior
+    ? { ...fullSource, preferredAccount: safePrior }
+    : fullSource;
+}
+
+function preserveDomainSourceKey(domainId, diffSource, requestedSource) {
+  if (
+    diffSource?.mode === requestedSource?.mode &&
+    requestedSource?.cwd &&
+    computeDomainIdForSource(diffSource) !== domainId
+  ) {
+    return { ...diffSource, cwd: requestedSource.cwd };
+  }
+  return diffSource;
 }
 
 export function createDiffCanvasConfig({
@@ -353,6 +393,7 @@ export function createDiffCanvasConfig({
   storeFactory = (safeFile) => userStore("diff", safeFile),
 } = {}) {
   const pendingOpen = new Map();
+  const pendingReopenSources = new Map();
   const domainSources = new Map();
   const hydratedDomains = new Set();
   const loadedDomainKeys = new Set();
@@ -394,10 +435,25 @@ export function createDiffCanvasConfig({
     requireCapability: true,
     assetsDir: ASSETS_DIR,
     _hydratedDomains: hydratedDomains,
+    _loadedDomainKeys: loadedDomainKeys,
 
     isDomainHydrated(input = {}, ctx = {}) {
       const domainId = computeDomainId(input ?? {}, String(ctx?.workspacePath ?? ""));
       return hydratedDomains.has(domainId);
+    },
+
+    isDomainCached(input = {}, ctx = {}) {
+      try {
+        const fullSource = normalizeDiffSource(
+          input ?? {},
+          String(ctx?.workspacePath ?? ""),
+        );
+        if (!fullSource) return false;
+        const domainId = computeDomainIdForSource(fullSource);
+        return loadedDomainKeys.has(domainId);
+      } catch {
+        return false;
+      }
     },
 
     resolveDomainId(input = {}, ctx = {}) {
@@ -422,7 +478,17 @@ export function createDiffCanvasConfig({
       const domainId = computeDomainIdForSource(fullSource);
       if (loadedDomainKeys.has(domainId)) {
         if (fullSource) {
-          domainSources.set(domainId, fullSource);
+          const prevSource = domainSources.get(domainId);
+          const candidate = mergeAccountFromPrior(
+            fullSource,
+            input,
+            prevSource?.account || prevSource?.preferredAccount,
+          );
+          pendingReopenSources.set(domainId, candidate);
+          if (!domainSources.has(domainId)) {
+            const { account: _unverified, ...safeFallback } = candidate;
+            domainSources.set(domainId, safeFallback);
+          }
         }
       } else {
         pendingOpen.set(domainId, {
@@ -472,10 +538,15 @@ export function createDiffCanvasConfig({
         if (!fullSource && hasSaved) {
           try {
             if (savedPublicSource?.mode === "pr") {
+              const hasExplicitInputAccount =
+                typeof openInfo?.input?.account === "string";
               fullSource = normalizeDiffSource(
                 {
                   ...(savedPublicSource.repo ? { repo: savedPublicSource.repo } : {}),
                   pr: savedPublicSource.pr,
+                  ...(hasExplicitInputAccount
+                    ? { account: openInfo.input.account }
+                    : {}),
                   ...(savedPublicSource.paths?.length
                     ? { paths: savedPublicSource.paths }
                     : {}),
@@ -502,6 +573,12 @@ export function createDiffCanvasConfig({
             fullSource = null;
           }
         }
+
+        fullSource = mergeAccountFromPrior(
+          fullSource,
+          openInfo?.input,
+          savedPublicSource?.mode === "pr" ? savedPublicSource.account : null,
+        );
 
         if (!fullSource || computeDomainIdForSource(fullSource) !== domainId) {
           if (!openInfo) return null;
@@ -530,11 +607,26 @@ export function createDiffCanvasConfig({
             ? saved.diffFingerprint
             : null;
 
-        domainSources.set(domainId, fullSource);
+        const baselineSource =
+          fullSource.mode === "pr" && fullSource.account
+            ? mergeAccountFromPrior(
+                { ...fullSource, account: undefined },
+                {},
+                savedPublicSource?.mode === "pr"
+                  ? savedPublicSource.account
+                  : null,
+              )
+            : fullSource;
+        domainSources.set(domainId, baselineSource);
 
         try {
           const diff = await loadDiff(fullSource, { execFn, env });
-          domainSources.set(domainId, diff.source);
+          const storedSource = preserveDomainSourceKey(
+            domainId,
+            diff.source,
+            fullSource,
+          );
+          domainSources.set(domainId, storedSource);
           hydratedDomains.add(domainId);
           loadedDomainKeys.add(domainId);
           const diffFingerprint = computeDiffFingerprint(diff.files);
@@ -546,13 +638,20 @@ export function createDiffCanvasConfig({
               ? "draft"
               : savedStatus;
 
+          const validFocusFile =
+            focusFile &&
+            Array.isArray(diff.files) &&
+            diff.files.some((f) => f.canonicalPath === focusFile)
+              ? focusFile
+              : null;
+
           return {
             domain: domainId,
             loaded: true,
             diffRev: 1,
             diffFingerprint,
             error: null,
-            source: toPublicSource(diff.source),
+            source: toPublicSource(storedSource),
             title: diff.title || (hasSaved ? saved.title : "") || "Diff Viewer",
             diffSpec: diff.diffSpec || "",
             branch: diff.branch || (hasSaved ? saved.branch : "") || "",
@@ -562,9 +661,9 @@ export function createDiffCanvasConfig({
             comments: reconciled,
             files: diff.files,
             truncatedFiles: Boolean(diff.truncatedFiles),
-            focusedFile: focusFile,
+            focusedFile: validFocusFile,
             focusedLine: null,
-            focusSeq: focusFile ? 1 : 0,
+            focusSeq: validFocusFile ? 1 : 0,
             submittedAt:
               nextStatus === "draft" && savedStatus === "addressed"
                 ? null
@@ -584,7 +683,7 @@ export function createDiffCanvasConfig({
               diffRev: 0,
               diffFingerprint: savedFingerprint,
               error: sanitizePublicErrorMessage(err),
-              source: toPublicSource(fullSource),
+              source: savedPublicSource || toPublicSource(baselineSource),
               title: saved.title || "Diff Viewer",
               diffSpec: saved.diffSpec || "",
               branch: saved.branch || "",
@@ -606,6 +705,7 @@ export function createDiffCanvasConfig({
             loadedDomainKeys.add(domainId);
             return createEmptyDiffState(domainId);
           }
+          domainSources.delete(domainId);
           throw toCanvasKitError(err, "diff_load_failed");
         }
       } finally {
@@ -669,14 +769,21 @@ export function createDiffCanvasConfig({
         },
         handler: async ({ state, set, ctx }) => {
           const domainId = ctx?.domainId || state?.domain || "default";
-          const fullSource = domainSources.get(domainId);
+          const pendingCandidate = pendingReopenSources.get(domainId) ?? null;
+          pendingReopenSources.delete(domainId);
+          const fullSource = pendingCandidate || domainSources.get(domainId);
           if (!fullSource) {
             set((cur) => ({ ...cur, error: "No diff source is currently configured" }));
             return { ok: false, error: "No diff source is currently configured" };
           }
           try {
             const diff = await loadDiff(fullSource, { execFn, env });
-            domainSources.set(domainId, diff.source);
+            const storedSource = preserveDomainSourceKey(
+              domainId,
+              diff.source,
+              fullSource,
+            );
+            domainSources.set(domainId, storedSource);
             hydratedDomains.add(domainId);
             const nextFingerprint = computeDiffFingerprint(diff.files);
             const now = new Date().toISOString();
@@ -698,7 +805,7 @@ export function createDiffCanvasConfig({
                 diffRev: nextRev,
                 diffFingerprint: nextFingerprint,
                 error: null,
-                source: toPublicSource(diff.source),
+                source: toPublicSource(storedSource),
                 title: diff.title,
                 diffSpec: diff.diffSpec,
                 branch: diff.branch || cur.branch || "",
@@ -826,10 +933,7 @@ export function createDiffCanvasConfig({
             );
           }
           if (state.status === "addressed") {
-            throw new CanvasKitError(
-              "review_locked",
-              "Review has already been addressed; reload or open a fresh review round",
-            );
+            throw new CanvasKitError("review_locked", REVIEW_LOCKED_MESSAGE);
           }
           const currentComments = Array.isArray(state.comments)
             ? state.comments
@@ -893,10 +997,7 @@ export function createDiffCanvasConfig({
             );
           }
           if (state.status === "addressed") {
-            throw new CanvasKitError(
-              "review_locked",
-              "Cannot edit comments after review is marked addressed; reopen the review first",
-            );
+            throw new CanvasKitError("review_locked", REVIEW_LOCKED_MESSAGE);
           }
           const targetId = String(input.commentId ?? "").trim();
           if (!targetId) {
@@ -953,10 +1054,7 @@ export function createDiffCanvasConfig({
             );
           }
           if (state.status === "addressed") {
-            throw new CanvasKitError(
-              "review_locked",
-              "Cannot delete comments after review is marked addressed",
-            );
+            throw new CanvasKitError("review_locked", REVIEW_LOCKED_MESSAGE);
           }
           const targetId = String(input.id).trim();
           if (!targetId) {
@@ -999,10 +1097,7 @@ export function createDiffCanvasConfig({
             );
           }
           if (state.status === "addressed") {
-            throw new CanvasKitError(
-              "review_locked",
-              "Review has already been addressed",
-            );
+            throw new CanvasKitError("review_locked", REVIEW_LOCKED_MESSAGE);
           }
           const now = new Date().toISOString();
           const commentCount = Array.isArray(state.comments)
@@ -1158,4 +1253,106 @@ export function isDomainHydrated(input = {}, ctx = {}, config = canvasConfig) {
   }
   const domainId = computeDomainId(input ?? {}, String(ctx?.workspacePath ?? ""));
   return Boolean(config?._hydratedDomains?.has(domainId));
+}
+
+export function isDomainCached(input = {}, ctx = {}, config = canvasConfig) {
+  if (typeof config?.isDomainCached === "function") {
+    return config.isDomainCached(input, ctx);
+  }
+  try {
+    const fullSource = normalizeDiffSource(
+      input ?? {},
+      String(ctx?.workspacePath ?? ""),
+    );
+    if (!fullSource) return false;
+    return Boolean(
+      config?._loadedDomainKeys?.has(computeDomainIdForSource(fullSource)),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function broadcastStateToInstance(inst, statePayload) {
+  if (!inst?.clients?.size) return;
+  const payload = `data: ${JSON.stringify(statePayload)}\n\n`;
+  for (const res of inst.clients) {
+    try {
+      res.write(payload);
+    } catch {
+      // Ignore dropped SSE client
+    }
+  }
+}
+
+export async function openDiffInstance(runtime, config, ctx = {}) {
+  const input = ctx?.input ?? {};
+  const enrichedCtx = {
+    ...ctx,
+    input,
+    workspacePath: String(ctx?.workspacePath ?? ""),
+  };
+  const prevInst = runtime._instances?.get(ctx.instanceId) ?? null;
+  const prevDomainId = prevInst?.domainId ?? null;
+  const wasCached = isDomainCached(input, enrichedCtx, config);
+
+  const opened = await runtime.openInstance({
+    instanceId: ctx.instanceId,
+    input: ctx.input,
+    ctx: enrichedCtx,
+  });
+
+  try {
+    if (wasCached) {
+      await runtime.invokeFromAgent("refresh", {}, enrichedCtx);
+    }
+    if (input?.focusFile) {
+      await runtime.invokeFromAgent(
+        "focus_file",
+        { file: input.focusFile },
+        enrichedCtx,
+      );
+    }
+  } catch (err) {
+    if (!prevInst) {
+      await runtime.closeInstance?.(ctx.instanceId)?.catch?.(() => {});
+    } else {
+      const curInst = runtime._instances?.get(ctx.instanceId) ?? prevInst;
+      if (prevDomainId !== null && curInst && curInst.domainId !== prevDomainId) {
+        curInst.domainId = prevDomainId;
+        if (wasCached && curInst.clients?.size > 0) {
+          try {
+            const restoredState = await runtime.getState(prevDomainId);
+            broadcastStateToInstance(curInst, restoredState);
+          } catch {
+            // Ignore fallback restore error
+          }
+        }
+      }
+    }
+    throw err;
+  }
+
+  const nextInst = runtime._instances?.get(ctx.instanceId) ?? null;
+  const domainId =
+    nextInst?.domainId ??
+    computeDomainId(enrichedCtx.input, enrichedCtx.workspacePath);
+  const latestState = await runtime.getState(domainId);
+
+  if (
+    prevDomainId !== null &&
+    prevDomainId !== domainId &&
+    !wasCached &&
+    !input?.focusFile &&
+    nextInst?.clients?.size > 0
+  ) {
+    broadcastStateToInstance(nextInst, latestState);
+  }
+
+  return {
+    ...opened,
+    status: config?.statusLine
+      ? config.statusLine(enrichedCtx, latestState)
+      : opened.status,
+  };
 }
