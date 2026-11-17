@@ -319,18 +319,23 @@ function toPublicSource(source) {
 
 export function findLineText(files, canonicalFile, side, lineNumber) {
   if (!Array.isArray(files)) return { found: false, text: null };
-  const fileObj = files.find((item) => item.canonicalPath === canonicalFile);
-  if (!fileObj || !Array.isArray(fileObj.hunks)) {
-    return { found: false, text: null };
-  }
-  for (const hunk of fileObj.hunks) {
-    if (!Array.isArray(hunk.lines)) continue;
-    for (const ln of hunk.lines) {
-      if (side === "left" && ln.oldLine === lineNumber) {
-        return { found: true, text: String(ln.text ?? "") };
-      }
-      if (side === "right" && ln.newLine === lineNumber) {
-        return { found: true, text: String(ln.text ?? "") };
+  for (const fileObj of files) {
+    if (
+      !fileObj ||
+      fileObj.canonicalPath !== canonicalFile ||
+      !Array.isArray(fileObj.hunks)
+    ) {
+      continue;
+    }
+    for (const hunk of fileObj.hunks) {
+      if (!Array.isArray(hunk.lines)) continue;
+      for (const ln of hunk.lines) {
+        if (side === "left" && ln.oldLine === lineNumber) {
+          return { found: true, text: String(ln.text ?? "") };
+        }
+        if (side === "right" && ln.newLine === lineNumber) {
+          return { found: true, text: String(ln.text ?? "") };
+        }
       }
     }
   }
@@ -382,13 +387,34 @@ function normalizeViewedFingerprintMap(raw) {
   return map;
 }
 
-export function reconcileViewedFiles(viewedFiles, viewedFileFingerprints, files) {
-  const currentFingerprints = new Map();
+export function buildCanonicalFingerprintsMap(files) {
+  const perPathDigests = new Map();
   for (const file of Array.isArray(files) ? files : []) {
-    if (file?.canonicalPath) {
-      currentFingerprints.set(file.canonicalPath, computeFileFingerprint(file));
+    if (!file?.canonicalPath) continue;
+    const fp = computeFileFingerprint(file);
+    const list = perPathDigests.get(file.canonicalPath);
+    if (!list) {
+      perPathDigests.set(file.canonicalPath, [fp]);
+    } else {
+      list.push(fp);
     }
   }
+  const combined = new Map();
+  for (const [canonicalPath, list] of perPathDigests.entries()) {
+    if (list.length === 1) {
+      combined.set(canonicalPath, list[0]);
+    } else {
+      combined.set(
+        canonicalPath,
+        createHash("sha256").update(list.join(":"), "utf8").digest("hex").slice(0, 16),
+      );
+    }
+  }
+  return combined;
+}
+
+export function reconcileViewedFiles(viewedFiles, viewedFileFingerprints, files) {
+  const currentFingerprints = buildCanonicalFingerprintsMap(files);
 
   const prevMap = normalizeViewedFingerprintMap(viewedFileFingerprints);
   const nextViewedFiles = [];
@@ -843,6 +869,7 @@ export function createDiffCanvasConfig({
   const hydratedDomains = new Set();
   const loadedDomainKeys = new Set();
   const liveDomainStates = new Map();
+  const domainStateSeqs = new Map();
   const lastDiskDigests = new Map();
   const inFlightSaveDigests = new Map();
   const pendingBroadcastStates = new Map();
@@ -851,10 +878,17 @@ export function createDiffCanvasConfig({
   const withSaveLock = createKeyedMutex();
 
   function rememberDomainState(domainId, st) {
-    if (domainId && st && typeof st === "object") {
-      liveDomainStates.set(domainId, st);
-    }
-    return st;
+    if (!st || typeof st !== "object") return st;
+    const effectiveDomain =
+      typeof st.domain === "string" && st.domain.length > 0
+        ? st.domain
+        : domainId || "";
+    if (!effectiveDomain) return st;
+    const nextSeq = (domainStateSeqs.get(effectiveDomain) || 0) + 1;
+    domainStateSeqs.set(effectiveDomain, nextSeq);
+    const stamped = { ...st, stateSeq: nextSeq };
+    liveDomainStates.set(effectiveDomain, stamped);
+    return stamped;
   }
 
   function addInFlightDigest(domainId, digest) {
@@ -969,22 +1003,26 @@ export function createDiffCanvasConfig({
         if (synced.changed) {
           externalAdopted = true;
           lastDiskDigests.set(domainId, synced.diskDigest);
-          rememberDomainState(domainId, synced.state);
-          api.set(() => synced.state);
+          const adoptedState = rememberDomainState(domainId, synced.state);
+          api.set(() => adoptedState);
         }
       }
 
       const commitState = (updater) => {
         let committed = null;
         api.set((cur) => {
-          committed = typeof updater === "function" ? updater(cur) : updater;
+          const rawNext = typeof updater === "function" ? updater(cur) : updater;
+          const nextDomain =
+            typeof rawNext?.domain === "string" && rawNext.domain.length > 0
+              ? rawNext.domain
+              : domainId;
+          committed = rememberDomainState(nextDomain, rawNext);
           return committed;
         });
         const effectiveDomain =
           typeof committed?.domain === "string" && committed.domain.length > 0
             ? committed.domain
             : domainId;
-        rememberDomainState(effectiveDomain, committed);
         const digest = computeStateDurableDigest(domainId, committed);
         if (digest) {
           addInFlightDigest(effectiveDomain, digest);
@@ -1076,8 +1114,8 @@ export function createDiffCanvasConfig({
           return { changed: false };
         }
         lastDiskDigests.set(domainId, synced.diskDigest);
-        rememberDomainState(domainId, synced.state);
-        return { changed: true, state: synced.state };
+        const stampedSynced = rememberDomainState(domainId, synced.state);
+        return { changed: true, state: stampedSynced };
       });
     },
 
@@ -1202,7 +1240,7 @@ export function createDiffCanvasConfig({
               );
             }
             loadedDomainKeys.add(domainId);
-            return createEmptyDiffState(domainId);
+            return rememberDomainState(domainId, createEmptyDiffState(domainId));
           }
         }
 
@@ -1475,7 +1513,12 @@ export function createDiffCanvasConfig({
         typeof state.domain === "string" && state.domain.length > 0
           ? state.domain
           : domainId;
-      rememberDomainState(effectiveDomain, state);
+      if (effectiveDomain && typeof state === "object") {
+        const stampedForLive = Number.isInteger(state.stateSeq)
+          ? state
+          : rememberDomainState(effectiveDomain, state);
+        liveDomainStates.set(effectiveDomain, stampedForLive);
+      }
       pendingBroadcastStates.delete(effectiveDomain);
       pendingBroadcastStates.delete(domainId);
 
@@ -1775,15 +1818,11 @@ export function createDiffCanvasConfig({
               );
             }
             const normalizedFile = assertFileInDiff(activeState, api.input.file);
-            const targetFileObj = (activeState.files || []).find(
-              (f) => f.canonicalPath === normalizedFile,
-            );
-            const targetFp = targetFileObj
-              ? computeFileFingerprint(targetFileObj)
-              : "";
             let viewed = false;
             let viewedCount = 0;
             commitState((cur) => {
+              const curFingerprints = buildCanonicalFingerprintsMap(cur.files);
+              const targetFp = curFingerprints.get(normalizedFile) || "";
               const viewedSet = new Set(
                 Array.isArray(cur.viewedFiles) ? cur.viewedFiles : [],
               );
@@ -1796,12 +1835,9 @@ export function createDiffCanvasConfig({
               );
               if (prevNormalized === null && Array.isArray(cur.files)) {
                 for (const existingPath of viewedSet) {
-                  const existingFile = cur.files.find(
-                    (f) => f.canonicalPath === existingPath,
-                  );
-                  if (existingFile) {
-                    nextFingerprints[existingPath] =
-                      computeFileFingerprint(existingFile);
+                  const existingFp = curFingerprints.get(existingPath);
+                  if (existingFp) {
+                    nextFingerprints[existingPath] = existingFp;
                   }
                 }
               }

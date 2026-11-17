@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -3617,6 +3617,298 @@ test("concurrent openDiffInstance/openInstance calls serialize per instanceId, a
   assert.equal(
     nonCollidingTree.some((entry) => entry.kind === "file" && entry.path === "a.ts"),
     true,
+  );
+});
+
+test("review round 4: Git file-type-change tracking, monotonic stateSeq snapshot/stream ordering, and SDK extension SIGTERM shutdown", async (t) => {
+  const storeHome = makeTempDir("diff-round4-home-");
+  const repoDir = makeTempDir("diff-round4-repo-");
+  const prevHome = process.env.COPILOT_HOME;
+  process.env.COPILOT_HOME = storeHome;
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.COPILOT_HOME;
+    else process.env.COPILOT_HOME = prevHome;
+    fs.rmSync(storeHome, { recursive: true, force: true });
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  // 1a. Multi-entry Git file-type change (deleted file mode 100644 + new file mode 120000 sharing canonicalPath)
+  let symlinkTargetLine = "+./real-v1.ts";
+  const buildTypeChangePatch = () =>
+    [
+      "diff --git a/src/link.ts b/src/link.ts",
+      "deleted file mode 100644",
+      "index 1111111..0000000",
+      "--- a/src/link.ts",
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-export const legacy = 1;",
+      "diff --git a/src/link.ts b/src/link.ts",
+      "new file mode 120000",
+      "index 0000000..2222222",
+      "--- /dev/null",
+      "+++ b/src/link.ts",
+      "@@ -0,0 +1 @@",
+      symlinkTargetLine,
+      "\\ No newline at end of file",
+      "",
+    ].join("\n");
+
+  const customStore = (file) => userStore("diff", file);
+  const typeChangeExec = async (_cmd, args) => {
+    if (args[0] === "pr" && args[1] === "diff") return buildTypeChangePatch();
+    if (args[0] === "pr" && args[1] === "view") {
+      return JSON.stringify({
+        number: 104,
+        title: "Typechange PR",
+        headRefName: "feat/typechange",
+        baseRefName: "main",
+        headRefOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        baseRefOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        state: "OPEN",
+      });
+    }
+    throw new Error(`Unexpected command: ${args.join(" ")}`);
+  };
+
+  const tcCfg = createDiffCanvasConfig({ execFn: typeChangeExec, storeFactory: customStore });
+  const tcRt = createCanvasRuntime(tcCfg);
+  t.after(() => tcRt.shutdown());
+
+  await openDiffInstance(tcRt, tcCfg, {
+    instanceId: "tc-panel",
+    input: { repo: "example-org/widgets", pr: 104 },
+    workspacePath: "",
+  });
+
+  const initialState = await tcRt.getState("pr__example-org__widgets__104");
+  assert.equal(initialState.files.length, 2);
+  assert.equal(initialState.stateSeq, 1);
+
+  // Add comment on right side line 1 (lives in second diff --git block!) and mark src/link.ts Viewed
+  const rightComment = await tcRt.invokeFromAgent(
+    "add_comment",
+    { file: "src/link.ts", line: 1, side: "right", body: "Verify symlink target" },
+    { instanceId: "tc-panel" },
+  );
+  assert.equal(rightComment.comment.stale, false);
+  const afterCommentState = await tcRt.getState("pr__example-org__widgets__104");
+  assert.equal(afterCommentState.comments[0].lineText, "./real-v1.ts");
+
+  await tcRt.invokeFromAgent(
+    "toggle_viewed",
+    { file: "src/link.ts" },
+    { instanceId: "tc-panel" },
+  );
+
+  // Refresh with NO diff change -> Viewed must remain preserved and right-side comment stays non-stale!
+  const unchangedRefresh = await tcRt.invokeFromAgent(
+    "refresh",
+    {},
+    { instanceId: "tc-panel" },
+  );
+  assert.equal(unchangedRefresh.ok, true);
+  assert.deepEqual(unchangedRefresh.invalidatedViewedFiles, []);
+  const afterUnchangedState = await tcRt.getState("pr__example-org__widgets__104");
+  assert.deepEqual(afterUnchangedState.viewedFiles, ["src/link.ts"]);
+  assert.equal(afterUnchangedState.comments[0].stale, false);
+  assert.equal(afterUnchangedState.stateSeq > initialState.stateSeq, true);
+
+  // Durable JSON on disk must not persist ephemeral stateSeq
+  const rawSaved = await customStore("pr__example-org__widgets__104.json").load(null);
+  assert.equal(Object.hasOwn(rawSaved, "stateSeq"), false);
+
+  // Modify ONLY the second block (symlink target) -> refresh must invalidate Viewed and mark right comment stale!
+  symlinkTargetLine = "+./real-v2.ts";
+  const changedRefresh = await tcRt.invokeFromAgent(
+    "refresh",
+    {},
+    { instanceId: "tc-panel" },
+  );
+  assert.deepEqual(changedRefresh.invalidatedViewedFiles, ["src/link.ts"]);
+  const afterChangedState = await tcRt.getState("pr__example-org__widgets__104");
+  assert.deepEqual(afterChangedState.viewedFiles, []);
+  assert.equal(afterChangedState.comments[0].stale, true);
+
+  // 1b. Worktree file -> directory replacement produces distinct probeDiffContext stamp
+  execFileSync("git", ["init", "-b", "main"], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["config", "user.name", "Test"], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: repoDir, stdio: "ignore" });
+  const nodePath = path.join(repoDir, "entry");
+  fs.writeFileSync(nodePath, "regular\n", "utf8");
+  execFileSync("git", ["add", "entry"], { cwd: repoDir, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: repoDir, stdio: "ignore" });
+  fs.unlinkSync(nodePath);
+  const missingSig = (await probeDiffContext({ mode: "git", cwd: repoDir, spec: "", paths: [] }))
+    .contextSignature;
+  fs.mkdirSync(nodePath);
+  const dirSig = (await probeDiffContext({ mode: "git", cwd: repoDir, spec: "", paths: [] }))
+    .contextSignature;
+  assert.notEqual(
+    dirSig,
+    missingSig,
+    "Replacing a missing tracked file path with a directory must change contextSignature",
+  );
+
+  // 2. UI: Multi-card typechange renders anchored right-side comment once (not duplicated as unanchored on block 0),
+  //    and monotonic stateSeq prevents out-of-order stale /state snapshot from overwriting newer SSE /events state
+  const runtimeDir = path.resolve(import.meta.dirname, "..", "runtime");
+  const webDir = path.join(runtimeDir, "web");
+  const appSource = fs.readFileSync(path.join(webDir, "app.mjs"), "utf8");
+  const rewrittenSource = appSource
+    .replace(
+      'from "/kit/core-client.mjs"',
+      `from ${JSON.stringify(pathToFileURL(path.join(runtimeDir, "canvas-kit", "core-client.mjs")).href)}`,
+    )
+    .replace(
+      'from "/kit/icons.mjs"',
+      `from ${JSON.stringify(pathToFileURL(path.join(runtimeDir, "canvas-kit", "icons.mjs")).href)}`,
+    )
+    .replace(
+      'from "./diff-view-model.mjs"',
+      `from ${JSON.stringify(pathToFileURL(path.join(webDir, "diff-view-model.mjs")).href)}`,
+    );
+  const tempAppPath = path.join(storeHome, "app-round4.mjs");
+  fs.writeFileSync(tempAppPath, rewrittenSource, "utf8");
+
+  const prevDoc = globalThis.document;
+  const prevWin = globalThis.window;
+  const prevSvg = globalThis.SVGElement;
+  const prevRaf = globalThis.requestAnimationFrame;
+  const prevSkip = globalThis.__DIFF_SKIP_AUTO_MOUNT__;
+  globalThis.__DIFF_SKIP_AUTO_MOUNT__ = true;
+  globalThis.SVGElement = StrictSVGElement;
+  globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 0);
+  const docStub = createStrictDocument();
+  docStub.body = docStub.createElement("body");
+  globalThis.document = docStub;
+  globalThis.window = {
+    innerWidth: 1200,
+    requestAnimationFrame: (cb) => setTimeout(cb, 0),
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const { DiffCanvasApp } = await import(pathToFileURL(tempAppPath).href);
+  const mountEl = docStub.createElement("div");
+  docStub.body.appendChild(mountEl);
+
+  t.after(() => {
+    render(null, mountEl);
+    globalThis.document = prevDoc;
+    globalThis.window = prevWin;
+    globalThis.SVGElement = prevSvg;
+    globalThis.requestAnimationFrame = prevRaf;
+    globalThis.__DIFF_SKIP_AUTO_MOUNT__ = prevSkip;
+  });
+
+  render(
+    html`<${DiffCanvasApp} state=${afterUnchangedState} invoke=${async () => ({ ok: true })} />`,
+    mountEl,
+  );
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(
+    mountEl.querySelectorAll(".dv-unanchored-threads").length,
+    0,
+    "Right-side comment anchored on block 2 of a typechange must not render as unanchored on block 1",
+  );
+  assert.match(mountEl.textContent, /Verify symlink target/);
+
+  // Simulate slow out-of-order GET /state arriving later with older stateSeq=1 (zero comments) for same domain
+  const staleSnapshot = {
+    ...initialState,
+    stateSeq: 1,
+    comments: [],
+  };
+  render(
+    html`<${DiffCanvasApp} state=${staleSnapshot} invoke=${async () => ({ ok: true })} />`,
+    mountEl,
+  );
+  await new Promise((r) => setTimeout(r, 20));
+  assert.match(
+    mountEl.textContent,
+    /Verify symlink target/,
+    "Stale lower-stateSeq snapshot for the same domain must not overwrite newer SSE state",
+  );
+
+  // Switching to a different domain with stateSeq=1 updates immediately
+  const otherDomainSnapshot = {
+    ...staleSnapshot,
+    domain: "pr__example-org__widgets__999",
+    title: "Switched Domain PR",
+    stateSeq: 1,
+  };
+  render(
+    html`<${DiffCanvasApp} state=${otherDomainSnapshot} invoke=${async () => ({ ok: true })} />`,
+    mountEl,
+  );
+  await new Promise((r) => setTimeout(r, 20));
+  assert.doesNotMatch(mountEl.textContent, /Verify symlink target/);
+  assert.match(mountEl.textContent, /Switched Domain PR/);
+
+  // 3. SDK extension SIGTERM shutdown closes canvas runtime, disconnects live SDK session, and exits 0
+  const extUrl = new URL("../runtime/extension.mjs", import.meta.url).href;
+  const loaderSrc = `
+    export async function resolve(specifier, context, nextResolve) {
+      if (specifier === "@github/copilot-sdk/extension") {
+        return { url: "data:text/javascript," + encodeURIComponent(\`
+          export class CanvasError extends Error {
+            constructor(code, message) { super(message); this.code = code; }
+          }
+          export function createCanvas(def) { return def; }
+          export async function joinSession({ canvases }) {
+            const keepAlive = setInterval(() => {}, 60000);
+            globalThis.__TEST_CANVAS__ = canvases[0];
+            globalThis.__DISCONNECTED__ = false;
+            return {
+              sessionId: "sess-1",
+              rpc: { ui: { ephemeralQuery: async () => ({ answer: "" }) } },
+              send: async () => {},
+              disconnect: async () => {
+                globalThis.__DISCONNECTED__ = true;
+                clearInterval(keepAlive);
+              },
+            };
+          }
+        \`), shortCircuit: true };
+      }
+      return nextResolve(specifier, context);
+    }
+  `;
+  const loaderUrl = `data:text/javascript;base64,${Buffer.from(loaderSrc, "utf8").toString("base64")}`;
+  const runnerSrc = `
+    import { register } from "node:module";
+    register(${JSON.stringify(loaderUrl)});
+    await import(${JSON.stringify(extUrl)});
+    const opened = await globalThis.__TEST_CANVAS__.open({
+      sessionId: "sess-1",
+      instanceId: "ext-sigterm-1",
+      input: {},
+      session: { workingDirectory: ${JSON.stringify(repoDir)} },
+    });
+    const check = await fetch(opened.url);
+    if (check.status !== 200) process.exit(2);
+    process.on("exit", (code) => {
+      if (!globalThis.__DISCONNECTED__) {
+        process.exitCode = 3;
+      }
+    });
+    process.emit("SIGTERM", "SIGTERM");
+  `;
+  const extRun = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", runnerSrc],
+    {
+      cwd: path.resolve("."),
+      env: { ...process.env, COPILOT_HOME: storeHome, LOCALAPPDATA: storeHome },
+      timeout: 8000,
+      encoding: "utf8",
+      windowsHide: true,
+    },
+  );
+  assert.equal(
+    extRun.status,
+    0,
+    `Expected extension SIGTERM shutdown exit 0, got status=${extRun.status} signal=${extRun.signal} stderr=${extRun.stderr}`,
   );
 });
 

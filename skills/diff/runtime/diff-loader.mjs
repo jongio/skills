@@ -1047,6 +1047,7 @@ function collectWorktreeFileStamps(repoRoot, rawCandidatePaths) {
       continue;
     }
     if (!lstat.isFile()) {
+      stamps.push(`${relPath}:nonfile:${lstat.mode & 0o170000}`);
       continue;
     }
 

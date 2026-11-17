@@ -961,7 +961,27 @@ export class FileDiffCard extends Component {
   }
 }
 
-export function DiffCanvasApp({ state, invoke }) {
+export function DiffCanvasApp({ state: incomingState, invoke }) {
+  const latestOrderedStateRef = useRef(null);
+  let state = incomingState;
+  if (!incomingState || typeof incomingState !== "object") {
+    latestOrderedStateRef.current = incomingState;
+  } else {
+    const prevOrdered = latestOrderedStateRef.current;
+    if (
+      prevOrdered &&
+      typeof prevOrdered === "object" &&
+      prevOrdered.domain === incomingState.domain &&
+      Number.isInteger(prevOrdered.stateSeq) &&
+      Number.isInteger(incomingState.stateSeq) &&
+      incomingState.stateSeq < prevOrdered.stateSeq
+    ) {
+      state = prevOrdered;
+    } else {
+      latestOrderedStateRef.current = incomingState;
+    }
+  }
+
   // Local UI state strictly separated from SSE domain state so live updates
   // never overwrite focus, filter queries, or in-progress comment text.
   const [viewMode, setViewMode] = useState("split");
@@ -1051,6 +1071,51 @@ export function DiffCanvasApp({ state, invoke }) {
     }
     return counts;
   }, [commentsByFileMap]);
+
+  const multiCardCommentsByIndex = useMemo(() => {
+    if (files.length < 2 || commentsByFileMap.size === 0) return null;
+    const cardsByPath = new Map();
+    for (const f of files) {
+      if (!f?.canonicalPath) continue;
+      const list = cardsByPath.get(f.canonicalPath);
+      if (!list) cardsByPath.set(f.canonicalPath, [f]);
+      else list.push(f);
+    }
+    let perIndex = null;
+    for (const [canonicalPath, cardList] of cardsByPath.entries()) {
+      if (cardList.length < 2) continue;
+      const allComments = commentsByFileMap.get(canonicalPath);
+      if (!allComments || allComments.length === 0) continue;
+      if (!perIndex) perIndex = new Map();
+      const anchorsPerCard = cardList.map((card) => {
+        const set = new Set();
+        if (!card.isBinary && Array.isArray(card.hunks)) {
+          for (const h of card.hunks) {
+            for (const ln of h.lines || []) {
+              if (ln.type === "meta") continue;
+              if (ln.type !== "add" && ln.oldLine !== null) set.add(`left:${ln.oldLine}`);
+              if (ln.type !== "del" && ln.newLine !== null) set.add(`right:${ln.newLine}`);
+            }
+          }
+        }
+        return set;
+      });
+      const anyCardAnchors = new Set();
+      for (const s of anchorsPerCard) {
+        for (const k of s) anyCardAnchors.add(k);
+      }
+      cardList.forEach((card, idx) => {
+        const cardSet = anchorsPerCard[idx];
+        const filtered = allComments.filter((c) => {
+          const key = `${c.side}:${c.line}`;
+          if (cardSet.has(key)) return true;
+          return idx === 0 && !anyCardAnchors.has(key);
+        });
+        perIndex.set(card.index, filtered);
+      });
+    }
+    return perIndex;
+  }, [files, commentsByFileMap]);
 
   const knownFileSet = useMemo(
     () => new Set(files.map((f) => f.canonicalPath).filter(Boolean)),
@@ -2091,7 +2156,9 @@ export function DiffCanvasApp({ state, invoke }) {
                   const canonical = file.canonicalPath || "";
                   const { autoCollapseReason, isCollapsed } = computeEffectiveCollapsed(file);
                   const isFocusedFile = Boolean(canonical && state.focusedFile === canonical);
-                  const fileComments = commentsByFileMap.get(canonical) || EMPTY_ARRAY;
+                  const fileComments =
+                    multiCardCommentsByIndex?.get(file.index) ??
+                    (commentsByFileMap.get(canonical) || EMPTY_ARRAY);
                   const fileComposer =
                     activeComposer?.file === canonical ? activeComposer : null;
                   const cardBusyAction =

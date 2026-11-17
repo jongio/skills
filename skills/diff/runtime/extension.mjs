@@ -94,9 +94,31 @@ const canvas = createCanvas({
   },
 });
 
+let shuttingDown = false;
+export async function shutdownDiffExtension({
+  runtimeInstance = runtime,
+  activeSession = session,
+} = {}) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    await runtimeInstance?.shutdown?.();
+  } catch {
+    // Ignore shutdown errors during process teardown
+  }
+  try {
+    await activeSession?.disconnect?.();
+  } catch {
+    // Ignore RPC disconnect errors during process teardown
+  }
+}
+
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.once(sig, () => {
-    runtime.shutdown().catch(() => {});
+    void shutdownDiffExtension({
+      runtimeInstance: runtime,
+      activeSession: session,
+    }).finally(() => process.exit(0));
   });
 }
 
