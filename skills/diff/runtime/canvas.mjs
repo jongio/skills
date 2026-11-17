@@ -517,6 +517,20 @@ export function createDiffCanvasConfig({
     assetsDir: ASSETS_DIR,
     _hydratedDomains: hydratedDomains,
     _loadedDomainKeys: loadedDomainKeys,
+    _domainSources: domainSources,
+    _pendingReopenSources: pendingReopenSources,
+
+    async _hasSavedDomain(domainId) {
+      return (
+        isDurableDomainId(domainId) && Boolean(await fileFor(domainId).load(null))
+      );
+    },
+
+    _clearPendingReopen(domainId) {
+      if (domainId) {
+        pendingReopenSources.delete(domainId);
+      }
+    },
 
     isDomainHydrated(input = {}, ctx = {}) {
       const domainId = computeDomainId(input ?? {}, String(ctx?.workspacePath ?? ""));
@@ -727,8 +741,7 @@ export function createDiffCanvasConfig({
               status: savedStatus,
               stats: { fileCount: 0, totalFiles: 0, additions: 0, deletions: 0 },
               viewedFiles: savedViewed,
-              viewedFileFingerprints:
-                savedViewedFingerprints || createFingerprintDictionary(),
+              viewedFileFingerprints: savedViewedFingerprints,
               comments: savedComments,
               files: [],
               truncatedFiles: false,
@@ -842,8 +855,7 @@ export function createDiffCanvasConfig({
               status: savedStatus,
               stats: { fileCount: 0, totalFiles: 0, additions: 0, deletions: 0 },
               viewedFiles: savedViewed,
-              viewedFileFingerprints:
-                savedViewedFingerprints || createFingerprintDictionary(),
+              viewedFileFingerprints: savedViewedFingerprints,
               comments: savedComments,
               files: [],
               truncatedFiles: false,
@@ -913,6 +925,11 @@ export function createDiffCanvasConfig({
         flushSubmittedNotification();
         return;
       }
+      const normalizedViewedFps =
+        state.viewedFileFingerprints === null
+          ? null
+          : normalizeViewedFingerprintMap(state.viewedFileFingerprints) ||
+            createFingerprintDictionary();
       await fileFor(effectiveDomain).save({
         domain: effectiveDomain,
         source: publicSource,
@@ -922,9 +939,9 @@ export function createDiffCanvasConfig({
         status: state.status || "draft",
         diffFingerprint: state.diffFingerprint || null,
         viewedFiles: Array.isArray(state.viewedFiles) ? state.viewedFiles : [],
-        viewedFileFingerprints:
-          normalizeViewedFingerprintMap(state.viewedFileFingerprints) ||
-          createFingerprintDictionary(),
+        ...(normalizedViewedFps !== null
+          ? { viewedFileFingerprints: normalizedViewedFps }
+          : {}),
         comments: Array.isArray(state.comments) ? state.comments : [],
         submittedAt: state.submittedAt || null,
         addressedAt: state.addressedAt || null,
@@ -936,7 +953,15 @@ export function createDiffCanvasConfig({
     statusLine(_ctx, state) {
       if (!state?.loaded) return "Diff Viewer (ready)";
       const count = Array.isArray(state.comments) ? state.comments.length : 0;
-      return `${state.title} | ${state.stats.fileCount} files (+${state.stats.additions}/-${state.stats.deletions}) | ${state.status} (${count} comments)`;
+      const base = `${state.title} | ${state.stats.fileCount} files (+${state.stats.additions}/-${state.stats.deletions}) | ${state.status} (${count} comments)`;
+      if (state.error) {
+        const cleanErr = sanitizeMetadataText(
+          String(state.error).replace(/^Couldn't reload diff:\s*/i, ""),
+          120,
+        );
+        return `${base} | reload error: ${cleanErr}`;
+      }
+      return base;
     },
 
     actions: {
@@ -1146,11 +1171,24 @@ export function createDiffCanvasConfig({
             const viewedSet = new Set(
               Array.isArray(cur.viewedFiles) ? cur.viewedFiles : [],
             );
+            const prevNormalized = normalizeViewedFingerprintMap(
+              cur.viewedFileFingerprints,
+            );
             const nextFingerprints = Object.assign(
               createFingerprintDictionary(),
-              normalizeViewedFingerprintMap(cur.viewedFileFingerprints) ||
-                createFingerprintDictionary(),
+              prevNormalized || createFingerprintDictionary(),
             );
+            if (prevNormalized === null && Array.isArray(cur.files)) {
+              for (const existingPath of viewedSet) {
+                const existingFile = cur.files.find(
+                  (f) => f.canonicalPath === existingPath,
+                );
+                if (existingFile) {
+                  nextFingerprints[existingPath] =
+                    computeFileFingerprint(existingFile);
+                }
+              }
+            }
             if (viewedSet.has(normalizedFile)) {
               viewedSet.delete(normalizedFile);
               delete nextFingerprints[normalizedFile];
@@ -1575,41 +1613,104 @@ function broadcastStateToInstance(inst, statePayload) {
 }
 
 export async function openDiffInstance(runtime, config, ctx = {}) {
-  const input = ctx?.input ?? {};
+  const rawInput = ctx?.input ?? {};
+  const effectiveInput =
+    !hasExplicitSourceFields(rawInput) &&
+    ctx?.openInput &&
+    typeof ctx.openInput === "object"
+      ? ctx.openInput
+      : rawInput;
   const enrichedCtx = {
     ...ctx,
-    input,
+    input: rawInput,
     workspacePath: String(ctx?.workspacePath ?? ""),
   };
   const prevInst = runtime._instances?.get(ctx.instanceId) ?? null;
   const prevDomainId = prevInst?.domainId ?? null;
-  const wasCached = isDomainCached(input, enrichedCtx, config);
+  const wasCached = isDomainCached(effectiveInput, enrichedCtx, config);
 
-  const opened = await runtime.openInstance({
-    instanceId: ctx.instanceId,
-    input: ctx.input,
-    ctx: enrichedCtx,
-  });
+  let candidateSource = null;
+  let targetDomainId = null;
+  try {
+    candidateSource = normalizeDiffSource(
+      effectiveInput ?? {},
+      enrichedCtx.workspacePath,
+    );
+    targetDomainId = computeDomainIdForSource(candidateSource);
+  } catch {
+    candidateSource = null;
+    targetDomainId = null;
+  }
+
+  const prevCachedSource =
+    targetDomainId && config?._domainSources
+      ? config._domainSources.get(targetDomainId) ?? null
+      : null;
+  const normalizedOverrideCwd =
+    candidateSource?.cwd ||
+    (typeof effectiveInput?.cwd === "string" ? effectiveInput.cwd.trim() : "");
+  const hasExplicitSourceOverride = Boolean(
+    effectiveInput?.account !== undefined ||
+      (typeof effectiveInput?.cwd === "string" &&
+        effectiveInput.cwd.trim() !== "" &&
+        (!prevCachedSource?.cwd ||
+          normalizedOverrideCwd !== prevCachedSource.cwd)),
+  );
+
+  let opened;
+  try {
+    opened = await runtime.openInstance({
+      instanceId: ctx.instanceId,
+      input: ctx.input,
+      ctx: enrichedCtx,
+    });
+  } catch (err) {
+    config?._clearPendingReopen?.(targetDomainId);
+    throw err;
+  }
+
+  const activeInst = runtime._instances?.get(ctx.instanceId) ?? null;
+  const resolvedDomainId =
+    activeInst?.domainId ??
+    targetDomainId ??
+    computeDomainId(effectiveInput, enrichedCtx.workspacePath);
 
   try {
     if (wasCached) {
-      await runtime.invokeFromAgent("refresh", {}, enrichedCtx);
+      const refreshRes = await runtime.invokeFromAgent("refresh", {}, enrichedCtx);
+      if (refreshRes && refreshRes.ok === false) {
+        const afterRefreshState = await runtime.getState(resolvedDomainId);
+        const hadSavedReview = await (
+          config?._hasSavedDomain?.(resolvedDomainId) ?? false
+        );
+        if (
+          hasExplicitSourceOverride ||
+          (!afterRefreshState?.loaded && !hadSavedReview)
+        ) {
+          throw toCanvasKitError(
+            new Error(refreshRes.error || "Failed to load diff"),
+            "diff_load_failed",
+          );
+        }
+      }
     }
-    if (input?.focusFile) {
+    if (effectiveInput?.focusFile) {
       await runtime.invokeFromAgent(
         "focus_file",
-        { file: input.focusFile },
+        { file: effectiveInput.focusFile },
         enrichedCtx,
       );
     }
   } catch (err) {
+    config?._clearPendingReopen?.(resolvedDomainId);
+    config?._clearPendingReopen?.(targetDomainId);
     if (!prevInst) {
       await runtime.closeInstance?.(ctx.instanceId)?.catch?.(() => {});
     } else {
       const curInst = runtime._instances?.get(ctx.instanceId) ?? prevInst;
       if (prevDomainId !== null && curInst && curInst.domainId !== prevDomainId) {
         curInst.domainId = prevDomainId;
-        if (wasCached && curInst.clients?.size > 0) {
+        if (curInst.clients?.size > 0) {
           try {
             const restoredState = await runtime.getState(prevDomainId);
             broadcastStateToInstance(curInst, restoredState);
@@ -1620,19 +1721,22 @@ export async function openDiffInstance(runtime, config, ctx = {}) {
       }
     }
     throw err;
+  } finally {
+    config?._clearPendingReopen?.(resolvedDomainId);
+    config?._clearPendingReopen?.(targetDomainId);
   }
 
   const nextInst = runtime._instances?.get(ctx.instanceId) ?? null;
   const domainId =
     nextInst?.domainId ??
-    computeDomainId(enrichedCtx.input, enrichedCtx.workspacePath);
+    resolvedDomainId;
   const latestState = await runtime.getState(domainId);
 
   if (
     prevDomainId !== null &&
     prevDomainId !== domainId &&
     !wasCached &&
-    !input?.focusFile &&
+    !effectiveInput?.focusFile &&
     nextInst?.clients?.size > 0
   ) {
     broadcastStateToInstance(nextInst, latestState);

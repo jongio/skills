@@ -1331,6 +1331,9 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
 
   const invokedActions = [];
   const container = globalThis.document.createElement("div");
+  t.after(() => {
+    render(null, container);
+  });
   render(
     html`<${DiffCanvasApp}
       state=${state}
@@ -1550,6 +1553,9 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
 
   let shouldFailToggle = false;
   const cr2Container = globalThis.document.createElement("div");
+  t.after(() => {
+    render(null, cr2Container);
+  });
   const rerenderCr2 = () =>
     render(
       html`<${DiffCanvasApp}
@@ -1991,11 +1997,6 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
   await new Promise((r) => setTimeout(r, 10));
   assert.ok(cr2Container.querySelector(".dv-composer"), "Inline comment composer should be open");
 
-  // Re-collapse alpha card before Auto-refresh triggers so we also test un-collapsing invalidated viewed file!
-  [...(alphaCollapseBtn.listeners.get("click") || [])][0].call(alphaCollapseBtn, { type: "click" });
-  renderLiveUi();
-  await new Promise((r) => setTimeout(r, 10));
-
   const autoRefreshCheckbox = cr2Container
     .querySelector(".dv-update-banner")
     .querySelector("input");
@@ -2009,47 +2010,27 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
   assert.equal(
     refreshCalls,
     2,
-    "Auto-refresh must pause while an inline comment composer draft is open",
+    "Auto-refresh must pause while a visible inline comment composer draft is open",
   );
   assert.match(
     cr2Container.querySelector(".dv-update-banner").textContent,
     /Auto-refresh paused while editing comment/,
   );
 
-  // Cancel composer -> Auto-refresh immediately fires!
+  // Collapsing alpha clears its hidden composer so Auto-refresh is never stuck paused!
   // Simulate server refresh invalidating src/alpha.ts (hunks changed) while keeping src/beta.ts viewed
   refreshReturnPayload = {
     ok: true,
     changed: true,
     invalidatedViewedFiles: ["src/alpha.ts"],
   };
-  // Re-open alpha temporarily to click Cancel on composer, or cancel via handleCancelComposer:
   [...(alphaCollapseBtn.listeners.get("click") || [])][0].call(alphaCollapseBtn, { type: "click" });
   renderLiveUi();
-  await new Promise((r) => setTimeout(r, 10));
-  const cancelComposerBtns = cr2Container
-    .querySelector(".dv-composer")
-    .querySelectorAll("button");
-  const cancelBtn = cancelComposerBtns.find((b) => b.textContent.trim() === "Cancel");
-  assert.ok(cancelBtn);
-  // Collapse alpha right before cancelling so we verify diffRev Viewed->Unviewed uncollapses alpha while beta stays collapsed!
-  [...(alphaCollapseBtn.listeners.get("click") || [])][0].call(alphaCollapseBtn, { type: "click" });
-  renderLiveUi();
-  await new Promise((r) => setTimeout(r, 10));
-  // Trigger Escape on composer or re-open to cancel: let's open, leave collapsed state on beta, and test SSE diffRev transition!
-  [...(alphaCollapseBtn.listeners.get("click") || [])][0].call(alphaCollapseBtn, { type: "click" });
-  renderLiveUi();
-  await new Promise((r) => setTimeout(r, 10));
-  const activeCancelBtn = cr2Container
-    .querySelector(".dv-composer")
-    .querySelectorAll("button")
-    .find((b) => b.textContent.trim() === "Cancel");
-  [...(activeCancelBtn.listeners.get("click") || [])][0].call(activeCancelBtn, { type: "click" });
   await new Promise((r) => setTimeout(r, 140));
   assert.equal(
     refreshCalls,
     3,
-    "Closing the active comment composer must automatically run deferred Auto-refresh",
+    "Collapsing the file with an open composer clears the hidden composer and runs deferred Auto-refresh",
   );
   assert.equal(
     cr2Container.querySelector(".dv-update-banner"),
@@ -2186,7 +2167,149 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
     "Reverting context changes back to current contextSignature must clear .dv-update-banner",
   );
 
+  // 6. Filtered focus_file clears fileQuery and reveals focused file, copied badge renders, and !state.loaded displays title + saved comments + error heading
+  const multiParsed = parseDiffPatch(
+    [
+      "diff --git a/src/first.ts b/src/first.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/first.ts",
+      "+++ b/src/first.ts",
+      "@@ -1,1 +1,1 @@",
+      "-export const f = 1;",
+      "+export const f = 2;",
+      "diff --git a/src/base.ts b/src/copied-target.ts",
+      "similarity index 90%",
+      "copy from src/base.ts",
+      "copy to src/copied-target.ts",
+      "index 3333333..4444444 100644",
+      "--- a/src/base.ts",
+      "+++ b/src/copied-target.ts",
+      "@@ -1,1 +1,1 @@",
+      "-export const c = 1;",
+      "+export const c = 2;",
+    ].join("\n"),
+  );
+  liveUiState = {
+    ...liveUiState,
+    diffRev: 4,
+    contextSignature: "sig_v4",
+    comments: [],
+    files: multiParsed.files,
+    focusedFile: null,
+    focusSeq: 0,
+  };
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.match(
+    cr2Container.querySelectorAll(".dv-file-card")[1]?.textContent || "",
+    /copied/,
+    "Copied file card must render 'copied' status badge",
+  );
+
+  const focusFilterInput = cr2Container.querySelector(".dv-search-input");
+  assert.ok(focusFilterInput, "Toolbar filter input must exist");
+  focusFilterInput.value = "first.ts";
+  [...(focusFilterInput.listeners.get("input") || [])][0].call(focusFilterInput, {
+    type: "input",
+    target: focusFilterInput,
+    currentTarget: focusFilterInput,
+  });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(cr2Container.querySelectorAll(".dv-file-card").length, 1);
+
+  // Agent triggers focus_file on src/copied-target.ts (excluded by "first.ts" filter) -> clears fileQuery and reveals both cards!
+  StrictElement.scrollHistory = [];
+  liveUiState = {
+    ...liveUiState,
+    focusedFile: "src/copied-target.ts",
+    focusedLine: 1,
+    focusSeq: 1,
+  };
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 180));
+  assert.equal(
+    cr2Container.querySelectorAll(".dv-file-card").length,
+    2,
+    "Agent focus_file on a filtered-out file must clear fileQuery and reveal the target file card",
+  );
+  assert.equal(
+    StrictElement.scrollHistory.length > 0,
+    true,
+    "Agent focus_file after clearing fileQuery must scroll to the revealed target file/line",
+  );
+
+  // Subsequent diff refresh with unchanged focusSeq must NOT clear active fileQuery, uncollapse cards, or hijack scroll!
+  const copiedCollapseBtn = cr2Container
+    .querySelectorAll(".dv-file-card")[1]
+    .querySelector(".dv-collapse-btn");
+  [...(copiedCollapseBtn.listeners.get("click") || [])][0].call(copiedCollapseBtn, {
+    type: "click",
+  });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(
+    cr2Container.querySelectorAll(".dv-file-card")[1].className.includes("collapsed"),
+    true,
+  );
+
+  focusFilterInput.value = "first.ts";
+  [...(focusFilterInput.listeners.get("input") || [])][0].call(focusFilterInput, {
+    type: "input",
+    target: focusFilterInput,
+    currentTarget: focusFilterInput,
+  });
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(cr2Container.querySelectorAll(".dv-file-card").length, 1);
+
+  StrictElement.scrollHistory = [];
+  liveUiState = {
+    ...liveUiState,
+    diffRev: 5,
+    contextSignature: "sig_v5",
+    files: multiParsed.files.map((f) => ({ ...f })),
+  };
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 180));
+  assert.equal(
+    cr2Container.querySelectorAll(".dv-file-card").length,
+    1,
+    "Refreshing diff with unchanged focusSeq must preserve active fileQuery",
+  );
+  assert.equal(
+    StrictElement.scrollHistory.length,
+    0,
+    "Refreshing diff with unchanged focusSeq must not re-scroll to historical focusedFile",
+  );
+
+  // Render !state.loaded with saved source, title, error, and 2 saved comments
+  liveUiState = {
+    domain: "pr__example-org__widgets__55",
+    loaded: false,
+    error: "GitHub API temporarily unavailable",
+    source: { mode: "pr", repo: "example-org/widgets", pr: 55, paths: [] },
+    title: "example-org/widgets#55 - Saved Offline PR",
+    status: "pending",
+    viewedFiles: [],
+    comments: [
+      { id: "s1", file: "a.ts", line: 1, side: "right", body: "One" },
+      { id: "s2", file: "b.ts", line: 2, side: "right", body: "Two" },
+    ],
+    files: [],
+  };
+  renderLiveUi();
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(
+    cr2Container.querySelector(".dv-title")?.textContent,
+    "example-org/widgets#55 - Saved Offline PR",
+  );
+  assert.match(cr2Container.textContent, /Unable to load diff/);
+  assert.match(cr2Container.textContent, /2 saved comments/);
+
+  render(null, container);
   render(null, cr2Container);
+  await new Promise((r) => setTimeout(r, 150));
 });
 
 test("cached-domain reopen retries after transient failure, preserves non-secret account in durable source, and computes fresh status", async (t) => {
@@ -2324,16 +2447,18 @@ test("cached-domain reopen retries after transient failure, preserves non-secret
   assert.equal(coldState.loaded, true);
   assert.equal(coldState.source.account, "sample_emu");
 
-  // 4. Verify typo'd explicit account on reopen does NOT poison domainSources,
-  //    account: "" clears saved account, and inherited unlinked account falls back cleanly
-  const openTypo = await openDiffInstance(coldRt, coldCfg, {
-    instanceId: "emu-panel-2",
-    input: { repo: "example-org/emu-repo", pr: 77, account: "nonexistent_acct" },
-    workspacePath: "",
-  });
-  assert.match(openTypo.status, /example-org\/emu-repo#77/);
-  const afterTypoState = await coldRt.getState("pr__example-org__emu-repo__77");
-  assert.match(afterTypoState.error || "", /nonexistent_acct/);
+  // 4. Verify typo'd explicit account on reopen rejects like cold open, cleans up pendingReopenSources,
+  //    does NOT poison domainSources, account: "" clears saved account, and inherited unlinked account falls back cleanly
+  await assert.rejects(
+    openDiffInstance(coldRt, coldCfg, {
+      instanceId: "emu-panel-2",
+      input: { repo: "example-org/emu-repo", pr: 77, account: "nonexistent_acct" },
+      workspacePath: "",
+    }),
+    /nonexistent_acct/,
+  );
+  assert.equal(coldRt._instances.has("emu-panel-2"), false);
+  assert.equal(coldCfg._pendingReopenSources.size, 0);
   // Reopening without account still uses the prior working source ("sample_emu")!
   const recoveredOpen = await openDiffInstance(coldRt, coldCfg, {
     instanceId: "emu-panel-2",
@@ -2453,6 +2578,14 @@ test("opening Git diff from a repository subdirectory shares repo-root domainId 
   assert.equal(reloadedState.comments.length, 1);
   assert.equal(reloadedState.comments[0].body, "Persisted from subdir");
 
+  // Reopening the already-cached Git domain with explicit input.cwd (subdirectory) must succeed cleanly without ReferenceError or false override classification
+  const cachedSubdirReopen = await openDiffInstance(rtReloaded, cfgReloaded, {
+    instanceId: "root-panel",
+    input: { cwd: subDir },
+    workspacePath: "",
+  });
+  assert.match(cachedSubdirReopen.status, /files \(\+/);
+
   // Now verify re-targeting an open instanceId with a live SSE client to a cold PR domain pushes SSE immediately!
   const prMockExec = async (_cmd, args) => {
     const prNum = Number(args[2]);
@@ -2544,6 +2677,8 @@ test("opening Git diff from a repository subdirectory shares repo-root domainId 
     /not part of the loaded diff/,
   );
   assert.equal(sseRt._instances.get("switchable-panel").domainId, "pr__example-org__widgets__2");
+  const coldRollbackEvent = await streamIter.next();
+  assert.equal(coldRollbackEvent.value.domain, "pr__example-org__widgets__2");
 
   await assert.rejects(
     openDiffInstance(sseRt, sseCfg, {
@@ -2936,5 +3071,175 @@ test("probeDiffContext, check_updates, and smart viewedFiles invalidation cover 
   );
   assert.deepEqual(reconciledSpecial.invalidatedFiles, ["__proto__"]);
   assert.deepEqual(reconciledSpecial.viewedFiles, ["constructor"]);
+});
+
+test("legacy unseeded viewedFileFingerprints survive offline/--domain saves, sub-ms & symlink stamps update probeDiffContext, and statusLine reports reload errors", async (t) => {
+  const storeHome = makeTempDir("diff-cr3-regressions-");
+  const prevHome = process.env.COPILOT_HOME;
+  process.env.COPILOT_HOME = storeHome;
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.COPILOT_HOME;
+    else process.env.COPILOT_HOME = prevHome;
+    fs.rmSync(storeHome, { recursive: true, force: true });
+  });
+  const customStore = (file) => userStore("diff", file);
+
+  // 1. Seed legacy review JSON WITHOUT viewedFileFingerprints
+  const domainId = "pr__example-org__legacy__10";
+  await customStore(`${domainId}.json`).save({
+    domain: domainId,
+    source: { mode: "pr", repo: "example-org/legacy", pr: 10, paths: [] },
+    title: "example-org/legacy#10: Legacy PR",
+    status: "pending",
+    viewedFiles: ["src/keep.ts", "src/gone.ts"],
+    comments: [{ id: "c1", file: "src/keep.ts", line: 1, side: "right", body: "Check this" }],
+    updatedAt: "2026-04-19T12:00:00.000Z",
+  });
+
+  let isOffline = true;
+  const prPatch = [
+    "diff --git a/src/keep.ts b/src/keep.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/keep.ts",
+    "+++ b/src/keep.ts",
+    "@@ -1,1 +1,2 @@",
+    " export const keep = 1;",
+    "+export const next = 2;",
+  ].join("\n");
+
+  const mockExec = async (_cmd, args) => {
+    if (isOffline) {
+      throw new Error("Network temporarily unreachable");
+    }
+    if (args[0] === "pr" && args[1] === "diff") {
+      return prPatch;
+    }
+    if (args[0] === "pr" && args[1] === "view") {
+      return JSON.stringify({
+        number: 10,
+        title: "Legacy PR",
+        headRefName: "feat/legacy",
+        baseRefName: "main",
+        headRefOid: "aaaa1111",
+        baseRefOid: "bbbb2222",
+        state: "OPEN",
+      });
+    }
+    throw new Error(`Unexpected command: ${args.join(" ")}`);
+  };
+
+  const cfg = createDiffCanvasConfig({ execFn: mockExec, storeFactory: customStore });
+  const rt = createCanvasRuntime(cfg);
+  t.after(() => rt.shutdown());
+
+  // Offline --domain lookup + mark_addressed must NOT write viewedFileFingerprints: {} to disk
+  await rt.invokeFromAgent(
+    "mark_addressed",
+    {},
+    { targetDomainId: domainId, workspacePath: "" },
+  );
+  const rawAfterOfflineAddress = JSON.parse(
+    fs.readFileSync(
+      path.join(storeHome, "extensions", "diff", "artifacts", `${domainId}.json`),
+      "utf8",
+    ),
+  );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(rawAfterOfflineAddress, "viewedFileFingerprints"),
+    false,
+    "Unseeded viewedFileFingerprints must stay omitted on offline/byDomain saves",
+  );
+  assert.deepEqual(rawAfterOfflineAddress.viewedFiles, ["src/keep.ts", "src/gone.ts"]);
+
+  // Come back online and refresh -> src/keep.ts stays viewed and seeds its fingerprint!
+  isOffline = false;
+  const openedOnline = await openDiffInstance(rt, cfg, {
+    instanceId: "legacy-panel",
+    input: { repo: "example-org/legacy", pr: 10 },
+    workspacePath: "",
+  });
+  assert.match(openedOnline.status, /Legacy PR/);
+  const onlineState = await rt.getState(domainId);
+  assert.deepEqual(
+    onlineState.viewedFiles,
+    ["src/keep.ts"],
+    "Unseeded legacy viewedFiles must be preserved once diff loads",
+  );
+  assert.equal(typeof onlineState.viewedFileFingerprints?.["src/keep.ts"], "string");
+
+  // Transient reload error WITHOUT source overrides on an already-loaded/saved domain appends reload error in statusLine
+  isOffline = true;
+  const reopenedWhileOffline = await openDiffInstance(rt, cfg, {
+    instanceId: "legacy-panel",
+    input: { repo: "example-org/legacy", pr: 10 },
+    workspacePath: "",
+  });
+  assert.match(reopenedWhileOffline.status, /reload error: Network temporarily unreachable/);
+
+  // Cached reopen with NO saved review and !loaded must reject rather than silently succeeding
+  await assert.rejects(
+    openDiffInstance(rt, cfg, {
+      instanceId: "unsaved-panel",
+      input: { repo: "example-org/legacy", pr: 999 },
+      workspacePath: "",
+    }),
+    /Network temporarily unreachable/,
+  );
+
+  // 2. Sub-millisecond mtimeMs precision & symlink target changes in probeDiffContext
+  const gitRepo = fs.realpathSync.native(makeTempDir("diff-subms-probe-"));
+  t.after(() => fs.rmSync(gitRepo, { recursive: true, force: true }));
+  execFileSync("git", ["init", "-b", "main"], { cwd: gitRepo, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: gitRepo, stdio: "ignore" });
+  execFileSync("git", ["config", "user.name", "Test User"], { cwd: gitRepo, stdio: "ignore" });
+  const bigFile = path.join(gitRepo, "big.bin");
+  // Exceed MAX_UNTRACKED_FILE_BYTES (256 KiB) so stamp relies on size + mtimeMs (without contentDigest)
+  const bufA = Buffer.alloc(300 * 1024, 0x41);
+  fs.writeFileSync(bigFile, bufA);
+  execFileSync("git", ["add", "big.bin"], { cwd: gitRepo, stdio: "ignore" });
+  execFileSync("git", ["commit", "-m", "init"], { cwd: gitRepo, stdio: "ignore" });
+
+  // Modify big.bin and set two timestamps within the SAME millisecond (1700000000.1231 vs 1700000000.1239)
+  const bufB = Buffer.alloc(300 * 1024, 0x42);
+  fs.writeFileSync(bigFile, bufB);
+  fs.utimesSync(bigFile, 1700000000.1231, 1700000000.1231);
+  const probeSubMs1 = await probeDiffContext({ mode: "git", cwd: gitRepo, spec: "HEAD", paths: [] });
+  const stat1 = fs.lstatSync(bigFile);
+
+  fs.utimesSync(bigFile, 1700000000.1239, 1700000000.1239);
+  const stat2 = fs.lstatSync(bigFile);
+  const probeSubMs2 = await probeDiffContext({ mode: "git", cwd: gitRepo, spec: "HEAD", paths: [] });
+  if (Number(stat1.mtimeMs).toFixed(3) !== Number(stat2.mtimeMs).toFixed(3)) {
+    assert.notEqual(
+      probeSubMs1.contextSignature,
+      probeSubMs2.contextSignature,
+      "Sub-millisecond mtimeMs change on >256KiB dirty file must update contextSignature",
+    );
+  }
+
+  // Test tracked symlink target update if platform permits symlink creation without elevation
+  const linkPath = path.join(gitRepo, "tracked-link");
+  let symlinkSupported = false;
+  try {
+    fs.symlinkSync("target-one.txt", linkPath);
+    symlinkSupported = true;
+  } catch {
+    symlinkSupported = false;
+  }
+  if (symlinkSupported) {
+    execFileSync("git", ["add", "tracked-link"], { cwd: gitRepo, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "add symlink"], { cwd: gitRepo, stdio: "ignore" });
+    fs.unlinkSync(linkPath);
+    fs.symlinkSync("target-two.txt", linkPath);
+    const probeLink1 = await probeDiffContext({ mode: "git", cwd: gitRepo, spec: "HEAD", paths: [] });
+    fs.unlinkSync(linkPath);
+    fs.symlinkSync("target-three.txt", linkPath);
+    const probeLink2 = await probeDiffContext({ mode: "git", cwd: gitRepo, spec: "HEAD", paths: [] });
+    assert.notEqual(
+      probeLink1.contextSignature,
+      probeLink2.contextSignature,
+      "Retargeting a dirty tracked symlink must update contextSignature without dereferencing",
+    );
+  }
 });
 

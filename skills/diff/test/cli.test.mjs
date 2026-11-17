@@ -201,6 +201,11 @@ test("parseCliArgs rejects leading-dash ref injection, unknown flags, conflictin
   assert.throws(() => parseCliArgs(["serve", "--domain", "pr__a__b__1"]), /only supported with review/);
   assert.throws(() => parseCliArgs(["list", "--status", "bogus"]), /Invalid --status/);
   assert.throws(() => parseCliArgs(["pr", "not-a-number"]), /Invalid PR number/);
+  assert.throws(() => parseCliArgs(["list", "--no-open"]), /--no-open is only supported with 'serve'/);
+  assert.throws(() => parseCliArgs(["review", "--print-url"]), /--print-url is only supported with 'serve'/);
+  assert.throws(() => parseCliArgs(["address", "--domain", "pr__a__b__1", "--wait"]), /--wait is only supported with 'serve'/);
+  assert.throws(() => parseCliArgs(["reopen", "--domain", "pr__a__b__1", "--focus", "src/a.ts"]), /--focus is only supported with 'serve'/);
+  assert.throws(() => parseCliArgs(["list", "--idle-timeout-ms", "60000"]), /--idle-timeout-ms is only supported with 'serve'/);
 
   const parsed = parseCliArgs([
     "serve",
@@ -646,4 +651,47 @@ test("serve --wait awaits slow saveState completion and HTTP response before shu
     "Durable pending state must finish saving before serve --wait resolves",
   );
 });
+
+test("CLI entry point emits structured JSON errors to stdout with --json and plain errors to stderr otherwise", async () => {
+  const runSubprocess = (args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [CLI_SCRIPT_PATH, ...args], {
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      let stdoutText = "";
+      let stderrText = "";
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (c) => {
+        stdoutText += c;
+      });
+      child.stderr.on("data", (c) => {
+        stderrText += c;
+      });
+      child.on("error", reject);
+      child.on("close", (code) => {
+        resolve({ code, stdout: stdoutText, stderr: stderrText });
+      });
+    });
+
+  const jsonErr = await runSubprocess(["list", "--no-open", "--json"]);
+  assert.equal(jsonErr.code, 1);
+  assert.equal(jsonErr.stderr, "");
+  const parsedErr = JSON.parse(jsonErr.stdout.trim());
+  assert.equal(parsedErr.ok, false);
+  assert.match(parsedErr.error, /--no-open is only supported with 'serve'/);
+
+  const plainErr = await runSubprocess(["review", "--wait"]);
+  assert.equal(plainErr.code, 1);
+  assert.equal(plainErr.stdout, "");
+  assert.match(plainErr.stderr, /diff error: --wait is only supported with 'serve'/);
+
+  // Pathspec "--json" after "--" must NOT trigger JSON mode
+  const pathAfterDashErr = await runSubprocess(["list", "--no-open", "--", "--json"]);
+  assert.equal(pathAfterDashErr.code, 1);
+  assert.equal(pathAfterDashErr.stdout, "");
+  assert.match(pathAfterDashErr.stderr, /diff error:/);
+});
+
 

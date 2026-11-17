@@ -1,5 +1,5 @@
 // Browser-safe pure-JS diff view-model helpers shared by `runtime/web/app.mjs`
-// and `scripts/parse-diff.mjs`. Zero external dependencies, no DOM innerHTML,
+// and `runtime/parse-diff.mjs`. Zero external dependencies, no DOM innerHTML,
 // bounded O(N) tokenization and word diffing.
 
 const MAX_TOKENIZE_LINE_LENGTH = 1000;

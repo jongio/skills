@@ -249,12 +249,26 @@ export function parseDiffPatch(
 
   const finalizeFile = () => {
     if (!current) return;
-    const rawTarget = current.newPath || current.renameTo || current.oldPath || current.renameFrom || "";
+    const rawTarget =
+      current.newPath ||
+      current.renameTo ||
+      current.copyTo ||
+      current.oldPath ||
+      current.renameFrom ||
+      current.copyFrom ||
+      "";
     const canonicalPath = normalizeCanonicalPath(rawTarget);
-    const normOld = normalizeCanonicalPath(current.oldPath || current.renameFrom || "");
-    const normNew = normalizeCanonicalPath(current.newPath || current.renameTo || "");
+    const normOld = normalizeCanonicalPath(
+      current.oldPath || current.renameFrom || current.copyFrom || "",
+    );
+    const normNew = normalizeCanonicalPath(
+      current.newPath || current.renameTo || current.copyTo || "",
+    );
     const displayPath =
-      current.status === "renamed" && normOld && normNew && normOld !== normNew
+      (current.status === "renamed" || current.status === "copied") &&
+      normOld &&
+      normNew &&
+      normOld !== normNew
         ? `${normOld} -> ${normNew}`
         : canonicalPath || normNew || normOld || "(invalid-path)";
 
@@ -287,6 +301,8 @@ export function parseDiffPatch(
         newPath: parsed.newPath,
         renameFrom: "",
         renameTo: "",
+        copyFrom: "",
+        copyTo: "",
         canonicalPath: "",
         displayPath: "",
         status: "modified",
@@ -350,6 +366,14 @@ export function parseDiffPatch(
         current.status = "renamed";
         current.renameTo = unquoteGitHeaderPath(line.slice("rename to ".length));
         current.newPath = current.renameTo;
+      } else if (line.startsWith("copy from ")) {
+        current.status = "copied";
+        current.copyFrom = unquoteGitHeaderPath(line.slice("copy from ".length));
+        current.oldPath = current.copyFrom;
+      } else if (line.startsWith("copy to ")) {
+        current.status = "copied";
+        current.copyTo = unquoteGitHeaderPath(line.slice("copy to ".length));
+        current.newPath = current.copyTo;
       } else if (line.startsWith("Binary files ") || line === "GIT binary patch") {
         current.isBinary = true;
         if (current.status === "modified") current.status = "binary";

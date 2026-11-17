@@ -965,6 +965,14 @@ function collectWorktreeFileStamps(repoRoot, rawCandidatePaths) {
     const absPath = path.resolve(repoRootReal, relPath);
     if (!pathIsWithin(absPath, repoRootReal)) continue;
 
+    try {
+      const parentReal = fs.realpathSync.native(path.dirname(absPath));
+      if (!pathIsWithin(parentReal, repoRootReal)) continue;
+    } catch {
+      stamps.push(`${relPath}:missing`);
+      continue;
+    }
+
     let lstat;
     try {
       lstat = fs.lstatSync(absPath);
@@ -972,18 +980,25 @@ function collectWorktreeFileStamps(repoRoot, rawCandidatePaths) {
       stamps.push(`${relPath}:missing`);
       continue;
     }
-    if (lstat.isSymbolicLink() || !lstat.isFile()) {
+    if (lstat.isSymbolicLink()) {
+      try {
+        const linkTarget = fs.readlinkSync(absPath, "utf8");
+        const linkDigest = createHash("sha256")
+          .update(linkTarget, "utf8")
+          .digest("hex")
+          .slice(0, 16);
+        stamps.push(`${relPath}:symlink:${linkDigest}`);
+      } catch {
+        stamps.push(`${relPath}:symlink:unreadable`);
+      }
       continue;
     }
-    try {
-      const parentReal = fs.realpathSync.native(path.dirname(absPath));
-      if (!pathIsWithin(parentReal, repoRootReal)) continue;
-    } catch {
+    if (!lstat.isFile()) {
       continue;
     }
 
     const size = lstat.size;
-    const mtimeTrunc = Math.trunc(lstat.mtimeMs);
+    const mtimeStamp = Number(lstat.mtimeMs).toFixed(3);
     let contentDigest = "";
 
     if (
@@ -1020,7 +1035,7 @@ function collectWorktreeFileStamps(repoRoot, rawCandidatePaths) {
       }
     }
 
-    stamps.push(`${relPath}:${size}:${mtimeTrunc}:${contentDigest}`);
+    stamps.push(`${relPath}:${size}:${mtimeStamp}:${contentDigest}`);
   }
 
   return stamps;

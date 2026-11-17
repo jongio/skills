@@ -42,8 +42,9 @@ function statusBadgeMeta(status) {
 }
 
 function fileIconName(status) {
-  if (status === "added") return "file-plus";
+  if (status === "added" || status === "copied") return "file-plus";
   if (status === "deleted") return "file-minus";
+  if (status === "renamed") return "file-diff";
   return "file-code";
 }
 
@@ -1027,6 +1028,20 @@ export function DiffCanvasApp({ state, invoke }) {
     );
   }, [files, fileQuery]);
 
+  const fileQueryRef = useRef(fileQuery);
+  fileQueryRef.current = fileQuery;
+  const filteredFilesRef = useRef(filteredFiles);
+  filteredFilesRef.current = filteredFiles;
+  const knownFileSetRef = useRef(knownFileSet);
+  knownFileSetRef.current = knownFileSet;
+  const lastHandledFocusRef = useRef({ domain: null, focusSeq: 0 });
+
+  useEffect(() => {
+    setActiveComposer((prev) =>
+      prev && !knownFileSet.has(prev.file) ? null : prev,
+    );
+  }, [knownFileSet]);
+
   const viewedFilteredCount = useMemo(
     () =>
       filteredFiles.reduce(
@@ -1177,10 +1192,32 @@ export function DiffCanvasApp({ state, invoke }) {
   }, [state?.status]);
 
   useEffect(() => {
-    if (state?.focusSeq && state?.focusedFile) {
-      scrollToFile(state.focusedFile, state.focusedLine ?? null);
+    const domain = state?.domain ?? null;
+    if (lastHandledFocusRef.current.domain !== domain) {
+      lastHandledFocusRef.current = { domain, focusSeq: 0 };
     }
-  }, [state?.domain, state?.focusSeq, state?.focusedFile, state?.focusedLine, scrollToFile]);
+    if (!state?.loaded || !state?.focusSeq || !state?.focusedFile) {
+      return;
+    }
+    if (lastHandledFocusRef.current.focusSeq === state.focusSeq) {
+      return;
+    }
+    lastHandledFocusRef.current = { domain, focusSeq: state.focusSeq };
+    const targetFile = state.focusedFile;
+    const targetLine = state.focusedLine ?? null;
+    const queryTrimmed = fileQueryRef.current.trim();
+    const visibleInFilter = filteredFilesRef.current.some(
+      (f) => f.canonicalPath === targetFile,
+    );
+    if (queryTrimmed && !visibleInFilter && knownFileSetRef.current.has(targetFile)) {
+      setFileQuery("");
+      setTimeout(() => {
+        scrollToFile(targetFile, targetLine);
+      }, 0);
+      return;
+    }
+    scrollToFile(targetFile, targetLine);
+  }, [state?.domain, state?.loaded, state?.focusSeq, state?.focusedFile, state?.focusedLine, scrollToFile]);
 
   useEffect(
     () => () => {
@@ -1268,8 +1305,11 @@ export function DiffCanvasApp({ state, invoke }) {
   );
 
   const handleToggleCollapse = useCallback((key, nextCollapsed) => {
+    const val = Boolean(nextCollapsed);
+    if (val) {
+      setActiveComposer((prev) => (prev && prev.file === key ? null : prev));
+    }
     setCollapsedFiles((prev) => {
-      const val = Boolean(nextCollapsed);
       if (hasOwnKey(prev, key) && prev[key] === val) return prev;
       const next = cloneNullMap(prev);
       next[key] = val;
@@ -1436,7 +1476,33 @@ export function DiffCanvasApp({ state, invoke }) {
     };
   }, [state?.loaded, state?.domain, state?.source?.mode]);
 
-  const hasActiveDraft = activeComposer !== null || activeEditCount > 0;
+  const computeEffectiveCollapsed = useCallback(
+    (file) => {
+      const canonical = file.canonicalPath || "";
+      const collapseKey = canonical || String(file.index);
+      const autoCollapseReason = getAutoCollapseReason(file);
+      const hasExplicitCollapse = hasOwnKey(collapsedFiles, collapseKey);
+      const targetedByFocus = Boolean(
+        canonical && (selectedFile === canonical || state?.focusedFile === canonical),
+      );
+      const isCollapsed = hasExplicitCollapse
+        ? Boolean(collapsedFiles[collapseKey])
+        : Boolean(autoCollapseReason) && !targetedByFocus;
+      return { collapseKey, autoCollapseReason, isCollapsed };
+    },
+    [collapsedFiles, selectedFile, state?.focusedFile],
+  );
+
+  const isComposerVisible = useMemo(() => {
+    if (!activeComposer || !knownFileSet.has(activeComposer.file)) return false;
+    const targetFile = filteredFiles.find(
+      (f) => f.canonicalPath === activeComposer.file,
+    );
+    if (!targetFile) return false;
+    return !computeEffectiveCollapsed(targetFile).isCollapsed;
+  }, [activeComposer, knownFileSet, filteredFiles, computeEffectiveCollapsed]);
+
+  const hasActiveDraft = isComposerVisible || activeEditCount > 0;
 
   useEffect(() => {
     if (
@@ -1571,23 +1637,6 @@ export function DiffCanvasApp({ state, invoke }) {
     }
   }, [runAction]);
 
-  const computeEffectiveCollapsed = useCallback(
-    (file) => {
-      const canonical = file.canonicalPath || "";
-      const collapseKey = canonical || String(file.index);
-      const autoCollapseReason = getAutoCollapseReason(file);
-      const hasExplicitCollapse = hasOwnKey(collapsedFiles, collapseKey);
-      const targetedByFocus = Boolean(
-        canonical && (selectedFile === canonical || state?.focusedFile === canonical),
-      );
-      const isCollapsed = hasExplicitCollapse
-        ? Boolean(collapsedFiles[collapseKey])
-        : Boolean(autoCollapseReason) && !targetedByFocus;
-      return { collapseKey, autoCollapseReason, isCollapsed };
-    },
-    [collapsedFiles, selectedFile, state?.focusedFile],
-  );
-
   const allFilteredExpanded = useMemo(
     () =>
       filteredFiles.length > 0 &&
@@ -1597,6 +1646,14 @@ export function DiffCanvasApp({ state, invoke }) {
 
   const handleToggleAllFiles = useCallback(() => {
     const nextCollapsed = allFilteredExpanded;
+    if (nextCollapsed) {
+      const collapsedSet = new Set(
+        filteredFiles.map((f) => f.canonicalPath || String(f.index)),
+      );
+      setActiveComposer((prev) =>
+        prev && collapsedSet.has(prev.file) ? null : prev,
+      );
+    }
     setCollapsedFiles((prev) => {
       const next = cloneNullMap(prev);
       for (const f of filteredFiles) {
@@ -1619,13 +1676,27 @@ export function DiffCanvasApp({ state, invoke }) {
   }
 
   if (!state.loaded) {
-    const unloadedRetryLabel = state.error ? "Retry" : "Refresh";
+    const hasLoadError = Boolean(state.error || actionError);
+    const unloadedRetryLabel = hasLoadError ? "Retry" : "Refresh";
+    const unloadedTitle =
+      state.source && state.title ? state.title : "Diff Viewer";
+    const unloadedHeading = hasLoadError
+      ? "Unable to load diff"
+      : "No diff loaded yet";
+    const savedCommentCount = comments.length;
+    const unloadedBadge = state.source ? statusBadgeMeta(state.status) : null;
     return html`
       <div class="dv-shell">
         <header class="dv-toolbar">
           <div class="dv-title-group">
             <${Icon} name="git-compare-arrows" size=${16} />
-            <span class="dv-title">Diff Viewer</span>
+            <span class="dv-title" title=${unloadedTitle}>${unloadedTitle}</span>
+            ${unloadedBadge
+              ? html`<span class=${unloadedBadge.cls}><${Icon} name=${unloadedBadge.icon} size=${12} /> ${unloadedBadge.label}</span>`
+              : null}
+            ${savedCommentCount > 0
+              ? html`<span class="ck-badge ck-badge-muted">${savedCommentCount} saved ${savedCommentCount === 1 ? "comment" : "comments"}</span>`
+              : null}
           </div>
           <div class="dv-toolbar-actions">
             <button
@@ -1645,14 +1716,17 @@ export function DiffCanvasApp({ state, invoke }) {
           <div class="ck-card ck-col">
             <div class="ck-row">
               <${Icon} name="file-diff" size=${20} />
-              <strong>No diff loaded yet</strong>
+              <strong>${unloadedHeading}</strong>
+              ${savedCommentCount > 0
+                ? html`<span class="ck-badge ck-badge-muted">${savedCommentCount} ${savedCommentCount === 1 ? "comment" : "comments"}</span>`
+                : null}
             </div>
             <p class="ck-muted">
               Open this canvas from a Git workspace (<span class="ck-mono">cwd</span>,
               <span class="ck-mono">spec</span>) or target a GitHub pull request directly
               (<span class="ck-mono">repo</span>, <span class="ck-mono">pr</span>).
             </p>
-            ${state.error || actionError
+            ${hasLoadError
               ? html`
                   <div class="ck-callout ck-error">
                     <${Icon} name="circle-x" size=${16} />

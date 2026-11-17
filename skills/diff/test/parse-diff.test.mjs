@@ -196,3 +196,38 @@ test("parseDiffPatch parses all four combinations of quoted and unquoted diff --
   assert.equal(parsed.files[5].newPath, "docs/plan b/spec.md");
   assert.equal(parsed.files[5].canonicalPath, "docs/plan b/spec.md");
 });
+
+test("parseDiffPatch supports copy from / copy to headers with plain and quoted paths", () => {
+  const copyPatch = [
+    "diff --git a/src/template.ts b/src/copied-plain.ts",
+    "similarity index 95%",
+    "copy from src/template.ts",
+    "copy to src/copied-plain.ts",
+    "index 1111111..2222222 100644",
+    "--- a/src/template.ts",
+    "+++ b/src/copied-plain.ts",
+    "@@ -1,2 +1,2 @@",
+    " export const base = true;",
+    "-export const variant = 'a';",
+    "+export const variant = 'b';",
+    'diff --git "a/src/space base.ts" "b/src/space copy.ts"',
+    "similarity index 100%",
+    'copy from "src/space base.ts"',
+    'copy to "src/space copy.ts"',
+  ].join("\n");
+
+  const parsed = parseDiffPatch(copyPatch);
+  assert.equal(parsed.files.length, 2);
+
+  assert.equal(parsed.files[0].status, "copied");
+  assert.equal(parsed.files[0].oldPath, "src/template.ts");
+  assert.equal(parsed.files[0].newPath, "src/copied-plain.ts");
+  assert.equal(parsed.files[0].canonicalPath, "src/copied-plain.ts");
+  assert.equal(parsed.files[0].displayPath, "src/template.ts -> src/copied-plain.ts");
+
+  assert.equal(parsed.files[1].status, "copied");
+  assert.equal(parsed.files[1].oldPath, "src/space base.ts");
+  assert.equal(parsed.files[1].newPath, "src/space copy.ts");
+  assert.equal(parsed.files[1].canonicalPath, "src/space copy.ts");
+  assert.equal(parsed.files[1].displayPath, "src/space base.ts -> src/space copy.ts");
+});

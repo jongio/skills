@@ -230,6 +230,7 @@ export function parseCliArgs(argv = []) {
   let printUrl = false;
   let wait = false;
   let idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS;
+  let hasIdleTimeoutFlag = false;
   let json = false;
   const positionals = [];
 
@@ -280,6 +281,7 @@ export function parseCliArgs(argv = []) {
     } else if (tok === "--wait") {
       wait = true;
     } else if (tok === "--idle-timeout-ms") {
+      hasIdleTimeoutFlag = true;
       const rawTimeout = readValue("--idle-timeout-ms");
       if (!/^\d+$/.test(rawTimeout)) {
         throw new Error(`Invalid --idle-timeout-ms '${rawTimeout}'`);
@@ -361,6 +363,23 @@ export function parseCliArgs(argv = []) {
   }
   if (clearComments && command !== "reopen") {
     throw new Error("--clear-comments is only supported with 'reopen'");
+  }
+  if (command !== "serve") {
+    if (focusFile) {
+      throw new Error("--focus is only supported with 'serve'");
+    }
+    if (noOpen) {
+      throw new Error("--no-open is only supported with 'serve'");
+    }
+    if (printUrl) {
+      throw new Error("--print-url is only supported with 'serve'");
+    }
+    if (wait) {
+      throw new Error("--wait is only supported with 'serve'");
+    }
+    if (hasIdleTimeoutFlag) {
+      throw new Error("--idle-timeout-ms is only supported with 'serve'");
+    }
   }
 
   return {
@@ -750,17 +769,20 @@ const isDirectEntry =
   path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
 
 if (isDirectEntry) {
-  runCli(process.argv.slice(2)).then(
+  const cliArgs = process.argv.slice(2);
+  runCli(cliArgs).then(
     (res) => {
       if (res && res.ok === false) {
         process.exitCode = 1;
       }
     },
     (err) => {
-      const jsonMode = process.argv.includes("--json");
+      const ddIdx = cliArgs.indexOf("--");
+      const headArgs = ddIdx === -1 ? cliArgs : cliArgs.slice(0, ddIdx);
+      const jsonMode = headArgs.includes("--json");
       const message = sanitizePublicErrorMessage(err);
       if (jsonMode) {
-        process.stderr.write(`${JSON.stringify({ ok: false, error: message })}\n`);
+        process.stdout.write(`${JSON.stringify({ ok: false, error: message })}\n`);
       } else {
         process.stderr.write(`diff error: ${message}\n`);
       }
