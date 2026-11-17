@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeFileSync,
@@ -197,7 +198,17 @@ export function applySetup(plan, approval = plan?.hash) {
   return { applied: true, pluginManaged: false, file: current.file };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function isDirectEntryModule(metaUrl, argv1 = process.argv[1]) {
+  if (!argv1) return false;
+  const selfPath = fileURLToPath(metaUrl);
+  try {
+    return realpathSync.native(argv1) === realpathSync.native(selfPath);
+  } catch {
+    return resolve(argv1) === resolve(selfPath);
+  }
+}
+
+if (isDirectEntryModule(import.meta.url)) {
   try {
     const args = process.argv.slice(2);
     if (

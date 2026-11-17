@@ -831,9 +831,17 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
   }
 }
 
-const isDirectEntry =
-  process.argv[1] &&
-  path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+function isDirectEntryModule(metaUrl, argv1 = process.argv[1]) {
+  if (!argv1) return false;
+  const selfPath = fileURLToPath(metaUrl);
+  try {
+    return fs.realpathSync.native(argv1) === fs.realpathSync.native(selfPath);
+  } catch {
+    return path.resolve(argv1) === path.resolve(selfPath);
+  }
+}
+
+const isDirectEntry = isDirectEntryModule(import.meta.url);
 
 if (isDirectEntry) {
   const cliArgs = process.argv.slice(2);

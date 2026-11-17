@@ -1124,5 +1124,44 @@ test("browser-only CLI installs persist review artifacts with private 0o700 dire
   }
 });
 
+test("cli.mjs and setup.mjs execute when invoked via symlinked skill directories", (t) => {
+  const linkContainer = makeTempDir("diff-symlink-skill-");
+  const fakeHome = makeTempDir("diff-symlink-home-");
+  t.after(() => {
+    fs.rmSync(linkContainer, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
+  });
+
+  const realSkillDir = path.resolve(import.meta.dirname, "..");
+  const linkedSkillDir = path.join(linkContainer, "diff");
+  fs.symlinkSync(
+    realSkillDir,
+    linkedSkillDir,
+    process.platform === "win32" ? "junction" : "dir",
+  );
+
+  const env = { ...process.env, COPILOT_HOME: fakeHome };
+
+  const setupRaw = execFileSync(
+    process.execPath,
+    [path.join(linkedSkillDir, "scripts", "setup.mjs"), "--dry-run"],
+    { env, encoding: "utf8", windowsHide: true },
+  );
+  assert.notEqual(setupRaw.trim(), "", "setup.mjs must not exit silently via symlinked skill path");
+  const setupPlan = JSON.parse(setupRaw);
+  assert.equal(setupPlan.applied, false);
+  assert.equal(typeof setupPlan.hash, "string");
+
+  const cliRaw = execFileSync(
+    process.execPath,
+    [path.join(linkedSkillDir, "scripts", "cli.mjs"), "list", "--json"],
+    { env, encoding: "utf8", windowsHide: true },
+  );
+  assert.notEqual(cliRaw.trim(), "", "cli.mjs must not exit silently via symlinked skill path");
+  const cliList = JSON.parse(cliRaw);
+  assert.equal(cliList.ok, true);
+  assert.deepEqual(cliList.reviews, []);
+});
+
 
 
