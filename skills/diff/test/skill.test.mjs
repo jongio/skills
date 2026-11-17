@@ -21,6 +21,7 @@ test("skill includes workflow, safety, exit criteria, canvas actions, and untrus
   assert.match(skill, /^## Exit Criteria$/m);
   assert.match(skill, /Untrusted data boundary/i);
   assert.match(skill, /open_canvas/);
+  assert.match(skill, /scripts\/cli\.mjs/);
   assert.match(skill, /get_review/);
   assert.match(skill, /reopen_review/);
   assert.match(skill, /mark_addressed/);
@@ -40,6 +41,8 @@ test("tracked markdown, eval spec, and runtime sources avoid Unicode dashes and 
     "../runtime/web/app.mjs",
     "../runtime/web/diff-view-model.mjs",
     "../runtime/web/style.css",
+    "../scripts/cli.mjs",
+    "../scripts/setup.mjs",
   ];
   const loadedRuntime = await Promise.all(
     runtimeFiles.map(async (rel) => [rel, await readFile(new URL(rel, import.meta.url), "utf8")]),

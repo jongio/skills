@@ -1237,3 +1237,88 @@ export async function loadDiff(source, options = {}) {
     },
   };
 }
+
+export async function resolveCurrentBranchPrNumber(cwd, options = {}) {
+  const execFn = options.execFn ?? defaultExec;
+  const env = options.env ?? process.env;
+  const targetDir = cwd ? path.resolve(cwd) : process.cwd();
+
+  assertSafeCheckoutDir(targetDir);
+  let cwdStat;
+  try {
+    cwdStat = fs.statSync(targetDir);
+  } catch {
+    throw new Error("Target directory does not exist");
+  }
+  if (!cwdStat.isDirectory()) {
+    throw new Error("Target path is not a directory");
+  }
+
+  const repoRoot = assertSafeResolvedRepoRoot(
+    path.resolve(
+      (await execFn("git", ["rev-parse", "--show-toplevel"], { cwd: targetDir })).trim(),
+    ),
+    targetDir,
+  );
+  const untrustedRoots = [targetDir, repoRoot];
+  const explicitAccount = assertSafeGitHubAccount(options.account);
+
+  const runViewNumber = (tokenOverride) => {
+    const envOpt = tokenOverride
+      ? { env: { GH_HOST: "github.com", GH_TOKEN: tokenOverride } }
+      : {};
+    return execFn("gh", ["pr", "view", "--json", "number"], {
+      cwd: repoRoot,
+      untrustedRoots,
+      timeout: EXEC_TIMEOUT_MS,
+      ...envOpt,
+    });
+  };
+
+  let raw;
+  if (explicitAccount) {
+    const token = await resolveExplicitAccountToken(explicitAccount, {
+      execFn,
+      execCwd: repoRoot,
+      untrustedRoots,
+      env,
+    });
+    raw = await runViewNumber(token);
+  } else {
+    try {
+      raw = await runViewNumber(null);
+    } catch (primaryErr) {
+      if (!isGhAuthOrNotFoundError(primaryErr)) {
+        throw primaryErr;
+      }
+      const fallbackTokens = collectFallbackAccountTokens(env);
+      let recovered = false;
+      for (const candidateToken of fallbackTokens) {
+        try {
+          raw = await runViewNumber(candidateToken);
+          recovered = true;
+          break;
+        } catch (retryErr) {
+          if (!isGhAuthOrNotFoundError(retryErr)) {
+            throw retryErr;
+          }
+        }
+      }
+      if (!recovered) {
+        throw primaryErr;
+      }
+    }
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  const num = parsed?.number;
+  if (!Number.isInteger(num) || num <= 0) {
+    throw new Error("Could not resolve an open pull request number for the current branch");
+  }
+  return num;
+}

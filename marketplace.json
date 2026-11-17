@@ -173,7 +173,7 @@
     {
       "name": "diff",
       "source": "./skills/diff",
-      "description": "Open a GitHub-style side-by-side diff viewer in a Copilot App canvas with inline review comments and structured review triage.",
+      "description": "Open a GitHub-style side-by-side diff viewer in a Copilot App canvas or local browser with inline review comments and structured review triage.",
       "version": "1.0.0"
     }
   ]

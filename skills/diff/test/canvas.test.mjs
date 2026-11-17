@@ -1703,6 +1703,83 @@ test("DiffCanvasApp mounts cleanly in strict Preact DOM (zero empty-fragment cra
   );
   assert.equal(StrictElement.scrollHistory.length, 1);
 
+  // Verify non-Copilot-App Submit Review handoff banner (notifiedAgent: false vs true)
+  let nextNotifyAgentResult = false;
+  const renderHandoff = (st) =>
+    render(
+      html`<${DiffCanvasApp}
+        state=${st}
+        invoke=${async (name) => {
+          if (name === "submit_review") {
+            return {
+              status: "pending",
+              commentCount: 1,
+              notifiedAgent: nextNotifyAgentResult,
+            };
+          }
+          if (name === "reopen_review") {
+            return { status: "draft", commentCount: 1, clearedComments: false };
+          }
+          return { ok: true };
+        }}
+      />`,
+      cr2Container,
+    );
+
+  let handoffState = {
+    ...cr2State,
+    status: "draft",
+    comments: [
+      {
+        id: "h1",
+        file: "src/new-domain-file.ts",
+        line: 1,
+        side: "right",
+        body: "Needs check",
+        stale: false,
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  };
+  renderHandoff(handoffState);
+  let submitBtn = cr2Container
+    .querySelectorAll("button")
+    .find((btn) => btn.textContent.includes("Submit Review"));
+  assert.ok(submitBtn);
+  const submitClick = [...(submitBtn.listeners.get("click") || [])][0];
+  await submitClick.call(submitBtn, { type: "click" });
+  handoffState = { ...handoffState, status: "pending" };
+  renderHandoff(handoffState);
+  await new Promise((r) => setTimeout(r, 10));
+  const handoffBanner = cr2Container.querySelector(".dv-handoff-banner");
+  assert.ok(handoffBanner, "When notifiedAgent is false, .dv-handoff-banner must appear");
+  assert.match(handoffBanner.textContent, /ask your agent to run \/diff review/);
+
+  // Marking addressed clears manualHandoffNeeded automatically
+  handoffState = { ...handoffState, status: "addressed" };
+  renderHandoff(handoffState);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(cr2Container.querySelector(".dv-handoff-banner"), null);
+
+  // In Copilot App (notifiedAgent: true), .dv-handoff-banner does NOT appear
+  nextNotifyAgentResult = true;
+  handoffState = { ...handoffState, status: "draft" };
+  renderHandoff(handoffState);
+  await new Promise((r) => setTimeout(r, 10));
+  submitBtn = cr2Container
+    .querySelectorAll("button")
+    .find((btn) => btn.textContent.includes("Submit Review"));
+  const submitClickApp = [...(submitBtn.listeners.get("click") || [])][0];
+  await submitClickApp.call(submitBtn, { type: "click" });
+  handoffState = { ...handoffState, status: "pending" };
+  renderHandoff(handoffState);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(
+    cr2Container.querySelector(".dv-handoff-banner"),
+    null,
+    "When notifiedAgent is true (Copilot App), .dv-handoff-banner must stay hidden",
+  );
+
   render(null, cr2Container);
 });
 

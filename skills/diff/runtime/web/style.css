@@ -145,7 +145,8 @@ html, body, #app {
   font-size: 12px;
 }
 
-.dv-error-banner {
+.dv-error-banner,
+.dv-handoff-banner {
   margin: 8px 12px 0;
   flex-shrink: 0;
 }

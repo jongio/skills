@@ -891,6 +891,7 @@ export function DiffCanvasApp({ state, invoke }) {
   const [collapsedFiles, setCollapsedFiles] = useState({});
   const [activeComposer, setActiveComposer] = useState(null);
   const [actionError, setActionError] = useState(null);
+  const [manualHandoffNeeded, setManualHandoffNeeded] = useState(false);
   const [busyAction, setBusyAction] = useState(false);
 
   const mainPaneRef = useRef(null);
@@ -1025,10 +1026,17 @@ export function DiffCanvasApp({ state, invoke }) {
       setCollapsedDirs({});
       setFileQuery("");
       setActionError(null);
+      setManualHandoffNeeded(false);
       setSelectedFile(null);
       setActiveComposer(null);
     }
   }, [state?.domain]);
+
+  useEffect(() => {
+    if (state?.status && state.status !== "pending") {
+      setManualHandoffNeeded(false);
+    }
+  }, [state?.status]);
 
   useEffect(() => {
     if (state?.focusSeq && state?.focusedFile) {
@@ -1192,11 +1200,17 @@ export function DiffCanvasApp({ state, invoke }) {
     const res = await runAction("submit_review", { notifyAgent: true });
     if (res) {
       setActiveComposer(null);
+      setManualHandoffNeeded(
+        res.status === "pending" && res.notifiedAgent === false,
+      );
     }
   }, [runAction]);
 
   const handleReopenReview = useCallback(async () => {
-    await runAction("reopen_review", { clearComments: false });
+    const res = await runAction("reopen_review", { clearComments: false });
+    if (res) {
+      setManualHandoffNeeded(false);
+    }
   }, [runAction]);
 
   const computeEffectiveCollapsed = useCallback(
@@ -1418,6 +1432,15 @@ export function DiffCanvasApp({ state, invoke }) {
             <div class="ck-callout ck-error dv-error-banner">
               <${Icon} name="circle-x" size=${16} />
               <span>${actionError || state.error}</span>
+            </div>
+          `
+        : null}
+
+      ${manualHandoffNeeded && state.status === "pending"
+        ? html`
+            <div class="ck-callout dv-handoff-banner" role="status">
+              <${Icon} name="circle-check" size=${16} />
+              <span>Review saved locally. If your coding harness isn't waiting automatically, ask your agent to run /diff review.</span>
             </div>
           `
         : null}
