@@ -37,6 +37,34 @@ html, body, #app {
   color: var(--ck-fg);
 }
 
+/* Theme-aware button & segmented-tab fallbacks when no host injects
+ * --background-color-button-default-* (for example CLI browser sessions in a
+ * light OS color scheme, where theme.css's #30363d/#282e33 dark fallbacks would
+ * reduce contrast against dark --ck-fg text). When the Copilot App host injects
+ * its Primer tokens, var(--background-color-button-default-*) wins directly.
+ */
+.dv-shell .ck-btn:not(.ck-btn-primary):not(.ck-btn-danger):hover {
+  background: var(
+    --background-color-button-default-hover,
+    color-mix(in srgb, var(--ck-bg-muted) 76%, var(--ck-fg) 24%)
+  );
+}
+
+.dv-shell .ck-btn:not(.ck-btn-primary):not(.ck-btn-danger):active {
+  background: var(
+    --background-color-button-default-active,
+    color-mix(in srgb, var(--ck-bg-muted) 68%, var(--ck-fg) 32%)
+  );
+}
+
+.dv-shell .ck-tab[aria-selected="true"] {
+  background: var(
+    --background-color-button-default-hover,
+    color-mix(in srgb, var(--ck-bg) 88%, var(--ck-fg) 12%)
+  );
+  color: var(--ck-fg);
+}
+
 /* ---- Top Toolbar --------------------------------------------------------- */
 .dv-toolbar {
   display: flex;

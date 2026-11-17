@@ -24,12 +24,15 @@ import {
   assertSafePathspecs,
   assertSafePrNumber,
   assertSafeRepoFullName,
+  assertSafeRepoRelativePath,
   computeDomainId,
   encodeCopilotGhAccountEnvKey,
   loadDiff,
+  normalizeDiffSource,
   probeDiffContext,
 } from "../runtime/diff-loader.mjs";
 import { parseDiffPatch } from "../runtime/parse-diff.mjs";
+import { buildFileTree } from "../runtime/web/diff-view-model.mjs";
 import { applySetup, findInstalledPluginDiffExtension, planSetup } from "../scripts/setup.mjs";
 
 function makeTempDir(prefix) {
@@ -3292,6 +3295,248 @@ test("loadDiff pins Git prefixes under diff.mnemonicPrefix, preserves untracked 
   );
   assert.match(cssText, /\.dv-table-unified\s*\{[^}]*width:\s*max-content/);
   assert.match(cssText, /\.dv-shell\.wrap-lines\s+\.dv-code\s*\{[^}]*overflow-x:\s*hidden/);
+  assert.match(
+    cssText,
+    /\.dv-shell\s+\.ck-btn:not\(\.ck-btn-primary\):not\(\.ck-btn-danger\):hover\s*\{[^}]*color-mix\(in srgb,\s*var\(--ck-bg-muted\)/,
+  );
+  assert.match(
+    cssText,
+    /\.dv-shell\s+\.ck-btn:not\(\.ck-btn-primary\):not\(\.ck-btn-danger\):active\s*\{[^}]*color-mix\(in srgb,\s*var\(--ck-bg-muted\)/,
+  );
+  assert.match(
+    cssText,
+    /\.dv-shell\s+\.ck-tab\[aria-selected="true"\]\s*\{[^}]*color-mix\(in srgb,/,
+  );
 });
+
+test("concurrent openDiffInstance/openInstance calls serialize per instanceId, and POSIX trailing-space & literal-backslash paths work end to end", async (t) => {
+  const storeHome = makeTempDir("diff-concurrent-edgepaths-");
+  const prevHome = process.env.COPILOT_HOME;
+  process.env.COPILOT_HOME = storeHome;
+  t.after(() => {
+    if (prevHome === undefined) delete process.env.COPILOT_HOME;
+    else process.env.COPILOT_HOME = prevHome;
+    fs.rmSync(storeHome, { recursive: true, force: true });
+  });
+  const customStore = (file) => userStore("diff", file);
+
+  // Path boundary checks across POSIX, Windows Git, and PR mode
+  assert.equal(
+    assertSafeRepoRelativePath("src/literal\\name.ts", "Path filter", {
+      platform: "linux",
+    }),
+    "src/literal\\name.ts",
+  );
+  assert.equal(
+    assertSafeRepoRelativePath("src/trailing.ts ", "Path filter", {
+      platform: "linux",
+    }),
+    "src/trailing.ts ",
+  );
+  assert.equal(
+    assertSafeRepoRelativePath("src\\service.ts", "Path filter", {
+      platform: "win32",
+    }),
+    "src/service.ts",
+  );
+  const prSourceWithBackslash = normalizeDiffSource(
+    {
+      repo: "example-org/posix-paths",
+      pr: 42,
+      paths: ["src/literal\\name.ts", ".\\src\\service.ts"],
+    },
+    "",
+    { platform: "win32" },
+  );
+  assert.deepEqual(prSourceWithBackslash.paths, [
+    "src/literal\\name.ts",
+    "src\\service.ts",
+  ]);
+
+  const posixPrPatch = [
+    "diff --git a/src/trailing.ts  b/src/trailing.ts ",
+    "index 1111111..2222222 100644",
+    "--- a/src/trailing.ts \t2026-01-01 00:00:00 +0000",
+    "+++ b/src/trailing.ts \t2026-01-01 00:00:00 +0000",
+    "@@ -1,1 +1,2 @@",
+    " export const trailing = true;",
+    "+export const updated = 1;",
+    'diff --git "a/src/literal\\\\name.ts" "b/src/literal\\\\name.ts"',
+    "index 3333333..4444444 100644",
+    '--- "a/src/literal\\\\name.ts"',
+    '+++ "b/src/literal\\\\name.ts"',
+    "@@ -1,1 +1,2 @@",
+    " export const bs = true;",
+    "+export const bsNext = 2;",
+  ].join("\n");
+
+  const mockExecFn = async (_cmd, args) => {
+    await new Promise((r) => setTimeout(r, 25));
+    if (args[0] === "pr" && args[1] === "diff") return posixPrPatch;
+    if (args[0] === "pr" && args[1] === "view") {
+      return JSON.stringify({
+        number: 42,
+        title: "POSIX Edge Paths",
+        headRefName: "feat/posix-paths",
+        baseRefName: "main",
+        headRefOid: "aaaa1111",
+        baseRefOid: "bbbb2222",
+        state: "OPEN",
+      });
+    }
+    throw new Error(`Unexpected command: ${args.join(" ")}`);
+  };
+
+  const cfg = createDiffCanvasConfig({
+    execFn: mockExecFn,
+    storeFactory: customStore,
+  });
+  const rt = createCanvasRuntime(cfg);
+  cfg._attachRuntime(rt);
+  t.after(async () => {
+    await rt.shutdown();
+  });
+
+  // 1. Concurrent openDiffInstance calls for the same brand-new instanceId must both return valid loopback URLs (never "")
+  const [openA, openB] = await Promise.all([
+    openDiffInstance(rt, cfg, {
+      instanceId: "race-panel-1",
+      input: {
+        repo: "example-org/posix-paths",
+        pr: 42,
+        focusFile: "src/literal\\name.ts",
+      },
+      workspacePath: "",
+    }),
+    openDiffInstance(rt, cfg, {
+      instanceId: "race-panel-1",
+      input: {
+        repo: "example-org/posix-paths",
+        pr: 42,
+        focusFile: "src/trailing.ts ",
+      },
+      workspacePath: "",
+    }),
+  ]);
+  assert.match(openA.url, /^http:\/\/127\.0\.0\.1:\d+\/\?capability=[0-9a-f]{64}$/);
+  assert.equal(openB.url, openA.url);
+
+  // 2. Concurrent raw rt.openInstance calls on a brand-new instanceId must also serialize and return non-empty URLs
+  const [rawA, rawB] = await Promise.all([
+    rt.openInstance({
+      instanceId: "race-panel-2",
+      input: { repo: "example-org/posix-paths", pr: 42 },
+      ctx: {
+        instanceId: "race-panel-2",
+        input: { repo: "example-org/posix-paths", pr: 42 },
+        workspacePath: "",
+      },
+    }),
+    rt.openInstance({
+      instanceId: "race-panel-2",
+      input: { repo: "example-org/posix-paths", pr: 42 },
+      ctx: {
+        instanceId: "race-panel-2",
+        input: { repo: "example-org/posix-paths", pr: 42 },
+        workspacePath: "",
+      },
+    }),
+  ]);
+  // 2b. Mixed concurrent openDiffInstance (failing focusFile) + rt.openInstance (valid) share one lock and keep the instance alive
+  const [mixedFail, mixedOk] = await Promise.allSettled([
+    openDiffInstance(rt, cfg, {
+      instanceId: "race-panel-mixed",
+      input: {
+        repo: "example-org/posix-paths",
+        pr: 42,
+        focusFile: "src/nonexistent.ts",
+      },
+      workspacePath: "",
+    }),
+    rt.openInstance({
+      instanceId: "race-panel-mixed",
+      input: { repo: "example-org/posix-paths", pr: 42 },
+      ctx: {
+        instanceId: "race-panel-mixed",
+        input: { repo: "example-org/posix-paths", pr: 42 },
+        workspacePath: "",
+      },
+    }),
+  ]);
+  assert.equal(mixedFail.status, "rejected");
+  assert.equal(mixedOk.status, "fulfilled");
+  assert.match(mixedOk.value.url, /^http:\/\/127\.0\.0\.1:\d+\/\?capability=[0-9a-f]{64}$/);
+  assert.equal(rt._instances.has("race-panel-mixed"), true);
+
+  // 2c. Windows .\ backslash paths in PR mode fall back to forward-slash matches when no literal POSIX backslash file matches
+  if (process.platform === "win32") {
+    const winPrFiltered = await loadDiff(
+      normalizeDiffSource({
+        repo: "example-org/posix-paths",
+        pr: 42,
+        paths: [".\\src\\trailing.ts "],
+      }),
+      { execFn: mockExecFn },
+    );
+    assert.deepEqual(
+      winPrFiltered.files.map((f) => f.canonicalPath),
+      ["src/trailing.ts "],
+    );
+  }
+
+  // 3. Verify loaded files, buildFileTree, toggle_viewed, focus_file, and add_comment preserve trailing whitespace & literal backslashes
+  const domainId = "pr__example-org__posix-paths__42";
+  const state = await rt.getState(domainId);
+  assert.deepEqual(
+    state.files.map((f) => f.canonicalPath),
+    ["src/trailing.ts ", "src/literal\\name.ts"],
+  );
+
+  const tree = buildFileTree(state.files);
+  assert.equal(tree.length, 1);
+  assert.equal(tree[0].name, "src");
+  assert.deepEqual(
+    tree[0].children.map((c) => ({ name: c.name, path: c.path })),
+    [
+      { name: "literal\\name.ts", path: "src/literal\\name.ts" },
+      { name: "trailing.ts ", path: "src/trailing.ts " },
+    ],
+  );
+
+  const actionCtx = {
+    instanceId: "race-panel-1",
+    openInput: { repo: "example-org/posix-paths", pr: 42 },
+    workspacePath: "",
+  };
+  const viewedTrailing = await rt.invokeFromAgent(
+    "toggle_viewed",
+    { file: "src/trailing.ts " },
+    actionCtx,
+  );
+  assert.equal(viewedTrailing.file, "src/trailing.ts ");
+  assert.equal(viewedTrailing.viewed, true);
+
+  const viewedBackslash = await rt.invokeFromAgent(
+    "toggle_viewed",
+    { file: "src/literal\\name.ts" },
+    actionCtx,
+  );
+  assert.equal(viewedBackslash.file, "src/literal\\name.ts");
+  assert.equal(viewedBackslash.viewed, true);
+
+  const commentBackslash = await rt.invokeFromAgent(
+    "add_comment",
+    {
+      file: "src/literal\\name.ts",
+      line: 2,
+      side: "right",
+      body: "Check literal backslash filename handling",
+    },
+    actionCtx,
+  );
+  assert.equal(commentBackslash.commentCount, 1);
+  assert.equal(commentBackslash.comment.file, "src/literal\\name.ts");
+});
+
 
 

@@ -260,7 +260,11 @@ export function assertSafeGitRef(ref, label = "Git ref") {
   return ref;
 }
 
-export function assertSafeRepoRelativePath(rawPath, label = "File path") {
+export function assertSafeRepoRelativePath(
+  rawPath,
+  label = "File path",
+  { platform = process.platform, preserveBackslashes = false } = {},
+) {
   if (typeof rawPath !== "string" || rawPath.length === 0 || rawPath.length > 1024) {
     throw new Error(`${label} must be a non-empty string up to 1024 characters`);
   }
@@ -270,16 +274,24 @@ export function assertSafeRepoRelativePath(rawPath, label = "File path") {
   if (rawPath.startsWith(":")) {
     throw new Error(`Git pathspec magic prefixes (':') are not permitted in ${label.toLowerCase()}`);
   }
+  const normalizeWinSeparators = platform === "win32" && !preserveBackslashes;
   if (
     rawPath.startsWith("/") ||
-    rawPath.startsWith("\\") ||
+    rawPath.startsWith("\\\\") ||
     WINDOWS_DRIVE_PREFIX_RE.test(rawPath) ||
-    path.win32.isAbsolute(rawPath) ||
-    path.posix.isAbsolute(rawPath)
+    path.posix.isAbsolute(rawPath) ||
+    (normalizeWinSeparators &&
+      (rawPath.startsWith("\\") || path.win32.isAbsolute(rawPath)))
   ) {
     throw new Error(`${label} must be repository-relative, not an absolute or drive-qualified path`);
   }
-  const normalized = rawPath.replaceAll("\\", "/").replace(/^(?:\.\/)+/, "");
+  const slashText = normalizeWinSeparators
+    ? rawPath.replaceAll("\\", "/")
+    : rawPath;
+  const normalized =
+    platform === "win32"
+      ? slashText.replace(/^(?:\.[\\/])+/, "")
+      : slashText.replace(/^(?:\.\/)+/, "");
   const segments = normalized.split("/");
   if (segments.some((seg) => seg.length === 0 || seg === ".")) {
     throw new Error(`${label} must not contain empty or '.' segments`);
@@ -287,20 +299,28 @@ export function assertSafeRepoRelativePath(rawPath, label = "File path") {
   if (segments.includes("..")) {
     throw new Error(`${label} must not contain '..' parent traversal segments`);
   }
-  if (segments.some((seg) => GIT_SHORTNAME_SEGMENT_RE.test(seg))) {
+  const checkSegments = normalized.includes("\\")
+    ? normalized.split(/[/\\]/)
+    : segments;
+  if (checkSegments.includes("..") || checkSegments.includes(".")) {
+    throw new Error(`${label} must not contain '.' or '..' traversal segments`);
+  }
+  if (checkSegments.some((seg) => GIT_SHORTNAME_SEGMENT_RE.test(seg))) {
     throw new Error(`${label} must not target '.git' metadata paths`);
   }
-  if (segments.some((seg) => WINDOWS_RESERVED_SEGMENT_RE.test(seg))) {
+  if (checkSegments.some((seg) => WINDOWS_RESERVED_SEGMENT_RE.test(seg))) {
     throw new Error(`${label} must not contain reserved device names`);
   }
   return normalized;
 }
 
-export function assertSafePathspecs(paths) {
+export function assertSafePathspecs(paths, options = {}) {
   if (paths === undefined || paths === null) return [];
   if (!Array.isArray(paths)) throw new Error("paths must be an array of repository-relative paths");
   if (paths.length > 200) throw new Error("paths cannot exceed 200 entries");
-  return paths.map((entry) => assertSafeRepoRelativePath(entry, "Path filter"));
+  return paths.map((entry) =>
+    assertSafeRepoRelativePath(entry, "Path filter", options),
+  );
 }
 
 export function parseGitSpec(rawSpec) {
@@ -411,13 +431,20 @@ function resolveLocalGitTopLevel(startDir) {
   return startDir;
 }
 
-export function normalizeDiffSource(input = {}, workspacePath = "") {
-  const paths = assertSafePathspecs(input?.paths);
+export function normalizeDiffSource(
+  input = {},
+  workspacePath = "",
+  { platform = process.platform } = {},
+) {
+  const hasPr = input?.pr !== undefined && input?.pr !== null;
+  const paths = assertSafePathspecs(input?.paths, {
+    platform,
+    preserveBackslashes: hasPr,
+  });
   const hasExplicitAccountProp = typeof input?.account === "string";
   const clearAccount = hasExplicitAccountProp && input.account.trim() === "";
   const account = clearAccount ? null : assertSafeGitHubAccount(input?.account);
   const rawRepo = typeof input?.repo === "string" && input.repo.trim() ? input.repo.trim() : "";
-  const hasPr = input?.pr !== undefined && input?.pr !== null;
 
   if (rawRepo && !hasPr) {
     throw new Error("'pr' is required when 'repo' is provided");
@@ -557,9 +584,31 @@ export function sanitizePublicErrorMessage(err) {
     .slice(0, 500);
 }
 
-function filterFilesByPaths(parsed, paths) {
+function filterFilesByPaths(parsed, paths, { platform = process.platform } = {}) {
   if (!paths || paths.length === 0) return parsed;
-  const allowed = new Set(paths);
+  const hasLiteralCandidate = (spec) => {
+    const prefix = spec.endsWith("/") ? spec : `${spec}/`;
+    return parsed.files.some((file) => {
+      const cands = [
+        file.canonicalPath,
+        normalizeCanonicalPath(file.oldPath),
+        normalizeCanonicalPath(file.newPath),
+      ];
+      return cands.some((c) => c && (c === spec || c.startsWith(prefix)));
+    });
+  };
+  const allowed = new Set();
+  for (const spec of paths) {
+    allowed.add(spec);
+    if (
+      platform === "win32" &&
+      spec.includes("\\") &&
+      !hasLiteralCandidate(spec)
+    ) {
+      const winFallback = normalizeCanonicalPath(spec.replaceAll("\\", "/"));
+      if (winFallback) allowed.add(winFallback);
+    }
+  }
   const matches = (candidate) => {
     if (!candidate) return false;
     if (allowed.has(candidate)) return true;
@@ -754,6 +803,7 @@ async function buildUntrackedFilesPatch(
   for (const rawEntry of rawEntries) {
     const relPath = normalizeCanonicalPath(rawEntry);
     if (!relPath) continue;
+    if (process.platform === "win32" && relPath.includes("\\")) continue;
 
     const absPath = path.resolve(repoRootReal, relPath);
     if (!pathIsWithin(absPath, repoRootReal)) continue;
@@ -964,6 +1014,7 @@ function collectWorktreeFileStamps(repoRoot, rawCandidatePaths) {
 
   for (let i = 0; i < normalizedUnique.length && i < MAX_PROBE_WORKTREE_FILES; i += 1) {
     const relPath = normalizedUnique[i];
+    if (process.platform === "win32" && relPath.includes("\\")) continue;
     const absPath = path.resolve(repoRootReal, relPath);
     if (!pathIsWithin(absPath, repoRootReal)) continue;
 

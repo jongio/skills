@@ -22,61 +22,63 @@ const MNEMONIC_SRC_PREFIXES = new Set(["a", "i", "c", "w", "o"]);
 const MNEMONIC_DST_PREFIXES = new Set(["b", "i", "c", "w", "o"]);
 
 export function unquoteGitHeaderPath(raw) {
-  if (typeof raw !== "string") return "";
-  const trimmed = raw.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    const inner = trimmed.slice(1, -1);
-    const bytes = [];
-    for (let i = 0; i < inner.length; ) {
-      const cp = inner.codePointAt(i);
-      const stepChars = cp > 0xffff ? 2 : 1;
-      const ch = String.fromCodePoint(cp);
-      if (ch !== "\\") {
-        const encoded = UTF8_ENCODER.encode(ch);
-        for (let b = 0; b < encoded.length; b += 1) bytes.push(encoded[b]);
-        i += stepChars;
-        continue;
-      }
-      if (i + 1 >= inner.length) {
-        bytes.push(0x5c);
-        break;
-      }
-      const nextUnit = inner[i + 1];
-      if (nextUnit >= "0" && nextUnit <= "7") {
-        let octal = nextUnit;
-        let step = 1;
-        while (step < 3 && inner[i + 1 + step] >= "0" && inner[i + 1 + step] <= "7") {
-          octal += inner[i + 1 + step];
-          step += 1;
-        }
-        bytes.push(Number.parseInt(octal, 8) & 0xff);
-        i += 1 + step;
-        continue;
-      }
-      const nextCp = inner.codePointAt(i + 1);
-      const nextChars = nextCp > 0xffff ? 2 : 1;
-      const next = String.fromCodePoint(nextCp);
-      i += 1 + nextChars;
-      switch (next) {
-        case "a": bytes.push(0x07); break;
-        case "b": bytes.push(0x08); break;
-        case "f": bytes.push(0x0c); break;
-        case "n": bytes.push(0x0a); break;
-        case "r": bytes.push(0x0d); break;
-        case "t": bytes.push(0x09); break;
-        case "v": bytes.push(0x0b); break;
-        case "\\": bytes.push(0x5c); break;
-        case '"': bytes.push(0x22); break;
-        default: {
-          const encoded = UTF8_ENCODER.encode(next);
+  if (typeof raw !== "string" || raw.length === 0) return "";
+  if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+    const endIdx = scanQuotedTokenEnd(raw, 0);
+    if (endIdx === raw.length - 1) {
+      const inner = raw.slice(1, -1);
+      const bytes = [];
+      for (let i = 0; i < inner.length; ) {
+        const cp = inner.codePointAt(i);
+        const stepChars = cp > 0xffff ? 2 : 1;
+        const ch = String.fromCodePoint(cp);
+        if (ch !== "\\") {
+          const encoded = UTF8_ENCODER.encode(ch);
           for (let b = 0; b < encoded.length; b += 1) bytes.push(encoded[b]);
+          i += stepChars;
+          continue;
+        }
+        if (i + 1 >= inner.length) {
+          bytes.push(0x5c);
           break;
         }
+        const nextUnit = inner[i + 1];
+        if (nextUnit >= "0" && nextUnit <= "7") {
+          let octal = nextUnit;
+          let step = 1;
+          while (step < 3 && inner[i + 1 + step] >= "0" && inner[i + 1 + step] <= "7") {
+            octal += inner[i + 1 + step];
+            step += 1;
+          }
+          bytes.push(Number.parseInt(octal, 8) & 0xff);
+          i += 1 + step;
+          continue;
+        }
+        const nextCp = inner.codePointAt(i + 1);
+        const nextChars = nextCp > 0xffff ? 2 : 1;
+        const next = String.fromCodePoint(nextCp);
+        i += 1 + nextChars;
+        switch (next) {
+          case "a": bytes.push(0x07); break;
+          case "b": bytes.push(0x08); break;
+          case "f": bytes.push(0x0c); break;
+          case "n": bytes.push(0x0a); break;
+          case "r": bytes.push(0x0d); break;
+          case "t": bytes.push(0x09); break;
+          case "v": bytes.push(0x0b); break;
+          case "\\": bytes.push(0x5c); break;
+          case '"': bytes.push(0x22); break;
+          default: {
+            const encoded = UTF8_ENCODER.encode(next);
+            for (let b = 0; b < encoded.length; b += 1) bytes.push(encoded[b]);
+            break;
+          }
+        }
       }
+      return UTF8_DECODER.decode(new Uint8Array(bytes));
     }
-    return UTF8_DECODER.decode(new Uint8Array(bytes));
   }
-  return trimmed;
+  return raw;
 }
 
 export function normalizeCanonicalPath(rawUnquotedPath) {
@@ -84,9 +86,16 @@ export function normalizeCanonicalPath(rawUnquotedPath) {
   let text = rawUnquotedPath;
   if (!text || text === "/dev/null" || text.length > 4096) return "";
   if (CONTROL_CHAR_RE.test(text)) return "";
-  text = text.replaceAll("\\", "/").replace(/\/{2,}/g, "/");
-  if (text.startsWith("./")) text = text.slice(2);
-  if (text.startsWith("/") || WINDOWS_DRIVE_PREFIX_RE.test(text)) return "";
+  text = text.replace(/\/{2,}/g, "/");
+  while (text.startsWith("./")) text = text.slice(2);
+  if (
+    !text ||
+    text.startsWith("/") ||
+    text.startsWith("\\\\") ||
+    WINDOWS_DRIVE_PREFIX_RE.test(text)
+  ) {
+    return "";
+  }
   const segments = text.split("/");
   if (
     segments.some(
@@ -100,13 +109,39 @@ export function normalizeCanonicalPath(rawUnquotedPath) {
   ) {
     return "";
   }
+  if (text.includes("\\")) {
+    const subSegments = text.split(/[/\\]/);
+    if (
+      subSegments.some(
+        (part) =>
+          part === "." ||
+          part === ".." ||
+          GIT_SHORTNAME_SEGMENT_RE.test(part) ||
+          WINDOWS_RESERVED_SEGMENT_RE.test(part),
+      )
+    ) {
+      return "";
+    }
+  }
   return text;
 }
 
 export const normalizeRepoRelativePath = normalizeCanonicalPath;
 
+function extractHeaderToken(rawHeaderPath) {
+  if (typeof rawHeaderPath !== "string" || rawHeaderPath.length === 0) return "";
+  if (rawHeaderPath.startsWith('"')) {
+    const endIdx = scanQuotedTokenEnd(rawHeaderPath, 0);
+    if (endIdx > 0) {
+      return unquoteGitHeaderPath(rawHeaderPath.slice(0, endIdx + 1));
+    }
+  }
+  const tabIdx = rawHeaderPath.indexOf("\t");
+  return tabIdx >= 0 ? rawHeaderPath.slice(0, tabIdx) : rawHeaderPath;
+}
+
 function stripHeaderPrefix(rawHeaderPath, prefix) {
-  const unquoted = unquoteGitHeaderPath(rawHeaderPath.replace(/\t.*$/, ""));
+  const unquoted = extractHeaderToken(rawHeaderPath);
   if (unquoted === "/dev/null") return "";
   if (prefix && unquoted.startsWith(`${prefix}/`)) {
     return unquoted.slice(prefix.length + 1);
@@ -157,12 +192,12 @@ function scanQuotedTokenEnd(str, openQuoteIdx) {
 }
 
 function parseGitDiffPaths(line) {
-  const rest = line.slice("diff --git ".length).trim();
+  const rest = line.slice("diff --git ".length);
   if (rest.startsWith('"')) {
     const endIdx = scanQuotedTokenEnd(rest, 0);
-    if (endIdx > 0) {
+    if (endIdx > 0 && rest[endIdx + 1] === " ") {
       const first = unquoteGitHeaderPath(rest.slice(0, endIdx + 1));
-      const second = unquoteGitHeaderPath(rest.slice(endIdx + 1).trim());
+      const second = unquoteGitHeaderPath(rest.slice(endIdx + 2));
       return stripDiffTokenPrefixes(first, second);
     }
   }
@@ -173,7 +208,7 @@ function parseGitDiffPaths(line) {
       if (spaceQuoteIdx === -1) break;
       const endIdx = scanQuotedTokenEnd(rest, spaceQuoteIdx + 1);
       if (endIdx === rest.length - 1) {
-        const first = unquoteGitHeaderPath(rest.slice(0, spaceQuoteIdx).trim());
+        const first = unquoteGitHeaderPath(rest.slice(0, spaceQuoteIdx));
         const second = unquoteGitHeaderPath(rest.slice(spaceQuoteIdx + 1));
         return stripDiffTokenPrefixes(first, second);
       }
@@ -465,13 +500,15 @@ export function parseDiffPatch(
         current.isBinary = true;
         if (current.status === "modified") current.status = "binary";
       } else if (line.startsWith("--- ")) {
-        const stripped = stripHeaderPrefix(line.slice(4), current.srcPrefix);
+        const rawOld = line.slice(4);
+        const stripped = stripHeaderPrefix(rawOld, current.srcPrefix);
         if (stripped) current.oldPath = stripped;
-        else if (line.slice(4).trim() === "/dev/null") current.status = "added";
+        else if (extractHeaderToken(rawOld) === "/dev/null") current.status = "added";
       } else if (line.startsWith("+++ ")) {
-        const stripped = stripHeaderPrefix(line.slice(4), current.dstPrefix);
+        const rawNew = line.slice(4);
+        const stripped = stripHeaderPrefix(rawNew, current.dstPrefix);
         if (stripped) current.newPath = stripped;
-        else if (line.slice(4).trim() === "/dev/null") current.status = "deleted";
+        else if (extractHeaderToken(rawNew) === "/dev/null") current.status = "deleted";
       }
       continue;
     }

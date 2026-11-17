@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildFileTree,
   computeInlineWordDiff,
+  normalizeCanonicalPath,
   pairSplitRows,
   parseDiffPatch,
   tokenizeCodeLine,
@@ -298,4 +299,53 @@ test("unquoteGitHeaderPath preserves astral emoji code points and parseDiffPatch
     ],
   );
 });
+
+test("parseDiffPatch and normalizeCanonicalPath preserve trailing whitespace and literal backslashes in valid POSIX paths", () => {
+  assert.equal(unquoteGitHeaderPath("src/trailing.ts "), "src/trailing.ts ");
+  assert.equal(normalizeCanonicalPath("src/trailing.ts "), "src/trailing.ts ");
+  assert.equal(
+    normalizeCanonicalPath("src/literal\\name.ts"),
+    "src/literal\\name.ts",
+  );
+  assert.equal(normalizeCanonicalPath("src\\..\\escape.ts"), "");
+  assert.equal(normalizeCanonicalPath("src\\.git\\config"), "");
+  assert.equal(normalizeCanonicalPath("src\\CON.txt"), "");
+  assert.equal(normalizeCanonicalPath("\\\\server\\share\\file.ts"), "");
+
+  const edgePathPatch = [
+    "diff --git a/src/trailing.ts  b/src/trailing.ts ",
+    "index 1111111..2222222 100644",
+    "--- a/src/trailing.ts \t2026-01-01 00:00:00 +0000",
+    "+++ b/src/trailing.ts \t2026-01-01 00:00:00 +0000",
+    "@@ -1,1 +1,1 @@",
+    "-export const t = 1;",
+    "+export const t = 2;",
+    "diff --git a/src/mode-trailing.sh  b/src/mode-trailing.sh ",
+    "old mode 100644",
+    "new mode 100755",
+    "diff --git a/src/old trailing.ts  b/src/new trailing.ts ",
+    "similarity index 100%",
+    "rename from src/old trailing.ts ",
+    "rename to src/new trailing.ts ",
+    'diff --git "a/src/literal\\\\name.ts" "b/src/literal\\\\name.ts"',
+    "index 3333333..4444444 100644",
+    '--- "a/src/literal\\\\name.ts"',
+    '+++ "b/src/literal\\\\name.ts"',
+    "@@ -1,1 +1,1 @@",
+    "-export const bs = 1;",
+    "+export const bs = 2;",
+  ].join("\n");
+
+  const parsed = parseDiffPatch(edgePathPatch);
+  assert.equal(parsed.files.length, 4);
+  assert.equal(parsed.files[0].canonicalPath, "src/trailing.ts ");
+  assert.equal(parsed.files[1].canonicalPath, "src/mode-trailing.sh ");
+  assert.equal(parsed.files[2].canonicalPath, "src/new trailing.ts ");
+  assert.equal(
+    parsed.files[2].displayPath,
+    "src/old trailing.ts  -> src/new trailing.ts ",
+  );
+  assert.equal(parsed.files[3].canonicalPath, "src/literal\\name.ts");
+});
+
 

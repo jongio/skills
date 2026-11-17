@@ -113,11 +113,105 @@ function toCanvasKitError(err, fallbackCode = "diff_load_failed") {
   return new CanvasKitError(fallbackCode, msg);
 }
 
-function normalizeOptionalFocusFile(rawFocusFile) {
+const runtimeOpenLocks = new WeakMap();
+const rawOpenInstanceFns = new WeakMap();
+
+function withKeyedRuntimeLock(lockRegistry, runtime, key, fn) {
+  if (!runtime || (typeof runtime !== "object" && typeof runtime !== "function")) {
+    return Promise.resolve().then(fn);
+  }
+  let locks = lockRegistry.get(runtime);
+  if (!locks) {
+    locks = new Map();
+    lockRegistry.set(runtime, locks);
+  }
+  const lockKey = String(key || "__default__");
+  const prev = locks.get(lockKey) ?? Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const tail = prev.then(() => gate, () => gate);
+  locks.set(lockKey, tail);
+  return prev
+    .catch(() => {})
+    .then(fn)
+    .finally(() => {
+      release();
+      if (locks.get(lockKey) === tail) {
+        locks.delete(lockKey);
+      }
+    });
+}
+
+export function ensureSerializedRuntimeOpen(rt) {
+  if (!rt || typeof rt !== "object" || typeof rt.openInstance !== "function") {
+    return rt;
+  }
+  if (rawOpenInstanceFns.has(rt)) {
+    return rt;
+  }
+  const origOpenInstance = rt.openInstance.bind(rt);
+  const openOnceUnserialized = async (args = {}) => {
+    const instanceId = String(args?.instanceId || "");
+    const hadExisting = Boolean(instanceId && rt._instances?.has(instanceId));
+    try {
+      return await origOpenInstance(args);
+    } catch (err) {
+      if (!hadExisting && instanceId && rt._instances?.has(instanceId)) {
+        await rt.closeInstance?.(instanceId)?.catch?.(() => {});
+      }
+      throw err;
+    }
+  };
+  rawOpenInstanceFns.set(rt, openOnceUnserialized);
+  rt.openInstance = async function serializedOpenInstance(args = {}) {
+    const instanceId = String(args?.instanceId || "");
+    return withKeyedRuntimeLock(runtimeOpenLocks, rt, instanceId, () =>
+      openOnceUnserialized(args),
+    );
+  };
+  return rt;
+}
+
+function resolveUserFileInput(
+  rawPath,
+  loadedFiles = null,
+  { platform = process.platform, sourceMode = null } = {},
+) {
+  if (typeof rawPath !== "string" || rawPath.length === 0) return "";
+  const exact = normalizeCanonicalPath(rawPath);
+  if (Array.isArray(loadedFiles) && loadedFiles.length > 0) {
+    if (exact && loadedFiles.some((f) => f.canonicalPath === exact)) {
+      return exact;
+    }
+    if (platform === "win32" && rawPath.includes("\\")) {
+      const winNormalized = normalizeCanonicalPath(
+        rawPath.replaceAll("\\", "/"),
+      );
+      if (winNormalized) return winNormalized;
+    }
+    return exact;
+  }
+  if (
+    platform === "win32" &&
+    rawPath.includes("\\") &&
+    (sourceMode !== "pr" || !exact)
+  ) {
+    return normalizeCanonicalPath(rawPath.replaceAll("\\", "/"));
+  }
+  return exact;
+}
+
+function normalizeOptionalFocusFile(
+  rawFocusFile,
+  loadedFiles = null,
+  options = {},
+) {
   if (rawFocusFile === undefined || rawFocusFile === null || rawFocusFile === "") {
     return null;
   }
-  const normalized = normalizeCanonicalPath(rawFocusFile);
+  const normalized = resolveUserFileInput(rawFocusFile, loadedFiles, options);
   if (!normalized) {
     throw new CanvasKitError(
       "invalid_input",
@@ -376,7 +470,9 @@ function validateCommentBody(rawBody) {
 }
 
 function validateCommentPayload(state, input) {
-  const normalizedFile = normalizeCanonicalPath(input?.file);
+  const normalizedFile = resolveUserFileInput(input?.file, state?.files, {
+    sourceMode: state?.source?.mode || null,
+  });
   if (!normalizedFile) {
     throw new CanvasKitError(
       "invalid_input",
@@ -853,7 +949,9 @@ export function createDiffCanvasConfig({
   }
 
   function assertFileInDiff(state, rawPath) {
-    const normalized = normalizeCanonicalPath(rawPath);
+    const normalized = resolveUserFileInput(rawPath, state?.files, {
+      sourceMode: state?.source?.mode || null,
+    });
     if (!normalized) {
       throw new CanvasKitError(
         "invalid_input",
@@ -887,6 +985,7 @@ export function createDiffCanvasConfig({
     _pendingReopenSources: pendingReopenSources,
     _attachRuntime(rt) {
       if (rt && typeof rt === "object") {
+        ensureSerializedRuntimeOpen(rt);
         attachedRuntimes.add(rt);
       }
     },
@@ -971,7 +1070,6 @@ export function createDiffCanvasConfig({
           ? ctx.openInput
           : (input ?? {});
       const explicitSource = hasExplicitSourceFields(effectiveInput);
-      const focusFile = normalizeOptionalFocusFile(effectiveInput?.focusFile);
 
       let fullSource;
       try {
@@ -979,6 +1077,12 @@ export function createDiffCanvasConfig({
       } catch (err) {
         throw toCanvasKitError(err, "invalid_input");
       }
+
+      const focusFile = normalizeOptionalFocusFile(
+        effectiveInput?.focusFile,
+        null,
+        { sourceMode: fullSource?.mode || null },
+      );
 
       if (!fullSource && explicitSource) {
         throw new CanvasKitError(
@@ -1198,11 +1302,16 @@ export function createDiffCanvasConfig({
               ? "draft"
               : savedStatus;
 
+          const resolvedFocusFile = openInfo?.input?.focusFile
+            ? normalizeOptionalFocusFile(openInfo.input.focusFile, diff.files, {
+                sourceMode: diff.source?.mode || fullSource?.mode || null,
+              })
+            : focusFile;
           const validFocusFile =
-            focusFile &&
+            resolvedFocusFile &&
             Array.isArray(diff.files) &&
-            diff.files.some((f) => f.canonicalPath === focusFile)
-              ? focusFile
+            diff.files.some((f) => f.canonicalPath === resolvedFocusFile)
+              ? resolvedFocusFile
               : null;
 
           return rememberDomainState(domainId, {
@@ -2072,7 +2181,17 @@ function broadcastStateToInstance(inst, statePayload) {
 }
 
 export async function openDiffInstance(runtime, config, ctx = {}) {
+  ensureSerializedRuntimeOpen(runtime);
   config?._attachRuntime?.(runtime);
+  return withKeyedRuntimeLock(
+    runtimeOpenLocks,
+    runtime,
+    String(ctx?.instanceId || ""),
+    () => openDiffInstanceInner(runtime, config, ctx),
+  );
+}
+
+async function openDiffInstanceInner(runtime, config, ctx = {}) {
   const rawInput = ctx?.input ?? {};
   const effectiveInput =
     !hasExplicitSourceFields(rawInput) &&
@@ -2119,7 +2238,9 @@ export async function openDiffInstance(runtime, config, ctx = {}) {
 
   let opened;
   try {
-    opened = await runtime.openInstance({
+    const rawOpen =
+      rawOpenInstanceFns.get(runtime) ?? runtime.openInstance.bind(runtime);
+    opened = await rawOpen({
       instanceId: ctx.instanceId,
       input: ctx.input,
       ctx: enrichedCtx,

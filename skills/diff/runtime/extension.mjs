@@ -9,6 +9,7 @@ import { canvasConfig, openDiffInstance } from "./canvas.mjs";
 import { createCanvasRuntime, CanvasKitError } from "./canvas-kit/server.mjs";
 
 const runtime = createCanvasRuntime(canvasConfig);
+canvasConfig._attachRuntime(runtime);
 let session = null;
 let resolveReady;
 let rejectReady;

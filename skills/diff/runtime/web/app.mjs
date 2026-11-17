@@ -54,7 +54,7 @@ const LOCKFILE_BASENAME_RE =
   /^(?:package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|cargo\.lock|gemfile\.lock|poetry\.lock|uv\.lock|pipfile\.lock|composer\.lock|go\.sum|packages\.lock\.json|paket\.lock|flake\.lock)$/i;
 
 export function getAutoCollapseReason(file) {
-  const pathText = String(file?.canonicalPath || file?.displayPath || "").trim();
+  const pathText = String(file?.canonicalPath || file?.displayPath || "");
   const base = pathText.split("/").pop() || "";
   if (base && LOCKFILE_BASENAME_RE.test(base)) {
     return "Lockfile diff collapsed by default";

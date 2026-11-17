@@ -346,7 +346,7 @@ export function buildFileTree(files) {
   if (!Array.isArray(files)) return [];
 
   for (const file of files) {
-    const pathText = String(file?.canonicalPath || file?.displayPath || "").trim();
+    const pathText = String(file?.canonicalPath || file?.displayPath || "");
     if (!pathText) continue;
     const parts = pathText.split("/").filter(Boolean);
     if (parts.length === 0) continue;
