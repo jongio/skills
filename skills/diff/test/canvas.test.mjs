@@ -3655,18 +3655,43 @@ test("review round 4: Git file-type-change tracking, monotonic stateSeq snapshot
     ].join("\n");
 
   const customStore = (file) => userStore("diff", file);
+  const pr105Patch = [
+    "diff --git a/src/second.ts b/src/second.ts",
+    "new file mode 100644",
+    "index 0000000..3333333",
+    "--- /dev/null",
+    "+++ b/src/second.ts",
+    "@@ -0,0 +1 @@",
+    "+export const secondPr = true;",
+    "",
+  ].join("\n");
   const typeChangeExec = async (_cmd, args) => {
-    if (args[0] === "pr" && args[1] === "diff") return buildTypeChangePatch();
+    const isPr105 = args.includes("105");
+    if (args[0] === "pr" && args[1] === "diff") {
+      return isPr105 ? pr105Patch : buildTypeChangePatch();
+    }
     if (args[0] === "pr" && args[1] === "view") {
-      return JSON.stringify({
-        number: 104,
-        title: "Typechange PR",
-        headRefName: "feat/typechange",
-        baseRefName: "main",
-        headRefOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        baseRefOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        state: "OPEN",
-      });
+      return JSON.stringify(
+        isPr105
+          ? {
+              number: 105,
+              title: "Second PR 105",
+              headRefName: "feat/second",
+              baseRefName: "main",
+              headRefOid: "cccccccccccccccccccccccccccccccccccccccc",
+              baseRefOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              state: "OPEN",
+            }
+          : {
+              number: 104,
+              title: "Typechange PR",
+              headRefName: "feat/typechange",
+              baseRefName: "main",
+              headRefOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              baseRefOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              state: "OPEN",
+            },
+      );
     }
     throw new Error(`Unexpected command: ${args.join(" ")}`);
   };
@@ -3830,20 +3855,96 @@ test("review round 4: Git file-type-change tracking, monotonic stateSeq snapshot
     "Stale lower-stateSeq snapshot for the same domain must not overwrite newer SSE state",
   );
 
-  // Switching to a different domain with stateSeq=1 updates immediately
-  const otherDomainSnapshot = {
-    ...staleSnapshot,
-    domain: "pr__example-org__widgets__999",
-    title: "Switched Domain PR",
-    stateSeq: 1,
+  // Live cross-PR retargeting: capture an earlier /state snapshot for PR #104, then retarget
+  // the same instance to PR #105 while subscribed to /events SSE, and verify a delayed PR #104
+  // /state response cannot revert the UI to PR #104 while POST /action targets PR #105.
+  const panelInst = tcRt._instances.get("tc-panel");
+  const panelUrl = new URL(panelInst.url);
+  const cap = panelUrl.searchParams.get("capability");
+  const baseOrigin = panelUrl.origin;
+
+  const earlyStateRes = await fetch(`${baseOrigin}/state?capability=${encodeURIComponent(cap)}`);
+  assert.equal(earlyStateRes.status, 200);
+  const delayedPr104WireState = await earlyStateRes.json();
+  assert.equal(delayedPr104WireState.domain, "pr__example-org__widgets__104");
+
+  const sseAbort = new AbortController();
+  t.after(() => sseAbort.abort());
+  const sseRes = await fetch(`${baseOrigin}/events?capability=${encodeURIComponent(cap)}`, {
+    signal: sseAbort.signal,
+  });
+  assert.equal(sseRes.status, 200);
+  const sseReader = sseRes.body.getReader();
+  const decoder = new TextDecoder();
+  let sseBuffer = "";
+  const readNextSseState = async () => {
+    while (true) {
+      const sepIdx = sseBuffer.indexOf("\n\n");
+      if (sepIdx !== -1) {
+        const block = sseBuffer.slice(0, sepIdx);
+        sseBuffer = sseBuffer.slice(sepIdx + 2);
+        if (block.startsWith("data: ")) {
+          return JSON.parse(block.slice(6));
+        }
+        continue;
+      }
+      const { value, done } = await sseReader.read();
+      if (done) throw new Error("SSE ended unexpectedly");
+      sseBuffer += decoder.decode(value, { stream: true });
+    }
   };
+  const initialSseFrame = await readNextSseState();
+  assert.equal(initialSseFrame.domain, "pr__example-org__widgets__104");
+
+  await openDiffInstance(tcRt, tcCfg, {
+    instanceId: "tc-panel",
+    input: { repo: "example-org/widgets", pr: 105 },
+    workspacePath: "",
+  });
+  const retargetedSseFrame = await readNextSseState();
+  sseAbort.abort();
+
+  assert.equal(retargetedSseFrame.domain, "pr__example-org__widgets__105");
+  assert.equal(
+    retargetedSseFrame.stateSeq > delayedPr104WireState.stateSeq,
+    true,
+    "Retargeted PR #105 SSE frame must carry a strictly higher stateSeq than earlier PR #104 /state snapshot",
+  );
+
   render(
-    html`<${DiffCanvasApp} state=${otherDomainSnapshot} invoke=${async () => ({ ok: true })} />`,
+    html`<${DiffCanvasApp} state=${retargetedSseFrame} invoke=${async () => ({ ok: true })} />`,
     mountEl,
   );
   await new Promise((r) => setTimeout(r, 20));
   assert.doesNotMatch(mountEl.textContent, /Verify symlink target/);
-  assert.match(mountEl.textContent, /Switched Domain PR/);
+  assert.match(mountEl.textContent, /Second PR 105/);
+
+  // Replay delayed GET /state from PR #104 arriving after SSE switched the UI to PR #105
+  render(
+    html`<${DiffCanvasApp} state=${delayedPr104WireState} invoke=${async () => ({ ok: true })} />`,
+    mountEl,
+  );
+  await new Promise((r) => setTimeout(r, 20));
+  assert.match(
+    mountEl.textContent,
+    /Second PR 105/,
+    "Delayed lower-stateSeq /state response from previous PR must not overwrite active retargeted PR in UI",
+  );
+  assert.doesNotMatch(mountEl.textContent, /Typechange PR/);
+
+  // Subsequent UI POST /action targets PR #105 (matching the displayed UI)
+  const uiActionRes = await fetch(`${baseOrigin}/action?capability=${encodeURIComponent(cap)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      actionName: "add_comment",
+      input: { file: "src/second.ts", line: 1, side: "right", body: "Targets PR 105" },
+    }),
+  });
+  assert.equal(uiActionRes.status, 200);
+  const pr105AfterAction = await tcRt.getState("pr__example-org__widgets__105");
+  assert.equal(pr105AfterAction.comments.length, 1);
+  assert.equal(pr105AfterAction.comments[0].body, "Targets PR 105");
 
   // 3. SDK extension SIGTERM shutdown closes canvas runtime, disconnects live SDK session, and exits 0
   const extUrl = new URL("../runtime/extension.mjs", import.meta.url).href;

@@ -117,7 +117,7 @@ const runtimeOpenLocks = new WeakMap();
 const rawOpenInstanceFns = new WeakMap();
 const hardenedServers = new WeakSet();
 
-function hardenCanvasHttpServer(server) {
+function hardenCanvasHttpServer(server, { getInstance = null, config = null } = {}) {
   if (!server || typeof server.listeners !== "function" || hardenedServers.has(server)) {
     return;
   }
@@ -154,6 +154,61 @@ function hardenCanvasHttpServer(server) {
           }),
         );
         return;
+      }
+      if (req?.method === "GET" && typeof config?._nextWireState === "function") {
+        if (parsedTarget.pathname === "/state") {
+          const origEnd = res.end.bind(res);
+          res.end = function wrappedStateEnd(chunk, ...rest) {
+            if (
+              res.statusCode === 200 &&
+              (typeof chunk === "string" || Buffer.isBuffer(chunk))
+            ) {
+              try {
+                const rawText = Buffer.isBuffer(chunk)
+                  ? chunk.toString("utf8")
+                  : chunk;
+                const parsed = JSON.parse(rawText);
+                const activeDomain = getInstance?.()?.domainId || null;
+                const stamped = config._nextWireState(activeDomain, parsed, {
+                  isInitialStreamFrame: true,
+                });
+                if (stamped) {
+                  return origEnd(JSON.stringify(stamped), ...rest);
+                }
+              } catch {
+                // Fall through to original chunk on unexpected payload
+              }
+            }
+            return origEnd(chunk, ...rest);
+          };
+        } else if (parsedTarget.pathname === "/events") {
+          let sawInitialDataFrame = false;
+          const origWrite = res.write.bind(res);
+          res.write = function wrappedEventsWrite(chunk, ...rest) {
+            if (
+              typeof chunk === "string" &&
+              chunk.startsWith("data: ") &&
+              chunk.endsWith("\n\n")
+            ) {
+              const isInitial = !sawInitialDataFrame;
+              sawInitialDataFrame = true;
+              try {
+                const parsed = JSON.parse(chunk.slice(6, -2));
+                const activeDomain = getInstance?.()?.domainId || null;
+                const stamped = config._nextWireState(activeDomain, parsed, {
+                  isInitialStreamFrame: isInitial,
+                });
+                if (!stamped) {
+                  return true;
+                }
+                return origWrite(`data: ${JSON.stringify(stamped)}\n\n`, ...rest);
+              } catch {
+                // Fall through to original chunk on unexpected payload
+              }
+            }
+            return origWrite(chunk, ...rest);
+          };
+        }
       }
       Promise.resolve()
         .then(() => origListener.call(server, req, res))
@@ -225,7 +280,10 @@ export function ensureSerializedRuntimeOpen(rt) {
     try {
       const result = await origOpenInstance(args);
       const inst = instanceId ? rt._instances?.get(instanceId) : null;
-      hardenCanvasHttpServer(inst?.server);
+      hardenCanvasHttpServer(inst?.server, {
+        getInstance: () => (instanceId ? rt._instances?.get(instanceId) ?? null : null),
+        config: rt.config,
+      });
       return result;
     } catch (err) {
       if (!hadExisting && instanceId && rt._instances?.has(instanceId)) {
@@ -869,13 +927,18 @@ export function createDiffCanvasConfig({
   const hydratedDomains = new Set();
   const loadedDomainKeys = new Set();
   const liveDomainStates = new Map();
-  const domainStateSeqs = new Map();
+  let nextStateSeq = 0;
   const lastDiskDigests = new Map();
   const inFlightSaveDigests = new Map();
   const pendingBroadcastStates = new Map();
   const attachedRuntimes = new Set();
   const withDomainLock = createKeyedMutex();
   const withSaveLock = createKeyedMutex();
+
+  function allocateStateSeq() {
+    nextStateSeq += 1;
+    return nextStateSeq;
+  }
 
   function rememberDomainState(domainId, st) {
     if (!st || typeof st !== "object") return st;
@@ -884,9 +947,7 @@ export function createDiffCanvasConfig({
         ? st.domain
         : domainId || "";
     if (!effectiveDomain) return st;
-    const nextSeq = (domainStateSeqs.get(effectiveDomain) || 0) + 1;
-    domainStateSeqs.set(effectiveDomain, nextSeq);
-    const stamped = { ...st, stateSeq: nextSeq };
+    const stamped = { ...st, stateSeq: allocateStateSeq() };
     liveDomainStates.set(effectiveDomain, stamped);
     return stamped;
   }
@@ -1091,6 +1152,29 @@ export function createDiffCanvasConfig({
     _loadedDomainKeys: loadedDomainKeys,
     _domainSources: domainSources,
     _pendingReopenSources: pendingReopenSources,
+    _restampDomainState(domainId, st) {
+      return rememberDomainState(domainId, st);
+    },
+    _nextWireState(activeDomainId, payload, { isInitialStreamFrame = false } = {}) {
+      if (!payload || typeof payload !== "object") return null;
+      let targetPayload = payload;
+      if (
+        activeDomainId &&
+        typeof payload.domain === "string" &&
+        payload.domain !== activeDomainId
+      ) {
+        if (!isInitialStreamFrame) {
+          return null;
+        }
+        const live = liveDomainStates.get(activeDomainId);
+        if (live && typeof live === "object") {
+          targetPayload = live;
+        } else {
+          return payload;
+        }
+      }
+      return { ...targetPayload, stateSeq: allocateStateSeq() };
+    },
     _attachRuntime(rt) {
       if (rt && typeof rt === "object") {
         ensureSerializedRuntimeOpen(rt);
@@ -2399,7 +2483,10 @@ async function openDiffInstanceInner(runtime, config, ctx = {}) {
         curInst.domainId = prevDomainId;
         if (curInst.clients?.size > 0) {
           try {
-            const restoredState = await runtime.getState(prevDomainId);
+            const rawRestored = await runtime.getState(prevDomainId);
+            const restoredState =
+              config?._restampDomainState?.(prevDomainId, rawRestored) ??
+              rawRestored;
             broadcastStateToInstance(curInst, restoredState);
           } catch {
             // Ignore fallback restore error
@@ -2417,7 +2504,11 @@ async function openDiffInstanceInner(runtime, config, ctx = {}) {
   const domainId =
     nextInst?.domainId ??
     resolvedDomainId;
-  const latestState = await runtime.getState(domainId);
+  const rawLatestState = await runtime.getState(domainId);
+  const latestState =
+    prevDomainId !== null && prevDomainId !== domainId
+      ? (config?._restampDomainState?.(domainId, rawLatestState) ?? rawLatestState)
+      : rawLatestState;
 
   if (
     prevDomainId !== null &&

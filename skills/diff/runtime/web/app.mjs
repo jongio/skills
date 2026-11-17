@@ -971,7 +971,6 @@ export function DiffCanvasApp({ state: incomingState, invoke }) {
     if (
       prevOrdered &&
       typeof prevOrdered === "object" &&
-      prevOrdered.domain === incomingState.domain &&
       Number.isInteger(prevOrdered.stateSeq) &&
       Number.isInteger(incomingState.stateSeq) &&
       incomingState.stateSeq < prevOrdered.stateSeq
