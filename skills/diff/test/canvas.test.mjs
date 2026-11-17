@@ -87,10 +87,18 @@ test("diff-loader input guards reject option injection, path traversal, and malf
   assert.throws(() => assertSafeGitRef("--output=/tmp/pwn"), /cannot start with '-' or ':'/);
   assert.throws(() => assertSafeGitRef(":/search"), /cannot start with '-' or ':'/);
 
-  assert.deepEqual(assertSafePathspecs(["src\\router.ts", "./src/auth.ts"]), [
-    "src/router.ts",
-    "src/auth.ts",
-  ]);
+  assert.deepEqual(
+    assertSafePathspecs(["src\\router.ts", "./src/auth.ts"], {
+      platform: "win32",
+    }),
+    ["src/router.ts", "src/auth.ts"],
+  );
+  assert.deepEqual(
+    assertSafePathspecs(["src\\router.ts", "./src/auth.ts"], {
+      platform: "linux",
+    }),
+    ["src\\router.ts", "src/auth.ts"],
+  );
   assert.throws(() => assertSafePathspecs(["../outside.ts"]), /parent traversal/);
   assert.throws(() => assertSafePathspecs([":(top)secret"]), /magic prefixes/);
 
@@ -3281,6 +3289,15 @@ test("loadDiff pins Git prefixes under diff.mnemonicPrefix, preserves untracked 
     loaded.files.some((f) => f.canonicalPath.includes("\uFFFD")),
     false,
   );
+
+  if (process.platform !== "win32") {
+    fs.writeFileSync(path.join(repoDir, "src", "literal\\name.ts"), "export const bs = 1;\n", "utf8");
+    fs.writeFileSync(path.join(repoDir, "src", "trailing.ts "), "export const tr = 1;\n", "utf8");
+    const posixLoaded = await loadDiff({ mode: "git", cwd: repoDir, spec: "", paths: [] });
+    const posixPaths = posixLoaded.files.map((f) => f.canonicalPath);
+    assert.equal(posixPaths.includes("src/literal\\name.ts"), true);
+    assert.equal(posixPaths.includes("src/trailing.ts "), true);
+  }
 
   // Verify unwrapped vs wrapped CSS rules in runtime/web/style.css
   const cssText = fs.readFileSync(
