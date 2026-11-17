@@ -51,6 +51,7 @@ validate all catalog mappings and generate byte-identical public copies.
 | `thumb-eval-doctor.png` | `eval-doctor` card/detail | Azure GPT Image 2 AI evaluation diagnostic console passing prompt and skill cards through a deterministic grading scale and lens into verified scorecard tiles and a locked CI shield. |
 | `thumb-secops-doctor.png` | `secops-doctor` card/detail | Azure GPT Image 2 security diagnostic console transforming exposed key, container, and workflow cards through a radar shield into a hardened vault, locked container, cloud edge shield, and Stealth Public Mode badge. |
 | `thumb-release-doctor.png` | `release-doctor` card/detail | Azure GPT Image 2 post-merge release readiness console aligning commit timeline and manifest cards through an inspection bracket into synchronized manifests and an emerald release tag badge. |
+| `thumb-diff.png` | `diff` card/detail | Copilot GPT Image 2 side-by-side diff viewer canvas with file tree, split hunks, inline comment threads, and agent review handoff badges. |
 
 ## Statusline diagrams
 
