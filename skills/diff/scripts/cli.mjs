@@ -10,10 +10,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createCanvasRuntime } from "../runtime/canvas-kit/server.mjs";
-import { userStore } from "../runtime/canvas-kit/storage.mjs";
 import {
   MAX_REVIEW_ARTIFACT_BYTES,
   createDiffCanvasConfig,
+  createPrivateDiffStore,
   openDiffInstance,
 } from "../runtime/canvas.mjs";
 import {
@@ -636,20 +636,7 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
 
   const storeFactory =
     deps.storeFactory ??
-    ((safeFile) => {
-      const prev = process.env.COPILOT_HOME;
-      if (env?.COPILOT_HOME !== undefined) {
-        process.env.COPILOT_HOME = env.COPILOT_HOME;
-      }
-      try {
-        return userStore("diff", safeFile);
-      } finally {
-        if (env?.COPILOT_HOME !== undefined) {
-          if (prev === undefined) delete process.env.COPILOT_HOME;
-          else process.env.COPILOT_HOME = prev;
-        }
-      }
-    });
+    ((safeFile) => createPrivateDiffStore(safeFile, { env }));
 
   if (
     parsed.command === "review" ||

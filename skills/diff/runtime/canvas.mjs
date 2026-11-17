@@ -4,10 +4,13 @@
 // `comments`) via `userStore("diff", ...)` and hydrates parsed diff hunks live
 // from `git` or `gh pr diff` via `./diff-loader.mjs`.
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CanvasKitError } from "./canvas-kit/server.mjs";
-import { userStore } from "./canvas-kit/storage.mjs";
 import { nid } from "./canvas-kit/format.mjs";
 import { normalizeCanonicalPath } from "./parse-diff.mjs";
 import {
@@ -914,12 +917,237 @@ function createKeyedMutex() {
   };
 }
 
+const privateWriteQueues = new Map();
+
+function assertPrivateStoreConfined(copilotHome, file, ops) {
+  const artifactsBase = path.join(copilotHome, "extensions", "diff", "artifacts");
+  const chain = [
+    copilotHome,
+    path.join(copilotHome, "extensions"),
+    path.join(copilotHome, "extensions", "diff"),
+    artifactsBase,
+    file,
+  ];
+  for (let i = 0; i < chain.length; i++) {
+    let st;
+    try {
+      st = ops.lstatSync(chain[i]);
+    } catch (err) {
+      if (err?.code === "ENOENT") break;
+      throw err;
+    }
+    if (st.isSymbolicLink()) {
+      throw new Error("storage: symlinked path inside store root is forbidden");
+    }
+    if (i < chain.length - 1 && !st.isDirectory()) {
+      throw new Error("storage: ancestor in store path is not a directory");
+    }
+    if (i === chain.length - 1 && !st.isFile()) {
+      throw new Error("storage: target is not a regular file");
+    }
+  }
+  let realHome = null;
+  try {
+    realHome = ops.realpathSync(copilotHome);
+  } catch (err) {
+    if (err?.code !== "ENOENT") throw err;
+  }
+  if (realHome !== null) {
+    const realHomePrefix = realHome.endsWith(path.sep)
+      ? realHome
+      : realHome + path.sep;
+    const homePrefix = copilotHome.endsWith(path.sep)
+      ? copilotHome
+      : copilotHome + path.sep;
+    let probe = path.dirname(file);
+    while (probe === copilotHome || probe.startsWith(homePrefix)) {
+      try {
+        const realProbe = ops.realpathSync(probe);
+        if (realProbe !== realHome && !realProbe.startsWith(realHomePrefix)) {
+          throw new Error("storage: resolved directory escapes store root");
+        }
+        break;
+      } catch (err) {
+        if (err?.code !== "ENOENT") throw err;
+        if (probe === copilotHome) break;
+        const parent = path.dirname(probe);
+        if (parent === probe) break;
+        probe = parent;
+      }
+    }
+  }
+}
+
+function ensurePrivateStoreDirs(copilotHome, file, ops) {
+  const dirs = [
+    copilotHome,
+    path.join(copilotHome, "extensions"),
+    path.join(copilotHome, "extensions", "diff"),
+    path.join(copilotHome, "extensions", "diff", "artifacts"),
+  ];
+  for (let i = 0; i < dirs.length; i++) {
+    const dir = dirs[i];
+    let created = false;
+    let st = null;
+    try {
+      st = ops.lstatSync(dir);
+    } catch (err) {
+      if (err?.code !== "ENOENT") throw err;
+    }
+    if (!st) {
+      try {
+        ops.mkdirSync(dir, { mode: 0o700 });
+        created = true;
+      } catch (err) {
+        if (err?.code !== "EEXIST") throw err;
+      }
+      st = ops.lstatSync(dir);
+    }
+    if (st.isSymbolicLink()) {
+      throw new Error("storage: symlinked path inside store root is forbidden");
+    }
+    if (!st.isDirectory()) {
+      throw new Error("storage: ancestor in store path is not a directory");
+    }
+    if (
+      ops.platform !== "win32" &&
+      (created || i >= 2) &&
+      (st.mode & 0o077) !== 0
+    ) {
+      ops.chmodSync(dir, 0o700);
+    }
+  }
+  assertPrivateStoreConfined(copilotHome, file, ops);
+}
+
+export function createPrivateDiffStore(safeFile, { env, fsOps } = {}) {
+  if (
+    typeof safeFile !== "string" ||
+    !safeFile ||
+    safeFile === "." ||
+    safeFile === ".." ||
+    !/^[A-Za-z0-9._-]+$/.test(safeFile)
+  ) {
+    throw new Error("storage: invalid fileName");
+  }
+  const effectiveEnv = env ?? process.env;
+  const rawHome =
+    effectiveEnv?.COPILOT_HOME || path.join(os.homedir(), ".copilot");
+  const copilotHome = path.resolve(rawHome);
+  const artifactsBase = path.join(copilotHome, "extensions", "diff", "artifacts");
+  const file = path.resolve(artifactsBase, safeFile);
+  const basePrefix = artifactsBase.endsWith(path.sep)
+    ? artifactsBase
+    : artifactsBase + path.sep;
+  if (file === artifactsBase || !file.startsWith(basePrefix)) {
+    throw new Error("storage: fileName escapes store root");
+  }
+
+  const ops = {
+    platform: fsOps?.platform ?? process.platform,
+    lstatSync: fsOps?.lstatSync ?? fs.lstatSync,
+    realpathSync: fsOps?.realpathSync ?? fs.realpathSync,
+    mkdirSync: fsOps?.mkdirSync ?? fs.mkdirSync,
+    chmodSync: fsOps?.chmodSync ?? fs.chmodSync,
+    openSync: fsOps?.openSync ?? fs.openSync,
+    fstatSync: fsOps?.fstatSync ?? fs.fstatSync,
+    readFileSync: fsOps?.readFileSync ?? fs.readFileSync,
+    closeSync: fsOps?.closeSync ?? fs.closeSync,
+    readFile: fsOps?.readFile ?? fsPromises.readFile,
+    open: fsOps?.open ?? fsPromises.open,
+    rename: fsOps?.rename ?? fsPromises.rename,
+    unlink: fsOps?.unlink ?? fsPromises.unlink,
+  };
+
+  return {
+    file,
+    async load(fallback = null) {
+      try {
+        assertPrivateStoreConfined(copilotHome, file, ops);
+        if (fs.constants.O_NOFOLLOW) {
+          const fd = ops.openSync(
+            file,
+            fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW,
+          );
+          try {
+            const st = ops.fstatSync(fd);
+            if (!st.isFile()) {
+              throw new Error("storage: target is not a regular file");
+            }
+            return JSON.parse(ops.readFileSync(fd, "utf8"));
+          } finally {
+            ops.closeSync(fd);
+          }
+        }
+        const raw = await ops.readFile(file, "utf8");
+        assertPrivateStoreConfined(copilotHome, file, ops);
+        return JSON.parse(raw);
+      } catch (err) {
+        if (err?.code === "ENOENT") return fallback;
+        throw err;
+      }
+    },
+    async save(data) {
+      const prev = privateWriteQueues.get(file) ?? Promise.resolve();
+      const run = prev
+        .catch(() => {})
+        .then(async () => {
+          ensurePrivateStoreDirs(copilotHome, file, ops);
+          const tmp = `${file}.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`;
+          let fh;
+          try {
+            fh = await ops.open(tmp, "wx", 0o600);
+            try {
+              if (ops.platform !== "win32" && typeof fh.chmod === "function") {
+                await fh.chmod(0o600);
+              }
+              await fh.writeFile(JSON.stringify(data, null, 2), "utf8");
+            } finally {
+              await fh.close().catch(() => {});
+            }
+          } catch (openWriteErr) {
+            await ops.unlink(tmp).catch(() => {});
+            throw openWriteErr;
+          }
+          try {
+            assertPrivateStoreConfined(copilotHome, file, ops);
+            await ops.rename(tmp, file);
+          } catch (err) {
+            if (err?.code === "EPERM" || err?.code === "EACCES") {
+              await new Promise((r) => setTimeout(r, 25));
+              try {
+                assertPrivateStoreConfined(copilotHome, file, ops);
+                await ops.rename(tmp, file);
+              } catch (err2) {
+                await ops.unlink(tmp).catch(() => {});
+                throw err2;
+              }
+            } else {
+              await ops.unlink(tmp).catch(() => {});
+              throw err;
+            }
+          }
+        });
+      privateWriteQueues.set(file, run);
+      try {
+        await run;
+      } finally {
+        if (privateWriteQueues.get(file) === run) {
+          privateWriteQueues.delete(file);
+        }
+      }
+    },
+  };
+}
+
 export function createDiffCanvasConfig({
   execFn,
   env,
-  storeFactory = (safeFile) => userStore("diff", safeFile),
+  storeFactory,
   onReviewSubmitted,
 } = {}) {
+  const effectiveStoreFactory =
+    storeFactory ?? ((safeFile) => createPrivateDiffStore(safeFile, { env }));
   const pendingOpen = new Map();
   const pendingReopenSources = new Map();
   const pendingSubmittedNotifications = new Map();
@@ -1114,7 +1342,7 @@ export function createDiffCanvasConfig({
       String(domainId || "default")
         .replace(/[^a-zA-Z0-9._-]/g, "_")
         .slice(0, 120) || "default";
-    return storeFactory(`${safe}.json`);
+    return effectiveStoreFactory(`${safe}.json`);
   }
 
   function assertFileInDiff(state, rawPath) {

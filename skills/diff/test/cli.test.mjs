@@ -6,6 +6,7 @@ import path from "node:path";
 import { Writable } from "node:stream";
 import test from "node:test";
 
+import { createPrivateDiffStore } from "../runtime/canvas.mjs";
 import {
   listSavedReviews,
   openSystemBrowser,
@@ -990,6 +991,137 @@ test("openSystemBrowser and serve --wait surface nonzero launcher exits without 
       return true;
     },
   );
+});
+
+test("browser-only CLI installs persist review artifacts with private 0o700 directories and 0o600 files", async (t) => {
+  const { root } = createGitFixtureRepo(t);
+  const sandboxParent = makeTempDir("diff-cli-uninitialized-home-");
+  t.after(() => fs.rmSync(sandboxParent, { recursive: true, force: true }));
+
+  // 1. Simulated POSIX permission tracking (runs deterministically on both Windows and POSIX)
+  const freshHome = path.join(sandboxParent, "fresh-copilot-home");
+  const recordedMkdirs = [];
+  const recordedChmodSyncs = [];
+  const recordedOpens = [];
+  const recordedFhChmods = [];
+  const simulatedModes = new Map();
+
+  const store = createPrivateDiffStore("pr__example-org__widgets__293.json", {
+    env: { COPILOT_HOME: freshHome },
+    fsOps: {
+      platform: "linux",
+      lstatSync(p) {
+        const realStat = fs.lstatSync(p);
+        const mode = simulatedModes.get(p) ?? (realStat.isDirectory() ? 0o40755 : 0o100644);
+        return Object.assign(Object.create(Object.getPrototypeOf(realStat)), realStat, { mode });
+      },
+      mkdirSync(p, opts) {
+        recordedMkdirs.push({ path: p, mode: opts?.mode });
+        fs.mkdirSync(p, opts);
+        // Simulate a permissive umask / inherited ACL leaving 0o755 until chmodSync tightens it
+        simulatedModes.set(p, 0o40755);
+      },
+      chmodSync(p, mode) {
+        recordedChmodSyncs.push({ path: p, mode });
+        simulatedModes.set(p, 0o40000 | mode);
+      },
+      async open(p, flags, mode) {
+        recordedOpens.push({ path: p, flags, mode });
+        const fh = await fs.promises.open(p, flags, mode);
+        return {
+          async chmod(m) {
+            recordedFhChmods.push(m);
+            simulatedModes.set(p, 0o100000 | m);
+          },
+          writeFile: fh.writeFile.bind(fh),
+          close: fh.close.bind(fh),
+        };
+      },
+      async rename(from, to) {
+        await fs.promises.rename(from, to);
+        if (simulatedModes.has(from)) {
+          simulatedModes.set(to, simulatedModes.get(from));
+          simulatedModes.delete(from);
+        }
+      },
+    },
+  });
+
+  await store.save({
+    domain: "pr__example-org__widgets__293",
+    status: "pending",
+    comments: [{ id: "c1", file: "src/service.ts", line: 1, side: "right", body: "Private review note" }],
+  });
+
+  assert.equal(recordedMkdirs.length, 4);
+  for (const entry of recordedMkdirs) {
+    assert.equal(entry.mode, 0o700, `Expected mkdir mode 0o700 for ${entry.path}`);
+  }
+  assert.equal(recordedChmodSyncs.length, 4);
+  for (const entry of recordedChmodSyncs) {
+    assert.equal(entry.mode, 0o700, `Expected chmodSync 0o700 for ${entry.path}`);
+  }
+  assert.equal(recordedOpens.length, 1);
+  assert.equal(recordedOpens[0].flags, "wx");
+  assert.equal(recordedOpens[0].mode, 0o600);
+  assert.deepEqual(recordedFhChmods, [0o600]);
+
+  const loaded = await store.load();
+  assert.equal(loaded.comments[0].body, "Private review note");
+
+  // 2. End-to-end browser-only CLI serve flow into a non-existent COPILOT_HOME
+  const cliFreshHome = path.join(sandboxParent, "cli-browser-only-home");
+  const ac = new AbortController();
+  t.after(() => ac.abort());
+  let panelUrl = null;
+  const servePromise = runCli(
+    ["serve", "--cwd", root, "--no-open", "--print-url", "--json"],
+    {
+      env: { ...process.env, COPILOT_HOME: cliFreshHome },
+      abortSignal: ac.signal,
+      stdout: createCaptureStream().stream,
+      onReady: ({ url }) => {
+        panelUrl = url;
+      },
+    },
+  );
+  const start = Date.now();
+  while (!panelUrl && Date.now() - start < 5000) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.ok(panelUrl, "CLI server should become ready");
+  const addRes = await postPanelAction(panelUrl, "add_comment", {
+    file: "src/service.ts",
+    line: 2,
+    side: "right",
+    body: "Confidential comment",
+  });
+  assert.equal(addRes.status, 200);
+  ac.abort();
+  await servePromise;
+
+  const artifactsDir = path.join(cliFreshHome, "extensions", "diff", "artifacts");
+  const files = fs.readdirSync(artifactsDir).filter((f) => f.endsWith(".json"));
+  assert.equal(files.length, 1);
+  if (process.platform !== "win32") {
+    for (const dir of [
+      cliFreshHome,
+      path.join(cliFreshHome, "extensions"),
+      path.join(cliFreshHome, "extensions", "diff"),
+      artifactsDir,
+    ]) {
+      assert.equal(
+        fs.statSync(dir).mode & 0o077,
+        0,
+        `Directory ${dir} must not grant group/other permissions`,
+      );
+    }
+    assert.equal(
+      fs.statSync(path.join(artifactsDir, files[0])).mode & 0o777,
+      0o600,
+      "Saved review artifact file must have 0o600 permissions",
+    );
+  }
 });
 
 
