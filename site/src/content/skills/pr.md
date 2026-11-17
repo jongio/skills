@@ -72,7 +72,25 @@ that renewed concern, explicitly citing its review ID. Unrelated edits do not
 revalidate another concern.
 For long prose or ambiguous titles, cite the review ID and the exact `concern:...`
 token from `unsettledConcernDetails`; full evidence and local context remain
-available without requiring a verbatim reply. Critically evaluate every reviewer
+available without requiring a verbatim reply.
+
+Establish the user-approved goal, supported inputs, and architecture boundaries
+before preflight. Before each review-driven edit, record in the existing finding
+ledger the reachable supported input/caller path, concrete material impact, how
+this PR introduces/worsens or is tightly coupled to the defect, and the smallest
+fix. Missing evidence calls for bounded inspection or reporting the gap, not
+speculative code; priority labels and repeated bot warnings are not proof.
+Reviewer suggestions do not authorize unsupported data shapes, duplicate upstream
+responsibilities, optional modes, or repeated output. Decline or defer tangential
+work and ask before expanding the supported contract or architecture.
+
+If a concern stems from an unnecessary earlier addition, remove or simplify that
+addition before layering on compensating logic. Repeat the scope audit after each
+review-fix batch before committing or pushing: remove unnecessary review-driven
+additions and their obsolete tests, not legitimate fixes or unrelated edits.
+Concrete in-scope defects, CI, final-head review, and approval gates remain binding.
+
+Critically evaluate every reviewer
 and Copilot suggestion before editing code: distinguish concrete bugs, security
 boundary violations, or broken contracts in touched code from speculative
 hypotheticals for impossible or already-guarded inputs; reject over-engineered

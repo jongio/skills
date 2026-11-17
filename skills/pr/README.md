@@ -139,6 +139,37 @@ or redesign the workflow without authorization.
 
 ## Review feedback
 
+Establish the user-approved goal, supported inputs, and architecture boundaries
+before preflight. Before each review-driven edit, record in the existing finding
+ledger the reachable supported input/caller path, concrete material impact, how
+this PR introduces/worsens or is tightly coupled to the defect, and the smallest
+fix. Missing evidence calls for bounded inspection or reporting the gap, not
+speculative code; priority labels and repeated bot warnings are not proof.
+Reviewer suggestions do not authorize unsupported data shapes, duplicate upstream
+responsibilities, optional modes, or repeated output. Decline or defer tangential
+work and ask before expanding the supported contract or architecture.
+
+If a concern stems from an unnecessary earlier addition, remove or simplify that
+addition before layering on compensating logic. Repeat the scope audit after each
+review-fix batch before committing or pushing: remove unnecessary review-driven
+additions and their obsolete tests, not legitimate fixes or unrelated edits.
+Concrete in-scope defects, CI, final-head review, and approval gates remain binding.
+
+The eval suite includes both plan cases and a real local workspace review where
+unnecessary edits fail `diff-empty`. Skill Eval CI checks every review-scope
+trial, including its semantic rubric: one failed trial blocks the PR-skill eval
+job even if the suite's average score passes. Deterministic tests exercise that
+gate with passing, failing, missing, and filtered trial evidence on pull requests.
+Filtered runs use the actual tag expression and still require all five trials
+for every selected critical case, even when a case produced no records.
+Live model trials remain scheduled/manual; local gate tests are not model-run
+evidence.
+Separate local review flows cover a valid historical-scoring comment that must
+be acknowledged and deferred outside the formatter PR, and a poor submitted
+implementation that must be blocked using concrete defects and failing tests.
+Deferring valid feedback is distinct from dismissing it as incorrect; keeping
+scope tight is never a reason to approve bad code within that scope.
+
 At each new CI-ready review round, inventory paginated submitted review history,
 not only pending requests or required approvers. Retain all prior human reviewers
 in the expected roster across pushes and resumptions, including those who

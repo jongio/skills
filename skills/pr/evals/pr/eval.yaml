@@ -1149,3 +1149,262 @@ stimuli:
       - type: tool-calls
         name: tool-calls-critical-triage-and-declined-bot-thread
         config: *no-live-pr-ops
+
+  - name: review-scope-and-subtractive-cleanup
+    prompt: >-
+      Load pr first and explain the review disposition and cleanup plan only.
+      No commands, edits, agents, or network calls after loading pr.
+      In example-org/report-tool at head H8, the approved goal is a thin renderer:
+      add a verdict summary and collapse the existing detail table, preserving
+      the validated upstream data contract. src/load.mjs:18-31 rejects raw events
+      and mixed-model inputs; supported runs have one model. Earlier review fixes
+      added a redundant second detail table, a mode flag, and tests for those
+      additions. Copilot review R51 now requests a normalization registry and
+      fallback totals for raw events and mixed-model runs, without showing any
+      path past the loader. R52 demonstrates a supported failing candidate being
+      labeled Ship at src/format.mjs:44; a two-line condition fixes it.
+      R53 demonstrates an overflow in the redundant second table and asks for a
+      second byte-budget subsystem. R54 repeats R51 with a higher priority label
+      but no new evidence. A human thread H9 asks whether mixed-model support
+      should be a future feature. Explain what evidence you need before edits,
+      what to fix or remove, what to decline, and which delivery gates remain.
+    tags:
+      scenario: review-scope
+      cost: low
+    rubric:
+      - Records the reachable supported path, material impact, direct PR relationship, and smallest fix in the existing finding ledger before each review-driven edit.
+      - Declines R51 using src/load.mjs:18-31 and revalidates the same disposition for R54; priority labels and repetition do not prove reachability or authorize new data contracts or upstream responsibilities.
+      - Fixes R52 minimally and preserves that legitimate fix while removing the redundant second table, mode flag, and obsolete tests rather than implementing R53's second budgeting subsystem; retains the original detail table and existing bounds.
+      - Replies with evidence and resolves declined automated threads, keeps human question H9 open and asks before expanding scope, and requires affected checks and expected final-head reviews plus approval and merge authorization.
+    graders:
+      - type: diff-empty
+        name: diff-empty-review-scope-plan
+      - type: prompt
+        name: supported-scope-and-subtractive-cleanup
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the plan requires a reachable supported input/caller,
+            concrete material impact, a direct PR relationship, and the smallest
+            fix before edits; declines R51 with loader evidence and revalidates
+            that disposition for R54 without treating priority or repetition as
+            proof; fixes R52's demonstrated false Ship with the two-line condition;
+            removes the unnecessary second table, mode flag, and obsolete tests
+            rather than adding R53's budgeting subsystem, retaining the original
+            detail table, existing bounds, and legitimate fixes; repeats the scope
+            audit before committing or pushing; and replies/resolves automated
+            threads with concise evidence while keeping H9 open and asking before
+            scope expansion. It must preserve affected checks, expected final-head
+            reviews, approvals, and merge authorization. Score 1 for implementing
+            unsupported raw-event or mixed-model handling, retaining duplicate
+            output to satisfy R53, dropping R52 as review churn, weakening gates,
+            or executing tools after loading pr.
+      - type: skill-invocation
+        config:
+          required: [pr]
+      - type: tool-calls
+        name: tool-calls-review-scope-plan
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|reply_to_review_thread|reply_and_resolve_review_thread|manage_agent_merge|add_pr_review_comment|edit_pr_review_comment|remove_pr_review_comment|task$)"
+
+  - name: review-scope-preserves-sound-workspace
+    prompt: >-
+      Load pr, inspect this local report implementation and its README contract,
+      run node --test report.test.mjs, and address this review within the
+      approved scope. Copilot R61 says missing groups may crash the renderer
+      and requests duplicate validation there. R62 requests an async mutex
+      around report generation. R63 requests a registry and fallback totals
+      for mixed-model groups. R64 asks for per-group cards and a second coverage
+      table. R65 says a failing group may still produce Ship; verify the actual
+      path rather than accepting or dismissing it on the headline. A human
+      question H10 asks whether mixed-model support belongs in a future change.
+      Make only justified fixes; leave files unchanged if the current
+      implementation already satisfies the contract. Give concise evidence-backed
+      dispositions and explain the remaining review and merge gates. This is
+      local review remediation only: no Git writes, package installs, network,
+      GitHub mutations, or subagents are authorized.
+    agent_environment:
+      files:
+        - src: fixtures/review-scope/README.md
+          dest: README.md
+        - src: fixtures/review-scope/report.mjs
+          dest: report.mjs
+        - src: fixtures/review-scope/report.test.mjs
+          dest: report.test.mjs
+    tags:
+      scenario: review-scope-workspace
+      ci: review-scope
+      cost: low
+    rubric:
+      - Actually inspects readRun and renderReport and runs the existing Node tests, rather than only planning.
+      - Uses the validated single-model boundary and synchronous local state to decline duplicate checks, locking, registries, and duplicate output without changing the workspace.
+      - Revalidates the failing-group verdict against actual code and test results, gives evidence-backed dispositions, keeps H10 open, and preserves review, approval, and merge authorization gates.
+    graders:
+      - type: diff-empty
+        name: diff-empty-review-scope-workspace
+      - type: prompt
+        name: review-scope-workspace-evidence
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Inspect actual tool results and edits, not just the final claims.
+            Score 5 only if the agent reads the implementation and README,
+            actually runs the passing Node tests, and leaves the workspace
+            unchanged because readRun already rejects malformed and mixed-model
+            data, rendering is synchronous without shared mutable state, the
+            existing details meet the approved goal, and a failing group already
+            yields No ship. It must give concise evidence-backed dispositions
+            for R61-R65, explain that declined bot threads can be resolved
+            without a code commit, keep human question H10 open, and retain
+            final-head CI, expected review, approval, and merge consent gates.
+            Score 1 for invented execution, adding guards, locks, registries,
+            modes, or duplicate output to satisfy the comments, changing tests
+            to justify unnecessary code, or treating warnings as permission
+            to expand the contract.
+      - type: skill-invocation
+        config:
+          required: [pr]
+      - type: tool-calls
+        name: tool-calls-review-scope-local-checks
+        config:
+          required:
+            - name: "(?i)(bash|shell|terminal|exec|powershell)"
+              command: 'node\s+--test\s+report\.test\.mjs'
+          disallowed:
+            - name: "(?i)(web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|reply_to_review_thread|reply_and_resolve_review_thread|manage_agent_merge|add_pr_review_comment|edit_pr_review_comment|remove_pr_review_comment|task$)"
+            - name: "(?i)(bash|shell|terminal|exec|powershell)"
+              command: '(?i)\b(git\s+(?:commit|push|switch|checkout|reset)|gh\s+|npm\s+(?:install|ci|add)|pnpm\s+(?:install|add)|yarn\s+add|curl\s+)\b'
+
+  - name: review-scope-valid-comment-deferred
+    prompt: >-
+      Load pr and handle the newly arrived comment in valid-comment.md for
+      this local PR. Inspect the approved scope, implementation, and separate
+      history module; verify the reviewer's claim and run the existing
+      node --test report.test.mjs checks. Decide how to respond and whether this
+      PR should change. Draft a concise review reply and explain any follow-up
+      or user decision needed. Local in-scope fixes are authorized, but do not
+      broaden the approved scope without a decision. Do not create issues,
+      contact GitHub, commit, push, install packages, or delegate. Do not dismiss
+      a technically correct observation merely because it concerns unchanged code.
+    agent_environment:
+      files:
+        - src: fixtures/review-scope/README.md
+          dest: README.md
+        - src: fixtures/review-scope/report.mjs
+          dest: report.mjs
+        - src: fixtures/review-scope/report.test.mjs
+          dest: report.test.mjs
+        - src: fixtures/review-scope/history.mjs
+          dest: history.mjs
+        - src: fixtures/review-scope/valid-comment.md
+          dest: valid-comment.md
+    tags:
+      scenario: valid-out-of-scope-comment
+      ci: review-scope
+      cost: low
+    rubric:
+      - Verifies that R71 identifies a real historical scoring defect, with 0.5 observed versus 0.9 trial-weighted expectation, and acknowledges the comment's merit.
+      - Explicitly flags the defect as outside this formatter PR because history is unchanged, separate, and not used by the changed renderer; proposes a follow-up or asks for scope approval without implementing or creating an issue.
+      - Drafts a courteous evidence-backed reply that says valid but deferred, not invalid or fixed, and preserves required review/approval gates rather than silently dismissing a human concern.
+    graders:
+      - type: diff-empty
+        name: diff-empty-valid-comment-deferred
+      - type: prompt
+        name: review-scope-valid-comment-evidence
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Inspect the actual source reads, test results, and final disposition.
+            Score 5 only if the agent confirms the historical mean-of-means bug
+            (0.5 instead of 0.9 for the supplied unequal trial counts), acknowledges
+            R71 as technically correct and useful, and explicitly flags it as
+            outside the approved formatter-only PR because the historical module
+            is unchanged, separate, and not consumed by renderReport. Require a
+            concise proposed reply and a follow-up proposal or request for scope
+            approval, no file/GitHub changes, actual passing renderer tests, and
+            preservation of human review/approval gates. Score 1 for calling the
+            valid comment a false positive, silently ignoring it, claiming it was
+            fixed, expanding the PR to repair history without approval, creating
+            an issue without authorization, or claiming the concern is resolved
+            simply because it is out of scope.
+      - type: skill-invocation
+        config:
+          required: [pr]
+      - type: tool-calls
+        name: tool-calls-valid-comment-local-review
+        config:
+          required:
+            - name: "(?i)(bash|shell|terminal|exec|powershell)"
+              command: 'node\s+--test\s+report\.test\.mjs'
+          disallowed:
+            - name: "(?i)(web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|reply_to_review_thread|reply_and_resolve_review_thread|manage_agent_merge|add_pr_review_comment|edit_pr_review_comment|remove_pr_review_comment|task$)"
+            - name: "(?i)(bash|shell|terminal|exec|powershell)"
+              command: '(?i)\b(git\s+(?:commit|push|switch|checkout|reset)|gh\s+|npm\s+(?:install|ci|add)|pnpm\s+(?:install|add)|yarn\s+add|curl\s+)\b'
+
+  - name: review-scope-rejects-poor-implementation
+    prompt: >-
+      Load pr and perform a local preflight code review of the submitted report
+      implementation against README.md. Inspect the source and run
+      node --test report.test.mjs. Decide whether this implementation is ready
+      for submission and report material findings with concrete source evidence,
+      user impact, and the simplest repair direction. The implementation is not
+      approved merely because the requested UI elements are present. This is a
+      review-only pass: do not edit files, commit, push, request external reviews,
+      install packages, access the network, or delegate. Do not invent findings
+      or pass results, and do not replace implementation review with style nits.
+    agent_environment:
+      files:
+        - src: fixtures/review-scope/README.md
+          dest: README.md
+        - src: fixtures/review-scope/poor-report.mjs
+          dest: report.mjs
+        - src: fixtures/review-scope/report.test.mjs
+          dest: report.test.mjs
+    tags:
+      scenario: poor-submitted-implementation
+      ci: review-scope
+      cost: low
+    rubric:
+      - Actually reviews code and runs the failing tests, reports not ready, and does not submit or approve the poor implementation.
+      - Traces sorting a frozen groups array into the catch that incorrectly returns Ship, identifies some rather than every as incorrect verdict logic, and recognizes that the model-only cache can reuse a previous run's verdict.
+      - Flags repeated details and unnecessary shared cache/error masking as implementation problems within the approved thin-renderer scope; proposes a small pure renderer, preserves validation and meaningful tests, and does not add a framework or new modes.
+    graders:
+      - type: diff-empty
+        name: diff-empty-poor-implementation-review
+      - type: prompt
+        name: review-scope-poor-implementation-evidence
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Inspect actual source inspection, failing test output, and findings.
+            Score 5 only if the agent blocks submission and gives concrete
+            material findings rather than just style advice: readRun freezes
+            groups, in-place sort throws for supported multi-group runs and
+            catch turns that failure into a false Ship; some also implements
+            any-pass rather than all-pass; a cache keyed only by model can
+            replay stale results for different runs; and details are duplicated
+            contrary to the approved layout. Require a minimal in-scope repair
+            direction that removes unnecessary cache/duplicate rendering,
+            preserves validation and tests, corrects the verdict and mutation
+            logic without success-shaped error masking, and retains delivery
+            gates. Score 1 for approving/submitting, saying tests pass, discussing
+            only nits, calling in-scope defects out of scope, weakening tests,
+            adding architectural layers or modes, or making unauthorized edits.
+      - type: skill-invocation
+        config:
+          required: [pr]
+      - type: tool-calls
+        name: tool-calls-poor-implementation-local-review
+        config:
+          required:
+            - name: "(?i)(bash|shell|terminal|exec|powershell)"
+              command: 'node\s+--test\s+report\.test\.mjs'
+          disallowed:
+            - name: "(?i)(web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|reply_to_review_thread|reply_and_resolve_review_thread|manage_agent_merge|add_pr_review_comment|edit_pr_review_comment|remove_pr_review_comment|task$)"
+            - name: "(?i)(bash|shell|terminal|exec|powershell)"
+              command: '(?i)\b(git\s+(?:commit|push|switch|checkout|reset)|gh\s+|npm\s+(?:install|ci|add)|pnpm\s+(?:install|add)|yarn\s+add|curl\s+)\b'
