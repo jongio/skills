@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -32,7 +33,7 @@ import {
   probeDiffContext,
 } from "../runtime/diff-loader.mjs";
 import { parseDiffPatch } from "../runtime/parse-diff.mjs";
-import { buildFileTree } from "../runtime/web/diff-view-model.mjs";
+import { buildFileTree, computeInlineWordDiff } from "../runtime/web/diff-view-model.mjs";
 import { applySetup, findInstalledPluginDiffExtension, planSetup } from "../scripts/setup.mjs";
 
 function makeTempDir(prefix) {
@@ -3553,6 +3554,70 @@ test("concurrent openDiffInstance/openInstance calls serialize per instanceId, a
   );
   assert.equal(commentBackslash.commentCount, 1);
   assert.equal(commentBackslash.comment.file, "src/literal\\name.ts");
+
+  // 3. Malformed unauthenticated HTTP request targets return 400 without crashing the server
+  const parsedPanelUrl = new URL(mixedOk.value.url);
+  const sendRawHttp = (rawRequest) =>
+    new Promise((resolve, reject) => {
+      const chunks = [];
+      const sock = net.createConnection(
+        { host: "127.0.0.1", port: Number(parsedPanelUrl.port) },
+        () => sock.write(rawRequest),
+      );
+      sock.on("data", (c) => chunks.push(c));
+      sock.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      sock.on("error", reject);
+    });
+
+  const malformedResp1 = await sendRawHttp(
+    `GET http://[::1 HTTP/1.1\r\nHost: ${parsedPanelUrl.host}\r\nConnection: close\r\n\r\n`,
+  );
+  assert.match(malformedResp1, /^HTTP\/1\.1 400 /);
+  const malformedResp2 = await sendRawHttp(
+    `GET //[::1 HTTP/1.1\r\nHost: ${parsedPanelUrl.host}\r\nConnection: close\r\n\r\n`,
+  );
+  assert.match(malformedResp2, /^HTTP\/1\.1 400 /);
+
+  const healthyRes = await fetch(
+    `${parsedPanelUrl.origin}/state?capability=${parsedPanelUrl.searchParams.get("capability")}`,
+  );
+  assert.equal(healthyRes.status, 200);
+
+  // 4. Inline word diff never splits UTF-16 surrogate pairs sharing a high surrogate
+  const emojiDiff = computeInlineWordDiff(
+    "const badge = '\uD83D\uDE00';",
+    "const badge = '\uD83D\uDE80';",
+  );
+  assert.ok(emojiDiff);
+  const loneSurrogateRe =
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  for (const seg of [...emojiDiff.left, ...emojiDiff.right]) {
+    assert.equal(
+      loneSurrogateRe.test(seg.text),
+      false,
+      `Segment split a surrogate pair: ${JSON.stringify(seg)}`,
+    );
+  }
+  assert.equal(
+    emojiDiff.left.find((s) => s.changed)?.text,
+    "\uD83D\uDE00",
+  );
+  assert.equal(
+    emojiDiff.right.find((s) => s.changed)?.text,
+    "\uD83D\uDE80",
+  );
+
+  // 5. buildFileTree separates directory keys from generated file keys
+  const nonCollidingTree = buildFileTree([
+    { canonicalPath: "a.ts", displayPath: "a.ts", index: 0 },
+    { canonicalPath: "file:a.ts:0/b.ts", displayPath: "file:a.ts:0/b.ts", index: 1 },
+    { canonicalPath: "file:0:a.ts/c.ts", displayPath: "file:0:a.ts/c.ts", index: 2 },
+  ]);
+  assert.equal(nonCollidingTree.length, 3);
+  assert.equal(
+    nonCollidingTree.some((entry) => entry.kind === "file" && entry.path === "a.ts"),
+    true,
+  );
 });
 
 

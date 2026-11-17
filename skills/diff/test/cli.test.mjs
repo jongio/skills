@@ -922,5 +922,75 @@ test("live background serve runtime adopts external CLI address/reopen updates w
   );
 });
 
+test("openSystemBrowser and serve --wait surface nonzero launcher exits without blocking on long-lived helpers or leaking tokens", async (t) => {
+  const { EventEmitter } = await import("node:events");
+  const secretToken = "ab".repeat(32);
+  const validUrl = `http://127.0.0.1:43123/?capability=${secretToken}`;
+
+  // 1. Fast nonzero exit within startup grace window rejects with sanitized hint and no token leak
+  await assert.rejects(
+    openSystemBrowser(validUrl, {
+      platform: "linux",
+      startupGraceMs: 120,
+      spawnFn: () => {
+        const proc = new EventEmitter();
+        proc.unref = () => {};
+        setTimeout(() => {
+          proc.emit("spawn");
+          setTimeout(() => proc.emit("exit", 3, null), 10);
+        }, 5);
+        return proc;
+      },
+    }),
+    (err) => {
+      assert.match(err.message, /xdg-open exited with code 3/);
+      assert.match(err.message, /--no-open --print-url/);
+      assert.equal(err.message.includes(secretToken), false);
+      return true;
+    },
+  );
+
+  // 2. Long-lived browser helper resolves after startupGraceMs without waiting for exit
+  const longLivedRes = await openSystemBrowser(validUrl, {
+    platform: "linux",
+    startupGraceMs: 25,
+    spawnFn: () => {
+      const proc = new EventEmitter();
+      proc.unref = () => {};
+      setTimeout(() => proc.emit("spawn"), 5);
+      return proc;
+    },
+  });
+  assert.deepEqual(longLivedRes, { launched: true });
+
+  // 3. Deferred nonzero exit after startupGraceMs aborts `serve --wait` via the default openBrowser path when no viewer connected
+  const { root, copilotHome } = createGitFixtureRepo(t);
+  const env = { ...process.env, COPILOT_HOME: copilotHome };
+  await assert.rejects(
+    runCli(["serve", "--cwd", root, "--wait", "--json"], {
+      env,
+      stdout: createCaptureStream().stream,
+      browserOptions: {
+        platform: "linux",
+        startupGraceMs: 20,
+        spawnFn: () => {
+          const proc = new EventEmitter();
+          proc.unref = () => {};
+          setTimeout(() => {
+            proc.emit("spawn");
+            setTimeout(() => proc.emit("exit", 4, null), 55);
+          }, 5);
+          return proc;
+        },
+      },
+    }),
+    (err) => {
+      assert.match(err.message, /xdg-open exited with code 4/);
+      assert.match(err.message, /--no-open --print-url/);
+      return true;
+    },
+  );
+});
+
 
 

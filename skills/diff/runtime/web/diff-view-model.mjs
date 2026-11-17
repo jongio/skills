@@ -162,8 +162,10 @@ function splitWordTokens(text) {
       out.push(text.slice(i, j));
       i = j;
     } else {
-      out.push(ch);
-      i += 1;
+      const cp = text.codePointAt(i);
+      const step = cp !== undefined && cp > 0xffff ? 2 : 1;
+      out.push(text.slice(i, i + step));
+      i += step;
     }
   }
   return out;
@@ -355,17 +357,18 @@ export function buildFileTree(files) {
     let prefix = "";
     for (let i = 0; i < parts.length - 1; i += 1) {
       const seg = parts[i];
+      const dirKey = `dir:${seg}`;
       prefix = prefix ? `${prefix}/${seg}` : seg;
-      let existing = cursor.get(seg);
-      if (!existing || existing.kind !== "dir") {
+      let existing = cursor.get(dirKey);
+      if (!existing) {
         existing = { kind: "dir", name: seg, path: prefix, childrenMap: new Map() };
-        cursor.set(seg, existing);
+        cursor.set(dirKey, existing);
       }
       cursor = existing.childrenMap;
     }
 
     const leaf = parts[parts.length - 1];
-    cursor.set(`file:${leaf}:${file.index ?? pathText}`, {
+    cursor.set(`file:${file.index ?? pathText}:${leaf}`, {
       kind: "file",
       name: leaf,
       path: pathText,

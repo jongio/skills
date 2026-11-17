@@ -115,6 +115,8 @@ export function openSystemBrowser(
     env = process.env,
     untrustedRoots = [],
     resolveExecutable,
+    startupGraceMs = 150,
+    onAsyncFailure = null,
   } = {},
 ) {
   const safeUrl = validateLoopbackCapabilityUrl(url);
@@ -129,6 +131,11 @@ export function openSystemBrowser(
       ? ["url.dll,FileProtocolHandler", safeUrl]
       : [safeUrl];
   const childEnv = buildSanitizedBrowserEnv(env);
+  const cmdLabel = path.basename(cmd);
+  const formatLaunchError = (detail) =>
+    new Error(
+      `Failed to launch system browser (${sanitizePublicErrorMessage(detail)}). Re-run with --no-open --print-url to open the viewer manually.`,
+    );
 
   return new Promise((resolve, reject) => {
     const child = spawnFn(cmd, args, {
@@ -140,6 +147,13 @@ export function openSystemBrowser(
       shell: false,
     });
     let settled = false;
+    let graceTimer = null;
+    const clearGrace = () => {
+      if (graceTimer) {
+        clearTimeout(graceTimer);
+        graceTimer = null;
+      }
+    };
     if (typeof child?.once !== "function") {
       settled = true;
       child?.unref?.();
@@ -147,19 +161,49 @@ export function openSystemBrowser(
       return;
     }
     child.once("error", (err) => {
-      if (settled) return;
-      settled = true;
-      reject(
-        new Error(
-          `Failed to launch system browser: ${sanitizePublicErrorMessage(err)}`,
-        ),
-      );
+      clearGrace();
+      const failure = formatLaunchError(err);
+      if (!settled) {
+        settled = true;
+        reject(failure);
+      } else {
+        onAsyncFailure?.(failure);
+      }
+    });
+    child.once("exit", (code, signal) => {
+      clearGrace();
+      if (code === 0) {
+        if (!settled) {
+          settled = true;
+          child.unref?.();
+          resolve({ launched: true });
+        }
+        return;
+      }
+      const detail =
+        code !== null && code !== undefined
+          ? `${cmdLabel} exited with code ${code}`
+          : `${cmdLabel} terminated by ${signal || "signal"}`;
+      const failure = formatLaunchError(detail);
+      if (!settled) {
+        settled = true;
+        reject(failure);
+      } else {
+        onAsyncFailure?.(failure);
+      }
     });
     child.once("spawn", () => {
       if (settled) return;
-      settled = true;
-      child.unref?.();
-      resolve({ launched: true });
+      const delay =
+        Number.isFinite(startupGraceMs) && startupGraceMs >= 0 ? startupGraceMs : 150;
+      graceTimer = setTimeout(() => {
+        graceTimer = null;
+        if (settled) return;
+        settled = true;
+        child.unref?.();
+        resolve({ launched: true });
+      }, delay);
+      graceTimer.unref?.();
     });
   });
 }
@@ -572,8 +616,10 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
 
   const openBrowser =
     deps.openBrowser ??
-    ((targetUrl) =>
+    ((targetUrl, browserOpts = {}) =>
       openSystemBrowser(targetUrl, {
+        ...deps.browserOptions,
+        ...browserOpts,
         env,
         untrustedRoots: [workspacePath, process.cwd()],
       }));
@@ -663,18 +709,10 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     const domainId = inst?.domainId ?? "default";
     const initialState = await runtime.getState(domainId);
 
-    if (!parsed.noOpen) {
-      await openBrowser(panel.url);
-    }
-
-    deps.onReady?.({
-      url: panel.url,
-      domain: initialState.domain,
-      status: panel.status,
-    });
-
     let idleTimer = null;
     let resolveStop = null;
+    let viewerConnected = false;
+    let deferredLaunchError = null;
     const stopPromise = new Promise((resolve) => {
       resolveStop = resolve;
     });
@@ -685,11 +723,39 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
         resolveStop?.({ reason: "timeout" });
       }, parsed.idleTimeoutMs);
     };
-    resetIdleTimer();
 
     if (inst?.server) {
-      inst.server.on("request", resetIdleTimer);
+      inst.server.on("request", (_req, res) => {
+        res.once("finish", () => {
+          if (res.statusCode > 0 && res.statusCode < 400) {
+            viewerConnected = true;
+            resetIdleTimer();
+          }
+        });
+      });
     }
+
+    if (!parsed.noOpen) {
+      await openBrowser(panel.url, {
+        onAsyncFailure: (err) => {
+          if (!viewerConnected) {
+            deferredLaunchError = err;
+            resolveStop?.({ reason: "launch_failed", error: err });
+          }
+        },
+      });
+      if (deferredLaunchError && !viewerConnected) {
+        throw deferredLaunchError;
+      }
+    }
+
+    deps.onReady?.({
+      url: panel.url,
+      domain: initialState.domain,
+      status: panel.status,
+    });
+
+    resetIdleTimer();
 
     const onSignal = () => resolveStop?.({ reason: "signal" });
     process.once("SIGINT", onSignal);
@@ -710,7 +776,13 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
           ...(parsed.printUrl ? { url: panel.url } : {}),
         };
         writeOutput(stdout, startPayload, parsed.json);
-        await stopPromise;
+        const stopOutcome = await stopPromise;
+        if (stopOutcome?.reason === "launch_failed" && stopOutcome.error) {
+          stderr.write(
+            `diff warning: ${sanitizePublicErrorMessage(stopOutcome.error)}\n`,
+          );
+          return { ...startPayload, ok: false };
+        }
         return startPayload;
       }
 
@@ -722,6 +794,10 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
         submittedPromise.then((info) => ({ reason: "submitted", info })),
         stopPromise,
       ]);
+
+      if (outcome.reason === "launch_failed") {
+        throw outcome.error ?? new Error("Failed to launch system browser");
+      }
 
       if (outcome.reason === "submitted") {
         await new Promise((r) => setTimeout(r, settleMs));

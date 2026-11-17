@@ -115,6 +115,73 @@ function toCanvasKitError(err, fallbackCode = "diff_load_failed") {
 
 const runtimeOpenLocks = new WeakMap();
 const rawOpenInstanceFns = new WeakMap();
+const hardenedServers = new WeakSet();
+
+function hardenCanvasHttpServer(server) {
+  if (!server || typeof server.listeners !== "function" || hardenedServers.has(server)) {
+    return;
+  }
+  const existing = server.listeners("request");
+  if (!Array.isArray(existing) || existing.length === 0) {
+    return;
+  }
+  hardenedServers.add(server);
+  server.removeAllListeners("request");
+  for (const origListener of existing) {
+    server.on("request", (req, res) => {
+      const rawTarget = typeof req?.url === "string" ? req.url : "";
+      let parsedTarget = null;
+      if (rawTarget) {
+        try {
+          parsedTarget = new URL(rawTarget, "http://127.0.0.1");
+        } catch {
+          parsedTarget = null;
+        }
+      }
+      if (!rawTarget || !parsedTarget || (!rawTarget.startsWith("/") && rawTarget !== "*")) {
+        if (!res.headersSent) {
+          res.writeHead(400, {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+          });
+        }
+        res.end(
+          JSON.stringify({
+            ok: false,
+            code: "bad_request",
+            message: "Malformed request target",
+          }),
+        );
+        return;
+      }
+      Promise.resolve()
+        .then(() => origListener.call(server, req, res))
+        .catch(() => {
+          try {
+            if (!res.headersSent) {
+              res.writeHead(500, {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+              });
+              res.end(
+                JSON.stringify({
+                  ok: false,
+                  code: "internal_error",
+                  message: "Internal server error",
+                }),
+              );
+            } else {
+              res.destroy();
+            }
+          } catch {
+            // ignore secondary socket write errors
+          }
+        });
+    });
+  }
+}
 
 function withKeyedRuntimeLock(lockRegistry, runtime, key, fn) {
   if (!runtime || (typeof runtime !== "object" && typeof runtime !== "function")) {
@@ -156,7 +223,10 @@ export function ensureSerializedRuntimeOpen(rt) {
     const instanceId = String(args?.instanceId || "");
     const hadExisting = Boolean(instanceId && rt._instances?.has(instanceId));
     try {
-      return await origOpenInstance(args);
+      const result = await origOpenInstance(args);
+      const inst = instanceId ? rt._instances?.get(instanceId) : null;
+      hardenCanvasHttpServer(inst?.server);
+      return result;
     } catch (err) {
       if (!hadExisting && instanceId && rt._instances?.has(instanceId)) {
         await rt.closeInstance?.(instanceId)?.catch?.(() => {});
