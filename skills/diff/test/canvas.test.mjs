@@ -4013,5 +4013,117 @@ test("review round 4: Git file-type-change tracking, monotonic stateSeq snapshot
   );
 });
 
+test("truncated or delimiter-ambiguous repository names produce collision-free storage domainIds and isolate review state", async (t) => {
+  const storeHome = fs.realpathSync.native(
+    fs.mkdtempSync(path.join(os.tmpdir(), "diff-repo-collision-")),
+  );
+  t.after(() => fs.rmSync(storeHome, { recursive: true, force: true }));
+
+  const repoA =
+    "example-org/enterprise-customer-billing-reconciliation-platform-service-api";
+  const repoB =
+    "example-org/enterprise-customer-billing-reconciliation-platform-service-web";
+
+  assert.equal(computeDomainId({ repo: "example-org/widgets", pr: 2 }), "pr__example-org__widgets__2");
+
+  const domainA = computeDomainId({ repo: repoA, pr: 42 });
+  const domainB = computeDomainId({ repo: repoB, pr: 42 });
+  assert.notEqual(domainA, domainB);
+  assert.ok(domainA.length <= 120);
+  assert.ok(domainB.length <= 120);
+
+  const maxLenDomain = computeDomainId({
+    repo: `${"a".repeat(39)}/${"r".repeat(100)}`,
+    pr: 999_999_999,
+    paths: ["src/index.ts", "src/utils.ts"],
+  });
+  assert.ok(
+    maxLenDomain.length <= 120,
+    `Expected max domainId length <= 120, got ${maxLenDomain.length} (${maxLenDomain})`,
+  );
+  assert.match(maxLenDomain, /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/);
+
+  assert.notEqual(
+    computeDomainId({ repo: "acme__corp/app", pr: 1 }),
+    computeDomainId({ repo: "acme/corp__app", pr: 1 }),
+  );
+  assert.notEqual(
+    computeDomainId({ repo: "example-org/foo..bar", pr: 1 }),
+    computeDomainId({ repo: "example-org/foo_bar", pr: 1 }),
+  );
+
+  const makePatch = (label) =>
+    [
+      "diff --git a/src/service.ts b/src/service.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/service.ts",
+      "+++ b/src/service.ts",
+      "@@ -1 +1 @@",
+      `-export const name = "old";`,
+      `+export const name = "${label}";`,
+      "",
+    ].join("\n");
+
+  const execStub = async (_cmd, args) => {
+    const repoIdx = args.indexOf("--repo");
+    const targetRepo = repoIdx >= 0 ? args[repoIdx + 1] : "";
+    if (args[0] === "pr" && args[1] === "view") {
+      return JSON.stringify({
+        number: 42,
+        title: targetRepo === repoA ? "API PR" : "Web PR",
+        headRefName: "feat/update",
+        baseRefName: "main",
+        headRefOid: targetRepo === repoA ? "a".repeat(40) : "b".repeat(40),
+        baseRefOid: "c".repeat(40),
+        state: "OPEN",
+      });
+    }
+    if (args[0] === "pr" && args[1] === "diff") {
+      return makePatch(targetRepo === repoA ? "api" : "web");
+    }
+    throw new Error(`Unexpected gh invocation: ${args.join(" ")}`);
+  };
+
+  const config = createDiffCanvasConfig({
+    execFn: execStub,
+    env: { COPILOT_HOME: storeHome },
+  });
+  const rt = createCanvasRuntime(config);
+  t.after(() => rt.shutdown());
+
+  await openDiffInstance(rt, config, {
+    instanceId: "panel-long-repo",
+    input: { repo: repoA, pr: 42 },
+    workspacePath: "",
+  });
+  await rt.invokeFromAgent(
+    "add_comment",
+    { file: "src/service.ts", line: 1, side: "right", body: "API-only comment" },
+    { instanceId: "panel-long-repo" },
+  );
+  await rt.invokeFromAgent(
+    "toggle_viewed",
+    { file: "src/service.ts" },
+    { instanceId: "panel-long-repo" },
+  );
+
+  await openDiffInstance(rt, config, {
+    instanceId: "panel-long-repo",
+    input: { repo: repoB, pr: 42 },
+    workspacePath: "",
+  });
+
+  const stateB = await rt.getState(domainB);
+  assert.equal(stateB.comments.length, 0, "Second long-named repo must not inherit comments");
+  assert.deepEqual(stateB.viewedFiles, [], "Second long-named repo must not inherit viewedFiles");
+
+  const reviewA = await rt.invokeFromAgent("get_review", {}, { targetDomainId: domainA });
+  assert.equal(reviewA.comments.length, 1);
+  assert.equal(reviewA.comments[0].body, "API-only comment");
+  const stateA = await rt.getState(domainA);
+  assert.deepEqual(stateA.viewedFiles, ["src/service.ts"]);
+});
+
+
 
 

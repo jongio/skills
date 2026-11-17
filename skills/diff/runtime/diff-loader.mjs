@@ -395,14 +395,16 @@ function assertSafeResolvedRepoRoot(repoRoot, sourceCwd) {
   return repoRoot;
 }
 
-function sanitizeSegment(raw, fallback = "item") {
+function sanitizeSegment(raw, fallback = "item", maxLen = 48) {
   const cleaned = String(raw ?? "")
     .trim()
     .replace(/[^A-Za-z0-9._-]+/g, "_")
     .replace(/\.{2,}/g, "_")
     .replace(/^_+|_+$/g, "");
   if (!cleaned || cleaned === "." || cleaned === "..") return fallback;
-  return cleaned.slice(0, 48);
+  const truncated = cleaned.slice(0, maxLen).replace(/^_+|_+$/g, "");
+  if (!truncated || truncated === "." || truncated === "..") return fallback;
+  return truncated;
 }
 
 function resolveLocalGitTopLevel(startDir) {
@@ -534,8 +536,18 @@ export function computeDomainIdForSource(source) {
 
   if (source.mode === "pr") {
     if (source.repo) {
-      const [owner, repo] = source.repo.toLowerCase().split("/");
-      return `pr__${sanitizeSegment(owner, "owner")}__${sanitizeSegment(repo, "repo")}__${source.pr}${pathsSuffix}`;
+      const [owner = "", repo = ""] = source.repo.toLowerCase().split("/");
+      const safeOwner = sanitizeSegment(owner, "owner", 36);
+      const safeRepo = sanitizeSegment(repo, "repo", 36);
+      const needsRepoDigest =
+        safeOwner !== owner ||
+        safeRepo !== repo ||
+        owner.includes("__") ||
+        repo.includes("__");
+      const repoDigestSuffix = needsRepoDigest
+        ? `__h_${createHash("sha256").update(`${owner}/${repo}`, "utf8").digest("hex").slice(0, 12)}`
+        : "";
+      return `pr__${safeOwner}__${safeRepo}${repoDigestSuffix}__${source.pr}${pathsSuffix}`;
     }
     if (!source.cwd) return "unconfigured";
     const cwdHash = createHash("sha256")

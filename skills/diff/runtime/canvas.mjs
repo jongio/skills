@@ -1338,10 +1338,13 @@ export function createDiffCanvasConfig({
   }
 
   function fileFor(domainId) {
+    const raw = String(domainId || "default");
+    const cleaned =
+      raw.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/\.{2,}/g, "_") || "default";
     const safe =
-      String(domainId || "default")
-        .replace(/[^a-zA-Z0-9._-]/g, "_")
-        .slice(0, 120) || "default";
+      cleaned.length > 120 || cleaned !== raw
+        ? `${cleaned.slice(0, 102).replace(/_+$/g, "") || "default"}__h_${createHash("sha256").update(raw, "utf8").digest("hex").slice(0, 12)}`
+        : cleaned;
     return effectiveStoreFactory(`${safe}.json`);
   }
 
