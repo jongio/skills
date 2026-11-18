@@ -277,7 +277,9 @@ function recommendationFor(members, canonical, destructive, complete) {
   }
   const branch = preferredBranch(members);
   if (branch && isIntegratedLocalBranch(branch)) {
-    return "defer";
+    return complete && members.some(({ changeUnitIds }) => changeUnitIds.length > 0)
+      ? "resume"
+      : "defer";
   }
   const ancestry = branch?.observed?.ancestry;
   if (ancestry?.ahead > 0 && ancestry?.behind > 0) {
@@ -289,12 +291,24 @@ function recommendationFor(members, canonical, destructive, complete) {
   return complete ? "resume" : "defer";
 }
 
-function recommendationReason(recommendation, groupId, destructive) {
+function recommendationReason(recommendation, groupId, destructive, members) {
   if (destructive.length > 0) {
     return reason(
       "exact-duplicate-preserved",
       groupId,
       "Exact duplicate work has a retained durable witness.",
+    );
+  }
+  if (
+    recommendation === "defer" &&
+    completeEvidence(members) &&
+    members.some(isIntegratedLocalBranch) &&
+    members.every(({ changeUnitIds }) => changeUnitIds.length === 0)
+  ) {
+    return reason(
+      "integrated-work-retained",
+      groupId,
+      "Integrated branch work is retained by cleanup safeguards.",
     );
   }
   const details = {
@@ -381,7 +395,7 @@ function workItem(group, evidence, allCarriers) {
     evidence: evidenceState,
     confidence: evidenceState === "complete" ? "proven" : "unknown",
     reasons: [
-      recommendationReason(recommendation, group.id, destructive),
+      recommendationReason(recommendation, group.id, destructive, members),
     ],
     blockers,
     preservation: {

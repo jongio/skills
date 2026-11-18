@@ -102,9 +102,13 @@ clear, exact witnesses, and current identities. Recommendation alone never
 authorizes or implies an action. Each destructive carrier action requires its
 own identity, proof, witness set, blocker check, and approval.
 
-When exact integration proof leaves no unique branch work but cleanup is
-blocked, defer rather than infer a rebase or new PR from ahead/behind counts.
-Integration proof does not clear any cleanup blocker or grant approval.
+When exact integration proof leaves no change units across the whole work item
+but cleanup is blocked, defer rather than infer a rebase or new PR from
+ahead/behind counts. Complete integration proof uses the
+`integrated-work-retained` reason, not an incomplete-evidence reason. If another
+member, such as a grouped stash, still has change units, retain the normal
+completeness-based resume/save behavior. Integration proof does not clear any
+cleanup blocker or grant approval.
 
 ## Source-specific proof
 
