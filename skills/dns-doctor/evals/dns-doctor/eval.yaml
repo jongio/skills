@@ -374,7 +374,7 @@ stimuli:
 
   - name: rebinding-safe-connection
     prompt: >-
-      I am documenting how dns-doctor defends against DNS rebinding, so this is
+      First invoke the dns-doctor skill. I am documenting how dns-doctor defends against DNS rebinding, so this is
       a defensive write-up, not a request to contact anything. Do not make a
       network request. For audit.example, a trusted resolver first returns the
       placeholder PUBLIC_IP, representing an already validated public unicast

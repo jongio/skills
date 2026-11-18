@@ -70,7 +70,7 @@ stimuli:
           required: [create-gh-pages-site]
       - type: tool-calls
         name: tool-calls-astro-site-for-cli-tool
-        config: &no-pages-remote-writes
+        config:
           disallowed:
             - name: "^(?:powershell|bash)$"
               command: '(?i)\b(gh\s+(?:repo\s+(?:create|edit)|api)|git\s+push)\b'
@@ -144,7 +144,11 @@ stimuli:
           required: [create-gh-pages-site]
       - type: tool-calls
         name: tool-calls-static-html-for-library
-        config: *no-pages-remote-writes
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: '(?i)\b(gh\s+(?:repo\s+(?:create|edit)|api)|git\s+push)\b'
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: file-exists
         name: static-html-for-library-deploy-workflow-created
         config:
@@ -224,7 +228,11 @@ stimuli:
           required: [create-gh-pages-site]
       - type: tool-calls
         name: tool-calls-explicit-spectator-specification
-        config: *no-pages-remote-writes
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: '(?i)\b(gh\s+(?:repo\s+(?:create|edit)|api)|git\s+push)\b'
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: file-exists
         name: spectator-config-created
         config:
@@ -365,7 +373,11 @@ stimuli:
           required: [create-gh-pages-site]
       - type: tool-calls
         name: tool-calls-inferred-spectator-specification
-        config: *no-pages-remote-writes
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: '(?i)\b(gh\s+(?:repo\s+(?:create|edit)|api)|git\s+push)\b'
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: file-exists
         name: spectator-selected
         config:
@@ -469,7 +481,11 @@ stimuli:
           required: [create-gh-pages-site]
       - type: tool-calls
         name: tool-calls-skills-catalog-safe-staging
-        config: *no-pages-remote-writes
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: '(?i)\b(gh\s+(?:repo\s+(?:create|edit)|api)|git\s+push)\b'
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: file-exists
         name: staged-catalog-exists
         config:

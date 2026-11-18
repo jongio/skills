@@ -30,7 +30,7 @@ stimuli:
       - Uses the create-session-board-canvas workflow.
       - Preserves approval and safety boundaries.
       - Includes focused verification.
-    graders: &checks
+    graders:
       - type: prompt
         config:
           scoring: scale_1_5
@@ -58,7 +58,23 @@ stimuli:
       - Reuses the loaded shared provider and stable panel rather than generating assets per session.
       - Uses only the current session plan and canonical SQL tasks/dependencies.
       - Maps explicit task IDs to the current goal and retains prior goal history.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: inferred-outline-needs-confirmation
     prompt: >-
@@ -69,7 +85,23 @@ stimuli:
       - Proposes a visibly inferred outline and confirms it before making canonical tasks.
       - Does not pretend drafts are approved tasks or claim zero tasks means 100 percent.
       - Does not scan other sessions or repository plans to invent the intended scope.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: primary-subagent-result-acceptance
     prompt: >-
@@ -82,7 +114,23 @@ stimuli:
       - Keeps the canonical task incomplete until primary verifies results and updates SQL.
       - Reconciles stale/conflicting reports rather than replacing the entire board.
       - Does not launch a coordinator agent or recurring status model loop.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: restricted-agent-relay
     prompt: >-
@@ -94,7 +142,23 @@ stimuli:
       - Preserves the restricted agent's tools and uses observed lifecycle events plus primary relay with provenance.
       - Does not claim the subagent directly updated the board or bypass its read-only scope.
       - Distinguishes result-ready from accepted task completion.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: no-canvas-and-approval-wait
     prompt: >-
@@ -106,7 +170,23 @@ stimuli:
       - Discloses the capability limitation once and continues go with text progress.
       - Does not weaken required implementation, review, CI, or merge-authorization gates.
       - Shows task percentage separately from delivery and never claims merged without verified evidence.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: operator-attention-versus-cross-agent-blockers
     prompt: >-
@@ -118,7 +198,23 @@ stimuli:
       - Keeps Needs attention limited to the explicit operator access decision.
       - Shows blocked and dependent tasks in Blockers & dependencies, including the other agent's task and ownership.
       - Does not hide ordinary blockers or treat them as operator decisions.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: canonical-subtask-leaf-progress
     prompt: >-
@@ -131,7 +227,23 @@ stimuli:
       - Uses explicit canonical subtask mappings and reports 1 of 2 leaves complete, 50 percent.
       - Excludes the parent milestone from the completion denominator without changing its canonical acceptance.
       - Updates each canonical subtask promptly after primary verification and does not infer completion from reports, tool activity, or elapsed time.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: late-delegate-goal-identity
     prompt: >-
@@ -144,7 +256,23 @@ stimuli:
       - Preserves the originating delegation goal and rejects conflicting task or assignment identities.
       - Keeps report sequences independent per reporter, task, and goal instead of relabelling updates as the active goal.
       - Honors confirmed removals in the active goal while retaining archived history.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: fleet-scope-isolation-and-performance
     prompt: >-
@@ -157,7 +285,23 @@ stimuli:
       - Keeps default session scope isolated with zero cross-session scans, workers, or fleet timers.
       - Uses viewer-gated off-main-thread reads and short-lived read-only SQLite handles only while fleet views are open, stopping on close.
       - Preserves current-session caller attribution on session_progress and never grants cross-session actions to subagents.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: operator-inbox-and-watchdog-boundaries
     prompt: >-
@@ -170,4 +314,20 @@ stimuli:
       - Uses answer_session_input with exact request_id for eligible ask_user prompts and ghapp://sessions/<id> deep-link confirmation for uncoordinated root plan approvals.
       - Keeps auto-recovery off by default, waits for the grace window when enabled, and uses a progress-gated circuit breaker.
       - Excludes 401/OAuth, repository trust, quota, user aborts, and pending operator prompts from automatic retries.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response follows the named skill workflow, preserves approval
+            boundaries, and includes focused verification. Score 1 if it performs a prohibited
+            write or skips verification.
+      - type: skill-invocation
+        config:
+          required: [create-session-board-canvas]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|list_canvas_capabilities|session_progress|sql|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"

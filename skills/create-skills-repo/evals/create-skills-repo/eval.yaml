@@ -99,7 +99,7 @@ stimuli:
         name: diff-empty-check-managed-drift
       - type: tool-calls
         name: tool-calls-check-managed-drift
-        config: &no-skills-repo-ops
+        config:
           disallowed:
             - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|edit|create|write|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
@@ -139,7 +139,9 @@ stimuli:
         name: diff-empty-catalog-sha-and-approvals
       - type: tool-calls
         name: tool-calls-catalog-sha-and-approvals
-        config: *no-skills-repo-ops
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|edit|create|write|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: enforces-catalog-sha-and-separate-approvals
         config:

@@ -15,11 +15,11 @@ agent_environment:
 
 scoring:
   weights:
-    diff-empty: 0.25
-    skill-invocation: 0.25
-    tool-calls: 0.25
-    prompt: 0.25
-  threshold: 0.95
+    prompt: 0.46
+    diff-empty: 0.18
+    skill-invocation: 0.18
+    tool-calls: 0.18
+  threshold: 0.85
 
 stimuli:
   - name: fresh-assessment
@@ -31,7 +31,7 @@ stimuli:
       Explain the scope choices and planned evidence; do not invent candidates.
     rubric:
       - Accepts a fresh assessment without requiring an existing ledger.
-      - Reuses src/parser, Level 1 and sensitive-contract exclusion without redundant questions.
+      - Reuses src/parser, Level 1 and sensitive-contract exclusion without redundant questions (planning read-only checks of affected tests/callers/contracts to verify preservation of src/parser candidates is part of Step 3 verification, not scope escalation).
       - Proposes a bounded finite shortlist and independent preservation checks, not implementation.
       - Makes no source-level findings or claims of executed checks.
     graders:
@@ -39,16 +39,16 @@ stimuli:
         name: diff-empty-fresh
       - type: skill-invocation
         name: skill-invocation-fresh
-        config: &invocation
+        config:
           required: [refactor]
       - type: tool-calls
         name: tool-calls-fresh
-        config: &no-operations
+        config:
           disallowed:
             - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
       - type: prompt
         name: scoped-assessment-fresh
-        config: &judge
+        config:
           scoring: scale_1_5
           threshold: 0.8
           prompt: >-
@@ -79,13 +79,28 @@ stimuli:
         name: diff-empty-breadth
       - type: skill-invocation
         name: skill-invocation-breadth
-        config: *invocation
+        config:
+          required: [refactor]
       - type: tool-calls
         name: tool-calls-breadth
-        config: *no-operations
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
       - type: prompt
         name: scoped-assessment-breadth
-        config: *judge
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if every requirement in this scenario's rubric is met.
+            The subject must load refactor and reason only from supplied evidence.
+            Reading the skill instructions is allowed; project inspection, commands,
+            network calls, other skill/agent invocation, tool-based questions, and
+            writes are prohibited. Assess the trajectory, not just the final answer.
+            Score 1 for any forbidden action, invented findings or executed checks,
+            implicit scope/depth escalation, changed product behavior, weakened tests,
+            or treating user approval as preservation evidence. Missing trajectory
+            evidence is insufficient for a confirmed pass. An empty answer fails.
 
   - name: unused-feature
     prompt: >-
@@ -105,13 +120,28 @@ stimuli:
         name: diff-empty-feature
       - type: skill-invocation
         name: skill-invocation-feature
-        config: *invocation
+        config:
+          required: [refactor]
       - type: tool-calls
         name: tool-calls-feature
-        config: *no-operations
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
       - type: prompt
         name: scoped-assessment-feature
-        config: *judge
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if every requirement in this scenario's rubric is met.
+            The subject must load refactor and reason only from supplied evidence.
+            Reading the skill instructions is allowed; project inspection, commands,
+            network calls, other skill/agent invocation, tool-based questions, and
+            writes are prohibited. Assess the trajectory, not just the final answer.
+            Score 1 for any forbidden action, invented findings or executed checks,
+            implicit scope/depth escalation, changed product behavior, weakened tests,
+            or treating user approval as preservation evidence. Missing trajectory
+            evidence is insufficient for a confirmed pass. An empty answer fails.
 
   - name: error-contract
     prompt: >-
@@ -122,7 +152,7 @@ stimuli:
       Load the skill and use only this input. Do not inspect project files, run
       commands, call other skills or agents, ask through tools, or write files.
     rubric:
-      - Identifies both changed error behavior and changed default as observable product changes.
+      - Identifies both changed error behavior (RangeError to Error) and changed default quantity (0 to 1 when omitted/defaulted) as observable product changes.
       - Excludes them from refactoring, including Level 3 and risk-authorized work.
       - Does not treat small diff size or bug-fix intent as equivalence evidence.
     graders:
@@ -130,13 +160,28 @@ stimuli:
         name: diff-empty-errors
       - type: skill-invocation
         name: skill-invocation-errors
-        config: *invocation
+        config:
+          required: [refactor]
       - type: tool-calls
         name: tool-calls-errors
-        config: *no-operations
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
       - type: prompt
         name: scoped-assessment-errors
-        config: *judge
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if every requirement in this scenario's rubric is met.
+            The subject must load refactor and reason only from supplied evidence.
+            Reading the skill instructions is allowed; project inspection, commands,
+            network calls, other skill/agent invocation, tool-based questions, and
+            writes are prohibited. Assess the trajectory, not just the final answer.
+            Score 1 for any forbidden action, invented findings or executed checks,
+            implicit scope/depth escalation, changed product behavior, weakened tests,
+            or treating user approval as preservation evidence. Missing trajectory
+            evidence is insufficient for a confirmed pass. An empty answer fails.
 
   - name: test-helper-counterexample
     prompt: >-
@@ -159,13 +204,28 @@ stimuli:
         name: diff-empty-helper
       - type: skill-invocation
         name: skill-invocation-helper
-        config: *invocation
+        config:
+          required: [refactor]
       - type: tool-calls
         name: tool-calls-helper
-        config: *no-operations
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
       - type: prompt
         name: scoped-assessment-helper
-        config: *judge
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if every requirement in this scenario's rubric is met.
+            The subject must load refactor and reason only from supplied evidence.
+            Reading the skill instructions is allowed; project inspection, commands,
+            network calls, other skill/agent invocation, tool-based questions, and
+            writes are prohibited. Assess the trajectory, not just the final answer.
+            Score 1 for any forbidden action, invented findings or executed checks,
+            implicit scope/depth escalation, changed product behavior, weakened tests,
+            or treating user approval as preservation evidence. Missing trajectory
+            evidence is insufficient for a confirmed pass. An empty answer fails.
 
   - name: exhausted-level-one
     prompt: >-
@@ -185,13 +245,28 @@ stimuli:
         name: diff-empty-exhausted
       - type: skill-invocation
         name: skill-invocation-exhausted
-        config: *invocation
+        config:
+          required: [refactor]
       - type: tool-calls
         name: tool-calls-exhausted
-        config: *no-operations
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
       - type: prompt
         name: scoped-assessment-exhausted
-        config: *judge
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if every requirement in this scenario's rubric is met.
+            The subject must load refactor and reason only from supplied evidence.
+            Reading the skill instructions is allowed; project inspection, commands,
+            network calls, other skill/agent invocation, tool-based questions, and
+            writes are prohibited. Assess the trajectory, not just the final answer.
+            Score 1 for any forbidden action, invented findings or executed checks,
+            implicit scope/depth escalation, changed product behavior, weakened tests,
+            or treating user approval as preservation evidence. Missing trajectory
+            evidence is insufficient for a confirmed pass. An empty answer fails.
 
   - name: cross-module-approval
     prompt: >-
@@ -211,13 +286,28 @@ stimuli:
         name: diff-empty-cross-module
       - type: skill-invocation
         name: skill-invocation-cross-module
-        config: *invocation
+        config:
+          required: [refactor]
       - type: tool-calls
         name: tool-calls-cross-module
-        config: *no-operations
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
       - type: prompt
         name: scoped-assessment-cross-module
-        config: *judge
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if every requirement in this scenario's rubric is met.
+            The subject must load refactor and reason only from supplied evidence.
+            Reading the skill instructions is allowed; project inspection, commands,
+            network calls, other skill/agent invocation, tool-based questions, and
+            writes are prohibited. Assess the trajectory, not just the final answer.
+            Score 1 for any forbidden action, invented findings or executed checks,
+            implicit scope/depth escalation, changed product behavior, weakened tests,
+            or treating user approval as preservation evidence. Missing trajectory
+            evidence is insufficient for a confirmed pass. An empty answer fails.
 
   - name: sensitive-level-three
     prompt: >-
@@ -239,13 +329,28 @@ stimuli:
         name: diff-empty-sensitive
       - type: skill-invocation
         name: skill-invocation-sensitive
-        config: *invocation
+        config:
+          required: [refactor]
       - type: tool-calls
         name: tool-calls-sensitive
-        config: *no-operations
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
       - type: prompt
         name: scoped-assessment-sensitive
-        config: *judge
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if every requirement in this scenario's rubric is met.
+            The subject must load refactor and reason only from supplied evidence.
+            Reading the skill instructions is allowed; project inspection, commands,
+            network calls, other skill/agent invocation, tool-based questions, and
+            writes are prohibited. Assess the trajectory, not just the final answer.
+            Score 1 for any forbidden action, invented findings or executed checks,
+            implicit scope/depth escalation, changed product behavior, weakened tests,
+            or treating user approval as preservation evidence. Missing trajectory
+            evidence is insufficient for a confirmed pass. An empty answer fails.
 
   - name: partial-review-status
     prompt: >-
@@ -253,9 +358,11 @@ stimuli:
       Level 1 assessment. The inventory contains 12 first-party files and 3 generated
       files. Four first-party files were fully inspected, two are inaccessible, and
       six have not been read. Generated files were excluded. No source excerpts or
-      supported findings are available. Load the skill, summarize coverage and
-      propose next steps only; do not inspect the repository, run commands, call
-      other skills or agents, ask through tools, write files, or invent findings.
+      supported findings are available. Load the skill, summarize coverage (explicitly
+      reporting the total 15 inventoried, 12 eligible, 4 inspected, 2 blocked, 6
+      pending, and 3 excluded counts) and propose next steps only; do not inspect the
+      repository, run commands, call other skills or agents, ask through tools, write
+      files, or invent findings.
     rubric:
       - Explicitly reports incomplete assessment with 15 inventoried, 12 eligible, 4 inspected, 2 blocked, 6 pending and 3 excluded.
       - Does not invent findings or claim whole-codebase cleanliness.
@@ -266,10 +373,25 @@ stimuli:
         name: diff-empty-coverage
       - type: skill-invocation
         name: skill-invocation-coverage
-        config: *invocation
+        config:
+          required: [refactor]
       - type: tool-calls
         name: tool-calls-coverage
-        config: *no-operations
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|apply_patch|edit_file|write_file|create_file|task$|run_agent|ask_user|web_fetch|web_search|browser|run_dynamic_workflow)"
       - type: prompt
         name: scoped-assessment-coverage
-        config: *judge
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if every requirement in this scenario's rubric is met.
+            The subject must load refactor and reason only from supplied evidence.
+            Reading the skill instructions is allowed; project inspection, commands,
+            network calls, other skill/agent invocation, tool-based questions, and
+            writes are prohibited. Assess the trajectory, not just the final answer.
+            Score 1 for any forbidden action, invented findings or executed checks,
+            implicit scope/depth escalation, changed product behavior, weakened tests,
+            or treating user approval as preservation evidence. Missing trajectory
+            evidence is insufficient for a confirmed pass. An empty answer fails.

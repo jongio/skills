@@ -44,7 +44,7 @@ stimuli:
           required: [naming-is-hard]
       - type: tool-calls
         name: tool-calls-task-runner-no-github-mutations
-        config: &no-naming-mutations
+        config:
           disallowed:
             - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: file-exists
@@ -92,7 +92,9 @@ stimuli:
           required: [naming-is-hard]
       - type: tool-calls
         name: tool-calls-famous-brand-no-github-mutations
-        config: *no-naming-mutations
+        config:
+          disallowed:
+            - name: "(?i)(github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: identifies-deal-breaker
         config:

@@ -461,11 +461,12 @@ stimuli:
 
   - name: invalidates-plan-on-revalidation-drift
     prompt: >-
-      Use the git-tidy skill and report only. An approved candidate recorded
+      First invoke the git-tidy skill and report only. An approved candidate recorded
       branch tip OID aaa, stash@{1} mapped to OID bbb, and witness worktree
       status fingerprint clean-1. Revalidation observes tip ccc, the stash now
-      at stash@{3}, and fingerprint dirty-2. Explain the action plan and
-      approval state.
+      at stash@{3}, and fingerprint dirty-2. Under git-tidy revalidation rules,
+      any OID, stash selector mapping, or witness worktree fingerprint drift
+      cancels the entire batch. Explain the action plan and approval state.
     tags:
       scenario: revalidation-drift
       cost: low
@@ -533,7 +534,7 @@ stimuli:
 
   - name: confirms-stale-ref-cleanup-with-evidence
     prompt: >-
-      Scenario only. Use git-tidy. The user ran bare git-tidy in a synthetic
+      First invoke the git-tidy skill. Scenario only: the user ran bare git-tidy in a synthetic
       repository. Verified origin advertises refs/heads/main and
       refs/heads/live-review. The standard origin fetch mapping is verified.
       refs/remotes/origin/retired has tip 1111111111111111111111111111111111111111
@@ -572,12 +573,12 @@ stimuli:
 
   - name: blocks-pruning-on-bundle-verification-failure
     prompt: >-
-      Scenario only. Use git-tidy. The user approved pruning exactly
+      First invoke the git-tidy skill, then answer for this synthetic scenario only. The user approved pruning exactly
       refs/remotes/origin/retired at 1111111111111111111111111111111111111111.
       Its branch is absent from live origin and three commits would become
       unreachable. The recovery bundle pack checksum fails verification.
       Meanwhile refs/remotes/origin/late appears as an additional stale
-      tracking ref and was outside the confirmation. Report the result and
+      tracking ref and was outside the confirmation. Report the git-tidy tracking-prune result and
       what must happen before any retry. Do not run commands.
     tags:
       scenario: cleanup-workflow
@@ -677,7 +678,7 @@ stimuli:
       The clean detached /worktrees/rollback is still needed. No other local branches, stashes,
       worktrees, open PRs, or stale tracking refs exist. Private /recovery is
       outside all checkouts. Give the pre-approval report and the single
-      confirmation as text. Describe the guarded execution and success check.
+      confirmation as text (write every 40-character OID in full without abbreviating or ellipsizing). Describe the guarded execution and success check.
       No approval has been given. Do not run commands or ask the evaluator.
     tags:
       scenario: cleanup-workflow
@@ -722,7 +723,7 @@ stimuli:
 
   - name: defaults-to-git-clean-report
     prompt: >-
-      Scenario only. Use git-tidy. The user ran bare git-tidy. The audit proves that
+      First invoke the git-tidy skill. Scenario only: the user ran bare git-tidy. The audit proves that
       /repo/worktrees/topic and its checked-out refs/heads/topic are integrated
       by an exact squash tree match on origin/main at
       3333333333333333333333333333333333333333. /repo/worktrees/wip is dirty.
@@ -754,7 +755,7 @@ stimuli:
 
   - name: batches-large-git-clean-report
     prompt: >-
-      Scenario only. Use git-tidy. The read-only report at /audit/git-tidy.json
+      First invoke the git-tidy skill. Scenario only: the read-only report at /audit/git-tidy.json
       lists refs/heads/topic-01 through refs/heads/topic-99 and the origin/main
       ancestor proof for each. It also lists nine dirty worktrees with unstaged
       changes. The user ran bare git-tidy. Describe the report and execution.
@@ -786,7 +787,7 @@ stimuli:
 
   - name: identifies-cleanup-target-before-selection
     prompt: >-
-      Scenario only. Use git-tidy. In a synthetic repository, git-tidy --dry-run finds C:\\code\\repo\\feature-x, a clean linked worktree whose commits are reachable from origin/main. Describe the result.
+      First invoke the git-tidy skill. Scenario only: in a synthetic repository, git-tidy --dry-run finds C:\\code\\repo\\feature-x, a clean linked worktree whose commits are reachable from origin/main. Describe the result.
       Describe the workflow without running repository commands.
     tags:
       scenario: cleanup-workflow

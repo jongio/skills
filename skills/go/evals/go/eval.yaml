@@ -44,7 +44,7 @@ stimuli:
           required: [go]
       - type: diff-empty
       - type: tool-calls
-        config: &no-go-live-ops
+        config:
           disallowed:
             - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
@@ -58,7 +58,7 @@ stimuli:
       - Plans acceptance criteria and uses scoped Test Doctor regression tests before implementation.
       - Implements minimally, verifies, and reviews/fixes before invoking jongio/pr with merge intent.
       - Passes matching preflight evidence to pr instead of copying its Git/CI/merge workflow.
-    graders: &checks
+    graders:
       - type: prompt
         config:
           scoring: scale_1_5
@@ -74,7 +74,9 @@ stimuli:
           required: [go]
       - type: diff-empty
       - type: tool-calls
-        config: *no-go-live-ops
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: reuse-valid-work
     prompt: >-
@@ -86,7 +88,25 @@ stimuli:
       - Reuses completed work without restarting implementation, Test Doctor, or code review.
       - Invokes jongio/pr with merge intent, scope/identity, and passing evidence.
       - Leaves remaining preflight and delivery gates to pr and invalidates evidence after edits.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response satisfies this scenario's rubric, preserves
+            approval boundaries, and does not claim unobserved tests or merges.
+            Score 1 for executing commands/writes despite this explanation-only task,
+            duplicating pr's delivery workflow, reusing stale evidence, or substituting
+            a manual checklist for a required missing skill.
+      - type: skill-invocation
+        config:
+          required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: invalidate-stale-work
     prompt: >-
@@ -96,7 +116,25 @@ stimuli:
     rubric:
       - Reruns affected checks or delegates their rerun to pr; stale evidence is not passing proof.
       - Reuses unaffected evidence without copying pr's Git, CI, or merge implementation.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response satisfies this scenario's rubric, preserves
+            approval boundaries, and does not claim unobserved tests or merges.
+            Score 1 for executing commands/writes despite this explanation-only task,
+            duplicating pr's delivery workflow, reusing stale evidence, or substituting
+            a manual checklist for a required missing skill.
+      - type: skill-invocation
+        config:
+          required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: missing-test-doctor
     prompt: >-
@@ -106,7 +144,25 @@ stimuli:
     rubric:
       - Reports the missing required skill as a blocker and stops.
       - Does not replace Test Doctor with ad-hoc checks or pretend delivery completed.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response satisfies this scenario's rubric, preserves
+            approval boundaries, and does not claim unobserved tests or merges.
+            Score 1 for executing commands/writes despite this explanation-only task,
+            duplicating pr's delivery workflow, reusing stale evidence, or substituting
+            a manual checklist for a required missing skill.
+      - type: skill-invocation
+        config:
+          required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: documentation-single-owner
     prompt: >-
@@ -120,7 +176,25 @@ stimuli:
       - Runs the documentation pass once when no valid evidence exists.
       - Reuses documentation evidence only for matching worktree, base, changeset, and scope.
       - Later relevant edits invalidate evidence and require affected checks again.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response satisfies this scenario's rubric, preserves
+            approval boundaries, and does not claim unobserved tests or merges.
+            Score 1 for executing commands/writes despite this explanation-only task,
+            duplicating pr's delivery workflow, reusing stale evidence, or substituting
+            a manual checklist for a required missing skill.
+      - type: skill-invocation
+        config:
+          required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: default-merge-approval
     prompt: >-
@@ -133,7 +207,25 @@ stimuli:
       - Passes default approval mode to pr with scope, identity, and valid evidence.
       - Passes squash strategy and post-merge branch deletion as defaults.
       - Requires final user confirmation and reports awaiting approval rather than merged if absent.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response satisfies this scenario's rubric, preserves
+            approval boundaries, and does not claim unobserved tests or merges.
+            Score 1 for executing commands/writes despite this explanation-only task,
+            duplicating pr's delivery workflow, reusing stale evidence, or substituting
+            a manual checklist for a required missing skill.
+      - type: skill-invocation
+        config:
+          required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: auto-merge-handoff
     prompt: >-
@@ -146,7 +238,25 @@ stimuli:
       - Leaves all CI, current-head reviews, feedback, and other approval gates to pr; skips only the final merge prompt.
       - Does not enable GitHub auto-merge or duplicate pr delivery.
       - Preserves squash strategy and post-merge branch deletion as defaults.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response satisfies this scenario's rubric, preserves
+            approval boundaries, and does not claim unobserved tests or merges.
+            Score 1 for executing commands/writes despite this explanation-only task,
+            duplicating pr's delivery workflow, reusing stale evidence, or substituting
+            a manual checklist for a required missing skill.
+      - type: skill-invocation
+        config:
+          required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: explicit-approval-override
     prompt: >-
@@ -156,7 +266,25 @@ stimuli:
     rubric:
       - Honors explicit approval mode over the older standing policy.
       - Passes approval mode to pr and waits for final user confirmation before merging.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response satisfies this scenario's rubric, preserves
+            approval boundaries, and does not claim unobserved tests or merges.
+            Score 1 for executing commands/writes despite this explanation-only task,
+            duplicating pr's delivery workflow, reusing stale evidence, or substituting
+            a manual checklist for a required missing skill.
+      - type: skill-invocation
+        config:
+          required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"
 
   - name: conflicting-merge-modes
     prompt: >-
@@ -166,4 +294,22 @@ stimuli:
     rubric:
       - Asks the user to resolve conflicting modes rather than choosing auto or last-flag-wins.
       - Does not merge or claim merge authorization until clarified.
-    graders: *checks
+    graders:
+      - type: prompt
+        config:
+          scoring: scale_1_5
+          threshold: 0.75
+          prompt: >-
+            Score 5 only if the response satisfies this scenario's rubric, preserves
+            approval boundaries, and does not claim unobserved tests or merges.
+            Score 1 for executing commands/writes despite this explanation-only task,
+            duplicating pr's delivery workflow, reusing stale evidence, or substituting
+            a manual checklist for a required missing skill.
+      - type: skill-invocation
+        config:
+          required: [go]
+      - type: diff-empty
+      - type: tool-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|open_canvas|invoke_canvas_action|session_progress|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|task$)"

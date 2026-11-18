@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { Writable } from "node:stream";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(new URL("../.github/tools/vally/package.json", import.meta.url));
+const YAML = require("yaml");
 const {
   computeMetrics,
   EvalJsonlReporter,
@@ -14,6 +16,56 @@ const {
   normalizeScore,
   resolveGradePass,
 } = await import(pathToFileURL(require.resolve("@microsoft/vally")).href);
+
+async function collectEvalYamlFiles(dir, out = []) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === ".git" || entry.name === "node_modules" || entry.name === "vally-results") {
+      continue;
+    }
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await collectEvalYamlFiles(fullPath, out);
+    } else if (
+      entry.name === "eval.yaml" ||
+      entry.name.endsWith(".eval.yaml") ||
+      entry.name === ".vally.yaml"
+    ) {
+      out.push(fullPath);
+    }
+  }
+  return out;
+}
+
+test("all eval.yaml and .vally.yaml files parse under copilot-evals maxAliasCount: 0 without YAML anchors or aliases", async () => {
+  const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+  const yamlFiles = await collectEvalYamlFiles(repoRoot);
+  assert.ok(yamlFiles.length >= 50, `expected at least 50 eval/vally YAML files, found ${yamlFiles.length}`);
+
+  for (const file of yamlFiles) {
+    const rel = path.relative(repoRoot, file);
+    const source = await readFile(file, "utf8");
+    const doc = YAML.parseDocument(source, { uniqueKeys: true });
+    assert.equal(doc.errors.length, 0, `${rel} has YAML errors: ${doc.errors.map((e) => e.message).join("; ")}`);
+    assert.equal(doc.warnings.length, 0, `${rel} has YAML warnings: ${doc.warnings.map((w) => w.message).join("; ")}`);
+
+    let anchorOrAliasNodes = 0;
+    YAML.visit(doc, {
+      Node(_key, node) {
+        if (YAML.isAlias(node) || node.anchor) {
+          anchorOrAliasNodes++;
+        }
+      },
+    });
+    assert.equal(anchorOrAliasNodes, 0, `${rel} must not contain YAML anchors (&) or aliases (*)`);
+    assert.doesNotThrow(() => doc.toJS({ maxAliasCount: 0 }), `${rel} failed maxAliasCount: 0`);
+
+    if (file.endsWith("eval.yaml")) {
+      const spec = await loadEvalSpec(file);
+      assert.ok(Array.isArray(spec.stimuli) && spec.stimuli.length > 0, `${rel} must define stimuli`);
+    }
+  }
+});
 
 test("migrated agent environments still stage every fixture block", async () => {
   for (const [skill, count] of [["create-gh-pages-site", 5], ["deps-doctor", 11]]) {

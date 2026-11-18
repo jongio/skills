@@ -30,5 +30,6 @@ test("eval-doctor defines skill-doctor boundary, github/evals workflow, and 5 gi
   assert.match(skill, /Least-Privilege Permissions & Step-Scoped Token/);
   assert.match(skill, /Cost & Concurrency Guards/);
   assert.match(skill, /Zero Transcript Leakage/);
+  assert.match(skill, /maxAliasCount: 0/);
   assert.match(skill, /npm ci --prefix \.github\/tools\/vally --ignore-scripts/);
 });

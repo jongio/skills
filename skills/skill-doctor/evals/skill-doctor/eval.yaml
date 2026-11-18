@@ -39,7 +39,7 @@ stimuli:
         name: diff-empty-incremental-week
       - type: tool-calls
         name: tool-calls-incremental-week
-        config: &no-live-tools
+        config:
           disallowed:
             - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
@@ -75,7 +75,9 @@ stimuli:
         name: diff-empty-terse-supported-fix
       - type: tool-calls
         name: tool-calls-terse-supported-fix
-        config: *no-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: minimal-supported-lessons
         config:
@@ -108,7 +110,9 @@ stimuli:
         name: diff-empty-partial-history-and-injection
       - type: tool-calls
         name: tool-calls-partial-history-and-injection
-        config: *no-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: partial-privacy-source
         config:
@@ -142,7 +146,9 @@ stimuli:
         name: diff-empty-failed-delivery-and-cache
       - type: tool-calls
         name: tool-calls-failed-delivery-and-cache
-        config: *no-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: resumable-delivery
         config:
@@ -175,7 +181,9 @@ stimuli:
         name: diff-empty-explicit-range-and-no-change
       - type: tool-calls
         name: tool-calls-explicit-range-and-no-change
-        config: *no-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: no-change-is-valid
         config:
@@ -209,7 +217,9 @@ stimuli:
         name: diff-empty-independent-terseness-pass
       - type: tool-calls
         name: tool-calls-independent-terseness-pass
-        config: *no-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: source-terse-independent
         config:
@@ -247,7 +257,9 @@ stimuli:
         name: diff-empty-historical-cutoff-revision
       - type: tool-calls
         name: tool-calls-historical-cutoff-revision
-        config: *no-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: cutoff-bounded-cache-identity
         config:
@@ -287,7 +299,9 @@ stimuli:
         name: diff-empty-cloud-partition-bounded-session-reads
       - type: tool-calls
         name: tool-calls-cloud-partition-bounded-session-reads
-        config: *no-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: partition-pruned-complete-evidence
         config:

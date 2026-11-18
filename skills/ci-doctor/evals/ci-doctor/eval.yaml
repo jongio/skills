@@ -39,7 +39,7 @@ stimuli:
           required: [ci-doctor]
       - type: tool-calls
         name: tool-calls-etag-status-and-degraded-telemetry
-        config: &no-shell-or-network
+        config:
           disallowed:
             - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
       - type: prompt
@@ -80,7 +80,9 @@ stimuli:
           required: [ci-doctor]
       - type: tool-calls
         name: tool-calls-delivery-routing-go-vs-pr
-        config: *no-shell-or-network
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
       - type: prompt
         name: routes-new-repairs-to-go-and-existing-prs-to-pr
         config:
@@ -121,7 +123,9 @@ stimuli:
           required: [ci-doctor]
       - type: tool-calls
         name: tool-calls-workflow-hardening-and-right-sizing
-        config: *no-shell-or-network
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
       - type: prompt
         name: plans-complete-workflow-optimization-and-hardening
         config:

@@ -41,7 +41,7 @@ stimuli:
           required: [release-doctor]
       - type: tool-calls
         name: tool-calls-non-releasable-vs-semver-classification
-        config: &no-shell-or-network
+        config:
           disallowed:
             - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
       - type: prompt
@@ -81,7 +81,9 @@ stimuli:
           required: [release-doctor]
       - type: tool-calls
         name: tool-calls-cross-manifest-parity-and-ci-gate
-        config: *no-shell-or-network
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
       - type: prompt
         name: blocks-release-on-manifest-drift-and-non-green-ci
         config:
@@ -120,7 +122,9 @@ stimuli:
           required: [release-doctor]
       - type: tool-calls
         name: tool-calls-native-release-mechanism-and-stealth-notes
-        config: *no-shell-or-network
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|gh[-_]cli|create_issue|create_pull_request|update_pull_request|open_pr_session|open_issue_session|read_github_image|add_pr_review_comment)"
       - type: prompt
         name: prioritizes-release-workflow-stealth-notes-and-approval
         config:

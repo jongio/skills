@@ -33,7 +33,7 @@ stimuli:
         name: diff-empty-reconcile-missed-correction
       - type: tool-calls
         name: tool-calls-reconcile-missed-correction
-        config: &no-retro-live-tools
+        config:
           disallowed:
             - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
@@ -62,7 +62,9 @@ stimuli:
         name: diff-empty-missing-history-and-running-agent
       - type: tool-calls
         name: tool-calls-missing-history-and-running-agent
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: fails-closed-on-missing-evidence
         config:
@@ -90,7 +92,9 @@ stimuli:
         name: diff-empty-unknown-skill-source
       - type: tool-calls
         name: tool-calls-unknown-skill-source
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: asks-for-authoritative-source
         config:
@@ -119,7 +123,9 @@ stimuli:
         name: diff-empty-source-improvement-not-global-preference
       - type: tool-calls
         name: tool-calls-source-improvement-not-global-preference
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: generalizes-only-supported-lessons
         config:
@@ -149,7 +155,9 @@ stimuli:
         name: diff-empty-public-pr-current-head-review
       - type: tool-calls
         name: tool-calls-public-pr-current-head-review
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: rejects-stale-reviews-and-empty-requests
         config:
@@ -179,7 +187,9 @@ stimuli:
         name: diff-empty-private-owner-copilot-exception
       - type: tool-calls
         name: tool-calls-private-owner-copilot-exception
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: limits-private-owner-exception
         config:
@@ -209,7 +219,9 @@ stimuli:
         name: diff-empty-other-private-owner-and-commented-review
       - type: tool-calls
         name: tool-calls-other-private-owner-and-commented-review
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: separates-completion-from-approval
         config:
@@ -238,7 +250,9 @@ stimuli:
         name: diff-empty-merged-branch-with-new-work
       - type: tool-calls
         name: tool-calls-merged-branch-with-new-work
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: preserves-live-and-local-only-work
         config:
@@ -267,7 +281,9 @@ stimuli:
         name: diff-empty-cleanup-revalidation-and-partial-failure
       - type: tool-calls
         name: tool-calls-cleanup-revalidation-and-partial-failure
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: stops-on-changed-preconditions
         config:
@@ -296,7 +312,9 @@ stimuli:
         name: diff-empty-deferral-supersession-and-no-gratuitous-edit
       - type: tool-calls
         name: tool-calls-deferral-supersession-and-no-gratuitous-edit
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: preserves-user-decisions-without-inventing-work
         config:
@@ -325,7 +343,9 @@ stimuli:
         name: diff-empty-denial-is-not-a-merge-bypass
       - type: tool-calls
         name: tool-calls-denial-is-not-a-merge-bypass
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: respects-denial-and-head-pinning
         config:
@@ -358,7 +378,9 @@ stimuli:
         name: diff-empty-authorized-gap-is-work-not-just-advice
       - type: tool-calls
         name: tool-calls-authorized-gap-is-work-not-just-advice
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: closes-authorized-work-and-preserves-blockers
         config:
@@ -390,7 +412,9 @@ stimuli:
         name: diff-empty-bare-retro-is-read-only-despite-prior-approval
       - type: tool-calls
         name: tool-calls-bare-retro-is-read-only-despite-prior-approval
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: defaults-to-audit-without-reusing-old-edit-consent
         config:
@@ -422,7 +446,9 @@ stimuli:
         name: diff-empty-concise-summary-with-actionable-fix
       - type: tool-calls
         name: tool-calls-concise-summary-with-actionable-fix
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: concise-and-actionable-with-independent-blocker
         config:
@@ -455,7 +481,9 @@ stimuli:
         name: diff-empty-blocked-only-does-not-warrant-fix
       - type: tool-calls
         name: tool-calls-blocked-only-does-not-warrant-fix
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: prerequisite-before-fix
         config:
@@ -488,7 +516,9 @@ stimuli:
         name: diff-empty-verified-closeout-does-not-warrant-fix
       - type: tool-calls
         name: tool-calls-verified-closeout-does-not-warrant-fix
-        config: *no-retro-live-tools
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|sql|session_store_sql|list_agents|task$|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request)"
       - type: prompt
         name: no-reflexive-fix-for-deferrals-or-retention
         config:

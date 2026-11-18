@@ -51,7 +51,7 @@ stimuli:
         name: diff-empty-custom-session-name-not-global-settings
       - type: tool-calls
         name: tool-calls-custom-session-name-not-global-settings
-        config: &no-statusline-calls
+        config:
           disallowed:
             - name: "(?i)(bash|shell|terminal|exec|powershell|session_statusline|session_prs|session_issues|session_subagents|statusline_setup|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server)"
   - name: clear-name-not-tracked-pills
@@ -88,7 +88,9 @@ stimuli:
         name: diff-empty-clear-name-not-tracked-pills
       - type: tool-calls
         name: tool-calls-clear-name-not-tracked-pills
-        config: *no-statusline-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|session_statusline|session_prs|session_issues|session_subagents|statusline_setup|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server)"
   - name: clear-pills-not-work-or-settings
     prompt: >-
       Load the session-statusline skill first, then use session-statusline to
@@ -120,7 +122,9 @@ stimuli:
         name: diff-empty-clear-pills-not-work-or-settings
       - type: tool-calls
         name: tool-calls-clear-pills-not-work-or-settings
-        config: *no-statusline-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|session_statusline|session_prs|session_issues|session_subagents|statusline_setup|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server)"
   - name: references-are-not-active-work
     prompt: >-
       Load the session-statusline skill first, then use session-statusline. We
@@ -153,7 +157,9 @@ stimuli:
         name: diff-empty-references-are-not-active-work
       - type: tool-calls
         name: tool-calls-references-are-not-active-work
-        config: *no-statusline-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|session_statusline|session_prs|session_issues|session_subagents|statusline_setup|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server)"
   - name: missing-tools-are-not-success
     prompt: >-
       Load the session-statusline skill first, then use session-statusline to
@@ -185,7 +191,9 @@ stimuli:
         name: diff-empty-missing-tools-are-not-success
       - type: tool-calls
         name: tool-calls-missing-tools-are-not-success
-        config: *no-statusline-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|session_statusline|session_prs|session_issues|session_subagents|statusline_setup|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server)"
   - name: shell-results-are-not-ownership
     prompt: >-
       Load the session-statusline skill first, then use session-statusline. A
@@ -219,4 +227,6 @@ stimuli:
         name: diff-empty-shell-results-are-not-ownership
       - type: tool-calls
         name: tool-calls-shell-results-are-not-ownership
-        config: *no-statusline-calls
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|session_statusline|session_prs|session_issues|session_subagents|statusline_setup|edit|create|write|web_fetch|web_search|github[-_]mcp[-_]server)"
