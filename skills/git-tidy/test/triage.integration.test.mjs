@@ -28,7 +28,10 @@ import {
   parseFixedNulRecords,
   parseReplacementRefs,
 } from "../scripts/lib/git.mjs";
-import { validateMechanicalResult } from "../scripts/lib/review-policy.mjs";
+import {
+  validateMechanicalResult,
+  validateMonotoneTransition,
+} from "../scripts/lib/review-policy.mjs";
 import {
   parseCountObjects,
   parseLargeBlobInventory,
@@ -1390,6 +1393,7 @@ test("blocked squash-integrated work defers instead of recommending a rebase", a
         list.some(({ id }) => id === branch.id));
       assert.equal(item.evidence, "blocked");
       assert.equal(item.recommendation, "defer");
+      assert.equal(item.reasons[0].code, "integrated-work-retained");
     }
 
     fixture.git(["revert", "--no-edit", integrationOid]);
@@ -1402,6 +1406,84 @@ test("blocked squash-integrated work defers instead of recommending a rebase", a
     const revertedItem = afterRevert.workItems.find(({ carriers: list }) =>
       list.some(({ id }) => id === revertedBranch.id));
     assert.equal(revertedItem.recommendation, "update-rebase");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("proven protected integrated work reports retention rather than incomplete evidence", async () => {
+  const fixture = await committedFixture("triage-integrated-retention-reason");
+  try {
+    fixture.git(["branch", "release/retained"]);
+    await fixture.write("later.txt", "later default work\n");
+    fixture.commit("advance default");
+    fixture.git(["update-ref", "refs/remotes/origin/main", fixture.oid()]);
+
+    const result = await analyzeRepository(fixture.root, {
+      scope: "branches",
+      depth: "proof",
+    });
+    assert.ok(validateMechanicalResult(result).valid);
+    const branch = findCarrier(
+      result, "local-branch", (c) => c.displayName === "refs/heads/release/retained",
+    );
+    assert.equal(branch.observed.ancestry.mergedIntoDefault, true);
+    assert.equal(branch.observed.ancestry.reachableFromDefault, true);
+    assert.equal(branch.protection, "protected");
+    assert.deepEqual(branch.changeUnitIds, []);
+    assert.deepEqual(branch.blockerCodes, []);
+    assert.equal(branch.action, "keep");
+    assert.equal(branch.eligible, false);
+    const item = result.workItems.find(({ carriers: list }) =>
+      list.some(({ id }) => id === branch.id));
+    assert.equal(item.evidence, "complete");
+    assert.equal(item.confidence, "proven");
+    assert.deepEqual(item.blockers, []);
+    assert.equal(item.recommendation, "defer");
+    assert.equal(item.reasons[0].code, "integrated-work-retained");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("integrated branch preserves resume and save review for unique grouped stash work", async () => {
+  const fixture = await committedFixture("triage-integrated-grouped-stash");
+  try {
+    await fixture.write("tracked.txt", "delivered tracked snapshot\n");
+    await fixture.write("remaining.txt", "unique untracked snapshot\n");
+    fixture.git(["stash", "push", "--include-untracked", "-m", "saved work"]);
+    fixture.git(["branch", "saved-stash", "stash@{0}"]);
+    fixture.git(["merge", "--squash", "saved-stash"]);
+    fixture.commit("integrate tracked snapshot");
+    fixture.git(["update-ref", "refs/remotes/origin/main", fixture.oid()]);
+
+    const result = await analyzeRepository(fixture.root, {
+      scope: "stashes",
+      depth: "proof",
+    });
+    assert.ok(validateMechanicalResult(result).valid);
+    const stash = findCarrier(result, "stash");
+    const item = result.workItems.find(({ carriers: list }) =>
+      list.some(({ id }) => id === stash.id));
+    const branch = item.carriers.find(({ type }) => type === "local-branch");
+    assert.equal(branch.identity.tipOid, stash.identity.stashOid);
+    assert.equal(branch.observed.ancestry.mergedIntoDefault, true);
+    assert.equal(branch.observed.ancestry.reachableFromDefault, false);
+    assert.deepEqual(branch.changeUnitIds, []);
+    assert.ok(branch.blockerCodes.includes("scope-evidence-only"));
+    assert.equal(stash.observed.componentChangeUnitIds.untracked.length, 1);
+    assert.ok(item.changeUnits.length > 0);
+    assert.equal(item.preservation.lastCopy, true);
+    for (const carrier of item.carriers) {
+      assert.equal(carrier.action, "keep");
+      assert.equal(carrier.eligible, false);
+    }
+    assert.equal(item.recommendation, "resume");
+    const save = validateMonotoneTransition(item, {
+      ...structuredClone(item),
+      recommendation: "keep-save",
+    });
+    assert.equal(save.valid, true);
   } finally {
     await fixture.cleanup();
   }
