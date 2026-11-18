@@ -486,3 +486,12 @@ deployment: gpt-image-2
 endpoint: https://jong-image-westus3.openai.azure.com
 apiVersion: 2025-04-01-preview
 SHA-256: d0064a4103571a1886395552f201d292cda6fef3b7dafad7169dc4861de9c07b
+
+## diff (a18badbcc255)
+
+Prompt: "Flat vector illustration on a pure white background, square 1:1 aspect ratio (1024x1024 pixels), centered composition with generous white margins top and bottom. One large wide rounded dark-navy (#0f1b33) canvas window with a soft drop shadow is the single hero surface. A small dark-navy circular GitHub Octocat mark sits in the upper-right white margin above the window, connected down to the top-right edge of the dark-navy window by a neat dark dotted L-shaped tether line, never the main subject. Inside the dark-navy window, show a crisp left-to-right workflow for a side-by-side diff viewer and inline review handoff: on the far left, a narrow file-tree sidebar column with four rounded file pills and tiny green viewed dots; in the center-left, a sleek side-by-side two-column split diff panel topped by a compact two-pill toggle bar, with coral-red deletion rows on the left pane, emerald-green addition rows on the right pane, and two glowing warm-amber inline comment cards anchored directly under a diff hunk with speech-bubble icons and abstract rounded bars; from those inline comment cards, crisp dashed arrow connectors flow rightward into a rounded review-handoff card on the right containing a cyan robot-agent badge and three glowing emerald-green circular checkmark badges showing addressed feedback. Deep navy, emerald green, coral red, warm amber, electric cyan, and soft violet palette; clean modern rounded vector shapes, subtle inner borders, tiny four-point star sparkles inside the dark panel, strong simple silhouette clearly legible when scaled down to 175 pixels. Strict diagram treatment only: abstract short rounded bars and pills instead of code or text. Absolutely no words, no letters, no numerals, no readable labels, no fake text, no watermarks, no photorealism, no 3D rendering, and no clutter."
+
+Provider: github-copilot-image-generation
+model: gpt-image-2
+delivery: Generated via Copilot App image_generation tool and resampled with Lanczos-3 from 1254x1254 to strict 1024x1024 RGB PNG
+SHA-256: a18badbcc255e09503924dc5d62ef1b4c63a45e15daae113ace8f13f6b62ae14

@@ -122,8 +122,12 @@ jobs:
                 DIRS=$(printf '%s\n%s\n' "$DIRS" "skills/create-session-board-canvas" \
                   | sed '/^$/d' | sort -u)
               fi
+              if grep -Eq '^com\.github\.copilot/extensions/diff/' <<< "$CHANGED"; then
+                DIRS=$(printf '%s\n%s\n' "$DIRS" "skills/diff" \
+                  | sed '/^$/d' | sort -u)
+              fi
               if grep -Eq '^skills/create-canvas-app/kit/' <<< "$CHANGED"; then
-                DIRS=$(printf '%s\n%s\n%s\n' "$DIRS" "skills/create-canvas-app" "skills/create-session-board-canvas" \
+                DIRS=$(printf '%s\n%s\n%s\n%s\n' "$DIRS" "skills/create-canvas-app" "skills/create-session-board-canvas" "skills/diff" \
                   | sed '/^$/d' | sort -u)
               fi
             fi

@@ -624,8 +624,8 @@ test("portable package cannot gain implicit executable components", async () => 
     .sort();
   assert.deepEqual(
     extEntries,
-    ["daemon-notifications", "pr-statusline", "session-progress"],
-    "only the reviewed statusline, session-progress, and opt-in logging-only notifications may be exposed",
+    ["daemon-notifications", "diff", "pr-statusline", "session-progress"],
+    "only the reviewed statusline, diff, session-progress, and opt-in logging-only notifications may be exposed",
   );
   for (const extName of ["daemon-notifications", "issue-statusline", "pr-statusline", "subagent-statusline", "worktree-statusline"]) {
     const testDir = path.join(root, "extensions", extName, "test");
@@ -810,7 +810,8 @@ test("skill CI detection selects lockfiles, site edits, shared changes, and both
     ["pull_request", ["skills/other/runtime/canvas.mjs"], [all[2]]],
     ["pull_request", ["skills/other/com.github.copilot/extensions/session-progress/extension.mjs"], [all[2]]],
     ["pull_request", ["com.github.copilot/extensions/session-progress/extension.mjs"], ["skills/create-session-board-canvas"]],
-    ["pull_request", ["skills/create-canvas-app/kit/server.mjs"], ["skills/create-canvas-app", "skills/create-session-board-canvas"]],
+    ["pull_request", ["com.github.copilot/extensions/diff/extension.mjs"], ["skills/diff"]],
+    ["pull_request", ["skills/create-canvas-app/kit/server.mjs"], ["skills/create-canvas-app", "skills/create-session-board-canvas", "skills/diff"]],
     ["pull_request", ["docs/specs/git-tidy/test-plan.md"], [all[1]]],
     ...["site/src/components/Card.astro", "site/src/styles/global.css", "site/scripts/check-performance.mjs",
       "site/astro.config.mjs", "site/package-lock.json", "docs/unrelated.md"]

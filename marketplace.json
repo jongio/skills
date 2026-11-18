@@ -12,7 +12,7 @@
       "name": "jongio-skills",
       "source": "./",
       "description": "Install the complete Jon Gallant skills collection as one plugin.",
-      "version": "2.1.16"
+      "version": "2.2.0"
     },
     {
       "name": "statuslines",
@@ -168,6 +168,12 @@
       "name": "release-doctor",
       "source": "./skills/release-doctor",
       "description": "Verify post-merge release readiness, unreleased commits, semver recommendations, and cross-manifest version parity before cutting a release.",
+      "version": "1.0.0"
+    },
+    {
+      "name": "diff",
+      "source": "./skills/diff",
+      "description": "Open a GitHub-style side-by-side diff viewer in a Copilot App canvas or local browser with inline review comments and structured review triage.",
       "version": "1.0.0"
     }
   ]
