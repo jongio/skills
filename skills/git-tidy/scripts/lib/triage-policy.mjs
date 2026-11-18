@@ -276,6 +276,9 @@ function recommendationFor(members, canonical, destructive, complete) {
       : "defer";
   }
   const branch = preferredBranch(members);
+  if (branch && isIntegratedLocalBranch(branch)) {
+    return "defer";
+  }
   const ancestry = branch?.observed?.ancestry;
   if (ancestry?.ahead > 0 && ancestry?.behind > 0) {
     return "update-rebase";

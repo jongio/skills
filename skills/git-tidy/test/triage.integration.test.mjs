@@ -1336,6 +1336,77 @@ test("exact squash tree makes detached worktree and local branch removable", asy
   }
 });
 
+test("blocked squash-integrated work defers instead of recommending a rebase", async () => {
+  const fixture = await committedFixture("triage-squash-retained");
+  try {
+    await fixture.write(".gitignore", "*.generated\n");
+    fixture.commit("ignore generated output");
+    fixture.git(["switch", "-c", "squashed"]);
+    await fixture.write("tracked.txt", "delivered\n");
+    fixture.commit("topic work");
+    const topicOid = fixture.oid();
+    fixture.git(["switch", "main"]);
+    fixture.git(["merge", "--squash", "squashed"]);
+    fixture.git(["commit", "-m", "squash on default"]);
+    const integrationOid = fixture.oid();
+    assert.notEqual(topicOid, integrationOid);
+    fixture.git(["update-ref", "refs/remotes/origin/main", integrationOid]);
+
+    const linkedPath = path.join(fixture.root, "squash-retained");
+    fixture.git(["worktree", "add", "--quiet", linkedPath, "squashed"]);
+    await fixture.write(
+      path.join("squash-retained", "output.generated"),
+      "retained local output\n",
+    );
+
+    for (const scope of ["worktrees", "all"]) {
+      const result = await analyzeRepository(fixture.root, { scope, depth: "proof" });
+      assert.ok(validateMechanicalResult(result).valid);
+      const branch = findCarrier(
+        result, "local-branch", (c) => c.displayName === "refs/heads/squashed",
+      );
+      const linked = findCarrier(result, "worktree", (c) => !c.observed.main);
+      for (const [carrier, ancestry] of [
+        [branch, branch.observed.ancestry],
+        [linked, linked.observed.committedAncestry],
+      ]) {
+        assert.equal(ancestry.mergedIntoDefault, true);
+        assert.equal(ancestry.reachableFromDefault, false);
+        assert.equal(ancestry.integrationCommitOid, integrationOid);
+        assert.ok(ancestry.ahead > 0 && ancestry.behind > 0);
+        assert.deepEqual(carrier.changeUnitIds, []);
+        assert.equal(carrier.changeUnitsComplete, true);
+        assert.equal(carrier.action, "keep");
+        assert.equal(carrier.eligible, false);
+        assert.deepEqual(carrier.prerequisiteIds, []);
+      }
+      assert.ok(branch.blockerCodes.includes("branch-checked-out"));
+      if (scope === "worktrees") {
+        assert.ok(branch.blockerCodes.includes("scope-evidence-only"));
+      }
+      assert.equal(linked.observed.ignoredPathCount, 1);
+      assert.ok(linked.blockerCodes.includes("ignored-content-present"));
+      const item = result.workItems.find(({ carriers: list }) =>
+        list.some(({ id }) => id === branch.id));
+      assert.equal(item.evidence, "blocked");
+      assert.equal(item.recommendation, "defer");
+    }
+
+    fixture.git(["revert", "--no-edit", integrationOid]);
+    fixture.git(["update-ref", "refs/remotes/origin/main", fixture.oid()]);
+    const afterRevert = await analyzeRepository(fixture.root, { scope: "worktrees" });
+    const revertedBranch = findCarrier(
+      afterRevert, "local-branch", (c) => c.displayName === "refs/heads/squashed",
+    );
+    assert.equal(revertedBranch.observed.ancestry.mergedIntoDefault, false);
+    const revertedItem = afterRevert.workItems.find(({ carriers: list }) =>
+      list.some(({ id }) => id === revertedBranch.id));
+    assert.equal(revertedItem.recommendation, "update-rebase");
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("untracked worktree limits share one collection budget", async (t) => {
   const fixture = await committedFixture("triage-shared-untracked-budget");
   try {
