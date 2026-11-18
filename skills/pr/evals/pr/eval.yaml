@@ -289,6 +289,68 @@ stimuli:
         name: tool-calls-bot-vs-human-comment-resolution
         config: *no-live-pr-ops
 
+  - name: approved-draft-ready-with-existing-human-feedback
+    prompt: >-
+      Load pr first and provide a plan and draft replies only. After loading pr,
+      no commands, edits, agents, or network calls are authorized.
+      In example-org/settings-tool, the user says, "Make the approved draft PR
+      ready for review." The PR is still a draft, CI passes, and a required
+      maintainer approval is recorded on the current head. That approval did
+      not withdraw two existing human threads. H21 identifies a confirmed
+      in-scope bug: saving settings drops an explicitly false flag. It has not
+      been fixed or dispositioned. H22 asks whether overwriting an existing
+      settings file should require confirmation; the human reviewer's question
+      is unanswered. Copilot's earlier finding is verified fixed, replied to
+      with its fixing commit link, and its thread resolved; there is no
+      outstanding bot feedback. These comments already exist before the PR
+      becomes ready. No merge authorization has been given. Explain how to
+      fulfill the readiness request, handle the existing feedback, and report
+      what remains, distinguishing proposed actions from completed work.
+    tags:
+      scenario: draft-readiness-feedback
+      cost: low
+    rubric:
+      - Handles both existing human threads despite maintainer approval and settled bot feedback; does not limit remediation to bot findings.
+      - Plans a minimal verified fix for H21, then a terse reply with the actual fixing commit link and resolution of the addressed human thread, without inventing a commit or claiming the plan was executed.
+      - Drafts a response or explicit disposition for H22 and leaves the genuine open human question unresolved.
+      - Treats the draft-to-ready request and reviewer approval as neither permission to skip known findings nor authorization to merge or enable auto-merge; accurately reports outstanding feedback and unperformed actions.
+      - Does not require waiting for reviews that start only after readiness to fulfill the readiness-only request; separate future merge gates may still be noted.
+    graders:
+      - type: diff-empty
+        name: diff-empty-approved-draft-ready-human-feedback
+      - type: prompt
+        name: draft-ready-preserves-known-human-feedback
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the plan handles the existing human H21 and H22
+            feedback despite approval and settled bot feedback. Require a
+            minimal verified H21 fix, a terse reply linking the actual fixing
+            commit once it exists, and resolution of that addressed human
+            thread; do not accept a fabricated fixing commit or a claim that
+            planned work already happened. Require a proposed response or
+            explicit disposition for H22 while leaving its genuine open human
+            question unresolved. Readiness is distinct from feedback clearance
+            and merge consent: report remaining work, do not infer merge or
+            auto-merge authorization, and do not impose a wait for reviews
+            that begin only after readiness on this readiness-only request.
+            Separate future merge gates may be noted. Score 1 for ignoring
+            known human feedback because the PR is approved or bots are clear,
+            claiming all feedback settled, resolving H22 prematurely, omitting
+            fixing-commit replies or addressed-thread resolution, inferring
+            merge consent, requiring post-readiness reviews to finish this
+            request, or executing commands, edits, agents, or network calls.
+      - type: skill-invocation
+        name: skill-invocation-approved-draft-ready-human-feedback
+        config:
+          required: [pr]
+      - type: tool-calls
+        name: tool-calls-approved-draft-ready-human-feedback
+        config:
+          disallowed:
+            - name: "(?i)(bash|shell|terminal|exec|powershell|web_fetch|web_search|browser|github[-_]mcp[-_]server|create_issue|create_pull_request|update_pull_request|reply_to_review_thread|reply_and_resolve_review_thread|manage_agent_merge|add_pr_review_comment|edit_pr_review_comment|remove_pr_review_comment|task$)"
+
   - name: behind-base-preserves-head
     prompt: >-
       Load the pr skill first, then use pr to explain what to do before
