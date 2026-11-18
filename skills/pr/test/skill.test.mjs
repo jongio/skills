@@ -335,6 +335,7 @@ test("eval spec covers private repo reviewer rules, comment resolution, and bala
     "clean-headline-hides-body-only-finding",
     "deduplicate-and-revalidate-review-body-findings",
     "bot-vs-human-comment-resolution",
+    "approved-draft-ready-with-existing-human-feedback",
     "behind-base-preserves-head",
     "verified-base-update-blockers",
     "unknown-mergeability-and-queue",
