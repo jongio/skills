@@ -184,6 +184,15 @@ verifying ownership, branch, and existing changes. Separate source repositories
 need separate worktrees. Preserve unrelated edits and stop on conflicts.
 In audit mode, only propose the worktree and PR steps; create neither.
 
+If the host binds a session to a branch/PR, verify host context, Git branch/head,
+and intended PR destination agree before reuse and delivery. A supported host
+retarget is allowed only if its resulting binding is verified. If retargeting
+is unavailable or refused, preserve the reviewed changes as a portable patch
+and ask/coordinate a fresh source session/worktree. Do not independently switch
+branches behind the host, edit raw app state, or bypass a refusal through another
+interface. Ordinary terminal/Git-only reuse remains allowed when no host binding
+applies.
+
 Add or adjust a focused regression test/eval case when the skill's existing
 tooling supports it. Run its applicable deterministic checks and lint.
 Capability evals that spend credits or launch agents require separate consent.
