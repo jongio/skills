@@ -102,6 +102,10 @@ clear, exact witnesses, and current identities. Recommendation alone never
 authorizes or implies an action. Each destructive carrier action requires its
 own identity, proof, witness set, blocker check, and approval.
 
+When exact integration proof leaves no unique branch work but cleanup is
+blocked, defer rather than infer a rebase or new PR from ahead/behind counts.
+Integration proof does not clear any cleanup blocker or grant approval.
+
 ## Source-specific proof
 
 ### Stashes
