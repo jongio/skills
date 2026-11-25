@@ -91,10 +91,13 @@ test("the mutant grader fails when a test process cannot start", () => {
 test("fixture test and coverage scripts discover nested tests", () => {
   const dir = workspace((root) => {
     mkdirSync(join(root, "test", "unit"));
-    writeFileSync(join(root, "test", "unit", "discovery.test.mjs"), [
+    for (const [file, name] of [
+      [join(root, "test", "top-level-discovery.test.mjs"), "top-level discovery sentinel"],
+      [join(root, "test", "unit", "discovery.test.mjs"), "nested discovery sentinel"],
+    ]) writeFileSync(file, [
       'import assert from "node:assert/strict";',
       'import test from "node:test";',
-      'test("nested discovery sentinel", () => assert.fail("nested test discovery sentinel"));',
+      `test(${JSON.stringify(name)}, () => assert.ok(true));`,
       "",
     ].join("\n"));
   });
@@ -102,12 +105,14 @@ test("fixture test and coverage scripts discover nested tests", () => {
     const scripts = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).scripts;
     const env = { ...process.env };
     delete env.NODE_TEST_CONTEXT;
-    for (const script of [scripts.test, scripts.coverage]) {
-      const [runner, ...args] = script.split(/\s+/);
-      assert.equal(runner, "node");
-      const result = spawnSync(process.execPath, args, { cwd: dir, env, encoding: "utf8" });
-      assert.notEqual(result.status, 0, `${script}\n${result.stdout}\n${result.stderr}`);
-      assert.match(result.stdout + result.stderr, /nested test discovery sentinel/, script);
+    for (const name of ["test", "coverage"]) {
+      const script = scripts[name];
+      assert.match(script, /"test\/\*\*\/\*\.test\.mjs"/, script);
+      const result = spawnSync(`npm run ${name}`, { cwd: dir, env, encoding: "utf8", shell: true });
+      assert.equal(result.status, 0, `npm run ${name}\n${result.stdout}\n${result.stderr}`);
+      const output = result.stdout + result.stderr;
+      assert.match(output, /top-level discovery sentinel/, name);
+      assert.match(output, /nested discovery sentinel/, name);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

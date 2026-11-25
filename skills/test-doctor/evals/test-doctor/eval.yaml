@@ -156,7 +156,7 @@ stimuli:
                 "src/vouchers.mjs": "ffcf198e12605adb",
                 "src/report.mjs": "ab38ddac712bc443",
                 "README.md": "83d520c7fd136141",
-                "package.json": "ab465dc5946baba5",
+                "package.json": "56302fd4aa736c21",
               };
               for (const [file, expected] of Object.entries(pinned)) {
                 const full = path.join(root, file);
@@ -291,7 +291,7 @@ stimuli:
                 "src/report.mjs": "ab38ddac712bc443",
                 "test/redeem.test.mjs": "2e8646cb4f384ef8",
                 "README.md": "83d520c7fd136141",
-                "package.json": "ab465dc5946baba5",
+                "package.json": "56302fd4aa736c21",
               };
               for (const [file, expected] of Object.entries(pinned)) {
                 if (!fs.existsSync(file) || digest(read(file)) !== expected) {
