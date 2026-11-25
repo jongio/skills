@@ -31,11 +31,11 @@ function workspace(setup = () => {}) {
   return dir;
 }
 
-function grade(name, dir) {
+function grade(name, dir, transform = (script) => script) {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   try {
-    return spawnSync(process.execPath, ["-e", graderScript(name)], { cwd: dir, env, encoding: "utf8", timeout: 300_000 });
+    return spawnSync(process.execPath, ["-e", transform(graderScript(name))], { cwd: dir, env, encoding: "utf8", timeout: 300_000 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -75,6 +75,17 @@ test("the mutant grader rejects production edits", () => {
   }));
   assert.equal(result.status, 1);
   assert.match(result.stdout, /protected file changed: src\/transport\.mjs/);
+});
+
+test("the mutant grader fails when a test process cannot start", () => {
+  const result = grade("effects-seeded-mutants-killed", workspace(), (script) => {
+    const updated = script.replace('cwd: dir, env, encoding: "utf8", timeout: 30000', 'cwd: path.join(dir, "missing"), env, encoding: "utf8", timeout: 30000');
+    assert.notEqual(updated, script, "expected to find the test-process spawn call");
+    return updated;
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /FAIL pristine test process did not complete/);
+  assert.doesNotMatch(result.stdout, /killed \d+\/8 seeded mutants/);
 });
 
 test("the read-only control accepts report tests and rejects out-of-scope effect tests", () => {

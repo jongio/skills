@@ -191,6 +191,10 @@ stimuli:
                   fs.writeFileSync(full, text.replace(from, to));
                 }
                 const result = spawnSync(process.execPath, ["--test"], { cwd: dir, env, encoding: "utf8", timeout: 30000 });
+                if (result.error || result.status === null) {
+                  console.log("FAIL " + label + " test process did not complete");
+                  throw result.error || new Error(label + " test process did not exit");
+                }
                 return result.status === 0 && !result.error;
               };
               let exitCode = 1;
@@ -243,10 +247,10 @@ stimuli:
 
   - name: read-only-change-does-not-trigger-effect-gates
     prompt: >-
-      Use test-doctor fix on this repository, scoped to src/report.mjs. That
-      summary formatter is the only changed file. Add focused tests for its
-      edge cases, keep Node's test runner, do not change src/, README.md, or
-      package.json, run the tests, and report the evidence.
+      Use test-doctor fix on this repository, scoped to tests for src/report.mjs.
+      This is a test-only request: add focused tests under test/, keep Node's
+      test runner, and do not edit production source, test/redeem.test.mjs,
+      README.md, or package.json. Run the tests and report the evidence.
     agent_environment:
       files:
         - src: fixtures/effects/package.json
