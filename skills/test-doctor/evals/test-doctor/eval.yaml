@@ -12,10 +12,11 @@ defaults:
 
 scoring:
   weights:
-    prompt: 0.25
-    diff-empty: 0.25
-    file-matches: 0.25
-    tool-calls: 0.25
+    prompt: 0.2
+    diff-empty: 0.2
+    file-matches: 0.2
+    tool-calls: 0.2
+    run-command: 0.2
   threshold: 0.8
 
 stimuli:
@@ -106,6 +107,235 @@ stimuli:
       - Meaningful fee, cutoff, and invalid-input assertions are written.
       - Production behavior and configuration remain unchanged.
       - Focused and final test/coverage results support the claimed outcome.
+
+  - name: fix-traces-effect-outcomes-through-unchanged-helpers
+    prompt: >-
+      Use test-doctor fix on this repository. The latest change added voucher
+      handling in src/redeem.mjs and its tests pass. Strengthen the tests
+      against the README contract before it ships. Keep Node's test runner and
+      the test/ directory. Do not change src/, README.md, or package.json. Run
+      the tests and report the evidence and anything left unverified.
+    agent_environment:
+      files:
+        - src: fixtures/effects/package.json
+          dest: package.json
+        - src: fixtures/effects/README.md
+          dest: README.md
+        - src: fixtures/effects/src/redeem.mjs
+          dest: src/redeem.mjs
+        - src: fixtures/effects/src/report.mjs
+          dest: src/report.mjs
+        - src: fixtures/effects/src/transport.mjs
+          dest: src/transport.mjs
+        - src: fixtures/effects/src/vouchers.mjs
+          dest: src/vouchers.mjs
+        - src: fixtures/effects/test/redeem.test.mjs
+          dest: test/redeem.test.mjs
+        - src: fixtures/effects/test/report.test.mjs
+          dest: test/report.test.mjs
+    graders:
+      - type: run-command
+        name: tool-calls-effects-seeded-mutants-killed
+        config:
+          command: node
+          timeout: 330s
+          args:
+            - "-e"
+            - |
+              const fs = require("node:fs");
+              const os = require("node:os");
+              const path = require("node:path");
+              const crypto = require("node:crypto");
+              const { spawnSync } = require("node:child_process");
+              const root = process.cwd();
+              const read = (file) => fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+              const digest = (text) => crypto.createHash("sha256").update(text).digest("hex").slice(0, 16);
+              const pinned = {
+                "src/redeem.mjs": "870fb9b06c11aaa8",
+                "src/transport.mjs": "524bfa963349ecb7",
+                "src/vouchers.mjs": "ffcf198e12605adb",
+                "src/report.mjs": "ab38ddac712bc443",
+                "README.md": "83d520c7fd136141",
+                "package.json": "56302fd4aa736c21",
+              };
+              for (const [file, expected] of Object.entries(pinned)) {
+                const full = path.join(root, file);
+                if (!fs.existsSync(full) || digest(read(full)) !== expected) {
+                  console.log("FAIL protected file changed: " + file);
+                  process.exit(1);
+                }
+              }
+              const mutants = [
+                ["concurrent-reserve", [["src/redeem.mjs", "  if (!store.reserve(voucher)) return { state: \"busy\" };\n", "  if (store.state(voucher) !== \"available\") return { state: \"busy\" };\n  await null;\n  store.reserve(voucher);\n"]]],
+                ["error-after-dispatch-not-sent", [["src/transport.mjs", "\n  return \"unknown\";\n}", "\n  return \"not-sent\";\n}"]]],
+                ["unknown-released", [["src/redeem.mjs", "  if (outcome.state === \"unknown\") store.markUncertain(voucher);\n  else store.release(voucher);", "  store.release(voucher);"]]],
+                ["rejection-erases-unknown", [["src/transport.mjs", "  if (attempts.some((item) => item.state === \"unknown\")) return \"unknown\";\n  if (attempts.some((item) => item.state === \"rejected\")) return \"rejected\";", "  if (attempts.some((item) => item.state === \"rejected\")) return \"rejected\";\n  if (attempts.some((item) => item.state === \"unknown\")) return \"unknown\";"]]],
+                ["fallback-after-dispatch", [["src/transport.mjs", "attempts.every((item) => item.state === \"not-sent\")", "attempts.at(-1).state !== \"applied\""]]],
+                ["cancel-as-not-sent", [["src/transport.mjs", "return { state: classify(error), error };", "return { state: signal?.aborted ? \"not-sent\" : classify(error), error };"]]],
+                ["audit-failure-releases", [["src/redeem.mjs", "    store.spend(voucher);\n    try {\n      await audit?.(voucher);\n    } catch (error) {\n      return { ...outcome, auditError: error.message };\n    }\n", "    try {\n      await audit?.(voucher);\n    } catch (error) {\n      store.release(voucher);\n      throw error;\n    }\n    store.spend(voucher);\n"]]],
+                ["not-sent-retained", [["src/transport.mjs", "  if (error instanceof NotSentError) return \"not-sent\";\n", ""]]],
+              ];
+              const env = { ...process.env };
+              delete env.NODE_TEST_CONTEXT;
+              const work = fs.mkdtempSync(path.join(os.tmpdir(), "effects-mutants-"));
+              const run = (label, edits) => {
+                const dir = path.join(work, label);
+                fs.cpSync(root, dir, {
+                  recursive: true,
+                  filter: (source) => !/^(node_modules|\.git)(?:[\\/]|$)/.test(path.relative(root, source)),
+                });
+                for (const [file, from, to] of edits) {
+                  const full = path.join(dir, file);
+                  const text = read(full);
+                  if (text.split(from).length !== 2) throw new Error("mutant " + label + " no longer applies to " + file);
+                  fs.writeFileSync(full, text.replace(from, to));
+                }
+                const result = spawnSync(process.execPath, ["--test", "test/**/*.test.mjs"], { cwd: dir, env, encoding: "utf8", timeout: 30000 });
+                if (result.error || result.status === null) {
+                  console.log("FAIL " + label + " test process did not complete");
+                  throw result.error || new Error(label + " test process did not exit");
+                }
+                return result.status === 0 && !result.error;
+              };
+              let exitCode = 1;
+              try {
+                if (!run("pristine", [])) {
+                  console.log("FAIL tests do not pass on the unmodified fixture");
+                } else {
+                  let killed = 0;
+                  for (const [label, edits] of mutants) {
+                    const survived = run(label, edits);
+                    if (!survived) killed += 1;
+                    console.log((survived ? "survived " : "killed ") + label);
+                  }
+                  console.log("killed " + killed + "/" + mutants.length + " seeded mutants");
+                  exitCode = killed >= mutants.length - 1 ? 0 : 1;
+                }
+              } finally {
+                fs.rmSync(work, { recursive: true, force: true });
+              }
+              process.exit(exitCode);
+      - type: tool-calls
+        name: tool-calls-effects-fix-no-git-or-install
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: '(?i)\b(git\s+(?:commit|push|branch|checkout\s+-b)|gh\s+pr|npm\s+(?:install|i|add)|pnpm\s+add|yarn\s+add)\b'
+            - name: "(?i)(web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request)"
+      - type: prompt
+        name: traces-effect-paths-with-evidence
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Inspect tool results and the actual edits. Score 5 only if the agent
+            reads the unchanged transport and voucher helpers as well as
+            redeem, adds behavioral tests for outcomes the README defines
+            (concurrent holds, unknown failures and cancellation after
+            dispatch, a retry that ends in rejection, fallback limits, audit
+            failure after delivery, and clean not-sent release), leaves
+            production files unchanged, runs passing tests, and reports a
+            compact path/outcome/evidence summary that treats coverage as
+            supporting rather than proof and names anything still unverified.
+            Score 1 for claiming success from the original green tests or
+            coverage alone, editing production, or asserting values copied
+            from the implementation instead of the README.
+    rubric:
+      - Unchanged helpers that dispatch, retry, fall back, or classify errors are traced.
+      - Tests distinguish applied, definitive no-effect, and unknown outcomes.
+      - Seeded regressions in those helpers are detected by the new tests.
+
+  - name: read-only-change-does-not-trigger-effect-gates
+    prompt: >-
+      Use test-doctor fix on this repository, scoped to tests for src/report.mjs.
+      This is a test-only request: add focused tests under test/, keep Node's
+      test runner, and do not edit production source, test/redeem.test.mjs,
+      README.md, or package.json. Run the tests and report the evidence.
+    agent_environment:
+      files:
+        - src: fixtures/effects/package.json
+          dest: package.json
+        - src: fixtures/effects/README.md
+          dest: README.md
+        - src: fixtures/effects/src/redeem.mjs
+          dest: src/redeem.mjs
+        - src: fixtures/effects/src/report.mjs
+          dest: src/report.mjs
+        - src: fixtures/effects/src/transport.mjs
+          dest: src/transport.mjs
+        - src: fixtures/effects/src/vouchers.mjs
+          dest: src/vouchers.mjs
+        - src: fixtures/effects/test/redeem.test.mjs
+          dest: test/redeem.test.mjs
+        - src: fixtures/effects/test/report.test.mjs
+          dest: test/report.test.mjs
+    graders:
+      - type: run-command
+        name: tool-calls-report-scope-stays-read-only
+        config:
+          command: node
+          timeout: 120s
+          args:
+            - "-e"
+            - |
+              const fs = require("node:fs");
+              const path = require("node:path");
+              const crypto = require("node:crypto");
+              const { spawnSync } = require("node:child_process");
+              const read = (file) => fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+              const digest = (text) => crypto.createHash("sha256").update(text).digest("hex").slice(0, 16);
+              const pinned = {
+                "src/redeem.mjs": "870fb9b06c11aaa8",
+                "src/transport.mjs": "524bfa963349ecb7",
+                "src/vouchers.mjs": "ffcf198e12605adb",
+                "src/report.mjs": "ab38ddac712bc443",
+                "test/redeem.test.mjs": "2e8646cb4f384ef8",
+                "README.md": "83d520c7fd136141",
+                "package.json": "56302fd4aa736c21",
+              };
+              for (const [file, expected] of Object.entries(pinned)) {
+                if (!fs.existsSync(file) || digest(read(file)) !== expected) {
+                  console.log("FAIL out-of-scope file changed: " + file);
+                  process.exit(1);
+                }
+              }
+              const effectImport = /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'][^"']*\bsrc\/(?:redeem|transport)(?:\.m?js)?["']/;
+              const tests = fs.readdirSync("test", { recursive: true })
+                .map((name) => path.join("test", String(name)))
+                .filter((file) => fs.statSync(file).isFile() && /\.[cm]?js$/.test(file) && file !== path.join("test", "redeem.test.mjs"));
+              const strays = tests.filter((file) => effectImport.test(read(file)));
+              if (strays.length) {
+                console.log("FAIL effect tests added outside the requested scope: " + strays.join(", "));
+                process.exit(1);
+              }
+              const env = { ...process.env };
+              delete env.NODE_TEST_CONTEXT;
+              const result = spawnSync(process.execPath, ["--test", "test/**/*.test.mjs"], { env, encoding: "utf8", timeout: 60000 });
+              console.log(result.status === 0 ? "report tests pass" : "FAIL tests do not pass");
+              process.exit(result.status === 0 ? 0 : 1);
+      - type: tool-calls
+        name: tool-calls-read-only-change-no-git-or-install
+        config:
+          disallowed:
+            - name: "^(?:powershell|bash)$"
+              command: '(?i)\b(git\s+(?:commit|push|branch|checkout\s+-b)|gh\s+pr|npm\s+(?:install|i|add)|pnpm\s+add|yarn\s+add)\b'
+            - name: "(?i)(web_fetch|web_search|github[-_]mcp[-_]server|create_issue|create_pull_request)"
+      - type: prompt
+        name: proportional-read-only-review
+        config:
+          scoring: scale_1_5
+          threshold: 0.8
+          prompt: >-
+            Score 5 only if the agent adds focused summarize tests (for example
+            empty input, missing ids, and sorted counts), runs them, and
+            reports the result without turning the read-only formatter into an
+            effect or reservation review: no blocker, uncertainty table, or
+            demand to test redeem/transport paths that this change cannot
+            reach. Score 1 if it blocks the change on unrelated effect paths,
+            edits redeem tests or production, or claims unrun results.
+    rubric:
+      - A read-only change gets proportional tests only.
+      - Effect and reservation gates are not imposed on unrelated code.
 
   - name: missing-tooling-is-not-permission-to-install
     prompt: >-

@@ -40,6 +40,32 @@ Do not demand unreachable defensive branches, one test per source file, or
 tests of type declarations merely to raise counts. Explain why a gap matters.
 Also inspect coverage inclusion: omitted production code can inflate the result.
 
+## Do effect outcomes survive every path?
+
+Apply this only when a change can cause an external effect (send, write,
+charge, publish, delete) or holds a single-use reservation that a successful
+effect consumes. Skip it for read-only code; reusable permits or slots follow
+their own cleanup contract.
+
+- Find where effects can actually occur, then follow unchanged helpers that
+  dispatch, retry, fall back, map results, or handle errors and cancellation.
+  A changed caller inherits their behavior.
+- Classify outcomes as no effect, effect, or unknown. Errors after dispatch
+  began, timeouts, and cancellation are unknown unless the contract proves
+  otherwise. Unknown must not become false, not-sent, or available, and a later
+  retry or rejection must not erase an earlier unknown attempt.
+- Release a reservation only when the whole call proves no effect occurred; a
+  clean pre-dispatch failure should still release it. A failure after the
+  effect, such as an audit write, must not undo its record.
+- Exercise concurrent attempts on the same reservation.
+- Keep a compact table of material paths: path, expected outcome, evidence
+  (behavioral test, proof that it is unreachable or equivalent, or accepted as
+  unverified). Coverage locates candidates; it does not prove an outcome.
+- A specific material path without evidence blocks completion until it is
+  tested, shown irrelevant or equivalent, or explicitly accepted as unverified.
+- When scope or source changes after validation, recheck the table; earlier
+  results do not cover new paths.
+
 ## Multi-ecosystem coverage runners & coverage gap gates
 
 Select the repository's native coverage runner before falling back to manual

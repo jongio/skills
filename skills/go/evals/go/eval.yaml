@@ -98,6 +98,45 @@ stimuli:
       - Reuses unaffected evidence without copying pr's Git, CI, or merge implementation.
     graders: *checks
 
+  - name: green-tests-with-unresolved-effect-path
+    prompt: >-
+      Load the go skill first, then use go for this context: a change to a
+      single-use redemption handler passed its targeted tests and code review.
+      Review named one material path: an unchanged shared retry helper the
+      handler calls can report a timeout followed by a rejection as a plain
+      rejection, which releases the reservation even though the first attempt
+      may have applied. No test covers it. Explain the handoff only; do not run
+      shell commands or perform writes.
+    rubric:
+      - Green tests and review do not clear the named path; it is a blocker before a ready handoff.
+      - The blocker clears only by a behavioral test, a proof the path is unreachable or equivalent, or explicit user acceptance as unverified.
+      - Keeps the earlier uncertain attempt as unknown rather than released, without inventing unrelated authorization or resource gates.
+    graders: *checks
+
+  - name: effect-scope-expands-after-validation
+    prompt: >-
+      Load the go skill first, then use go for this context: tests and review
+      passed for a change to a delivery handler. Afterwards the change was
+      expanded to add a fallback route inside the shared delivery helper.
+      Worktree and base are unchanged. Explain the handoff only; do not run
+      shell commands or perform writes.
+    rubric:
+      - Earlier test and review evidence does not cover the new fallback path; affected checks rerun before handoff.
+      - The rerun checks whether fallback can follow an attempt whose outcome is unknown and duplicate an effect.
+      - Unaffected evidence may be reused; pr's delivery workflow is not duplicated.
+    graders: *checks
+
+  - name: read-only-change-skips-effect-gate
+    prompt: >-
+      Load the go skill first, then use go for this context: a change only
+      reformats a read-only status summary; its targeted tests and code review
+      passed and scope is unchanged. Explain the handoff only; do not run shell
+      commands or perform writes.
+    rubric:
+      - Hands off to pr with the passing evidence.
+      - Does not demand effect-path tables, reservation analysis, or other effect checks for read-only code.
+    graders: *checks
+
   - name: missing-test-doctor
     prompt: >-
       Load the go skill first, then use go to explain the workflow for an
