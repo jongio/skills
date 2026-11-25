@@ -135,7 +135,7 @@ stimuli:
           dest: test/report.test.mjs
     graders:
       - type: run-command
-        name: effects-seeded-mutants-killed
+        name: tool-calls-effects-seeded-mutants-killed
         config:
           command: node
           timeout: 330s
@@ -156,7 +156,7 @@ stimuli:
                 "src/vouchers.mjs": "ffcf198e12605adb",
                 "src/report.mjs": "ab38ddac712bc443",
                 "README.md": "83d520c7fd136141",
-                "package.json": "5cf291b17f6e9404",
+                "package.json": "ab465dc5946baba5",
               };
               for (const [file, expected] of Object.entries(pinned)) {
                 const full = path.join(root, file);
@@ -190,7 +190,7 @@ stimuli:
                   if (text.split(from).length !== 2) throw new Error("mutant " + label + " no longer applies to " + file);
                   fs.writeFileSync(full, text.replace(from, to));
                 }
-                const result = spawnSync(process.execPath, ["--test"], { cwd: dir, env, encoding: "utf8", timeout: 30000 });
+                const result = spawnSync(process.execPath, ["--test", "test/**/*.test.mjs"], { cwd: dir, env, encoding: "utf8", timeout: 30000 });
                 if (result.error || result.status === null) {
                   console.log("FAIL " + label + " test process did not complete");
                   throw result.error || new Error(label + " test process did not exit");
@@ -271,7 +271,7 @@ stimuli:
           dest: test/report.test.mjs
     graders:
       - type: run-command
-        name: report-scope-stays-read-only
+        name: tool-calls-report-scope-stays-read-only
         config:
           command: node
           timeout: 120s
@@ -291,7 +291,7 @@ stimuli:
                 "src/report.mjs": "ab38ddac712bc443",
                 "test/redeem.test.mjs": "2e8646cb4f384ef8",
                 "README.md": "83d520c7fd136141",
-                "package.json": "5cf291b17f6e9404",
+                "package.json": "ab465dc5946baba5",
               };
               for (const [file, expected] of Object.entries(pinned)) {
                 if (!fs.existsSync(file) || digest(read(file)) !== expected) {
@@ -310,7 +310,7 @@ stimuli:
               }
               const env = { ...process.env };
               delete env.NODE_TEST_CONTEXT;
-              const result = spawnSync(process.execPath, ["--test"], { env, encoding: "utf8", timeout: 60000 });
+              const result = spawnSync(process.execPath, ["--test", "test/**/*.test.mjs"], { env, encoding: "utf8", timeout: 60000 });
               console.log(result.status === 0 ? "report tests pass" : "FAIL tests do not pass");
               process.exit(result.status === 0 ? 0 : 1);
       - type: tool-calls

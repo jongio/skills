@@ -54,21 +54,21 @@ const mutants = [
 ];
 
 test("the original green effects tests miss every seeded mutant", () => {
-  const result = grade("effects-seeded-mutants-killed", workspace());
+  const result = grade("tool-calls-effects-seeded-mutants-killed", workspace());
   assert.equal(result.status, 1, result.stdout + result.stderr);
   for (const mutant of mutants) assert.match(result.stdout, new RegExp(`^survived ${mutant}$`, "m"));
   assert.match(result.stdout, /killed 0\/8 seeded mutants/);
 });
 
 test("contract tests for traced effect paths kill every seeded mutant", () => {
-  const result = grade("effects-seeded-mutants-killed", workspace(withOracle));
+  const result = grade("tool-calls-effects-seeded-mutants-killed", workspace(withOracle));
   assert.equal(result.status, 0, result.stdout + result.stderr);
   for (const mutant of mutants) assert.match(result.stdout, new RegExp(`^killed ${mutant}$`, "m"));
   assert.match(result.stdout, /killed 8\/8 seeded mutants/);
 });
 
 test("the mutant grader rejects production edits", () => {
-  const result = grade("effects-seeded-mutants-killed", workspace((dir) => {
+  const result = grade("tool-calls-effects-seeded-mutants-killed", workspace((dir) => {
     withOracle(dir);
     const file = join(dir, "src", "transport.mjs");
     writeFileSync(file, readFileSync(file, "utf8").replace('return "unknown";', 'return "unknown"; // edited'));
@@ -78,7 +78,7 @@ test("the mutant grader rejects production edits", () => {
 });
 
 test("the mutant grader fails when a test process cannot start", () => {
-  const result = grade("effects-seeded-mutants-killed", workspace(), (script) => {
+  const result = grade("tool-calls-effects-seeded-mutants-killed", workspace(), (script) => {
     const updated = script.replace('cwd: dir, env, encoding: "utf8", timeout: 30000', 'cwd: path.join(dir, "missing"), env, encoding: "utf8", timeout: 30000');
     assert.notEqual(updated, script, "expected to find the test-process spawn call");
     return updated;
@@ -88,8 +88,34 @@ test("the mutant grader fails when a test process cannot start", () => {
   assert.doesNotMatch(result.stdout, /killed \d+\/8 seeded mutants/);
 });
 
+test("fixture test and coverage scripts discover nested tests", () => {
+  const dir = workspace((root) => {
+    mkdirSync(join(root, "test", "unit"));
+    writeFileSync(join(root, "test", "unit", "discovery.test.mjs"), [
+      'import assert from "node:assert/strict";',
+      'import test from "node:test";',
+      'test("nested discovery sentinel", () => assert.fail("nested test discovery sentinel"));',
+      "",
+    ].join("\n"));
+  });
+  try {
+    const scripts = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).scripts;
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    for (const script of [scripts.test, scripts.coverage]) {
+      const [runner, ...args] = script.split(/\s+/);
+      assert.equal(runner, "node");
+      const result = spawnSync(process.execPath, args, { cwd: dir, env, encoding: "utf8" });
+      assert.notEqual(result.status, 0, `${script}\n${result.stdout}\n${result.stderr}`);
+      assert.match(result.stdout + result.stderr, /nested test discovery sentinel/, script);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the read-only control accepts report tests and rejects out-of-scope effect tests", () => {
-  const reportOnly = grade("report-scope-stays-read-only", workspace((dir) => {
+  const reportOnly = grade("tool-calls-report-scope-stays-read-only", workspace((dir) => {
     mkdirSync(join(dir, "test", "unit"));
     writeFileSync(join(dir, "test", "unit", "report-edge.test.mjs"), [
       'import assert from "node:assert/strict";',
@@ -102,7 +128,7 @@ test("the read-only control accepts report tests and rejects out-of-scope effect
   }));
   assert.equal(reportOnly.status, 0, reportOnly.stdout + reportOnly.stderr);
 
-  const scopeCreep = grade("report-scope-stays-read-only", workspace(withOracle));
+  const scopeCreep = grade("tool-calls-report-scope-stays-read-only", workspace(withOracle));
   assert.equal(scopeCreep.status, 1);
   assert.match(scopeCreep.stdout, /effect tests added outside the requested scope: test[\\/]oracle\.test\.mjs/);
 });
