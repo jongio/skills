@@ -58,27 +58,35 @@ test("checklist preserves independent evidence rather than blanket style rules",
   assert.match(reference, /go test -race -covermode=atomic -coverprofile=coverage\.out/);
   assert.match(reference, /cargo llvm-cov/);
   assert.match(reference, /XPlat Code Coverage/);
+  assert.match(reference, /Unknown must not become false, not-sent, or available/);
+  assert.match(reference, /Coverage locates candidates; it does not prove an outcome/);
+  assert.match(skill, /Skip this for read-only changes/);
 });
 
 test("capability cases are specific and behavioral graders remain decisive", () => {
   const cases = [...evalSpec.matchAll(/^  - name: (.+)$/gm)].map(([, name]) => name);
-  assert.equal(cases.length, 7);
+  assert.equal(cases.length, 9);
   assert.equal(new Set(cases).size, cases.length);
   assert.doesNotMatch(evalSpec, /representative request|follows-complete-workflow/);
   assert.match(evalSpec, /type: diff-empty/);
   assert.match(evalSpec, /path: test\/shipping\.test\.mjs/);
   const weights = Object.fromEntries(
-    [...evalSpec.matchAll(/^    (prompt|diff-empty|file-matches|tool-calls): ([\d.]+)$/gm)]
+    [...evalSpec.matchAll(/^    (prompt|diff-empty|file-matches|tool-calls|run-command): ([\d.]+)$/gm)]
       .map(([, type, weight]) => [type, Number(weight)]),
   );
-  assert.equal(Object.keys(weights).length, 4);
+  assert.equal(Object.keys(weights).length, 5);
   assert.ok(Math.abs(Object.values(weights).reduce((a, b) => a + b, 0) - 1) < 0.000001);
   const threshold = Number(evalSpec.match(/^  threshold: ([\d.]+)$/m)[1]);
-  for (const behavior of ["diff-empty", "file-matches", "tool-calls"]) {
+  for (const behavior of ["diff-empty", "file-matches", "tool-calls", "run-command"]) {
     const total = weights.prompt + weights[behavior];
     assert.ok(weights.prompt / total < threshold, "prose cannot outvote failed behavior");
     assert.ok(weights[behavior] / total < threshold, "behavior cannot outvote failed judgment");
   }
-  const threeTypeScoreOnSingleFail = (weights.prompt + weights["tool-calls"]) / (weights.prompt + weights["file-matches"] + weights["tool-calls"]);
-  assert.ok(threeTypeScoreOnSingleFail < threshold, "failing any grader in a 3-type stimulus must drop score below threshold");
+  for (const behavior of ["file-matches", "run-command"]) {
+    const types = ["prompt", "tool-calls", behavior];
+    const total = types.reduce((sum, type) => sum + weights[type], 0);
+    for (const failed of types) {
+      assert.ok((total - weights[failed]) / total < threshold, "failing any grader in a 3-type stimulus must drop score below threshold");
+    }
+  }
 });

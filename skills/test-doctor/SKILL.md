@@ -116,6 +116,13 @@ and durable or partial results where applicable. Do not mock the behavior under 
 Allow justified capability, native UI, and authentication-adapter differences;
 do not require identical pixels or duplicate every E2E.
 
+When a change can cause an external effect or holds a single-use reservation,
+apply the reference's effect-outcome checks: trace unchanged helpers that
+dispatch, retry, fall back, or map errors and cancellation; keep unknown
+outcomes unknown; and report a compact path/outcome/evidence table. A material
+path without behavioral evidence blocks completion unless proved irrelevant or
+explicitly accepted as unverified. Skip this for read-only changes.
+
 Treat ratios, test counts, snapshots, sleeps, mocks, and file/network access as
 investigation signals, not automatic defects. Do not require a fixed number of
 tests per function, test every constant, or impose an invented coverage target.
